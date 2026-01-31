@@ -170,17 +170,17 @@ For long text, PyKokoro automatically handles splitting at natural boundaries:
    pipe = KokoroPipeline(PipelineConfig(voice="af_bella"))
    result = pipe.run(long_text)
 
-   # Or take manual control of pauses
-   manual_pipe = KokoroPipeline(
+   # Or let PyKokoro insert boundary pauses
+   auto_pipe = KokoroPipeline(
        PipelineConfig(
            voice="af_bella",
-           generation=GenerationConfig(pause_mode="manual"),
+           generation=GenerationConfig(pause_mode="auto"),
        )
    )
-   manual_result = manual_pipe.run(long_text)
+   auto_result = auto_pipe.run(long_text)
 
    import soundfile as sf
-   sf.write("long_text.wav", manual_result.audio, manual_result.sample_rate)
+   sf.write("long_text.wav", auto_result.audio, auto_result.sample_rate)
 
 Complete Example
 ----------------

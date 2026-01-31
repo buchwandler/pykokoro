@@ -65,6 +65,7 @@ The new ``pause_mode`` parameter simplifies pause control:
 
 * ``pause_mode="tts"`` (default): TTS generates pauses naturally. Best for most content.
 * ``pause_mode="manual"``: PyKokoro controls pauses precisely. Best for podcasts, voice switching, and precise timing.
+* ``pause_mode="auto"``: PyKokoro inserts pauses at sentence/paragraph boundaries and trims silence.
 
 **Improvements:**
 
@@ -81,7 +82,7 @@ The new ``pause_mode`` parameter simplifies pause control:
 * Added 103 voices for v1.1-zh variant
 * Voice files automatically combined into efficient .npz format
 * Progress callbacks for voice downloads
-* Added ``pause_mode`` parameter for simplified pause control
+* Added ``pause_mode`` parameter for simplified pause control, including ``"auto"`` boundary pauses
 
 **Documentation:**
 

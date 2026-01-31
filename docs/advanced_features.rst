@@ -258,11 +258,23 @@ The modern ``Kokoro.create()`` API uses ``pause_mode`` for controlling pause beh
            voice="af_sarah"
        )
 
-       # Manual mode: PyKokoro controls pauses precisely
+       # Auto mode: PyKokoro inserts boundary pauses
        audio, sr = kokoro.create(
            long_text,
            voice="af_sarah",
-           pause_mode="manual",         # PyKokoro controls pauses
+           pause_mode="auto",
+           pause_clause=0.25,           # Clause boundaries
+           pause_sentence=0.5,          # Sentence boundaries
+           pause_paragraph=1.0,         # Paragraph boundaries
+           pause_variance=0.05,         # Natural variance (Gaussian)
+           random_seed=42               # For reproducible results
+       )
+
+       # Manual mode: PyKokoro trims and preserves explicit pauses
+       audio, sr = kokoro.create(
+           long_text,
+           voice="af_sarah",
+           pause_mode="manual",         # Preserve explicit pauses
            pause_clause=0.25,           # Clause boundaries
            pause_sentence=0.5,          # Sentence boundaries
            pause_paragraph=1.0,         # Paragraph boundaries
@@ -290,18 +302,18 @@ Use ``random_seed`` for consistent output across runs:
 
    # Same output every time
    audio1, sr = kokoro.create(text, voice="af_sarah",
-                              pause_mode="manual",
+                              pause_mode="auto",
                               random_seed=42)
 
    audio2, sr = kokoro.create(text, voice="af_sarah",
-                              pause_mode="manual",
+                              pause_mode="auto",
                               random_seed=42)
 
    # audio1 and audio2 are identical
 
    # Different output each time
    audio3, sr = kokoro.create(text, voice="af_sarah",
-                              pause_mode="manual",
+                              pause_mode="auto",
                               random_seed=None)  # or omit parameter
 
 Custom Warning Callbacks
@@ -680,7 +692,7 @@ Performance Tips
 
 5. **Use pause_mode for Long Text**
 
-   Using ``pause_mode="manual"`` with appropriate pause settings improves quality for long text.
+   Using ``pause_mode="auto"`` with appropriate pause settings improves quality for long text.
 
 Internal Architecture
 ---------------------

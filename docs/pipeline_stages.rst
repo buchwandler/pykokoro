@@ -112,7 +112,8 @@ GenerationConfig fields
 * ``lang``: Default language code for phonemization (``"en-us"`` etc).
 * ``is_phonemes``: Treat input text as phoneme strings instead of raw text.
 * ``pause_mode``: ``"tts"`` keeps natural model pauses, ``"manual"`` trims
-  segment silence and relies on explicit pauses between segments.
+  segment silence and preserves explicit pauses, ``"auto"`` inserts pauses
+  at sentence/paragraph boundaries and trims segment silence.
 * ``pause_clause``: Default pause for SSMD ``...c`` breaks (seconds).
 * ``pause_sentence``: Default pause for SSMD ``...s`` breaks (seconds).
 * ``pause_paragraph``: Default pause for SSMD ``...p`` breaks (seconds).
@@ -218,8 +219,8 @@ Onnx audio postprocessing
 
 ``OnnxAudioPostprocessingAdapter`` trims silence and concatenates segments.
 
-* ``generation.pause_mode="manual"`` enables silence trimming before
-  inserting explicit pauses.
+* ``generation.pause_mode"`` set to ``"manual"`` or ``"auto"`` enables silence
+  trimming before inserting explicit pauses.
 * SSMD prosody metadata (rate/pitch/volume) is applied to each segment.
 * ``pause_before``/``pause_after`` values from G2P are inserted between segments.
 

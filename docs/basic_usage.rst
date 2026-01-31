@@ -252,7 +252,7 @@ For natural rhythm, let the pipeline insert pauses at boundaries:
    """
 
    generation = GenerationConfig(
-       pause_mode="manual",
+       pause_mode="auto",
        pause_clause=0.25,
        pause_sentence=0.5,
        pause_paragraph=1.0,

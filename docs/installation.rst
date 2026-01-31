@@ -75,7 +75,7 @@ Optional dependencies:
 
 * ``soundfile`` - For saving audio to WAV files (recommended)
 * ``onnxruntime-gpu`` - For GPU acceleration
-* ``spacy`` - For sentence/clause splitting (used with ``pause_mode="manual"`` and legacy ``split_mode``)
+* ``spacy`` - For sentence/clause splitting (used with ``pause_mode="auto"`` and legacy ``split_mode``)
 
 Installing espeak-ng
 ~~~~~~~~~~~~~~~~~~~~
@@ -107,7 +107,7 @@ Or use Chocolatey:
 Installing spaCy (Optional)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-For advanced text splitting with ``pause_mode="manual"`` or the legacy ``split_and_phonemize_text()`` function:
+For advanced text splitting with ``pause_mode="auto"`` or the legacy ``split_and_phonemize_text()`` function:
 
 .. code-block:: bash
 

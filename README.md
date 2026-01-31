@@ -309,7 +309,8 @@ audio = res.audio
 
 #### 2. Automatic Natural Pauses
 
-For more natural speech, enable automatic pause insertion at linguistic boundaries:
+For more natural speech, enable automatic pause insertion at linguistic boundaries with
+`pause_mode="auto"`:
 
 ```python
 text = """
@@ -328,7 +329,7 @@ from pykokoro.generation_config import GenerationConfig
 config = PipelineConfig(
     voice="af_sarah",
     generation=GenerationConfig(
-        pause_mode="manual",
+        pause_mode="auto",
         pause_clause=0.25,        # Pause after clauses (commas)
         pause_sentence=0.5,       # Pause after sentences
         pause_paragraph=1.0,      # Pause after paragraphs
@@ -375,7 +376,7 @@ text = "Welcome! ...p Let's discuss AI, machine learning, and deep learning."
 
 config = PipelineConfig(
     voice="af_sarah",
-    generation=GenerationConfig(pause_mode="manual", pause_variance=0.05),
+    generation=GenerationConfig(pause_mode="auto", pause_variance=0.05),
 )
 pipe = KokoroPipeline(config)
 res = pipe.run(text)
