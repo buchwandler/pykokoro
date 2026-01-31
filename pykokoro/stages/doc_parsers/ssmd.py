@@ -29,6 +29,8 @@ class SsmdDocumentParser:
         clean_text, spans, boundaries, doc_segments = self._build_document(
             segments, initial_pause, trace
         )
+        if generation.pause_mode == "auto":
+            boundaries.extend(self._sentence_boundaries(doc_segments, boundaries))
         return DocumentResult(
             clean_text=clean_text,
             annotation_spans=spans,
@@ -136,6 +138,54 @@ class SsmdDocumentParser:
 
         clean_text = "".join(clean_parts)
         return clean_text, spans, boundaries, doc_segments
+
+    @staticmethod
+    def _sentence_boundaries(
+        segments: list[Segment], boundaries: list[BoundaryEvent]
+    ) -> list[BoundaryEvent]:
+        if not segments:
+            return []
+        pause_positions = {
+            boundary.pos for boundary in boundaries if boundary.kind == "pause"
+        }
+        out: list[BoundaryEvent] = []
+        last_sentence = None
+        last_paragraph = None
+        last_end = None
+        for segment in segments:
+            sentence = segment.sentence_idx
+            paragraph = segment.paragraph_idx
+            if sentence is None:
+                continue
+            if last_sentence is None:
+                last_sentence = sentence
+                last_paragraph = paragraph
+                last_end = segment.char_end
+                continue
+            if sentence != last_sentence or paragraph != last_paragraph:
+                if (
+                    last_end is not None
+                    and last_paragraph == paragraph
+                    and last_end > 0
+                ):
+                    boundary_pos = max(0, last_end - 1)
+                    if boundary_pos not in pause_positions:
+                        out.append(
+                            BoundaryEvent(
+                                pos=boundary_pos,
+                                kind="pause",
+                                duration_s=None,
+                                attrs={"strength": "s"},
+                            )
+                        )
+                        pause_positions.add(boundary_pos)
+                last_sentence = sentence
+                last_paragraph = paragraph
+                last_end = segment.char_end
+            else:
+                if last_end is None or segment.char_end > last_end:
+                    last_end = segment.char_end
+        return out
 
     @staticmethod
     def _warn_once(trace: Trace, message: str) -> None:

@@ -89,8 +89,8 @@ def validate_transcript(transcript: dict[str, Any]) -> None:
     _require_str(defaults.get("lang"), "defaults.lang")
     _require_number(defaults.get("speed"), "defaults.speed")
     pause_mode = defaults.get("pause_mode")
-    if pause_mode not in {"tts", "manual"}:
-        raise ValueError("defaults.pause_mode must be 'tts' or 'manual'")
+    if pause_mode not in {"tts", "manual", "auto"}:
+        raise ValueError("defaults.pause_mode must be 'tts', 'manual', or 'auto'")
 
     pause = _require_dict(defaults.get("pause"), "defaults.pause")
     _require_number(pause.get("clause"), "defaults.pause.clause")

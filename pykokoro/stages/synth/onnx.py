@@ -29,7 +29,7 @@ class OnnxSynthesizerAdapter:
 
         generation = cfg.generation
         voice_style = kokoro._resolve_voice_style(cfg.voice)
-        trim_silence = generation.pause_mode == "manual"
+        trim_silence = generation.pause_mode in {"manual", "auto"}
 
         return kokoro._generate_from_segments(
             phoneme_segments,

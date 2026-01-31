@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import asdict
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, cast
@@ -13,6 +14,7 @@ from ..protocols import DocumentResult, G2PAdapter
 if TYPE_CHECKING:
     from kokorog2p.base import G2PBase
 
+    from ...generation_config import GenerationConfig
     from ...pipeline_config import PipelineConfig
     from ...types import AnnotationSpan, Segment, Trace
 
@@ -123,14 +125,15 @@ class KokoroG2PAdapter(G2PAdapter):
 
             pause_before, pause_after = self._resolve_pauses(seg_boundaries, generation)
             phoneme_batches = self._split_phoneme_batches(
-                g2p, str(phonemes), list(tokens), model_version
+                g2p, str(phonemes), list(tokens), model_version, generation
             )
             total_batches = len(phoneme_batches)
-            for idx, (batch_phonemes, batch_tokens) in enumerate(
+            for idx, (batch_phonemes, batch_tokens, batch_pause_after) in enumerate(
                 phoneme_batches, start=0
             ):
                 batch_pause_before = pause_before if idx == 0 else 0.0
-                batch_pause_after = pause_after if idx == total_batches - 1 else 0.0
+                if idx == total_batches - 1:
+                    batch_pause_after = max(pause_after, batch_pause_after)
                 phoneme_id = idx
                 phoneme_segment_id = f"{segment.id}_ph{phoneme_id}"
                 out.append(
@@ -196,18 +199,77 @@ class KokoroG2PAdapter(G2PAdapter):
         phonemes: str,
         tokens: list[int],
         model_version: str,
-    ) -> list[tuple[str, list[int]]]:
+        generation: GenerationConfig,
+    ) -> list[tuple[str, list[int], float]]:
         if not tokens:
-            return [(phonemes, tokens)]
+            return [(phonemes, tokens, 0.0)]
         if len(tokens) <= MAX_PHONEME_LENGTH:
-            return [(phonemes, tokens)]
-        batches: list[tuple[str, list[int]]] = []
+            return [(phonemes, tokens, 0.0)]
+        if generation.pause_mode == "auto":
+            clause_batches = self._split_phoneme_batches_by_clause(
+                g2p_module, phonemes, model_version
+            )
+            if clause_batches:
+                last_idx = len(clause_batches) - 1
+                return [
+                    (
+                        batch_phonemes,
+                        batch_tokens,
+                        generation.pause_clause if idx < last_idx else 0.0,
+                    )
+                    for idx, (batch_phonemes, batch_tokens) in enumerate(clause_batches)
+                ]
+        batches: list[tuple[str, list[int], float]] = []
         for start in range(0, len(tokens), MAX_PHONEME_LENGTH):
             chunk_tokens = tokens[start : start + MAX_PHONEME_LENGTH]
             chunk_phonemes = g2p_module.ids_to_phonemes(
                 chunk_tokens, model=model_version
             )
-            batches.append((chunk_phonemes, chunk_tokens))
+            batches.append((chunk_phonemes, chunk_tokens, 0.0))
+        return batches
+
+    def _split_phoneme_batches_by_clause(
+        self, g2p_module: Any, phonemes: str, model_version: str
+    ) -> list[tuple[str, list[int]]]:
+        clause_boundaries = [match.end() for match in re.finditer(r"[,;:]", phonemes)]
+        if not clause_boundaries:
+            return []
+        parts: list[str] = []
+        start = 0
+        for end in clause_boundaries:
+            parts.append(phonemes[start:end])
+            start = end
+        if start < len(phonemes):
+            parts.append(phonemes[start:])
+
+        batches: list[tuple[str, list[int]]] = []
+        current = ""
+        for part in parts:
+            candidate = f"{current}{part}" if current else part
+            candidate_tokens = g2p_module.phonemes_to_ids(
+                candidate, model=model_version
+            )
+            if len(candidate_tokens) > MAX_PHONEME_LENGTH:
+                if not current:
+                    return []
+                current_tokens = g2p_module.phonemes_to_ids(
+                    current, model=model_version
+                )
+                if len(current_tokens) > MAX_PHONEME_LENGTH:
+                    return []
+                batches.append((current, current_tokens))
+                current = part
+            else:
+                current = candidate
+
+        if current:
+            current_tokens = g2p_module.phonemes_to_ids(current, model=model_version)
+            if len(current_tokens) > MAX_PHONEME_LENGTH:
+                return []
+            batches.append((current, current_tokens))
+
+        if len(batches) <= 1:
+            return []
         return batches
 
     def _apply_span_metadata(

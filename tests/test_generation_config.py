@@ -95,7 +95,10 @@ class TestGenerationConfigValidation:
 
     def test_invalid_pause_mode(self):
         """Test that invalid pause_mode raises ValueError."""
-        with pytest.raises(ValueError, match="pause_mode must be 'tts' or 'manual'"):
+        with pytest.raises(
+            ValueError,
+            match="pause_mode must be 'tts', 'manual', or 'auto'",
+        ):
             GenerationConfig(pause_mode="invalid")  # type: ignore
 
     def test_invalid_lang_empty(self):

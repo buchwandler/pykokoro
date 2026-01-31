@@ -37,20 +37,23 @@ class GenerationConfig:
             - "tts" (default): TTS generates pauses naturally at sentence
               boundaries. SSMD pauses are preserved. Best for natural speech.
             - "manual": PyKokoro controls pauses with precision. Silence is
-              trimmed from segment boundaries and automatic pauses are added
-              between segments. Best for precise timing control.
+              trimmed from segment boundaries and SSMD pauses are preserved.
+              Best for precise timing control.
+            - "auto": PyKokoro automatically inserts pauses at sentence and
+              paragraph boundaries, and adds clause pauses when long sentences
+              are split. Silence is trimmed from segment boundaries.
             Default: "tts"
         pause_clause: Duration in seconds for SSMD ...c (comma) breaks and
-            automatic clause boundary pauses when pause_mode="manual".
+            automatic clause boundary pauses when pause_mode="manual" or "auto".
             Must be >= 0.0. Default: 0.3
         pause_sentence: Duration in seconds for SSMD ...s (sentence) breaks and
-            automatic sentence boundary pauses when pause_mode="manual".
+            automatic sentence boundary pauses when pause_mode="manual" or "auto".
             Must be >= 0.0. Default: 0.6
         pause_paragraph: Duration in seconds for SSMD ...p (paragraph) breaks and
-            automatic paragraph boundary pauses when pause_mode="manual".
+            automatic paragraph boundary pauses when pause_mode="manual" or "auto".
             Must be >= 0.0. Default: 1.0
         pause_variance: Standard deviation in seconds for Gaussian variance added
-            to automatic pauses. Only applies when pause_mode="manual".
+            to automatic pauses. Only applies when pause_mode="manual" or "auto".
             Default 0.05 (±100ms at 95% confidence). Set to 0.0 to disable
             variance. Must be >= 0.0. Default: 0.05
         random_seed: Optional random seed for reproducible pause variance.
@@ -97,7 +100,7 @@ class GenerationConfig:
     is_phonemes: bool = False
 
     # Pause control
-    pause_mode: Literal["tts", "manual"] = "tts"
+    pause_mode: Literal["tts", "manual", "auto"] = "tts"
     pause_clause: float = 0.3
     pause_sentence: float = 0.6
     pause_paragraph: float = 1.0
@@ -135,9 +138,10 @@ class GenerationConfig:
             )
 
         # Validate pause_mode
-        if self.pause_mode not in ("tts", "manual"):
+        if self.pause_mode not in ("tts", "manual", "auto"):
             raise ValueError(
-                f"pause_mode must be 'tts' or 'manual', got '{self.pause_mode}'"
+                "pause_mode must be 'tts', 'manual', or 'auto', "
+                f"got '{self.pause_mode}'"
             )
 
         # Validate lang is non-empty

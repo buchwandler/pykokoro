@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Demonstrate automatic pause insertion with pause_mode="manual".
+Demonstrate automatic pause insertion with pause_mode="auto".
 
-This example shows how pause_mode="manual" automatically adds natural pauses
+This example shows how pause_mode="auto" automatically adds natural pauses
 between clauses, sentences, and paragraphs for more natural-sounding speech
 without manual pause markers.
 
@@ -24,7 +24,7 @@ def main():
     print("Initializing TTS engine...")
     generation = GenerationConfig(
         lang="en-us",
-        pause_mode="manual",
+        pause_mode="auto",
         pause_clause=0.25,
         pause_sentence=0.5,
         pause_paragraph=2.0,
@@ -54,10 +54,10 @@ def main():
     """
 
     print("=" * 70)
-    print("Generating with AUTOMATIC pauses (pause_mode='manual')")
+    print("Generating with AUTOMATIC pauses (pause_mode='auto')")
     print("=" * 70)
     print("\nKey features:")
-    print("  • pause_mode='manual' - PyKokoro controls all pauses precisely")
+    print("  • pause_mode='auto' - PyKokoro inserts pauses at boundaries")
     print("  • Automatic pause insertion:")
     print("    - Short pauses after clauses (within sentence)")
     print("    - Medium pauses after sentences (within paragraph)")
@@ -99,16 +99,16 @@ def main():
     print("   pipe.run(text, voice='af_sarah')")
     print("   → SSMD breaks automatically detected and processed")
     print()
-    print("3. Manual pause control (this example):")
+    print("3. Automatic pause control (this example):")
     print(
         "   pipe.run(text, voice='af_sarah', "
-        "generation=GenerationConfig(pause_mode='manual'))"
+        "generation=GenerationConfig(pause_mode='auto'))"
     )
     print("   → PyKokoro controls pauses precisely at linguistic boundaries")
     print()
 
     print("Tips for best results:")
-    print("  • Use pause_mode='manual' for precise control over all pauses")
+    print("  • Use pause_mode='auto' for automatic boundary pauses")
     print("  • Use pause_mode='tts' (default) to let TTS handle pauses naturally")
     print("  • Adjust pause_clause/sentence/paragraph to match your content style")
     print("  • Set pause_variance=0.0 for consistent timing (e.g., training data)")

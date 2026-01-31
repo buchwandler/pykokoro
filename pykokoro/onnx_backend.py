@@ -326,11 +326,9 @@ VOICE_NAMES_V1_1_DE = ["df_eva", "dm_bernd"]
 # These voices are dynamically loaded from the model's voices.bin file
 # The actual available voices may vary depending on the model source and variant
 VOICE_NAMES_BY_VARIANT = {
-    "huggingface-v1.0": VOICE_NAMES_V1_0,  # All voices (multi-language)
-    "huggingface-v1.1-zh": VOICE_NAMES_V1_1_ZH,  # Chinese-specific voices
-    "github-v1.0": VOICE_NAMES_V1_0,  # Same as HuggingFace (multi-language)
-    "github-v1.1-zh": VOICE_NAMES_V1_1_ZH,  # Chinese-specific voices
-    "github-v1.1-de": VOICE_NAMES_V1_1_DE,  # German-specific voices
+    "v1.0": VOICE_NAMES_V1_0,  # Same as HuggingFace (multi-language)
+    "v1.1-zh": VOICE_NAMES_V1_1_ZH,  # Chinese-specific voices
+    "v1.1-de": VOICE_NAMES_V1_1_DE,  # German-specific voices
 }
 
 
