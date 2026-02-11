@@ -37,6 +37,8 @@ class TestTokenizerConfig:
         config = TokenizerConfig()
         assert config.use_espeak_fallback is True
         assert config.use_spacy is True
+        assert config.spacy_model == "auto"
+        assert config.spacy_model_size == "md"
         assert config.use_dictionary is True
 
     def test_custom_values(self):
@@ -45,11 +47,15 @@ class TestTokenizerConfig:
             use_espeak_fallback=False,
             use_goruut_fallback=True,
             use_spacy=False,
+            spacy_model="en_core_web_sm",
+            spacy_model_size="sm",
             use_dictionary=False,
         )
         assert config.use_espeak_fallback is False
         assert config.use_goruut_fallback is True
         assert config.use_spacy is False
+        assert config.spacy_model == "en_core_web_sm"
+        assert config.spacy_model_size == "sm"
         assert config.use_dictionary is False
 
 
@@ -132,6 +138,47 @@ class TestTokenizer:
         tokenizer = Tokenizer(config=config)
         assert tokenizer.config.use_spacy is False
         assert tokenizer.config.use_espeak_fallback is True
+
+    def test_get_g2p_forwards_spacy_model(self, monkeypatch):
+        """Test configured spaCy model is forwarded to get_g2p."""
+        import pykokoro.tokenizer as tokenizer_module
+
+        captured: dict[str, object] = {}
+
+        def fake_get_g2p(**kwargs):
+            captured.update(kwargs)
+            return object()
+
+        monkeypatch.setattr(tokenizer_module, "get_g2p", fake_get_g2p)
+
+        tokenizer = Tokenizer(
+            config=TokenizerConfig(use_spacy=True, spacy_model="en_core_web_trf")
+        )
+        tokenizer._get_g2p("en-us")
+
+        assert captured["use_spacy"] is True
+        assert captured["spacy_model"] == "en_core_web_trf"
+
+    def test_get_g2p_resolves_auto_spacy_model(self, monkeypatch):
+        """Test auto spaCy model derives from language and size."""
+        import pykokoro.tokenizer as tokenizer_module
+
+        captured: dict[str, object] = {}
+
+        def fake_get_g2p(**kwargs):
+            captured.update(kwargs)
+            return object()
+
+        monkeypatch.setattr(tokenizer_module, "get_g2p", fake_get_g2p)
+
+        tokenizer = Tokenizer(
+            config=TokenizerConfig(
+                use_spacy=True, spacy_model="auto", spacy_model_size="lg"
+            )
+        )
+        tokenizer._get_g2p("de")
+
+        assert captured["spacy_model"] == "de_core_news_lg"
 
     def test_normalize_text(self, tokenizer):
         """Test text normalization."""
@@ -333,12 +380,21 @@ class TestCreateTokenizer:
         tokenizer = create_tokenizer()
         assert tokenizer.config.use_espeak_fallback is True
         assert tokenizer.config.use_spacy is True
+        assert tokenizer.config.spacy_model == "auto"
+        assert tokenizer.config.spacy_model_size == "md"
 
     def test_create_custom(self):
         """Test creating tokenizer with custom settings."""
-        tokenizer = create_tokenizer(use_espeak_fallback=False, use_spacy=False)
+        tokenizer = create_tokenizer(
+            use_espeak_fallback=False,
+            use_spacy=False,
+            spacy_model="en_core_web_sm",
+            spacy_model_size="sm",
+        )
         assert tokenizer.config.use_espeak_fallback is False
         assert tokenizer.config.use_spacy is False
+        assert tokenizer.config.spacy_model == "en_core_web_sm"
+        assert tokenizer.config.spacy_model_size == "sm"
 
 
 class TestKokorog2pIntegration:

@@ -7,6 +7,7 @@ import re
 from bisect import bisect_left
 from typing import TYPE_CHECKING, Any
 
+from ...spacy_models import resolve_spacy_model
 from ...types import AnnotationSpan, BoundaryEvent, Segment, Trace
 from ..protocols import DocumentResult
 
@@ -402,18 +403,7 @@ class PhrasplitSentenceSplitter:
         return out
 
     def _language_model_from_lang(self, lang: str | None) -> str:
-        lang_code = (lang or "en").lower()
-        for sep in ("-", "_"):
-            if sep in lang_code:
-                lang_code = lang_code.split(sep, 1)[0]
-                break
-        if not lang_code:
-            lang_code = "en"
-        web_langs = {"en", "zh"}
-        size = "sm"
-        if lang_code in web_langs:
-            return f"{lang_code}_core_web_{size}"
-        return f"{lang_code}_core_news_{size}"
+        return resolve_spacy_model(lang, size="sm")
 
 
 def _first_mismatch(left: str, right: str) -> int:

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, cast
 from ...constants import MAX_PHONEME_LENGTH, SUPPORTED_LANGUAGES
 from ...runtime.cache import cache_from_dir, make_g2p_key
 from ...runtime.spans import slice_boundaries, slice_spans
+from ...spacy_models import resolve_configured_spacy_model, resolve_spacy_model
 from ...types import PhonemeSegment
 from ..protocols import DocumentResult, G2PAdapter
 
@@ -171,6 +172,7 @@ class KokoroG2PAdapter(G2PAdapter):
             "language": kokorog2p_lang,
             "version": version,
             "phoneme_quotes": "curly",
+            "spacy_model": resolve_spacy_model(kokorog2p_lang, size="md"),
         }
         if tokenizer_config is not None:
             kwargs.update(
@@ -178,6 +180,11 @@ class KokoroG2PAdapter(G2PAdapter):
                     "use_goruut_fallback": tokenizer_config.use_goruut_fallback,
                     "use_espeak_fallback": tokenizer_config.use_espeak_fallback,
                     "use_spacy": tokenizer_config.use_spacy,
+                    "spacy_model": resolve_configured_spacy_model(
+                        spacy_model=tokenizer_config.spacy_model,
+                        lang=kokorog2p_lang,
+                        size=tokenizer_config.spacy_model_size,
+                    ),
                     "backend": tokenizer_config.backend,
                     "load_gold": tokenizer_config.load_gold,
                     "load_silver": tokenizer_config.load_silver,

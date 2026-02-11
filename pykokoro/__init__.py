@@ -7,7 +7,7 @@ Public API:
 - GenerationConfig
 """
 
-from .pipeline import KokoroPipeline, build_pipeline
+from .pipeline import KokoroPipeline, build_pipeline, with_spacy_model_size
 from .pipeline_config import PipelineConfig
 from .generation_config import GenerationConfig
 
@@ -24,6 +24,7 @@ __all__ = [
     "__version_tuple__",
     "build_pipeline",
     "KokoroPipeline",
+    "with_spacy_model_size",
     "PipelineConfig",
     "GenerationConfig",
 ]

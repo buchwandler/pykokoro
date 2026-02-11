@@ -151,6 +151,29 @@ Reuse a pipeline instance for multiple runs:
        result = pipe.run(sentence)
        print(result.audio.shape)
 
+Choosing spaCy Model Size (Auto)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If you use spaCy-based tokenization/splitting, you can keep language-aware
+auto selection and choose only the model size:
+
+.. code-block:: python
+
+   from pykokoro import (
+       GenerationConfig,
+       KokoroPipeline,
+       PipelineConfig,
+       with_spacy_model_size,
+   )
+
+   base = PipelineConfig(
+       voice="af_bella",
+       generation=GenerationConfig(lang="fr-fr"),
+   )
+   cfg = with_spacy_model_size(base, size="md")
+   pipe = KokoroPipeline(cfg)
+   result = pipe.run("Bonjour")
+
 Processing Long Text
 ~~~~~~~~~~~~~~~~~~~~
 

@@ -40,6 +40,12 @@ GenerationConfig
    :undoc-members:
    :show-inheritance:
 
+Pipeline Helpers
+----------------
+
+.. autofunction:: pykokoro.build_pipeline
+.. autofunction:: pykokoro.with_spacy_model_size
+
 Result and Data Classes
 -----------------------
 

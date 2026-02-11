@@ -19,6 +19,8 @@ A Python library for Kokoro TTS (Text-to-Speech) using ONNX runtime.
   levels
 - **GPU Acceleration**: Optional CUDA, CoreML, or DirectML support
 - **Phoneme Support**: Advanced phoneme-based generation with kokorog2p
+- **Language-Aware spaCy Models**: Automatic spaCy model name resolution from language
+  with configurable size (`sm`/`md`/`lg`/`trf`)
 - **Hugging Face Integration**: Automatic model downloading from Hugging Face Hub
 - **Text Normalization**: Automatic say-as support for numbers, dates, phone numbers,
   and more using SSMD markup
@@ -360,12 +362,19 @@ audio = res.audio
 - `pause_variance=0.05` - Default (±100ms at 95% confidence)
 - `pause_variance=0.1` - More variation (±200ms at 95% confidence)
 
-**Note:** For sentence splitting with `PlainTextDocumentParser`, install spaCy:
+**Note:** For sentence splitting with `PlainTextDocumentParser` and spaCy-based G2P
+tokenization, install spaCy and at least one language model:
 
 ```bash
 pip install spacy
 python -m spacy download en_core_web_sm
+python -m spacy download en_core_web_md
 ```
+
+PyKokoro resolves spaCy model names automatically when
+`TokenizerConfig.spacy_model="auto"` (default). The G2P pipeline uses `md` by default
+(`en_core_web_md`, `de_core_news_md`, etc.), while sentence splitting via `phrasplit`
+uses `sm`.
 
 **Combining Both Approaches:**
 
@@ -793,6 +802,43 @@ pipe = KokoroPipeline(
     PipelineConfig(voice="af_sarah", tokenizer_config=tokenizer_config)
 )
 res = pipe.run("Ich gehe zum Meeting")
+```
+
+### Language-Aware spaCy Model Selection
+
+Use the helper to set auto spaCy model resolution with a consistent size:
+
+```python
+from pykokoro import (
+    GenerationConfig,
+    KokoroPipeline,
+    PipelineConfig,
+    with_spacy_model_size,
+)
+
+base = PipelineConfig(
+    voice="af_sarah",
+    generation=GenerationConfig(lang="de"),
+)
+config = with_spacy_model_size(base, size="md")
+
+# For lang="de", this resolves to de_core_news_md
+pipe = KokoroPipeline(config)
+res = pipe.run("Guten Tag")
+```
+
+You can still force an explicit model package name:
+
+```python
+from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro.tokenizer import TokenizerConfig
+
+tokenizer_config = TokenizerConfig(
+    spacy_model="fr_core_news_sm",  # explicit package
+)
+pipe = KokoroPipeline(
+    PipelineConfig(voice="af_sarah", tokenizer_config=tokenizer_config)
+)
 ```
 
 ### Backend Configuration

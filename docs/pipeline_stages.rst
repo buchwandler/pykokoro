@@ -92,10 +92,22 @@ Tokenizer and phoneme handling
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 * ``tokenizer_config``: ``TokenizerConfig`` used by SSMD parsing and ``kokorog2p``.
+* ``tokenizer_config.spacy_model``: spaCy package name or ``"auto"``.
+* ``tokenizer_config.spacy_model_size``: package tier for auto mode
+  (``"sm"``, ``"md"``, ``"lg"``, ``"trf"``). Default: ``"md"``.
 * ``espeak_config``: Deprecated espeak configuration. Prefer ``TokenizerConfig``.
 * ``short_sentence_config``: ``ShortSentenceConfig`` for short-sentence handling.
 * ``overlap_mode``: ``"snap"`` clips overlapping SSMD spans to segment bounds,
   ``"strict"`` drops partial spans and emits trace warnings.
+
+Helper for auto spaCy model tier:
+
+.. code-block:: python
+
+   from pykokoro import PipelineConfig, with_spacy_model_size
+
+   cfg = PipelineConfig(voice="af_bella")
+   cfg = with_spacy_model_size(cfg, size="md")
 
 Other
 ^^^^^
@@ -175,8 +187,8 @@ Plain text sentence splitting
 
 ``PlainTextDocumentParser`` uses the optional ``phrasplit`` package for
 sentence splitting. When ``phrasplit`` is unavailable, it falls back to a
-single segment. The language model is derived from ``generation.lang`` (for
-example ``en_core_web_sm`` for English).
+single segment. The language model is derived from ``generation.lang`` using
+spaCy package naming rules (for example ``en_core_web_sm`` for English).
 
 Split boundaries are forced at SSMD pause boundaries and at spans that contain
 phoneme overrides so those overrides are kept intact. Set
@@ -192,6 +204,7 @@ token IDs.
 * ``generation.is_phonemes`` treats input as phonemes and skips text G2P.
 * SSMD ``ph``/``phonemes`` spans override phonemes for that segment.
 * ``tokenizer_config`` is forwarded to ``kokorog2p.get_g2p``.
+* ``spacy_model="auto"`` resolves per language (default size ``md``).
 * ``cache_dir`` enables on-disk caching of phonemes/tokens.
 * Long phoneme token sequences are split into batches of
   ``MAX_PHONEME_LENGTH``.

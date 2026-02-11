@@ -12,6 +12,7 @@ from .generation_config import GenerationConfig
 from .onnx_backend import LANG_CODE_TO_ONNX
 from .pipeline_config import PipelineConfig
 from .runtime.tracing import trace_timing
+from .spacy_models import SpacyModelSize
 from .stages.audio_generation.onnx import OnnxAudioGenerationAdapter
 from .stages.audio_postprocessing.onnx import OnnxAudioPostprocessingAdapter
 from .stages.doc_parsers.ssmd import SsmdDocumentParser
@@ -26,10 +27,11 @@ from .stages.protocols import (
 )
 from .types import AudioResult, Segment, Trace
 
-logger = logging.getLogger(__name__)
-
 if TYPE_CHECKING:
     from .onnx_backend import Kokoro
+    from .tokenizer import TokenizerConfig
+
+logger = logging.getLogger(__name__)
 
 
 def _coerce_generation(base: GenerationConfig, value: Any) -> GenerationConfig:
@@ -95,6 +97,30 @@ def _merge_config(
         cfg = replace(cfg, generation=_coerce_generation(cfg.generation, gen_value))
 
     return cfg
+
+
+def with_spacy_model_size(
+    config: PipelineConfig | Mapping[str, Any] | None = None,
+    *,
+    size: SpacyModelSize = "md",
+    model: str = "auto",
+) -> PipelineConfig:
+    """Return PipelineConfig with tokenizer spaCy model settings.
+
+    This helper is useful when you want language-based model resolution in G2P:
+    keep ``model="auto"`` and pick the package tier via ``size``.
+    """
+    cfg = _coerce_pipeline_config(config)
+
+    from .tokenizer import TokenizerConfig
+
+    tokenizer_config: TokenizerConfig = cfg.tokenizer_config or TokenizerConfig()
+    tokenizer_config = replace(
+        tokenizer_config,
+        spacy_model=model,
+        spacy_model_size=size,
+    )
+    return replace(cfg, tokenizer_config=tokenizer_config)
 
 
 def build_pipeline(

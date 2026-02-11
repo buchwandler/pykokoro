@@ -198,6 +198,45 @@ PyKokoro defaults language from the voice prefix, but you can override it:
 
 Supported languages: ``en-us``, ``en-gb``, ``es``, ``fr``, ``de``, ``it``, ``pt``, ``hi``, ``ja``, ``zh``
 
+Language-Aware spaCy Models
+---------------------------
+
+PyKokoro resolves spaCy model package names automatically by language when
+``TokenizerConfig.spacy_model="auto"`` (default).
+
+Use ``with_spacy_model_size`` to set the auto-resolved model tier explicitly:
+
+.. code-block:: python
+
+   from pykokoro import (
+       GenerationConfig,
+       KokoroPipeline,
+       PipelineConfig,
+       with_spacy_model_size,
+   )
+
+   base = PipelineConfig(
+       voice="af_bella",
+       generation=GenerationConfig(lang="de"),
+   )
+   cfg = with_spacy_model_size(base, size="md")
+
+   # For lang="de", G2P uses de_core_news_md
+   pipe = KokoroPipeline(cfg)
+   result = pipe.run("Guten Tag")
+
+You can still force a specific spaCy package if needed:
+
+.. code-block:: python
+
+   from pykokoro import KokoroPipeline, PipelineConfig
+   from pykokoro.tokenizer import TokenizerConfig
+
+   tokenizer_config = TokenizerConfig(spacy_model="fr_core_news_sm")
+   pipe = KokoroPipeline(
+       PipelineConfig(voice="af_bella", tokenizer_config=tokenizer_config)
+   )
+
 Speech Speed Control
 --------------------
 

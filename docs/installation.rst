@@ -75,7 +75,7 @@ Optional dependencies:
 
 * ``soundfile`` - For saving audio to WAV files (recommended)
 * ``onnxruntime-gpu`` - For GPU acceleration
-* ``spacy`` - For sentence/clause splitting (used with ``pause_mode="auto"`` and legacy ``split_mode``)
+* ``spacy`` - For sentence/clause splitting and spaCy-aware G2P tokenization
 
 Installing espeak-ng
 ~~~~~~~~~~~~~~~~~~~~
@@ -107,12 +107,20 @@ Or use Chocolatey:
 Installing spaCy (Optional)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-For advanced text splitting with ``pause_mode="auto"`` or the legacy ``split_and_phonemize_text()`` function:
+For advanced text splitting with ``pause_mode="auto"`` and language-aware
+spaCy tokenization in G2P:
 
 .. code-block:: bash
 
    pip install spacy
    python -m spacy download en_core_web_sm
+   python -m spacy download en_core_web_md
+
+.. note::
+
+   ``TokenizerConfig.spacy_model`` defaults to ``"auto"`` and resolves package
+   names from language + size (default size: ``md``). For example:
+   ``en-us -> en_core_web_md`` and ``de -> de_core_news_md``.
 
 Development Installation
 ------------------------
