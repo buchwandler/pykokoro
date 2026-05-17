@@ -532,31 +532,41 @@ See `examples/say_as_demo.py` for comprehensive examples.
 #### 4. Automatic Short Sentence Handling
 
 When processing text, very short sentences (like "Why?" or "Go!") can produce poor audio
-quality when processed individually (only 3-8 phonemes each). Pykokoro automatically
-handles this using a "repeat-and-cut" technique:
+quality when processed individually (only 3-8 phonemes each). Pykokoro can add phoneme
+context around those short segments before synthesis.
 
 **How It Works:**
 
-1. Short segments are detected based on phoneme length (default: <30 phonemes)
-2. The sentence is repeated: "Why?" → "Why? Why? Why?"
-3. TTS generates audio with more context (better prosody)
-4. Audio is trimmed to extract only the first instance
+1. Short segments are detected based on phoneme token length.
+2. Depending on the chosen resolve mode, the segment is wrapped with more context.
+   (default resolve mode: `randomized-phrase`)
+3. TTS generates audio from the wrapped phoneme sequence.
+4. Cut away the extra context and put audio together.
 
 This happens automatically during `pipe.run()` - no configuration needed!
 
+NOTE: Currently, phrase and randomized-phrase mode only support ENGLISH text! (see
+"Advanced customization of short-sentence handling" to add support for other languages)
+
 **Customizing the Behavior:**
 
-You can customize the thresholds using `ShortSentenceConfig`:
+You can customize the behavior using `ShortSentenceConfig`:
 
 ```python
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.short_sentence_handler import ShortSentenceConfig
 
-# More aggressive short sentence handling
+# Less aggressive short sentence handling (also less acurate)
 short_sentence_config = ShortSentenceConfig(
-    min_phoneme_length=50,    # Treat segments <50 phonemes as short
-    target_phoneme_length=150, # Repeat until ~150 phonemes
-    max_repetitions=7,         # Allow up to 7 repetitions
+    resolve_mode="wrap",
+    min_phoneme_length=10,  # Treat segments <10 phoneme tokens as short
+    phoneme_pretext="—",  # Add this before and after short phonemes
+)
+
+# More advanced short sentence handling (useful for some voices)
+short_sentence_config = ShortSentenceConfig(
+    resolve_mode="randomized-phrase",
+    min_phoneme_length=40,  # Treat segments <40 phoneme tokens as short
 )
 
 pipe = KokoroPipeline(
@@ -567,9 +577,48 @@ res = pipe.run("Why?")
 
 **Default Configuration:**
 
-- `min_phoneme_length=30`: Segments below this use repeat-and-cut
-- `target_phoneme_length=100`: Target length for repeated text
-- `max_repetitions=5`: Maximum times to repeat
+- `enabled=True`: Short-sentence handling is enabled by default
+- `min_phoneme_length=30`: Segments below this token count engage short-sentence
+  handling
+- `resolve_mode="randomized-phrase"` Chose between `randomized-phrase`(default),
+  `phrase`, or `wrap`(fallback)
+- `phrase_selection="auto"` Chose which phrase templates to use. `auto`= uses "end", if
+  phrase ends with '.', otherwise uses "neutral"
+- `phrase_fallback_tries=5`: Phrase modes try up to X alternate phrase templates before
+  falling back to wrap mode when a cut lacks confident boundaries.
+- `phoneme_pretext="—"`: Phoneme context added in wrap mode before and after short
+  segments
+
+```python
+from pykokoro.short_sentence_handler import (
+    PhraseResolveMode,
+    ShortSentenceConfig,
+)
+
+short_sentence_config = ShortSentenceConfig(
+    resolve_modes={
+        "phrase": PhraseResolveMode(
+            phrase_selection="end",  # "auto", "neutral", or "end"
+        ),
+        "randomized-phrase": RandomizedPhraseResolveMode(
+            phrase_selection="neutral", # "auto", "neutral", or "end"
+        ),
+        "wrap": WrapResolveMode(
+            phoneme_pretext="…"
+        )
+    },
+    resolve_mode="phrase",
+    phrase_fallback_tries=10,
+)
+```
+
+**Voice Recommendation:**
+
+For phrase-based short-sentence handling, prefer these voices in order:
+`am_santa`, `af_nicole`, `bm_lewis`, `bm_george`, `af_bella`,
+`am_echo`, `af_sky`, `af_sarah`, `bm_fable`, `af_heart`, `am_michael`, `af_alloy`,
+`af_nova`, `bf_isabella`, and `am_adam`. If you prefer one of the less accurate voices,
+try blending it with one on this list. E.g. --voice-blend "bf_lily:60,bf_isabella:40"
 
 **Disabling Short Sentence Handling:**
 
@@ -577,7 +626,7 @@ res = pipe.run("Why?")
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.short_sentence_handler import ShortSentenceConfig
 
-short_sentence_config = ShortSentenceConfig(min_phoneme_length=0)
+short_sentence_config = ShortSentenceConfig(enabled=False)
 pipe = KokoroPipeline(
     PipelineConfig(voice="af_sarah", short_sentence_config=short_sentence_config)
 )
@@ -585,6 +634,51 @@ res = pipe.run("Why?")
 ```
 
 See `examples/optimal_phoneme_length_demo.py` for a demonstration.
+
+**Advanced customization of short-sentence handling**
+
+You can add custom template phrases used to add context in phrase mode, but THIS IS NOT
+RECOMMENDED for most users! However, you can use it to add support for more languages
+than just english.
+
+WARNING: The quality of the phrase makes a huge difference. If possible, test the
+phrases first, e.g. by using the various short-sentence py scripts in metrics/. All
+default phrases have been verified with the
+metrics\rank_short_sentence_phrases_across_voice_list.py script to work reliably with
+most voices.
+
+```python
+from pykokoro.short_sentence_handler import (
+    PhraseResolveMode,
+    ShortSentenceConfig,
+)
+
+short_sentence_config = ShortSentenceConfig(
+    resolve_modes={
+        "phrase": PhraseResolveMode(
+            phrase_selection="end",  # "auto", "neutral", or "end"
+            neutral_phrase="The word, {segment}, appears here.", # Changing this to anything not in the default neutral_phrases list is not recommended
+            end_phrase="The word is hello. The word is '{segment}'", # Changing this to anything not in the default end_phrases list is not recommended
+        ),
+        "randomized-phrase": RandomizedPhraseResolveMode(
+            phrase_selection="neutral", # "auto", "neutral", or "end"
+            neutral_phrases=[ # Adding new untested phrases is not recommended without rigurous testing
+                "First {segment} is the word.",
+                "Second {segment} is the word.",
+                "Third {segment} is the word.",
+                "Fourth {segment} is the word.",
+            ],
+            end_phrases=[ # Adding new untested phrases is not recommended without rigurous testing
+                "First {segment}."
+            ]
+        ),
+        "wrap": WrapResolveMode(
+            phoneme_pretext="…"
+        )
+    },
+    resolve_mode="phrase",
+)
+```
 
 ## Available Voices
 

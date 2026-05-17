@@ -3,6 +3,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline import KokoroPipeline
 from pykokoro.pipeline_config import PipelineConfig
 from pykokoro.stages.audio_generation.onnx import OnnxAudioGenerationAdapter
@@ -127,3 +128,30 @@ def test_pipeline_does_not_close_external_kokoro():
     pipeline.close()
 
     assert shared.close_calls == 0
+
+
+def test_phoneme_processor_passes_random_seed_to_short_sentence_preprocess():
+    class SeedRecordingKokoro(DummyKokoro):
+        def __init__(self) -> None:
+            super().__init__()
+            self.random_seed = None
+
+        def preprocess_segments(
+            self, phoneme_segments, enable_short_sentence, random_seed=None
+        ):
+            _ = enable_short_sentence
+            self.random_seed = random_seed
+            return phoneme_segments
+
+    shared = SeedRecordingKokoro()
+    pipeline = KokoroPipeline(
+        PipelineConfig(voice="af", generation=GenerationConfig(random_seed=42)),
+        g2p=DummyG2PAdapter(),
+        phoneme_processing=OnnxPhonemeProcessorAdapter(shared),
+        audio_generation=OnnxAudioGenerationAdapter(shared),
+        audio_postprocessing=OnnxAudioPostprocessingAdapter(shared),
+    )
+
+    pipeline.run("Hello")
+
+    assert shared.random_seed == 42

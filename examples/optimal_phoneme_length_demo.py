@@ -3,15 +3,15 @@
 Short Sentence Handling Demonstration.
 
 This example demonstrates how pykokoro automatically handles short sentences
-using the repeat-and-cut technique. Short phoneme sequences (like "Why?" = 3
+using phrase-based context. Short phoneme sequences (like "Why?" = 3
 phonemes) can produce poor audio quality when processed individually. The
-repeat-and-cut technique provides more context for natural prosody.
+short-sentence handler provides more context for natural prosody.
 
 The technique works as follows:
 1. Short sentences are detected based on phoneme length
-2. The sentence is repeated multiple times (e.g., "Why?" -> "Why? Why? Why?")
-3. TTS generates audio for the repeated text (better quality with more context)
-4. The audio is cut at the measured duration of a single instance
+2. The configured resolve mode adds context around the short segment
+3. Phrase modes synthesize a context phrase
+4. The extra context is cut away when boundaries are confident
 
 This happens automatically during audio generation - no manual configuration
 is needed. However, you can customize the behavior using ShortSentenceConfig.
@@ -26,7 +26,10 @@ Output:
 
 import soundfile as sf
 
-import pykokoro
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
+from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
+from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
+from pykokoro.types import Trace
 
 # Dialogue with mix of very short and normal sentences
 DIALOGUE_TEXT = """
@@ -84,7 +87,7 @@ def analyze_segments(segments: list, title: str) -> dict:
 
         # Show first 5 and last 1 segments
         if i <= 5 or i == len(segments):
-            short_marker = " [SHORT - will use repeat-and-cut]" if is_short else ""
+            short_marker = " [SHORT - will use short-sentence handling]" if is_short else ""
             print(f"\nSegment {i}:{short_marker}")
             print(f"  Text: '{seg.text[:60]}{'...' if len(seg.text) > 60 else ''}'")
             print(f"  Phonemes: {phoneme_length} chars")
@@ -116,41 +119,39 @@ def main():
     """Generate demo showcasing automatic short sentence handling."""
     print_separator("SHORT SENTENCE HANDLING DEMONSTRATION")
     print("\nThis demo shows how pykokoro automatically handles short sentences")
-    print("using the repeat-and-cut technique for improved audio quality.")
+    print("using phrase-based context for improved audio quality.")
     print("\nHow it works:")
     print("  1. Short segments are detected based on phoneme length")
-    print("  2. Text is repeated: 'Why?' -> 'Why? Why? Why?'")
-    print("  3. TTS generates audio with more context (better prosody)")
-    print("  4. Audio is trimmed to extract only the first instance")
+    print("  2. The configured resolve mode adds context")
+    print("  3. Phrase modes synthesize a context phrase")
+    print("  4. Extra context is cut away when boundaries are confident")
     print("\nThis happens automatically - no configuration needed!")
 
-    # Create Kokoro with default settings (automatic short sentence handling)
-    print_separator("Creating Kokoro Instance")
-    kokoro = pykokoro.Kokoro()
-    print("Kokoro created with default ShortSentenceConfig:")
-    print("  min_phoneme_length: 30 (segments below this use repeat-and-cut)")
-    print("  target_phoneme_length: 100 (target length for repeated text)")
-    print("  max_repetitions: 5 (maximum times to repeat)")
+    # Create pipeline with default settings (automatic short sentence handling)
+    print_separator("Creating Pipeline Instance")
+    cfg = PipelineConfig(
+        voice=VOICE,
+        generation=GenerationConfig(lang=LANG, speed=1.0, pause_mode="tts"),
+    )
+    pipe = KokoroPipeline(cfg)
+    print("Pipeline created with default ShortSentenceConfig:")
+    print("  min_phoneme_length: 30 (segments below this use short-sentence handling)")
+    print("  resolve_mode: randomized-phrase")
+    print("  phrase_fallback_tries: 5")
 
     # Analyze the text to show which segments are short
     print_separator("Analyzing Text Segments")
-    segments = pykokoro.phonemes.text_to_phoneme_segments(
-        text=DIALOGUE_TEXT,
-        tokenizer=kokoro.tokenizer,
-        lang=LANG,
-        pause_mode="tts",
-    )
+    trace = Trace()
+    doc = SsmdDocumentParser().parse(DIALOGUE_TEXT, cfg, trace)
+    segments = KokoroG2PAdapter().phonemize(doc.segments, doc, cfg, trace)
     stats = analyze_segments(segments, "Segment Analysis (pause_mode='tts')")
 
     # Generate audio with automatic short sentence handling
     print_separator("Generating Audio")
-    print("\nShort segments will automatically use repeat-and-cut...")
-    samples, sample_rate = kokoro.create(
-        DIALOGUE_TEXT,
-        voice=VOICE,
-        lang=LANG,
-        speed=1.0,
-    )
+    print("\nShort segments will automatically use short-sentence handling...")
+    result = pipe.run(DIALOGUE_TEXT)
+    samples = result.audio
+    sample_rate = result.sample_rate
 
     duration = len(samples) / sample_rate
     print("\nAudio generated successfully!")
@@ -158,7 +159,7 @@ def main():
     print(f"  Sample rate: {sample_rate} Hz")
 
     # Save the audio
-    output_file = "short_sentence_demo.wav"
+    output_file = "optimal_phoneme_length_demo.wav"
     sf.write(output_file, samples, sample_rate)
     print(f"\nSaved to: {output_file}")
 
@@ -171,11 +172,11 @@ def main():
     # More aggressive short sentence handling
     config = ShortSentenceConfig(
         min_phoneme_length=50,    # Treat segments <50 as short
-        target_phoneme_length=150, # Repeat until ~150 phonemes
-        max_repetitions=7,         # Allow up to 7 repetitions
+        resolve_mode="randomized-phrase",
+        phrase_fallback_tries=5,
     )
 
-    kokoro = pykokoro.Kokoro(short_sentence_config=config)
+    pipe = KokoroPipeline(PipelineConfig(short_sentence_config=config))
     """)
 
     print("\nTo disable short sentence handling entirely:")
@@ -183,21 +184,21 @@ def main():
     config = ShortSentenceConfig(
         min_phoneme_length=0,  # No segment is considered "short"
     )
-    kokoro = pykokoro.Kokoro(short_sentence_config=config)
+    pipe = KokoroPipeline(PipelineConfig(short_sentence_config=config))
     """)
 
     # Summary
     print_separator("SUMMARY")
     print(f"\nProcessed {stats['segments']} segments total")
-    print(f"  - {stats['short_count']} short segments (used repeat-and-cut)")
+    print(f"  - {stats['short_count']} short segments (used short-sentence handling)")
     print(f"  - {stats['segments'] - stats['short_count']} normal segments")
-    print("\nBenefits of repeat-and-cut:")
+    print("\nBenefits of short-sentence handling:")
     print("  - Better prosody for short utterances")
     print("  - More natural intonation")
     print("  - Consistent audio quality across all segment lengths")
     print("\nListen to the WAV file to hear the natural-sounding short sentences!")
 
-    kokoro.close()
+    pipe.close()
 
 
 if __name__ == "__main__":

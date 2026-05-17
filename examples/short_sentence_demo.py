@@ -6,7 +6,7 @@ This example demonstrates the cross-correlation extraction technique used by PyK
 to improve audio quality for very short sentences.
 
 The short sentence handler:
-1. Detects sentences with fewer phonemes than a threshold (default: 10)
+1. Detects sentences with fewer phonemes than a threshold (default: 30)
 2. Generates the short sentence alone (poor quality, but needed for pattern)
 3. Generates context + short sentence together (good quality with natural prosody)
 4. Uses cross-correlation to find where the short sentence appears in combined audio
@@ -29,7 +29,10 @@ import soundfile as sf
 
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
-from pykokoro.short_sentence_handler import ShortSentenceConfig
+from pykokoro.short_sentence_handler import (
+    PhraseResolveMode,
+    ShortSentenceConfig,
+)
 from pykokoro.tokenizer import Tokenizer
 
 # Enable debug logging to see detailed processing information
@@ -39,7 +42,7 @@ from pykokoro.tokenizer import Tokenizer
 
 # Test sentences of varying lengths
 TEST_SENTENCES = [
-    # Very short (will trigger repeat-and-cut)
+    # Very short (will trigger short sentence handling)
     "Hi!",
     "Why?",
     "No.",
@@ -50,14 +53,26 @@ TEST_SENTENCES = [
     "Stop!",
     "What?",
     "Don't!",
+    "One … step. In front.",
+    "Of.",
+    "The other.",
+    "Ah.",
+    "Hush.",
+    "Go on.",
+    "Not yet.",
+    "I know.",
+    "Mm-hm.",
+    "Mr. Vale.",
+    "'Tis.",
+    "Chapter 4",
+    "Hermione."
 ]
+
 
 # Voice to use
 # Note: Different voices may produce slightly different durations due to varying
 # speaking rates. af_sarah is recommended for testing the short sentence handler.
-VOICE = "af_bella"  # Changed from af_bella for better short sentence results
-#  VOICE = "af_sarah"  # Changed from af_bella for better short sentence results
-VOICE = "af_heart"  # Changed from af_bella for better short sentence results
+VOICE = "bm_fable"  # Changed from af_bella for better short sentence results
 LANG = "en-us"
 
 
@@ -119,19 +134,24 @@ def main():
     )
     tokenizer = Tokenizer()
 
-    all_samples = []
-    all_samples2 = []
+    pretext_samples = []
+    disabled_samples = []
+    neutral_phrase_samples = []
     sample_rate = 24000
 
     pause = np.zeros(int(sample_rate * 0.5), dtype=np.float32)
     # Add announcement and samples to output
-    announcement = "With pretexting"
+    announcement = "With wrap mode"
     intro = kokoro.run(announcement).audio
-    all_samples.extend([intro, pause])
+    pretext_samples.extend([intro, pause])
     # Add announcement and samples to output
-    announcement = "Without pretexting"
+    announcement = "Without short sentence handling"
     intro2 = kokoro.run(announcement).audio
-    all_samples2.extend([pause, intro2, pause])
+    disabled_samples.extend([pause, intro2, pause])
+    # Add announcement and samples to output
+    announcement = "With phrase mode"
+    intro3 = kokoro.run(announcement).audio
+    neutral_phrase_samples.extend([pause, intro3, pause])
 
     # Test each sentence with different configurations
     for text in TEST_SENTENCES:
@@ -139,28 +159,33 @@ def main():
 
         print(f"\nText: '{text}' ({phoneme_count} phonemes)")
 
-        # Test with context-prepending enabled (default)
-        config_enabled = ShortSentenceConfig(
-            min_phoneme_length=10,
-            enabled=True,
-        )
+        # Test with phoneme pretext wrapping only
+        config_pretext = pretext_short_sentence_config()
 
-        # Test with context-prepending disabled
+        # Test with short sentence handling disabled
         config_disabled = ShortSentenceConfig(enabled=False)
 
-        # Generate with both configs
-        samples_enabled, sr = test_sentence_with_config(
-            text, config_enabled, "With prepending"
+        # Test with neutral phrase generation + cutting
+        config_neutral_phrase = neutral_phrase_short_sentence_config()
+
+        # Generate with all configs
+        samples_pretext, sr = test_sentence_with_config(
+            text, config_pretext, "With wrap mode"
         )
 
         samples_disabled, sr = test_sentence_with_config(
-            text, config_disabled, "Without prepending"
+            text, config_disabled, "Without handling"
         )
-        # Add: intro + enabled version + pause + disabled version + pause
+
+        samples_neutral_phrase, sr = test_sentence_with_config(
+            text, config_neutral_phrase, "With phrase mode"
+        )
+
         pause = np.zeros(int(sr * 0.1), dtype=np.float32)
-        # all_samples.extend([samples_enabled, pause, samples_disabled, pause])
-        all_samples.extend([samples_enabled, pause])
-        all_samples2.extend([samples_disabled, pause])
+        
+        disabled_samples.extend([samples_disabled, pause])
+        pretext_samples.extend([samples_pretext, pause])
+        neutral_phrase_samples.extend([samples_neutral_phrase, pause])
 
     # Configuration comparison
     print_separator("Configuration Comparison")
@@ -176,7 +201,9 @@ def main():
     # Save combined audio
     print_separator("Saving Combined Audio")
 
-    combined_samples = np.concatenate(all_samples + all_samples2)
+    combined_samples = np.concatenate(
+        disabled_samples + pretext_samples + neutral_phrase_samples
+    )
     output_file = "short_sentence_demo.wav"
     sf.write(output_file, combined_samples, sample_rate)
 
@@ -189,10 +216,9 @@ def main():
 
     print("\nHow the Short Sentence Handler Works:")
     print("  1. Detects sentences with < min_phoneme_length phonemes")
-    print("  2. Generates the short sentence alone to measure duration")
-    print("  3. Repeats the text to reach target_phoneme_length")
-    print("  4. Generates TTS for repeated text (better quality)")
-    print("  5. Cuts at measured duration + 15% safety buffer")
+    print("  2. Applies the configured resolve mode to the short segment")
+    print("  3. Phrase modes synthesize a context phrase")
+    print("  4. Cuts away the extra phrase context when boundaries are confident")
 
     print("\nBenefits:")
     print("  • Improved prosody and intonation for short sentences")
@@ -200,7 +226,8 @@ def main():
     print("  • Better handling of single-word sentences")
 
     print("\nConfiguration Options:")
-    print("  • min_phoneme_length: Threshold for 'short' (default: 10)")
+    print("  • min_phoneme_length: Threshold for 'short' (default: 30)")
+    print("  • resolve_mode: 'randomized-phrase' (default), 'phrase', or 'wrap'")
     print("  • enabled: Enable/disable the feature (default: True)")
 
     print("\nUsage:")
@@ -215,6 +242,27 @@ def main():
     print("\n" + "=" * 70)
     print("Listen to the WAV file to hear the difference!")
     print("=" * 70)
+
+def neutral_phrase_short_sentence_config() -> ShortSentenceConfig:
+    """Use phrase generation + cutting for short clauses in this demo."""
+    return ShortSentenceConfig(
+        resolve_modes={
+            "phrase": PhraseResolveMode(
+                neutral_phrase="The conversation stopped, {segment}, before someone answered.",
+                end_phrase="The conversation stopped after one last reply: {segment}",
+            )
+        },
+        min_phoneme_length=20,
+        resolve_mode="phrase",
+    )
+
+
+def pretext_short_sentence_config() -> ShortSentenceConfig:
+    """Use phoneme pretext wrapping for the same demo range as phrase mode."""
+    return ShortSentenceConfig(
+        min_phoneme_length=20,
+        resolve_mode="wrap",
+    )
 
 
 if __name__ == "__main__":

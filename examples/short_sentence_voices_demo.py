@@ -6,7 +6,7 @@ This example demonstrates the cross-correlation extraction technique used by PyK
 to improve audio quality for very short sentences.
 
 The short sentence handler:
-1. Detects sentences with fewer phonemes than a threshold (default: 10)
+1. Detects sentences with fewer phonemes than a threshold (default: 30)
 2. Generates the short sentence alone (poor quality, but needed for pattern)
 3. Generates context + short sentence together (good quality with natural prosody)
 4. Uses cross-correlation to find where the short sentence appears in combined audio
@@ -29,7 +29,10 @@ import soundfile as sf
 
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
-from pykokoro.short_sentence_handler import ShortSentenceConfig
+from pykokoro.short_sentence_handler import (
+    PhraseResolveMode,
+    ShortSentenceConfig,
+)
 from pykokoro.tokenizer import Tokenizer
 
 # Enable debug logging to see detailed processing information
@@ -39,7 +42,7 @@ from pykokoro.tokenizer import Tokenizer
 
 # Test sentences of varying lengths
 TEST_SENTENCES = [
-    # Very short (will trigger repeat-and-cut)
+    # Very short (will trigger short sentence handling)
     "Hi!",
     "Why?",
     "Oh No.",
@@ -50,8 +53,10 @@ TEST_SENTENCES = [
     "Stop!",
     "What?",
     "Don't!",
+    "One … step. In front.",
+    "thing on her chest.",
+    "Of.",
 ]
-TEST_SENTENCE = TEST_SENTENCES[2]
 # Voice to use
 
 VOICES = [
@@ -90,6 +95,7 @@ def print_separator(title: str) -> None:
 
 def test_sentence_with_config(
     voice: str,
+    text: str,
     config: ShortSentenceConfig | None,
     config_name: str,
 ) -> tuple[np.ndarray, int]:
@@ -113,7 +119,7 @@ def test_sentence_with_config(
         )
     )
 
-    res = kokoro_test.run(TEST_SENTENCE)
+    res = kokoro_test.run(text)
     samples, sr = res.audio, res.sample_rate
 
     print(f"  {config_name:25} -> {len(samples):6} samples ({len(samples) / sr:.3f}s)")
@@ -127,7 +133,7 @@ def main():
 
     print("\nThis demo shows how PyKokoro improves audio quality for short sentences")
     print("using cross-correlation extraction with context.")
-    print(f"\nText: {TEST_SENTENCE}")
+    print(f"\nTexts: {len(TEST_SENTENCES)} short-sentence samples")
     print(f"Language: {LANG}")
     print("\nNOTE: Audio duration will be similar, but QUALITY will be better")
     print("      with context-prepending. Listen to the generated files to compare!")
@@ -154,34 +160,26 @@ def main():
     intro2 = kokoro.run(announcement).audio
     all_samples2.extend([pause, intro2, pause])
 
-    # Test each sentence with different configurations
+    # Test each voice and sentence with different configurations
     for voice in VOICES:
-        phoneme_count = len(tokenizer.phonemize(TEST_SENTENCE, lang=LANG))
+        print(f"\nVoice: '{voice}'")
+        for text in TEST_SENTENCES:
+            phoneme_count = len(tokenizer.phonemize(text, lang=LANG))
+            print(f"\nText: '{text}' ({phoneme_count} phonemes)")
 
-        print(f"\nVoice: '{voice}' ({phoneme_count} phonemes)")
+            config_enabled = neutral_phrase_short_sentence_config()
+            config_disabled = ShortSentenceConfig(enabled=False)
 
-        # Test with context-prepending enabled (default)
-        config_enabled = ShortSentenceConfig(
-            min_phoneme_length=10,
-            enabled=True,
-        )
+            samples_enabled, sr = test_sentence_with_config(
+                voice, text, config_enabled, "With phrase cutting"
+            )
 
-        # Test with context-prepending disabled
-        config_disabled = ShortSentenceConfig(enabled=False)
-
-        # Generate with both configs
-        samples_enabled, sr = test_sentence_with_config(
-            voice, config_enabled, "With prepending"
-        )
-
-        samples_disabled, sr = test_sentence_with_config(
-            voice, config_disabled, "Without prepending"
-        )
-        # Add: intro + enabled version + pause + disabled version + pause
-        pause = np.zeros(int(sr * 0.1), dtype=np.float32)
-        # all_samples.extend([samples_enabled, pause, samples_disabled, pause])
-        all_samples.extend([samples_enabled, pause])
-        all_samples2.extend([samples_disabled, pause])
+            samples_disabled, sr = test_sentence_with_config(
+                voice, text, config_disabled, "Without phrase cutting"
+            )
+            pause = np.zeros(int(sr * 0.1), dtype=np.float32)
+            all_samples.extend([samples_enabled, pause])
+            all_samples2.extend([samples_disabled, pause])
 
     # Save combined audio
     print_separator("Saving Combined Audio")
@@ -199,10 +197,9 @@ def main():
 
     print("\nHow the Short Sentence Handler Works:")
     print("  1. Detects sentences with < min_phoneme_length phonemes")
-    print("  2. Generates the short sentence alone to measure duration")
-    print("  3. Repeats the text to reach target_phoneme_length")
-    print("  4. Generates TTS for repeated text (better quality)")
-    print("  5. Cuts at measured duration + 15% safety buffer")
+    print("  2. Applies the configured resolve mode to the short segment")
+    print("  3. Phrase modes synthesize a context phrase")
+    print("  4. Cuts away the extra phrase context when boundaries are confident")
 
     print("\nBenefits:")
     print("  • Improved prosody and intonation for short sentences")
@@ -210,7 +207,8 @@ def main():
     print("  • Better handling of single-word sentences")
 
     print("\nConfiguration Options:")
-    print("  • min_phoneme_length: Threshold for 'short' (default: 10)")
+    print("  • min_phoneme_length: Threshold for 'short' (default: 30)")
+    print("  • resolve_mode: 'randomized-phrase' (default), 'phrase', or 'wrap'")
     print("  • enabled: Enable/disable the feature (default: True)")
 
     print("\nUsage:")
@@ -225,6 +223,19 @@ def main():
     print("\n" + "=" * 70)
     print("Listen to the WAV file to hear the difference!")
     print("=" * 70)
+
+def neutral_phrase_short_sentence_config() -> ShortSentenceConfig:
+    """Use phrase generation + cutting for short clauses in this demo."""
+    return ShortSentenceConfig(
+        resolve_modes={
+            "phrase": PhraseResolveMode(
+                neutral_phrase="The conversation stopped, {segment}, before someone answered.",
+                end_phrase="The conversation stopped after one last reply: {segment}",
+            )
+        },
+        min_phoneme_length=20,
+        resolve_mode="phrase",
+    )
 
 
 if __name__ == "__main__":

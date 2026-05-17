@@ -41,7 +41,8 @@ class TestIsSegmentEmpty:
     def test_punctuation_length_at_threshold_returns_false(self):
         """Segments at the length threshold should not count as empty."""
         segment = make_segment(text="!", phonemes="!!!!!")
-        assert is_segment_empty(segment) is False
+        config = ShortSentenceConfig(min_phoneme_length=5)
+        assert is_segment_empty(segment, config=config) is False
 
     def test_non_punctuation_returns_false(self):
         """Segments containing letters should not be considered empty."""
@@ -63,15 +64,16 @@ class TestIsSegmentShort:
         segment = make_segment(text="Go", phonemes="abc")
         assert is_segment_short(segment) is True
 
-    def test_multi_word_returns_false(self):
-        """Multi-word segments should be considered short."""
+    def test_multi_word_can_be_short(self):
+        """Multi-word segments can still be considered short."""
         segment = make_segment(text="Go now", phonemes="abc")
         assert is_segment_short(segment) is True
 
     def test_long_phonemes_return_false(self):
         """Segments with phonemes at the threshold should not be short."""
         segment = make_segment(text="Go", phonemes="abcde")
-        assert is_segment_short(segment) is False
+        config = ShortSentenceConfig(min_phoneme_length=5)
+        assert is_segment_short(segment, config=config) is False
 
     def test_empty_phonemes_returns_false(self):
         """Whitespace-only phonemes should not be considered short."""
