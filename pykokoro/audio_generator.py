@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+import random
 import re
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Literal
@@ -13,6 +14,12 @@ import onnxruntime as rt
 
 from .constants import MAX_PHONEME_LENGTH, SAMPLE_RATE
 from .prosody import apply_prosody
+from .short_sentence_handler import (
+    SHORT_SENTENCE_META_KEY,
+    apply_short_sentence_mode,
+    build_short_sentence_phrase_retry,
+    cut_short_sentence_phrase_audio,
+)
 from .tokenizer import Tokenizer
 from .trim import trim as trim_audio
 from .types import PhonemeSegment
@@ -37,7 +44,7 @@ class AudioGenerator:
     - Batch generation from phoneme lists
     - Segment-based generation with pause support
     - Token-to-audio generation
-    - Short sentence handling via phoneme pretext
+    - Short sentence handling via configured context modes
 
     Args:
         session: ONNX Runtime inference session
@@ -61,6 +68,10 @@ class AudioGenerator:
         self._uses_input_ids = any(
             input_meta.name == "input_ids" for input_meta in session.get_inputs()
         )
+        get_outputs = getattr(session, "get_outputs", None)
+        outputs = get_outputs() if callable(get_outputs) else []
+        self._has_timestamp_output = len(outputs) > 1
+        self._reported_missing_timestamp_output = False
 
     def _tokenize_phonemes(self, phonemes: str) -> list[int]:
         trimmed = phonemes[:MAX_PHONEME_LENGTH]
@@ -112,6 +123,22 @@ class AudioGenerator:
             "speed": self._float_speed_input(speed),
         }
 
+    def _run_onnx(
+        self,
+        phonemes: str,
+        voice_style: np.ndarray,
+        speed: float,
+    ) -> tuple[np.ndarray, np.ndarray | None]:
+        tokens = self._tokenize_phonemes(phonemes)
+        voice_style_indexed = self._select_voice_style(voice_style, len(tokens))
+        tokens_padded = self._pad_tokens(tokens)
+        inputs = self._build_onnx_inputs(tokens_padded, voice_style_indexed, speed)
+        results = self._session.run(None, inputs)
+        audio = np.asarray(results[0]).T
+        audio = np.squeeze(audio)
+        pred_dur = np.asarray(results[1]).squeeze() if len(results) > 1 else None
+        return audio, pred_dur
+
     def generate_from_phonemes(
         self,
         phonemes: str,
@@ -130,13 +157,7 @@ class AudioGenerator:
         Returns:
             Tuple of (audio samples, sample rate)
         """
-        tokens = self._tokenize_phonemes(phonemes)
-        voice_style_indexed = self._select_voice_style(voice_style, len(tokens))
-        tokens_padded = self._pad_tokens(tokens)
-        inputs = self._build_onnx_inputs(tokens_padded, voice_style_indexed, speed)
-        result = self._session.run(None, inputs)[0]
-        audio = np.asarray(result).T
-        audio = np.squeeze(audio)
+        audio, _ = self._run_onnx(phonemes, voice_style, speed)
         return audio, SAMPLE_RATE
 
     def split_phonemes(self, phonemes: str) -> list[str]:  # noqa: C901
@@ -306,7 +327,7 @@ class AudioGenerator:
     def _resolve_short_sentence_config(
         self, enable_short_sentence_override: bool | None
     ) -> ShortSentenceConfig | None:
-        from .short_sentence_handler import ShortSentenceConfig
+        from .short_sentence_handler import ShortSentenceConfig, WrapResolveMode
 
         effective_config = self._short_sentence_config
 
@@ -326,18 +347,49 @@ class AudioGenerator:
         elif effective_config is None:
             effective_config = ShortSentenceConfig()
 
+        if (
+            effective_config is not None
+            and effective_config.enabled
+            and not self._has_timestamp_output
+            and self._uses_phrase_short_sentence_mode(effective_config)
+        ):
+            if not self._reported_missing_timestamp_output:
+                message = (
+                    "Loaded ONNX model has no timestamp output; phrase-based short "
+                    "sentence modes require timestamps. Falling back to wrap mode "
+                    "for this run."
+                )
+                print(message)
+                self._reported_missing_timestamp_output = True
+            resolve_modes = dict(effective_config.resolve_modes)
+            resolve_modes["wrap"] = resolve_modes.get("wrap", WrapResolveMode())
+            effective_config = dataclasses.replace(
+                effective_config,
+                resolve_modes=resolve_modes,
+                resolve_mode="wrap",
+            )
+
         return effective_config
+
+    @staticmethod
+    def _uses_phrase_short_sentence_mode(config: ShortSentenceConfig) -> bool:
+        if config.resolve_mode is False:
+            return False
+        mode = config.resolve_modes.get(config.resolve_mode)
+        return mode is not None and mode.kind in {"phrase", "randomized-phrase"}
 
     def _preprocess_segments(
         self,
         segments: list[PhonemeSegment],
         enable_short_sentence_override: bool | None,
+        random_seed: int | None = None,
     ) -> list[PhonemeSegment]:
-        from .short_sentence_handler import is_segment_empty
+        from .short_sentence_handler import is_segment_empty, is_segment_short
 
         effective_config = self._resolve_short_sentence_config(
             enable_short_sentence_override
         )
+        phrase_rng = random.Random(random_seed) if random_seed is not None else None
         processed: list[PhonemeSegment] = []
 
         for segment in segments:
@@ -360,6 +412,24 @@ class AudioGenerator:
                     )
                 )
                 continue
+
+            if effective_config:
+                detection_segment = dataclasses.replace(segment, tokens=tokens)
+                if is_segment_short(detection_segment, effective_config):
+                    short_sentence = apply_short_sentence_mode(
+                        segment,
+                        phonemes,
+                        tokens,
+                        effective_config,
+                        self._tokenizer.tokenize,
+                        rng=phrase_rng,
+                    )
+                    phonemes = short_sentence.phonemes
+                    tokens = short_sentence.tokens
+                    if short_sentence.metadata is not None:
+                        metadata = dict(segment.ssmd_metadata or {})
+                        metadata[SHORT_SENTENCE_META_KEY] = short_sentence.metadata
+                        segment = dataclasses.replace(segment, ssmd_metadata=metadata)
 
             if len(tokens) > MAX_PHONEME_LENGTH:
                 batches = [
@@ -388,6 +458,7 @@ class AudioGenerator:
                 processed.append(
                     dataclasses.replace(
                         segment,
+                        phonemes=phonemes,
                         tokens=tokens,
                         pause_before=segment.pause_before,
                         pause_after=segment.pause_after,
@@ -413,12 +484,180 @@ class AudioGenerator:
             segment_voice_style = self._resolve_segment_voice(
                 segment, voice_style, voice_resolver
             )
-            audio, _ = self.generate_from_phonemes(
+            audio, pred_dur = self._run_onnx(
                 segment.phonemes, segment_voice_style, speed
             )
-            segment.raw_audio = audio
+            self._log_short_sentence_timestamps(segment, pred_dur)
+            segment.raw_audio = self._prepare_short_sentence_phrase_audio(
+                segment,
+                audio,
+                segment_voice_style,
+                speed,
+            )
 
         return segments
+
+    def _log_short_sentence_timestamps(
+        self,
+        segment: PhonemeSegment,
+        pred_dur: np.ndarray | None,
+    ) -> None:
+        if pred_dur is None:
+            return
+        short_sentence_metadata = (
+            segment.ssmd_metadata or {}
+        ).get(SHORT_SENTENCE_META_KEY)
+        if not isinstance(short_sentence_metadata, dict):
+            return
+        timing_tokens = short_sentence_metadata.get("timing_tokens")
+        if not isinstance(timing_tokens, list):
+            return
+        timestamped = _join_timestamps(timing_tokens, pred_dur)
+        populate_short_sentence_boundary_metadata(
+            short_sentence_metadata,
+            timestamped,
+        )
+        for token in timestamped:
+            if not token.get("is_target"):
+                continue
+
+    def _prepare_short_sentence_phrase_audio(
+        self,
+        segment: PhonemeSegment,
+        audio: np.ndarray,
+        voice_style: np.ndarray,
+        speed: float,
+    ) -> np.ndarray:
+        """Accept confident phrase cuts or regenerate a wrap fallback."""
+        short_sentence_metadata = (
+            segment.ssmd_metadata or {}
+        ).get(SHORT_SENTENCE_META_KEY)
+        if not isinstance(short_sentence_metadata, dict):
+            return audio
+        if short_sentence_metadata.get("kind") not in {"phrase", "randomized-phrase"}:
+            return audio
+
+        cut_audio = cut_short_sentence_phrase_audio(audio, short_sentence_metadata)
+        if cut_audio is not None:
+            short_sentence_metadata["cut_applied"] = True
+            return cut_audio
+
+        retry_audio = self._try_short_sentence_phrase_fallbacks(
+            segment,
+            short_sentence_metadata,
+            voice_style,
+            speed,
+        )
+        if retry_audio is not None:
+            return retry_audio
+
+        fallback_phonemes = short_sentence_metadata.get("fallback_phonemes")
+        if not isinstance(fallback_phonemes, str) or not fallback_phonemes.strip():
+            logger.warning(
+                "Short sentence phrase cut for '%s' lacked confident boundaries; "
+                "no wrap fallback was available.",
+                segment.text[:50],
+            )
+            return audio
+
+        logger.warning(
+            "Short sentence phrase cut for '%s' lacked confident boundaries; "
+            "falling back to wrap mode.",
+            segment.text[:50],
+        )
+        fallback_audio, _ = self._run_onnx(fallback_phonemes, voice_style, speed)
+        short_sentence_metadata["cut_applied"] = True
+        short_sentence_metadata["fallback_used"] = "wrap"
+        segment.phonemes = fallback_phonemes
+        fallback_tokens = short_sentence_metadata.get("fallback_tokens")
+        if isinstance(fallback_tokens, list) and all(
+            isinstance(token, int) for token in fallback_tokens
+        ):
+            segment.tokens = fallback_tokens
+        return fallback_audio
+
+    def _try_short_sentence_phrase_fallbacks(
+        self,
+        segment: PhonemeSegment,
+        short_sentence_metadata: dict[str, object],
+        voice_style: np.ndarray,
+        speed: float,
+    ) -> np.ndarray | None:
+        templates = short_sentence_metadata.get("phrase_fallback_templates")
+        if not isinstance(templates, list):
+            return None
+
+        max_attempts = _short_sentence_phrase_fallback_limit(
+            short_sentence_metadata,
+            default=len(templates),
+        )
+        if max_attempts == 0:
+            short_sentence_metadata["retry_attempts"] = 0
+            return None
+
+        used_templates = {
+            template
+            for template in [short_sentence_metadata.get("phrase_template")]
+            if isinstance(template, str)
+        }
+        retry_attempts = 0
+        failed_template = short_sentence_metadata.get("phrase_template")
+        for template in templates:
+            if not isinstance(template, str) or not template.strip():
+                continue
+            if template in used_templates:
+                continue
+            used_templates.add(template)
+            if retry_attempts >= max_attempts:
+                break
+            retry_attempts += 1
+            logger.info(
+                "Short sentence phrase cut for '%s' lacked confident boundaries; "
+                "trying another phrase %d/%d. Failed with: '%s'",
+                segment.text[:50],
+                retry_attempts,
+                max_attempts,
+                failed_template if isinstance(failed_template, str) else "",
+            )
+
+            retry = build_short_sentence_phrase_retry(
+                segment,
+                template,
+                short_sentence_metadata,
+            )
+            if retry is None or retry.metadata is None:
+                continue
+
+            retry_audio, pred_dur = self._run_onnx(retry.phonemes, voice_style, speed)
+            timing_tokens = retry.metadata.get("timing_tokens")
+            if pred_dur is not None and isinstance(timing_tokens, list):
+                timestamped = _join_timestamps(timing_tokens, pred_dur)
+                populate_short_sentence_boundary_metadata(retry.metadata, timestamped)
+
+            cut_audio = cut_short_sentence_phrase_audio(retry_audio, retry.metadata)
+            if cut_audio is None:
+                failed_template = template
+                continue
+
+            logger.info(
+                "Short sentence phrase cut for '%s' lacked confident boundaries; "
+                "trying another phrase %d/%d. Failed with: '%s'",
+                segment.text[:50],
+                retry_attempts,
+                max_attempts,
+                failed_template if isinstance(failed_template, str) else "",
+            )
+            short_sentence_metadata.clear()
+            short_sentence_metadata.update(retry.metadata)
+            short_sentence_metadata["cut_applied"] = True
+            short_sentence_metadata["fallback_used"] = "phrase"
+            short_sentence_metadata["retry_attempts"] = retry_attempts
+            segment.phonemes = retry.phonemes
+            segment.tokens = retry.tokens
+            return cut_audio
+
+        short_sentence_metadata["retry_attempts"] = retry_attempts
+        return None
 
     def _postprocess_audio_segments(
         self, segments: list[PhonemeSegment], trim_silence: bool
@@ -433,6 +672,16 @@ class AudioGenerator:
                 continue
 
             audio = segment.raw_audio
+            short_sentence_metadata = (
+                segment.ssmd_metadata or {}
+            ).get(SHORT_SENTENCE_META_KEY)
+            if (
+                isinstance(short_sentence_metadata, dict)
+                and not short_sentence_metadata.get("cut_applied")
+            ):
+                cut_audio = cut_short_sentence_phrase_audio(audio, short_sentence_metadata)
+                if cut_audio is not None:
+                    audio = cut_audio
             if trim_silence:
                 audio, _ = trim_audio(audio)
             segment.processed_audio = self._apply_segment_prosody(audio, segment)
@@ -464,6 +713,7 @@ class AudioGenerator:
         trim_silence: bool,
         voice_resolver: Callable[[str], np.ndarray] | None = None,
         enable_short_sentence_override: bool | None = None,
+        random_seed: int | None = None,
     ) -> np.ndarray:
         """Generate audio from list of PhonemeSegment instances.
 
@@ -487,12 +737,14 @@ class AudioGenerator:
                 None (default): Use config setting
                 True: Force enable short sentence handling
                 False: Force disable short sentence handling
+            random_seed: Optional seed for reproducible randomized short-sentence
+                phrase selection.
 
         Returns:
             Concatenated audio array
         """
         preprocessed = self._preprocess_segments(
-            segments, enable_short_sentence_override
+            segments, enable_short_sentence_override, random_seed
         )
         generated = self._generate_raw_audio_segments(
             preprocessed, voice_style, speed, voice_resolver
@@ -556,3 +808,123 @@ class AudioGenerator:
         )
 
         return audio, SAMPLE_RATE
+
+
+def _join_timestamps(
+    tokens: list[object],
+    pred_dur: np.ndarray,
+) -> list[dict[str, object]]:
+    """Map timestamped model durations to G2P token metadata."""
+    durations = np.asarray(pred_dur).reshape(-1)
+    if not tokens or len(durations) < 3:
+        return []
+
+    timestamped: list[dict[str, object]] = []
+    divisor = 80
+    left = right = 2 * max(0.0, float(durations[0].item()) - 3)
+    i = 1
+
+    for raw_token in tokens:
+        if i >= len(durations) - 1:
+            break
+        token = dict(raw_token) if isinstance(raw_token, dict) else {}
+        phonemes = str(token.get("phonemes") or "")
+        whitespace = str(token.get("whitespace") or "")
+
+        if not phonemes:
+            if whitespace and i < len(durations):
+                i += 1
+                if i < len(durations):
+                    left = right + float(durations[i].item())
+                    right = left + float(durations[i].item())
+                    i += 1
+            timestamped.append(token)
+            continue
+
+        j = i + len(phonemes)
+        if j >= len(durations):
+            break
+
+        token["start_ts"] = left / divisor
+        token_dur = float(durations[i:j].sum().item())
+        space_dur = float(durations[j].item()) if whitespace else 0.0
+        speech_end = right + (2 * token_dur)
+        token["speech_end_ts"] = speech_end / divisor
+        left = speech_end + space_dur
+        token["end_ts"] = left / divisor
+        right = left + space_dur
+        i = j + (1 if whitespace else 0)
+        timestamped.append(token)
+
+    return timestamped
+
+
+def populate_short_sentence_boundary_metadata(
+    metadata: dict[str, object],
+    timestamped: list[dict[str, object]],
+) -> None:
+    """Populate production phrase-cut metadata from timestamped G2P tokens."""
+    target_indices = [
+        index
+        for index, token in enumerate(timestamped)
+        if token.get("is_target")
+        and isinstance(token.get("start_ts"), (int, float))
+        and isinstance(token.get("end_ts"), (int, float))
+    ]
+    if not target_indices:
+        return
+
+    target_tokens = [timestamped[index] for index in target_indices]
+    target_boundary_tokens = [
+        token for token in target_tokens if _is_spoken_token(token)
+    ] or target_tokens
+    metadata["target_start_ts"] = min(
+        float(token["start_ts"]) for token in target_boundary_tokens
+    )
+    metadata["target_end_ts"] = max(
+        float(token.get("speech_end_ts", token["end_ts"]))
+        for token in target_boundary_tokens
+    )
+
+    first_target = min(target_indices)
+    last_target = max(target_indices)
+    previous_tokens = [
+        token
+        for token in timestamped[:first_target]
+        if _is_spoken_token(token)
+        and isinstance(token.get("speech_end_ts", token.get("end_ts")), (int, float))
+    ]
+    next_tokens = [
+        token
+        for token in timestamped[last_target + 1 :]
+        if _is_spoken_token(token)
+        and isinstance(token.get("start_ts"), (int, float))
+    ]
+    metadata["has_left_context"] = bool(previous_tokens)
+    metadata["has_right_context"] = bool(next_tokens)
+    if previous_tokens:
+        previous_end = previous_tokens[-1].get(
+            "speech_end_ts",
+            previous_tokens[-1]["end_ts"],
+        )
+        metadata["previous_token_end_ts"] = float(previous_end)
+    if next_tokens:
+        metadata["next_token_start_ts"] = float(next_tokens[0]["start_ts"])
+
+
+def _short_sentence_phrase_fallback_limit(
+    metadata: dict[str, object],
+    *,
+    default: int,
+) -> int:
+    value = metadata.get("phrase_fallback_tries", default)
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return max(0, int(default))
+
+
+def _is_spoken_token(token: dict[str, object]) -> bool:
+    """Return whether a token corresponds to spoken lexical content."""
+    text = str(token.get("text") or "")
+    return any(char.isalnum() for char in text)

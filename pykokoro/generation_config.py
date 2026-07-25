@@ -61,7 +61,7 @@ class GenerationConfig:
             pause variance will be reproducible. Default: None
         enable_short_sentence: Override short sentence handling for this run.
             - None (default): Use config setting from PipelineConfig
-            - True: Force enable short sentence handling (phoneme pretext)
+            - True: Force enable short sentence handling
             - False: Force disable short sentence handling
             Default: None
 

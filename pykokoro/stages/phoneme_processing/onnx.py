@@ -25,7 +25,13 @@ class OnnxPhonemeProcessorAdapter:
         trace: Trace,
     ) -> list[PhonemeSegment]:
         _ = trace
+        if cfg.generation.random_seed is None:
+            return self._kokoro.preprocess_segments(
+                phoneme_segments,
+                cfg.generation.enable_short_sentence,
+            )
         return self._kokoro.preprocess_segments(
             phoneme_segments,
             cfg.generation.enable_short_sentence,
+            cfg.generation.random_seed,
         )

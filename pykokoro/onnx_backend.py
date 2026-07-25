@@ -95,8 +95,19 @@ MODEL_QUALITY_FILES_GITHUB_V1_1_DE: dict[str, str] = {
 # Backward compatibility
 MODEL_QUALITY_FILES = MODEL_QUALITY_FILES_HF
 
+
+def _timestamped_model_filename(filename: str) -> str:
+    path = Path(filename)
+    return f"{path.stem}-timestamped{path.suffix}"
+
+
+MODEL_QUALITY_CACHE_FILES_HF_V1_0: dict[str, str] = {
+    quality: _timestamped_model_filename(filename)
+    for quality, filename in MODEL_QUALITY_FILES_HF.items()
+}
+
 # HuggingFace repositories for models and voices (onnx-community)
-HF_REPO_V1_0 = "onnx-community/Kokoro-82M-v1.0-ONNX"
+HF_REPO_V1_0 = "onnx-community/Kokoro-82M-v1.0-ONNX-timestamped"
 HF_REPO_V1_1_ZH = "onnx-community/Kokoro-82M-v1.1-zh-ONNX"
 
 # HuggingFace repositories for configs (hexgrad)
@@ -447,8 +458,10 @@ def get_model_path(
 
     # Get appropriate filename mapping based on source and variant
     if source == "huggingface":
-        # Both v1.0 and v1.1-zh use same filename convention
-        quality_files = MODEL_QUALITY_FILES_HF
+        if variant == "v1.0":
+            quality_files = MODEL_QUALITY_CACHE_FILES_HF_V1_0
+        else:
+            quality_files = MODEL_QUALITY_FILES_HF
     elif source == "github":
         if variant == "v1.0":
             quality_files = MODEL_QUALITY_FILES_GITHUB_V1_0
@@ -707,6 +720,7 @@ def _download_from_hf(
     filename: str,
     subfolder: str | None = None,
     local_dir: Path | None = None,
+    local_filename: str | None = None,
     force: bool = False,
     min_size: int | None = None,
     validator: Callable[[Path], None] | None = None,
@@ -720,6 +734,7 @@ def _download_from_hf(
         filename: File to download
         subfolder: Subfolder in the repository
         local_dir: Local directory to save to
+        local_filename: Optional filename to use under local_dir
         force: Force re-download even if file exists
 
     Returns:
@@ -730,33 +745,43 @@ def _download_from_hf(
     local_dir_path = Path(local_dir) if local_dir else None
     target_path: Path | None = None
     if local_dir_path is not None:
-        target_path = local_dir_path / filename
+        target_filename = local_filename or filename
+        target_path = local_dir_path / target_filename
         if subfolder:
-            target_path = local_dir_path / subfolder / filename
+            target_path = local_dir_path / subfolder / target_filename
         target_path.parent.mkdir(parents=True, exist_ok=True)
 
     def _download() -> Path:
+        use_local_dir = local_dir_path is not None and local_filename is None
         downloaded_path = hf_hub_download(
             repo_id=repo_id,
             filename=filename,
             subfolder=subfolder,
-            local_dir=str(local_dir_path) if local_dir_path else None,
+            local_dir=str(local_dir_path) if use_local_dir else None,
             force_download=force,
         )
         downloaded = Path(downloaded_path)
+        delete_on_error = use_local_dir
         try:
             if min_size is not None:
                 _validate_min_size(downloaded, min_size)
             if validator is not None:
                 validator(downloaded)
+            if target_path is not None and downloaded != target_path:
+                _atomic_copy(downloaded, target_path)
+                downloaded = target_path
+                delete_on_error = True
         except Exception:
-            with contextlib.suppress(FileNotFoundError):
-                downloaded.unlink()
+            if delete_on_error:
+                with contextlib.suppress(FileNotFoundError):
+                    downloaded.unlink()
             raise
         return downloaded
 
     if target_path is not None:
         with _download_lock(target_path):
+            if target_path.exists() and not force:
+                return target_path
             return _run_with_retries(
                 _download, description=f"HF download of {filename}", retries=retries
             )
@@ -909,9 +934,12 @@ def download_model(
         raise ValueError(f"Quality '{quality}' not available. Available: {available}")
 
     filename = MODEL_QUALITY_FILES_HF[quality]
+    local_filename = (
+        MODEL_QUALITY_CACHE_FILES_HF_V1_0[quality] if variant == "v1.0" else filename
+    )
     # Use new path structure
     model_dir = get_model_dir(source="huggingface", variant=variant)
-    local_path = model_dir / HF_MODEL_SUBFOLDER / filename
+    local_path = model_dir / HF_MODEL_SUBFOLDER / local_filename
 
     if local_path.exists() and not force:
         logger.debug(f"Model already exists: {local_path}")
@@ -924,6 +952,7 @@ def download_model(
         filename=filename,
         subfolder=HF_MODEL_SUBFOLDER,
         local_dir=model_dir,
+        local_filename=local_filename,
         force=force,
         validator=_validate_onnx_file,
     )
@@ -1454,15 +1483,16 @@ class Kokoro:
             model_quality: Model quality/quantization level (default from config)
             model_source: Model source ("huggingface" or "github")
             model_variant: Model variant ("v1.0", "v1.1-zh")
-            short_sentence_config: Configuration for short sentence handling using
-                phoneme pretext. This improves audio quality for short sentences
-                (like "Why?" or "Go!") by surrounding phonemes with context.
+            short_sentence_config: Configuration for short sentence handling.
+                This improves audio quality for short sentences (like "Why?" or
+                "Go!") by adding context.
                 If None, uses default thresholds (min_phoneme_length=30).
                 Set enabled=False to disable.
                 Example:
                     from pykokoro.short_sentence_handler import ShortSentenceConfig
                     config = ShortSentenceConfig(
                         min_phoneme_length=20,  # Treat < 20 phonemes as short
+                        resolve_mode="randomized-phrase",
                         enabled=True,
                         phoneme_pretext="—"
                     )
@@ -1838,12 +1868,13 @@ class Kokoro:
         self,
         segments: list["PhonemeSegment"],
         enable_short_sentence_override: bool | None,
+        random_seed: int | None = None,
     ) -> list["PhonemeSegment"]:
         """Preprocess phoneme segments for short sentence handling."""
         self._init_kokoro()
         assert self._audio_generator is not None
         return self._audio_generator._preprocess_segments(
-            segments, enable_short_sentence_override
+            segments, enable_short_sentence_override, random_seed
         )
 
     def generate_raw_audio_segments(
@@ -2001,6 +2032,7 @@ class Kokoro:
         speed: float,
         trim_silence: bool,
         enable_short_sentence_override: bool | None = None,
+        random_seed: int | None = None,
     ) -> np.ndarray:
         """Delegate to AudioGenerator with voice resolution support.
 
@@ -2026,6 +2058,7 @@ class Kokoro:
             trim_silence,
             voice_resolver=voice_resolver,
             enable_short_sentence_override=enable_short_sentence_override,
+            random_seed=random_seed,
         )
 
     def close(self) -> None:

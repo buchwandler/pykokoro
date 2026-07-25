@@ -626,16 +626,32 @@ Trim Silence from Audio
 Short Sentence Handling
 -----------------------
 
-PyKokoro improves short, single-word sentences by surrounding the word with a
-pause marker. You can tune settins via ``ShortSentenceConfig``:
+PyKokoro improves short sentences by adding context before synthesis. You can tune settings via
+``ShortSentenceConfig``:
 
 .. code-block:: python
 
    from pykokoro.short_sentence_handler import ShortSentenceConfig
 
    short_config = ShortSentenceConfig(
+       min_phoneme_length=10,
+       resolve_mode="randomized-phrase",
+       phrase_fallback_tries=3,
        phoneme_pretext="…",
    )
+
+Phrase-based modes use the ``energy-valley`` cutter, which may fail to find confident boundaries.
+In that case, phrase modes try up to
+``phrase_fallback_tries`` alternate phrase templates before falling back to wrap mode.
+
+Phrase-based short-sentence handling can slow down processing because
+of these retries, but it usually improves the audio for very short segments
+much more than simple wrapping.
+
+For phrase-based short-sentence handling, prefer these
+voices in order: ``am_santa``, ``af_nicole``, ``bm_lewis``, ``bm_george``,
+``af_bella``, ``am_echo``, ``af_sky``, ``af_sarah``, ``bm_fable``, ``af_heart``,
+``am_michael``, ``af_alloy``, ``af_nova``, ``bf_isabella``, and ``am_adam``.
 
 Configuration Management
 ------------------------

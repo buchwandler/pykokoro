@@ -6,6 +6,7 @@ import urllib.request
 
 import pytest
 
+import pykokoro.onnx_backend as backend
 from pykokoro.onnx_backend import _download_from_github
 
 
@@ -117,3 +118,50 @@ def test_download_lock_timeout(tmp_path, monkeypatch):
             retries=1,
             lock_timeout=0.01,
         )
+
+
+def test_hf_v1_model_cache_path_uses_timestamped_suffix(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        backend, "get_user_cache_path", lambda folder=None: tmp_path / folder
+    )
+
+    model_path = backend.get_model_path(
+        quality="fp32", source="huggingface", variant="v1.0"
+    )
+
+    assert model_path == (
+        tmp_path / "models" / "huggingface" / "v1.0" / "onnx" / "model-timestamped.onnx"
+    )
+
+
+def test_hf_v1_download_ignores_old_non_timestamped_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        backend, "get_user_cache_path", lambda folder=None: tmp_path / folder
+    )
+    monkeypatch.setattr(backend, "_validate_onnx_file", lambda path: None)
+
+    old_path = tmp_path / "models" / "huggingface" / "v1.0" / "onnx" / "model.onnx"
+    old_path.parent.mkdir(parents=True)
+    old_path.write_bytes(b"old non timestamped model")
+
+    hub_path = tmp_path / "hub" / "model.onnx"
+    hub_path.parent.mkdir()
+    hub_path.write_bytes(b"new timestamped model")
+
+    calls = []
+
+    def fake_hf_hub_download(**kwargs):
+        calls.append(kwargs)
+        assert kwargs["filename"] == "model.onnx"
+        assert kwargs["subfolder"] == "onnx"
+        assert kwargs["local_dir"] is None
+        return str(hub_path)
+
+    monkeypatch.setattr(backend, "hf_hub_download", fake_hf_hub_download)
+
+    result = backend.download_model(variant="v1.0", quality="fp32")
+
+    assert result == old_path.with_name("model-timestamped.onnx")
+    assert result.read_bytes() == b"new timestamped model"
+    assert old_path.read_bytes() == b"old non timestamped model"
+    assert len(calls) == 1

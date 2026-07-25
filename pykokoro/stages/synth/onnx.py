@@ -31,10 +31,20 @@ class OnnxSynthesizerAdapter:
         voice_style = kokoro._resolve_voice_style(cfg.voice)
         trim_silence = generation.pause_mode in {"manual", "auto"}
 
+        if generation.random_seed is None:
+            return kokoro._generate_from_segments(
+                phoneme_segments,
+                voice_style,
+                generation.speed,
+                trim_silence,
+                generation.enable_short_sentence,
+            )
+
         return kokoro._generate_from_segments(
             phoneme_segments,
             voice_style,
             generation.speed,
             trim_silence,
             generation.enable_short_sentence,
+            random_seed=generation.random_seed,
         )
