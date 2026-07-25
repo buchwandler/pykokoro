@@ -114,7 +114,7 @@ class PhrasplitSentenceSplitter:
         language_model = self._language_model_from_lang(cfg.generation.lang)
         try:
             phrasplit = importlib.import_module("phrasplit")
-        except Exception:
+        except ImportError:
             if not text:
                 return []
             return [
@@ -231,9 +231,12 @@ class PhrasplitSentenceSplitter:
                     sentence_idx += 1
                 else:
                     sentence_idx = max(sentence_idx, sent + 1)
-                if para is None:
-                    resolved_paragraph = range_paragraph
-                elif paragraph_breaks and para == 0 and range_paragraph != 0:
+                if (
+                    para is None
+                    or paragraph_breaks
+                    and para == 0
+                    and range_paragraph != 0
+                ):
                     resolved_paragraph = range_paragraph
                 else:
                     resolved_paragraph = para

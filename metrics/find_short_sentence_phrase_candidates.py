@@ -56,7 +56,7 @@ PHRASE_CANDIDATES = [
     "The line says, {segment}, before continuing.",
     "The entry reads, {segment}, —in this place.",
     "It could be said, {segment}, —in all its glory—, might have been better.",
-    "He waited a moment, — {segment} — then spoke again."
+    "He waited a moment, — {segment} — then spoke again.",
 ]
 
 # Keep this in sync with examples/short_sentence_demo.py.
@@ -84,7 +84,7 @@ DEMO_SEGMENTS = [
     "St. John.",
     "'Tis.",
     "Chapter IV.",
-    "Hermione."
+    "Hermione.",
 ]
 
 
@@ -175,7 +175,9 @@ def main() -> None:
             reverse=True,
         )
         print_scores("Top 5 candidate phrases by pause after segment", ranked_after)
-        print_scores("Top 5 candidate phrases by combined pause metrics", ranked_combined)
+        print_scores(
+            "Top 5 candidate phrases by combined pause metrics", ranked_combined
+        )
 
 
 def print_scores(title: str, scores: list[CandidateScore]) -> None:
@@ -242,10 +244,16 @@ def score_phrase(
         if not target_tokens:
             continue
 
-        target_start = int(min(float(token["start_ts"]) for token in target_tokens) * SAMPLE_RATE)
-        target_end = int(max(float(token["end_ts"]) for token in target_tokens) * SAMPLE_RATE)
+        target_start = int(
+            min(float(token["start_ts"]) for token in target_tokens) * SAMPLE_RATE
+        )
+        target_end = int(
+            max(float(token["end_ts"]) for token in target_tokens) * SAMPLE_RATE
+        )
         runs = quiet_runs(audio)
-        before = nearest_run_before(runs, target_start) if REQUIRE_BEFORE_BOUNDARY else None
+        before = (
+            nearest_run_before(runs, target_start) if REQUIRE_BEFORE_BOUNDARY else None
+        )
         after = nearest_run_after(runs, target_end) if REQUIRE_AFTER_BOUNDARY else None
         if REQUIRE_BEFORE_BOUNDARY and before is None:
             continue
@@ -253,7 +261,9 @@ def score_phrase(
             continue
 
         before_gap = (
-            max(0, target_start - before[1]) / SAMPLE_RATE if before is not None else 0.0
+            max(0, target_start - before[1]) / SAMPLE_RATE
+            if before is not None
+            else 0.0
         )
         after_gap = (
             max(0, after[0] - target_end) / SAMPLE_RATE if after is not None else 0.0
@@ -278,8 +288,12 @@ def score_phrase(
         attempts=len(DEMO_SEGMENTS),
         mean_before_gap_seconds=mean(before_gaps) if before_gaps else float("inf"),
         mean_after_gap_seconds=mean(after_gaps) if after_gaps else float("inf"),
-        mean_before_pause_seconds=mean(before_pause_lengths) if before_pause_lengths else 0.0,
-        mean_after_pause_seconds=mean(after_pause_lengths) if after_pause_lengths else 0.0,
+        mean_before_pause_seconds=mean(before_pause_lengths)
+        if before_pause_lengths
+        else 0.0,
+        mean_after_pause_seconds=mean(after_pause_lengths)
+        if after_pause_lengths
+        else 0.0,
     )
 
 

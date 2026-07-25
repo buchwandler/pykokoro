@@ -20,11 +20,11 @@ except ImportError:
 
 
 __all__ = [
+    "GenerationConfig",
+    "KokoroPipeline",
+    "PipelineConfig",
     "__version__",
     "__version_tuple__",
     "build_pipeline",
-    "KokoroPipeline",
     "with_spacy_model_size",
-    "PipelineConfig",
-    "GenerationConfig",
 ]

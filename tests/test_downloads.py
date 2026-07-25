@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import urllib.request
+from typing import Self
 
 import pytest
 
@@ -26,7 +27,7 @@ class FakeResponse:
         self._offset += len(chunk)
         return chunk
 
-    def __enter__(self) -> FakeResponse:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> bool:

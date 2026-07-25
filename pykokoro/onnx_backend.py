@@ -641,7 +641,7 @@ def _run_with_retries(
     for attempt in range(1, retries + 1):
         try:
             return action()
-        except Exception as exc:
+        except OSError as exc:
             last_error = exc
             if attempt == retries:
                 break
@@ -874,7 +874,7 @@ def load_vocab_from_config(
     try:
         with open(config_path, encoding="utf-8") as f:
             config = json.load(f)
-    except Exception as e:
+    except (OSError, ValueError) as e:
         logger.error(
             f"Failed to load config from {config_path}: {e}. "
             f"Falling back to default vocabulary."
@@ -1092,7 +1092,7 @@ def download_all_voices(
                     _atomic_copy(downloaded_path, voice_path)
                 logger.info(f"Downloaded {voice_name}.bin")
                 downloaded_files.append(voice_name)
-            except Exception as e:
+            except (RuntimeError, OSError) as e:
                 logger.warning(f"Failed to download {voice_name}.bin: {e}")
                 continue
         else:
@@ -1122,7 +1122,7 @@ def download_all_voices(
                 )
                 lengths.add(voice_array.shape[0])
                 voices_data[voice_name] = voice_array
-            except Exception as e:
+            except (RuntimeError, OSError, ValueError) as e:
                 logger.warning(f"Failed to load {voice_name}.bin: {e}")
 
         if lengths and len(lengths) > 1:

@@ -151,7 +151,7 @@ class TestGetGpuInfo:
 
     def test_disabled_message(self):
         """Should indicate when GPU is disabled."""
-        message, available = get_gpu_info(enabled=False)
+        message, _available = get_gpu_info(enabled=False)
         # Either GPU is available but disabled, or just not available
         assert isinstance(message, str)
         assert len(message) > 0

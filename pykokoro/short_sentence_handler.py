@@ -2,14 +2,15 @@
 
 This module provides functionality to improve audio quality for short phrases
  by applying a "context-prepending" technique during phoneme creation.
- 
+
 See ShortSentenceConfig for details.
 
 This approach produces better prosody and intonation compared to generating
 very short sentences directly, as neural TTS models typically need more context
 to produce natural-sounding speech.
 
-Longer phrases will NOT use this handler, as they already have sufficient context for natural prosody.
+Longer phrases will NOT use this handler, as they already have
+sufficient context for natural prosody.
 """
 
 from __future__ import annotations
@@ -49,7 +50,9 @@ class PhraseResolveMode:
 
     kind: Literal["phrase"] = "phrase"
     phrase_selection: PhraseSelection = "auto"
-    neutral_phrase: str = "The conversation stopped, {segment}, before someone answered."
+    neutral_phrase: str = (
+        "The conversation stopped, {segment}, before someone answered."
+    )
     end_phrase: str = "The conversation stopped after one last reply: {segment}"
     frame_duration_ms: int = 5
     energy_threshold: float = 0.05
@@ -141,29 +144,35 @@ class ShortSentenceConfig:
     This module improves quality by applying workarounds.
 
     Mode: phrase and randomized-phrase (default)
-    1. Add a full sentence around the phrase. "Phrase" uses a fixed sentence, "Randomized-Phrase" choses from a list for variety.
+    1. Add a full sentence around the phrase. "Phrase" uses a fixed
+       sentence, "Randomized-Phrase" choses from a list for variety.
     2. Cut out the phrase if confidence level for a clean cut is reached.
     3. If not, tries another surrounding full sentence.
     This mode works best, but can increase computation time.
-    Accuracy is voice dependent, but a less accurate voice will only slow it down, not stop it from working.
+    Accuracy is voice dependent, but a less accurate voice will only
+    slow it down, not stop it from working.
     (Note: requires a timestamped onnx model, which is used by default.)
 
-    Mode: Wrap 
+    Mode: Wrap
     1. Add phoneme pretext around the phrase. (e.g. "—" or "…")
     This mode is faster and still an improvement over no short-sentence handling.
 
     Attributes:
-        min_phoneme_length: Threshold below which sentences are considered "short"
-            based on token count and will use context extraction. Default: 30 (decent for most voices).
-            Set as low as you can without having garbled or stretched short phrases with your voice.
+        min_phoneme_length: Threshold below which sentences are
+            considered "short" based on token count and will use
+            context extraction. Default: 30 (decent for most voices).
+            Set as low as you can without having garbled or stretched
+            short phrases with your voice.
         phoneme_pretext: Phoneme(s) to add before and after the target word
             when generating combined audio for context. Default: "—".
         enabled: Whether short sentence handling is enabled. Default: True.
         resolve_mode: Resolve mode to apply to all short sentences. Default:
             "randomized-phrase".
-        phrase_fallback_tries: Number of alternate phrase templates to try, if confidence level for cutting is too low for a phrase, before
-            falling back to wrap mode. Default: 5
-            Higher=more robust and possibly slower for less-accurate voices, Lower=falls back to wrap mode quicker.
+        phrase_fallback_tries: Number of alternate phrase templates to
+            try, if confidence level for cutting is too low for a phrase,
+            before falling back to wrap mode. Default: 5
+            Higher=more robust and possibly slower for less-accurate
+            voices, Lower=falls back to wrap mode quicker.
 
     """
 
@@ -356,7 +365,7 @@ def apply_short_sentence_mode(
     )
     try:
         phrase_result = phonemize_short_sentence_phrase(segment, phrase_template)
-    except Exception as exc:
+    except (RuntimeError, ValueError, KeyError) as exc:
         logger.warning(
             "Failed to phonemize short sentence phrase for '%s': %s",
             segment.text[:50],
@@ -409,7 +418,7 @@ def build_short_sentence_phrase_retry(
     """Build a retry phrase application using the original phrase-cut settings."""
     try:
         phrase_result = phonemize_short_sentence_phrase(segment, phrase_template)
-    except Exception as exc:
+    except (RuntimeError, ValueError, KeyError) as exc:
         logger.warning(
             "Failed to phonemize short sentence fallback phrase for '%s': %s",
             segment.text[:50],
@@ -611,14 +620,17 @@ def _build_short_sentence_retry_metadata(
 
 def _wrap_phonemes(phonemes: str, config: ShortSentenceConfig) -> str:
     wrap_mode = config.resolve_modes.get("wrap")
-    pretext = wrap_mode.phoneme_pretext if isinstance(wrap_mode, WrapResolveMode) else "â€”"
+    pretext = (
+        wrap_mode.phoneme_pretext if isinstance(wrap_mode, WrapResolveMode) else "â€”"
+    )
     if pretext == "â€”":
         pretext = config.phoneme_pretext
     return f"{pretext}{phonemes}{pretext}"
 
 
 def _coerce_phrase_result(
-    phrase_result: tuple[str, list[int]] | tuple[str, list[int], list[dict[str, object]]],
+    phrase_result: tuple[str, list[int]]
+    | tuple[str, list[int], list[dict[str, object]]],
 ) -> tuple[str, list[int], list[dict[str, object]]]:
     """Accept legacy two-item monkeypatched test tuples and new timing tuples."""
     if len(phrase_result) == 2:

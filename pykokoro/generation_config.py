@@ -184,7 +184,7 @@ class GenerationConfig:
         }
 
         # Override with kwargs (only non-None values override)
-        for key in result.keys():
+        for key in result:
             if key in kwargs and kwargs[key] is not None:
                 result[key] = kwargs[key]
 

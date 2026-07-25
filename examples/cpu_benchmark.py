@@ -272,8 +272,6 @@ def test_memory_settings():
         optimal = min(results.items(), key=lambda x: x[1][0])
         print(f"\n✓ Optimal memory config: {optimal[0]} ({optimal[1][0]:.2f}s)")
 
-    return None
-
 
 def test_combined_optimal():
     """Test combined optimal configuration."""
@@ -372,12 +370,10 @@ def main():
         print('        provider="cpu",')
         print("        provider_options={")
         for key, value in optimal_config.items():
-            if isinstance(value, bool):
-                print(f'            "{key}": {value},')
-            elif isinstance(value, int):
+            if isinstance(value, bool) or isinstance(value, int):
                 print(f'            "{key}": {value},')
             else:
-                print(f'            "{key}": {repr(value)},')
+                print(f'            "{key}": {value!r},')
         print("        }")
         print("    )")
         print(")")

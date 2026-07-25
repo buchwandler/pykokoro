@@ -16,11 +16,11 @@ Run duration: VOICES * DEMO_SEGMENTS * (NEUTRAL_PHRASES + END_PHRASES)
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
+import sys
+from dataclasses import dataclass
 from pathlib import Path
 from statistics import mean
-import sys
 from typing import Any
 
 import numpy as np
@@ -29,12 +29,16 @@ sys.path.append(str(Path(__file__).parent))
 
 import find_short_sentence_end_phrase_candidates as end_phrase_candidates
 import find_short_sentence_phrase_candidates as neutral_phrase_candidates
-from pykokoro.audio_generator import _join_timestamps, populate_short_sentence_boundary_metadata
+
+from pykokoro.audio_generator import (
+    _join_timestamps,
+    populate_short_sentence_boundary_metadata,
+)
 from pykokoro.constants import SAMPLE_RATE
 from pykokoro.onnx_backend import Kokoro
-from pykokoro.short_sentence_handler import phonemize_short_sentence_phrase
 from pykokoro.short_sentence_cutters.energy_valley import find_energy_valley_cut_bounds
 from pykokoro.short_sentence_cutters.shared import boundary_windows_from_metadata
+from pykokoro.short_sentence_handler import phonemize_short_sentence_phrase
 from pykokoro.types import PhonemeSegment
 
 LANG = "en-us"
@@ -155,12 +159,11 @@ def main() -> None:
                 "Use the timestamped ONNX model before running this script."
             )
 
-        voice_styles = {
-            voice: kokoro.resolve_voice_style(voice)
-            for voice in VOICES
-        }
+        voice_styles = {voice: kokoro.resolve_voice_style(voice) for voice in VOICES}
         result_cache = load_result_cache()
-        print(f"Loaded {count_cached_attempts(result_cache)} cached attempts from {RESULTS_PATH.name}")
+        print(
+            f"Loaded {count_cached_attempts(result_cache)} cached attempts from {RESULTS_PATH.name}"
+        )
         phrase_results_by_spec: dict[PhraseSpec, dict[str, list[AttemptResult]]] = {}
         voice_attempts = {voice: [] for voice in VOICES}
 
@@ -171,7 +174,9 @@ def main() -> None:
             )
             phrase_results_by_voice = {voice: [] for voice in VOICES}
             phrase_has_new_results = False
-            for voice_index, (voice, voice_style) in enumerate(voice_styles.items(), start=1):
+            for voice_index, (voice, voice_style) in enumerate(
+                voice_styles.items(), start=1
+            ):
                 cached_count = 0
                 computed_count = 0
                 for index, text in enumerate(DEMO_SEGMENTS):
@@ -222,15 +227,13 @@ def main() -> None:
         kokoro.close()
 
     voice_scores = [
-        summarize_voice(voice, attempts)
-        for voice, attempts in voice_attempts.items()
+        summarize_voice(voice, attempts) for voice, attempts in voice_attempts.items()
     ]
     ranked_voices = sorted_scores(voice_scores)
     print_voice_scores("Voices ranked across all phrases", ranked_voices)
 
     top_voices = {
-        score.voice
-        for score in ranked_voices[:TOP_VOICE_COUNT_FOR_PHRASE_RANKING]
+        score.voice for score in ranked_voices[:TOP_VOICE_COUNT_FOR_PHRASE_RANKING]
     }
     phrase_scores = [
         summarize_phrase(
@@ -368,7 +371,9 @@ def load_result_cache() -> ResultCache:
 
 def save_result_cache(result_cache: ResultCache) -> None:
     with RESULTS_PATH.open("w", encoding="utf-8") as results_file:
-        json.dump(result_cache, results_file, ensure_ascii=False, indent=2, sort_keys=True)
+        json.dump(
+            result_cache, results_file, ensure_ascii=False, indent=2, sort_keys=True
+        )
         results_file.write("\n")
 
 
@@ -450,7 +455,9 @@ def set_cached_attempt(
     }
 
 
-def sorted_scores(scores: list[PhraseScore] | list[VoiceScore]) -> list[PhraseScore] | list[VoiceScore]:
+def sorted_scores(
+    scores: list[PhraseScore] | list[VoiceScore],
+) -> list[PhraseScore] | list[VoiceScore]:
     return sorted(
         scores,
         key=lambda score: (

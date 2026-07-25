@@ -22,17 +22,21 @@ def pytest_configure(config):
         import kokorog2p
 
         print(f"kokorog2p version: {kokorog2p.__version__}", file=sys.stderr)
-    except Exception as e:
+    except ImportError as e:
         print(f"kokorog2p import failed: {e}", file=sys.stderr)
 
     try:
         import subprocess
 
         result = subprocess.run(
-            ["espeak-ng", "--version"], capture_output=True, text=True, timeout=5
+            ["espeak-ng", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
         )
         print(f"espeak-ng version: {result.stdout.strip()}", file=sys.stderr)
-    except Exception as e:
+    except (OSError, subprocess.SubprocessError) as e:
         print(f"espeak-ng check failed: {e}", file=sys.stderr)
 
     try:
@@ -44,7 +48,7 @@ def pytest_configure(config):
             f"Test phonemization: 'test' -> '{result}' (len={len(result)})",
             file=sys.stderr,
         )
-    except Exception as e:
+    except (RuntimeError, OSError) as e:
         print(f"Test phonemization failed: {e}", file=sys.stderr)
         import traceback
 

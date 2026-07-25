@@ -7,7 +7,7 @@ from typing import Any, cast
 
 import numpy as np
 
-import pykokoro.short_sentence_handler as short_sentence_handler
+from pykokoro import short_sentence_handler
 from pykokoro.audio_generator import (
     AudioGenerator,
     _join_timestamps,
@@ -15,9 +15,9 @@ from pykokoro.audio_generator import (
 )
 from pykokoro.constants import MAX_PHONEME_LENGTH
 from pykokoro.short_sentence_handler import (
+    SHORT_SENTENCE_META_KEY,
     PhraseResolveMode,
     RandomizedPhraseResolveMode,
-    SHORT_SENTENCE_META_KEY,
     ShortSentenceConfig,
 )
 from pykokoro.types import PhonemeSegment
@@ -481,7 +481,9 @@ def test_preprocess_randomized_phrase_mode_adds_following_fallbacks(monkeypatch)
         resolve_mode="randomized-phrase",
     )
 
-    monkeypatch.setattr(short_sentence_handler.random, "choice", lambda choices: choices[2])
+    monkeypatch.setattr(
+        short_sentence_handler.random, "choice", lambda choices: choices[2]
+    )
 
     def fake_phonemize(segment: PhonemeSegment, phrase_template: str):
         assert segment.text == "Go"
@@ -1306,7 +1308,6 @@ def test_prepare_phrase_audio_obeys_phrase_fallback_tries(
 
     def fake_cut(audio: np.ndarray, metadata: dict[str, object]):
         _ = audio, metadata
-        return None
 
     def fake_retry(
         segment: PhonemeSegment,

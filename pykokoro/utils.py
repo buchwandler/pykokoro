@@ -56,7 +56,7 @@ def load_config() -> dict[str, Any]:
                 user_config = json.load(f)
                 # Merge with defaults to ensure all keys exist
                 return {**DEFAULT_CONFIG, **user_config}
-    except Exception:
+    except (OSError, ValueError, KeyError):
         pass
     return DEFAULT_CONFIG.copy()
 
@@ -69,7 +69,7 @@ def save_config(config: dict[str, Any]) -> bool:
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(config, f, indent=2)
         return True
-    except Exception:
+    except (OSError, ValueError):
         return False
 
 
@@ -94,7 +94,7 @@ def detect_encoding(file_path: str | Path) -> str:
             if result and result.get("encoding"):
                 detected_encoding = result["encoding"]
                 break
-        except Exception:
+        except (OSError, UnicodeDecodeError, LookupError):
             continue
 
     encoding = detected_encoding if detected_encoding else "utf-8"
@@ -134,7 +134,7 @@ def get_gpu_info(enabled: bool = True) -> tuple[str, bool]:
         return f"No GPU providers available. Using CPU. (Available: {providers})", False
     except ImportError:
         return "ONNX Runtime not installed. Using CPU.", False
-    except Exception as e:
+    except (RuntimeError, OSError) as e:
         return f"Error checking GPU: {e}", False
 
 

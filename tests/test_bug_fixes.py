@@ -124,7 +124,7 @@ class TestBugFix2_VoiceStyleBoundsChecking:
         small_voice_style = np.random.randn(20, 1, 256).astype(np.float32)
 
         # Should use index 19 (last element), not 500 or 509
-        audio, sample_rate = generator.generate_from_phonemes(
+        audio, _sample_rate = generator.generate_from_phonemes(
             phonemes="test " * 100, voice_style=small_voice_style, speed=1.0
         )
 
@@ -299,7 +299,7 @@ class TestBugFix3Integration:
     def test_no_code_duplication_between_modules(self):
         """Verify that onnx_session and onnx_backend use same logic."""
         # Both modules should import and use ProviderConfigManager
-        import pykokoro.onnx_session as onnx_session
+        from pykokoro import onnx_session
 
         # Check that both use the shared manager (by checking method signatures)
         # This is a smoke test to ensure refactoring didn't break anything

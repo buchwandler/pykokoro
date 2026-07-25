@@ -113,7 +113,7 @@ class PhonemeDictionary:
                 # Simple format: {word: phoneme}
                 phoneme_dict = data
         else:
-            raise ValueError(
+            raise TypeError(
                 f"Phoneme dictionary must be a JSON object, got {type(data)}"
             )
 
@@ -121,7 +121,7 @@ class PhonemeDictionary:
         normalized_dict = {}
         for word, phoneme in phoneme_dict.items():
             if not isinstance(phoneme, str):
-                raise ValueError(
+                raise TypeError(
                     f"Phoneme for '{word}' must be a string, got {type(phoneme)}"
                 )
 

@@ -6,7 +6,7 @@ across different PyKokoro components.
 
 import logging
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ class ProviderConfigManager:
     """
 
     # Known provider-specific options for each provider
-    PROVIDER_OPTIONS_MAP: dict[str, list[str]] = {
+    PROVIDER_OPTIONS_MAP: ClassVar[dict[str, list[str]]] = {
         "OpenVINOExecutionProvider": [
             "device_type",
             "precision",
@@ -50,7 +50,7 @@ class ProviderConfigManager:
     }
 
     # SessionOptions attributes (not provider-specific)
-    SESSION_OPTION_ATTRS = {
+    SESSION_OPTION_ATTRS: ClassVar[set[str]] = {
         "intra_op_num_threads",
         "inter_op_num_threads",
         "num_threads",

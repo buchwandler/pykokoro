@@ -1,4 +1,4 @@
-import pykokoro.mixed_language_handler as mixed_language_handler
+from pykokoro import mixed_language_handler
 from pykokoro.mixed_language_handler import MixedLanguageHandler
 from pykokoro.tokenizer import TokenizerConfig
 

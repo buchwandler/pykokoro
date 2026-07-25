@@ -9,8 +9,8 @@ import soundfile as sf
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.short_sentence_handler import (
-    PhraseSelection,
     PhraseResolveMode,
+    PhraseSelection,
     RandomizedPhraseResolveMode,
     ShortSentenceConfig,
 )
@@ -30,7 +30,7 @@ TEST_SENTENCES = [
     "Hermione.",
     "One … step. In front.",
     "Of.",
-    "The other."
+    "The other.",
 ]
 DIRECT_COMPARISON_SENTENCES = ["Yes!", "Hermione."]
 OUTPUT_FILE = "short_sentence_randomized_demo.wav"
@@ -220,7 +220,9 @@ def main() -> None:
                 all_samples.extend([audio, pause])
             all_samples.append(group_pause)
 
-    combined = np.concatenate(all_samples) if all_samples else np.array([], dtype=np.float32)
+    combined = (
+        np.concatenate(all_samples) if all_samples else np.array([], dtype=np.float32)
+    )
     sf.write(OUTPUT_FILE, combined, sample_rate)
 
     print_separator("OUTPUT")

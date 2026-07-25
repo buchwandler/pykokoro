@@ -8,3 +8,5 @@ exclude = ["examples", "*/.venv/*"]
 include = ["**/*.py", "**/*.toml", "**/*.rst", "**/*.md"]
 split_max_chars = 0
 layout = "full"
+ptofile = "portable-agent"
+emit_standalone_unpacker = true

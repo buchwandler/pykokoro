@@ -439,7 +439,7 @@ class VoiceManager:
         """
         if self._voices_data is None:
             raise RuntimeError("Voices not loaded. Call load_voices() first.")
-        return list(sorted(self._voices_data.keys()))
+        return sorted(self._voices_data.keys())
 
     def get_voice_style(self, voice_name: str) -> np.ndarray:
         """Get the style vector for a voice.

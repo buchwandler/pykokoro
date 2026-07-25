@@ -96,7 +96,7 @@ class AudioGenerator:
         return np.ones(1, dtype=np.float32) * speed
 
     def _int_speed_input(self, speed: float) -> np.ndarray:
-        speed_int = max(1, int(round(speed)))
+        speed_int = max(1, round(speed))
         return np.array([speed_int], dtype=np.int32)
 
     def _build_onnx_inputs(
@@ -316,7 +316,7 @@ class AudioGenerator:
             if voice_name:
                 try:
                     segment_voice_style = voice_resolver(voice_name)
-                except Exception as e:
+                except (RuntimeError, OSError, ValueError) as e:
                     logger.warning(
                         f"Failed to resolve voice '{voice_name}' for segment, "
                         f"using default voice: {e}"
@@ -504,9 +504,9 @@ class AudioGenerator:
     ) -> None:
         if pred_dur is None:
             return
-        short_sentence_metadata = (
-            segment.ssmd_metadata or {}
-        ).get(SHORT_SENTENCE_META_KEY)
+        short_sentence_metadata = (segment.ssmd_metadata or {}).get(
+            SHORT_SENTENCE_META_KEY
+        )
         if not isinstance(short_sentence_metadata, dict):
             return
         timing_tokens = short_sentence_metadata.get("timing_tokens")
@@ -529,9 +529,9 @@ class AudioGenerator:
         speed: float,
     ) -> np.ndarray:
         """Accept confident phrase cuts or regenerate a wrap fallback."""
-        short_sentence_metadata = (
-            segment.ssmd_metadata or {}
-        ).get(SHORT_SENTENCE_META_KEY)
+        short_sentence_metadata = (segment.ssmd_metadata or {}).get(
+            SHORT_SENTENCE_META_KEY
+        )
         if not isinstance(short_sentence_metadata, dict):
             return audio
         if short_sentence_metadata.get("kind") not in {"phrase", "randomized-phrase"}:
@@ -672,14 +672,15 @@ class AudioGenerator:
                 continue
 
             audio = segment.raw_audio
-            short_sentence_metadata = (
-                segment.ssmd_metadata or {}
-            ).get(SHORT_SENTENCE_META_KEY)
-            if (
-                isinstance(short_sentence_metadata, dict)
-                and not short_sentence_metadata.get("cut_applied")
-            ):
-                cut_audio = cut_short_sentence_phrase_audio(audio, short_sentence_metadata)
+            short_sentence_metadata = (segment.ssmd_metadata or {}).get(
+                SHORT_SENTENCE_META_KEY
+            )
+            if isinstance(
+                short_sentence_metadata, dict
+            ) and not short_sentence_metadata.get("cut_applied"):
+                cut_audio = cut_short_sentence_phrase_audio(
+                    audio, short_sentence_metadata
+                )
                 if cut_audio is not None:
                     audio = cut_audio
             if trim_silence:
@@ -897,8 +898,7 @@ def populate_short_sentence_boundary_metadata(
     next_tokens = [
         token
         for token in timestamped[last_target + 1 :]
-        if _is_spoken_token(token)
-        and isinstance(token.get("start_ts"), (int, float))
+        if _is_spoken_token(token) and isinstance(token.get("start_ts"), (int, float))
     ]
     metadata["has_left_context"] = bool(previous_tokens)
     metadata["has_right_context"] = bool(next_tokens)

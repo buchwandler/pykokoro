@@ -62,7 +62,7 @@ class TestSSMDSegmentConversion:
         """Test SSMD parsing strips markup from text."""
         from pykokoro.ssmd_parser import parse_ssmd_to_segments
 
-        initial, segments = parse_ssmd_to_segments(
+        _initial, segments = parse_ssmd_to_segments(
             "This is *important* ...s Really!",
         )
 
@@ -80,7 +80,7 @@ class TestSSMDSegmentConversion:
         """Test SSMD parsing strips markup from text."""
         from pykokoro.ssmd_parser import parse_ssmd_to_segments
 
-        initial, segments = parse_ssmd_to_segments(
+        _initial, segments = parse_ssmd_to_segments(
             "Hello this is great. Really!",
         )
 
@@ -234,7 +234,7 @@ class TestSSMDVoiceSwitching:
             '<div voice="af_sarah">Hello ...s</div>\n\n'
             '<div voice="am_michael">World</div>'
         )
-        initial_pause, segments = parse_ssmd_to_segments(text)
+        _initial_pause, segments = parse_ssmd_to_segments(text)
 
         assert any(seg.metadata.voice_name == "af_sarah" for seg in segments)
         assert any(seg.metadata.voice_name == "am_michael" for seg in segments)
@@ -245,7 +245,7 @@ class TestSSMDVoiceSwitching:
 
         # Test 2: Inline voice annotations ([text](voice: name))
         text = "[Hello]{voice='af_sarah'} ...s\n\n[World]{voice='am_michael'}"
-        initial_pause, segments = parse_ssmd_to_segments(text)
+        _initial_pause, segments = parse_ssmd_to_segments(text)
 
         assert any(seg.metadata.voice_name == "af_sarah" for seg in segments)
         assert any(seg.metadata.voice_name == "am_michael" for seg in segments)

@@ -33,7 +33,7 @@ from pykokoro.tokenizer import Tokenizer, TokenizerConfig
 # Includes: quotes, dashes, ellipses, abbreviations, numbers, punctuation
 RICH_TEXT = """
 "Why, hello there! Don't stay inside boy!" exclaimed Dr. Smith—a well-known expert—as he gazed at the azure sky. The 5-year-old boy asked, "What's that...?" Mr. Jones replied: "It's a fjord, my friend; quite extraordinary, don't you think?" She nodded... "Yes, absolutely!" The temperature reached 98°F, or approximately 37°C. Lt. Commander Harris served valiantly in the U.S. Navy for 15 years.
-""".strip()  # noqa: E501
+""".strip()
 
 VOICE = "af_bella"  # American Female voice
 LANG = "en-us"

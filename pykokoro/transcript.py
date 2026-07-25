@@ -19,40 +19,40 @@ def load_transcript(transcript_or_json: dict[str, Any] | str) -> dict[str, Any]:
         try:
             parsed = json.loads(transcript_or_json)
         except json.JSONDecodeError as exc:
-            raise ValueError("Transcript JSON is invalid") from exc
+            raise TypeError("Transcript JSON is invalid") from exc
         if not isinstance(parsed, dict):
-            raise ValueError("Transcript JSON must decode to an object")
+            raise TypeError("Transcript JSON must decode to an object")
         return parsed
     return transcript_or_json
 
 
 def _require_dict(value: Any, name: str) -> dict[str, Any]:
     if not isinstance(value, dict):
-        raise ValueError(f"{name} must be a dict")
+        raise TypeError(f"{name} must be a dict")
     return value
 
 
 def _require_list(value: Any, name: str) -> list[Any]:
     if not isinstance(value, list):
-        raise ValueError(f"{name} must be a list")
+        raise TypeError(f"{name} must be a list")
     return value
 
 
 def _require_str(value: Any, name: str) -> str:
     if not isinstance(value, str):
-        raise ValueError(f"{name} must be a string")
+        raise TypeError(f"{name} must be a string")
     return value
 
 
 def _require_bool(value: Any, name: str) -> bool:
     if not isinstance(value, bool):
-        raise ValueError(f"{name} must be a boolean")
+        raise TypeError(f"{name} must be a boolean")
     return value
 
 
 def _require_number(value: Any, name: str) -> float:
     if not isinstance(value, int | float):
-        raise ValueError(f"{name} must be a number")
+        raise TypeError(f"{name} must be a number")
     return float(value)
 
 
@@ -60,7 +60,7 @@ def _optional_str(value: Any, name: str) -> str | None:
     if value is None:
         return None
     if not isinstance(value, str):
-        raise ValueError(f"{name} must be a string or null")
+        raise TypeError(f"{name} must be a string or null")
     return value
 
 
@@ -68,7 +68,7 @@ def _optional_number(value: Any, name: str) -> float | None:
     if value is None:
         return None
     if not isinstance(value, int | float):
-        raise ValueError(f"{name} must be a number or null")
+        raise TypeError(f"{name} must be a number or null")
     return float(value)
 
 
@@ -79,7 +79,7 @@ def validate_transcript(transcript: dict[str, Any]) -> None:
         ValueError: If transcript is invalid.
     """
     if not isinstance(transcript, dict):
-        raise ValueError("Transcript must be a dict")
+        raise TypeError("Transcript must be a dict")
 
     format_version = transcript.get("format_version")
     if format_version != TRANSCRIPT_VERSION:
@@ -130,7 +130,7 @@ def validate_transcript(transcript: dict[str, Any]) -> None:
         _require_str(blend.get("interpolation"), "defaults.voice.blend.interpolation")
         for idx, voice_item in enumerate(voices):
             if not isinstance(voice_item, dict):
-                raise ValueError(f"defaults.voice.blend.voices[{idx}] must be a dict")
+                raise TypeError(f"defaults.voice.blend.voices[{idx}] must be a dict")
             _require_str(
                 voice_item.get("name"),
                 f"defaults.voice.blend.voices[{idx}].name",
@@ -142,12 +142,12 @@ def validate_transcript(transcript: dict[str, Any]) -> None:
 
     include_tokens = defaults.get("include_tokens", False)
     if not isinstance(include_tokens, bool):
-        raise ValueError("defaults.include_tokens must be a boolean")
+        raise TypeError("defaults.include_tokens must be a boolean")
 
     segments = _require_list(transcript.get("segments"), "segments")
     for index, segment in enumerate(segments):
         if not isinstance(segment, dict):
-            raise ValueError(f"segments[{index}] must be a dict")
+            raise TypeError(f"segments[{index}] must be a dict")
         if segment.get("type") != "phoneme_segment":
             raise ValueError(f"segments[{index}].type must be 'phoneme_segment'")
         _require_str(segment.get("text"), f"segments[{index}].text")

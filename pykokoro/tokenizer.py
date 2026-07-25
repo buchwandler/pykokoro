@@ -9,7 +9,6 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import kokorog2p as _kokorog2p
 from kokorog2p import phonemize
@@ -30,8 +29,6 @@ ids_to_phonemes = _kokorog2p.ids_to_phonemes
 phonemes_to_ids = _kokorog2p.phonemes_to_ids
 validate_for_kokoro = _kokorog2p.validate_for_kokoro
 
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -224,7 +221,7 @@ class Tokenizer:
                     dictionary_path=self.config.phoneme_dictionary_path,
                     case_sensitive=self.config.phoneme_dict_case_sensitive,
                 )
-            except Exception as e:
+            except (OSError, ValueError) as e:
                 logger.warning(
                     f"Failed to load phoneme dictionary from "
                     f"'{self.config.phoneme_dictionary_path}': {e}. "

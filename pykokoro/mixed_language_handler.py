@@ -229,7 +229,7 @@ class MixedLanguageHandler:
 
         try:
             from kokorog2p.types import OverrideSpan
-        except Exception:
+        except ImportError:
             return text
 
         spans = [s for s in overrides if isinstance(s, OverrideSpan)]

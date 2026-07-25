@@ -43,7 +43,7 @@ import pykokoro
 
 # Import misaki if available
 try:
-    import misaki.en  # noqa: F401
+    import misaki.en
     import misaki.espeak  # noqa: F401
 
     MISAKI_AVAILABLE = True

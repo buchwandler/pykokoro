@@ -233,7 +233,7 @@ def apply_pitch(audio: np.ndarray, pitch: str, sample_rate: int) -> np.ndarray:
     except ValueError as e:
         logger.warning(f"Failed to apply pitch '{pitch}': {e}")
         return audio
-    except Exception as e:
+    except (RuntimeError, OSError) as e:
         logger.warning(f"Pitch shift failed for '{pitch}': {e}")
         return audio
 
@@ -277,7 +277,7 @@ def apply_rate(audio: np.ndarray, rate: str, sample_rate: int = 24000) -> np.nda
                 )
                 stretched = augmenter(samples=audio, sample_rate=sample_rate)
                 return stretched.astype(audio.dtype)
-            except Exception as e:
+            except (RuntimeError, OSError, ValueError) as e:
                 logger.debug(
                     f"Audiomentations TimeStretch failed, falling back to librosa: {e}"
                 )
@@ -292,7 +292,7 @@ def apply_rate(audio: np.ndarray, rate: str, sample_rate: int = 24000) -> np.nda
     except ValueError as e:
         logger.warning(f"Failed to apply rate '{rate}': {e}")
         return audio
-    except Exception as e:
+    except (RuntimeError, OSError) as e:
         logger.warning(f"Rate adjustment failed for '{rate}': {e}")
         return audio
 

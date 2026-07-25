@@ -209,4 +209,4 @@ pykokoro/_version.py
 
 *.wav
 TASKS.md
-context_pykokoro.md
+context_pykokoro.*

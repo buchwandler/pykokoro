@@ -100,7 +100,7 @@ def normalize_cardinal(text: str, lang: str = "en-us", **kwargs: Any) -> str:
 
         locale = _parse_language_to_locale(lang)
         return num2words(num, lang=locale)
-    except Exception as e:
+    except (NotImplementedError, ValueError, TypeError) as e:
         logger.warning(f"Failed to convert '{text}' to cardinal: {e}")
         return text
 
@@ -123,7 +123,7 @@ def normalize_ordinal(text: str, lang: str = "en-us", **kwargs: Any) -> str:
 
         locale = _parse_language_to_locale(lang)
         return num2words(num, lang=locale, to="ordinal")
-    except Exception as e:
+    except (NotImplementedError, ValueError, TypeError) as e:
         logger.warning(f"Failed to convert '{text}' to ordinal: {e}")
         return text
 
@@ -152,11 +152,11 @@ def normalize_digits(text: str, lang: str = "en-us", **kwargs: Any) -> str:
             try:
                 word = num2words(int(digit), lang=locale)
                 words.append(word)
-            except Exception:
+            except (NotImplementedError, ValueError, TypeError):
                 words.append(digit)
 
         return " ".join(words)
-    except Exception as e:
+    except (NotImplementedError, ValueError, TypeError) as e:
         logger.warning(f"Failed to convert '{text}' to digits: {e}")
         return text
 
@@ -218,7 +218,7 @@ def normalize_date(
             "%d.%m.%Y",  # 31.12.2024
         ]:
             try:
-                date_obj = datetime.strptime(text, fmt)
+                date_obj = datetime.strptime(text, fmt)  # noqa: DTZ007
                 break
             except ValueError:
                 continue
@@ -231,7 +231,7 @@ def normalize_date(
         locale_code = _parse_language_to_locale(lang)
         try:
             locale = Locale.parse(locale_code.replace("_", "-"))
-        except Exception:
+        except (ValueError, TypeError):
             locale = Locale.parse("en")
 
         # Format based on format_str
@@ -243,7 +243,7 @@ def normalize_date(
             # Use babel's default long format
             return format_date(date_obj, format="long", locale=locale)
 
-    except Exception as e:
+    except (NotImplementedError, ValueError, TypeError) as e:
         logger.warning(f"Failed to convert '{text}' to date: {e}")
         return text
 
@@ -272,7 +272,7 @@ def normalize_time(
             "%I:%M:%S %p",  # 2:30:45 PM
         ]:
             try:
-                time_obj = datetime.strptime(text, fmt)
+                time_obj = datetime.strptime(text, fmt)  # noqa: DTZ007
                 break
             except ValueError:
                 continue
@@ -285,13 +285,13 @@ def normalize_time(
         locale_code = _parse_language_to_locale(lang)
         try:
             locale = Locale.parse(locale_code.replace("_", "-"))
-        except Exception:
+        except (ValueError, TypeError):
             locale = Locale.parse("en")
 
         # Format the time
         return format_time(time_obj, format="short", locale=locale)
 
-    except Exception as e:
+    except (NotImplementedError, ValueError, TypeError) as e:
         logger.warning(f"Failed to convert '{text}' to time: {e}")
         return text
 
@@ -331,7 +331,7 @@ def normalize_telephone(text: str, lang: str = "en-us", **kwargs: Any) -> str:
                 )
             else:
                 words.append(num2words(int(digit), lang=locale))
-        except Exception:
+        except (NotImplementedError, ValueError, TypeError):
             words.append(digit)
 
     return " ".join(words)
@@ -397,7 +397,7 @@ def normalize_unit(text: str, lang: str = "en-us", **kwargs: Any) -> str:
         unit_word = unit_map.get(unit.lower(), unit)
         return f"{number_words} {unit_word}"
 
-    except Exception as e:
+    except (NotImplementedError, ValueError, TypeError) as e:
         logger.warning(f"Failed to convert '{text}' to unit: {e}")
         return text
 
@@ -442,7 +442,7 @@ def normalize_fraction(text: str, lang: str = "en-us", **kwargs: Any) -> str:
         else:
             return f"{num_words} {denom_words}"
 
-    except Exception as e:
+    except (NotImplementedError, ValueError, TypeError) as e:
         logger.warning(f"Failed to convert '{text}' to fraction: {e}")
         return text
 
@@ -501,6 +501,6 @@ def normalize_say_as(
 
     try:
         return normalizer(text, lang=lang, format_str=format_str, detail=detail)
-    except Exception as e:
+    except (NotImplementedError, ValueError, TypeError) as e:
         logger.error(f"Error normalizing '{text}' as '{interpret_as}': {e}")
         return text

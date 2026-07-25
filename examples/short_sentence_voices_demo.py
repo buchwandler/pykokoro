@@ -224,6 +224,7 @@ def main():
     print("Listen to the WAV file to hear the difference!")
     print("=" * 70)
 
+
 def neutral_phrase_short_sentence_config() -> ShortSentenceConfig:
     """Use phrase generation + cutting for short clauses in this demo."""
     return ShortSentenceConfig(

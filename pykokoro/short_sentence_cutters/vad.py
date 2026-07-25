@@ -82,8 +82,4 @@ def _overlapping_runs(
     window: tuple[int, int],
 ) -> list[tuple[int, int]]:
     window_start, window_end = window
-    return [
-        run
-        for run in runs
-        if min(run[1], window_end) > max(run[0], window_start)
-    ]
+    return [run for run in runs if min(run[1], window_end) > max(run[0], window_start)]

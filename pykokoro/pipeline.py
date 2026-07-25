@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 from types import TracebackType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 from .constants import SAMPLE_RATE
 from .generation_config import GenerationConfig
@@ -319,7 +319,7 @@ class KokoroPipeline:
         self._owns_audio_generation = False
         self._owns_audio_postprocessing = False
 
-    def __enter__(self) -> KokoroPipeline:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(

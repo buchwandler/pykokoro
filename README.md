@@ -614,11 +614,11 @@ short_sentence_config = ShortSentenceConfig(
 
 **Voice Recommendation:**
 
-For phrase-based short-sentence handling, prefer these voices in order:
-`am_santa`, `af_nicole`, `bm_lewis`, `bm_george`, `af_bella`,
-`am_echo`, `af_sky`, `af_sarah`, `bm_fable`, `af_heart`, `am_michael`, `af_alloy`,
-`af_nova`, `bf_isabella`, and `am_adam`. If you prefer one of the less accurate voices,
-try blending it with one on this list. E.g. --voice-blend "bf_lily:60,bf_isabella:40"
+For phrase-based short-sentence handling, prefer these voices in order: `am_santa`,
+`af_nicole`, `bm_lewis`, `bm_george`, `af_bella`, `am_echo`, `af_sky`, `af_sarah`,
+`bm_fable`, `af_heart`, `am_michael`, `af_alloy`, `af_nova`, `bf_isabella`, and
+`am_adam`. If you prefer one of the less accurate voices, try blending it with one on
+this list. E.g. --voice-blend "bf_lily:60,bf_isabella:40"
 
 **Disabling Short Sentence Handling:**
 

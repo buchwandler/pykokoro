@@ -50,13 +50,9 @@ PadMode = Literal[
 class TrimError(Exception):
     """Base exception for trim operations."""
 
-    pass
-
 
 class ParameterError(TrimError):
     """Exception for invalid parameters."""
-
-    pass
 
 
 def _cabs2(x: np.ndarray) -> np.ndarray:

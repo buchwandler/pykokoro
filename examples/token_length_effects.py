@@ -210,7 +210,7 @@ def main():
             SENTENCES
         ),
         "Second version: combining sentences in pairs": version2_paired(SENTENCES),
-        f"Third version: batching with {MIN_PHONEME_THRESHOLD} phoneme threshold": version3_threshold(  # noqa: E501
+        f"Third version: batching with {MIN_PHONEME_THRESHOLD} phoneme threshold": version3_threshold(
             SENTENCES, kokoro, MIN_PHONEME_THRESHOLD
         ),
         "Fourth version: processing all text at once": version4_complete(SENTENCES),
@@ -253,7 +253,7 @@ def main():
     print(f"{'Version':<50} {'Batches':<10} {'Avg Phonemes':<15} {'Duration':<10}")
     print("-" * 90)
 
-    for version_name in versions.keys():
+    for version_name in versions:
         stats = all_stats[version_name]
         duration = version_durations[version_name]
         short_name = version_name.split(":")[0]
@@ -266,7 +266,7 @@ def main():
     print("  • Version 1 (Individual): Maximum number of batches, shortest context")
     print("  • Version 2 (Paired): Reduced batches, better context than individual")
     print(
-        f"  • Version 3 (Threshold): Optimized batching at {MIN_PHONEME_THRESHOLD} phoneme minimum"  # noqa: E501
+        f"  • Version 3 (Threshold): Optimized batching at {MIN_PHONEME_THRESHOLD} phoneme minimum"
     )
     print("  • Version 4 (Complete): Single batch, maximum context and prosody")
     print("\nListen to compare:")

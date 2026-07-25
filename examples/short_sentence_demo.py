@@ -65,7 +65,7 @@ TEST_SENTENCES = [
     "Mr. Vale.",
     "'Tis.",
     "Chapter 4",
-    "Hermione."
+    "Hermione.",
 ]
 
 
@@ -182,7 +182,7 @@ def main():
         )
 
         pause = np.zeros(int(sr * 0.1), dtype=np.float32)
-        
+
         disabled_samples.extend([samples_disabled, pause])
         pretext_samples.extend([samples_pretext, pause])
         neutral_phrase_samples.extend([samples_neutral_phrase, pause])
@@ -242,6 +242,7 @@ def main():
     print("\n" + "=" * 70)
     print("Listen to the WAV file to hear the difference!")
     print("=" * 70)
+
 
 def neutral_phrase_short_sentence_config() -> ShortSentenceConfig:
     """Use phrase generation + cutting for short clauses in this demo."""

@@ -193,18 +193,13 @@ def has_ssmd_markup(text: str) -> bool:
     if re.search(r"(?:^|\s)@\w+", text):
         return True
 
-    # Voice markers: <div></div>
-    if "<div" in text.lower():
-        if bool(
-            re.search(
-                r"<div\b[^>]*=.*?>.*?</div\s*>",
-                text,
-                re.IGNORECASE | re.DOTALL,
-            )
-        ):
-            return True
-
-    return False
+    return "<div" in text.lower() and bool(
+        re.search(
+            r"<div\b[^>]*=.*?>.*?</div\s*>",
+            text,
+            re.IGNORECASE | re.DOTALL,
+        )
+    )
 
 
 def _normalize_div_directives(text: str) -> str:

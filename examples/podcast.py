@@ -27,7 +27,6 @@ import pykokoro
 # Each speaker's dialogue is wrapped in [text](voice: name) annotation
 # Pauses are added with SSMD break markers: ...s (sentence pause)
 # fmt: off
-# ruff: noqa: E501
 PODCAST_SCRIPT = """
 @voice: af_sarah
 Welcome to Tech Talk! I'm Sarah, and today we're diving into the fascinating world of text-to-speech technology.

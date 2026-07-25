@@ -104,12 +104,12 @@ def test_pipeline_context_manager_closes_on_exception(monkeypatch):
 
     monkeypatch.setattr("pykokoro.onnx_backend.Kokoro", TrackingKokoro)
 
-    with pytest.raises(RuntimeError):
-        with KokoroPipeline(
-            PipelineConfig(voice="af"), g2p=DummyG2PAdapter()
-        ) as active:
-            active.run("Hello")
-            raise RuntimeError("boom")
+    with (
+        pytest.raises(RuntimeError),
+        KokoroPipeline(PipelineConfig(voice="af"), g2p=DummyG2PAdapter()) as active,
+    ):
+        active.run("Hello")
+        raise RuntimeError("boom")
 
     assert instances
     assert instances[0].close_calls == 1

@@ -276,7 +276,7 @@ class TestLanguageSupport:
         try:
             result = normalize_cardinal("123", "fr-fr")
             assert "cent" in result.lower()
-        except Exception:
+        except (LookupError, RuntimeError):
             # If French not installed in num2words, skip
             pytest.skip("French language support not available")
 
@@ -286,7 +286,7 @@ class TestLanguageSupport:
             result = normalize_ordinal("3", "de-de")
             # German ordinal for 3 is "dritte"
             assert len(result) > 0
-        except Exception:
+        except (LookupError, RuntimeError):
             pytest.skip("German language support not available")
 
     def test_fallback_to_english(self):
