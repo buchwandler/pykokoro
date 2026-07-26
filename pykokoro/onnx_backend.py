@@ -723,6 +723,10 @@ def _is_stale_download_lock(lock_path: Path, timeout: float) -> bool:
         return True
     except PermissionError:
         return False
+    except OSError as exc:
+        # On Windows, probing a nonexistent PID with ``os.kill(pid, 0)``
+        # raises ERROR_INVALID_PARAMETER instead of ProcessLookupError.
+        return getattr(exc, "winerror", None) == 87
     return False
 
 

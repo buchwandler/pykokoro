@@ -128,6 +128,23 @@ def test_stale_dead_download_lock_is_recovered(tmp_path, monkeypatch) -> None:
     assert not lock_path.exists()
 
 
+def test_stale_download_lock_handles_windows_missing_process_error(tmp_path, monkeypatch) -> None:
+    lock_path = tmp_path / "artifact.bin.lock"
+    lock_path.write_text(
+        json.dumps({"pid": 99_999_999, "created_at": time.time() - 60}),
+        encoding="utf-8",
+    )
+
+    def fake_kill(pid: int, signal: int) -> None:
+        error = OSError("missing process")
+        error.winerror = 87
+        raise error
+
+    monkeypatch.setattr(backend.os, "kill", fake_kill)
+
+    assert backend._is_stale_download_lock(lock_path, timeout=1)
+
+
 def test_offline_mode_uses_valid_cache_and_rejects_missing_cache(tmp_path) -> None:
     destination = tmp_path / "cached.bin"
     destination.write_bytes(b"cached")
