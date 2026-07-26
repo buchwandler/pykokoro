@@ -58,9 +58,7 @@ def test_splitter_invariants_with_valid_offsets():
     first = FakeSplitSegment(text="Hello world.", start=0, end=12)
     assert first.end is not None
     second_start = text.find("Hello again.", first.end + 1)
-    second = FakeSplitSegment(
-        text="Hello again.", start=second_start, end=second_start + 12
-    )
+    second = FakeSplitSegment(text="Hello again.", start=second_start, end=second_start + 12)
 
     segments = _run_split_with_segments(text, [first, second])
     result = check_segment_invariants(segments, text, report_fn=None)

@@ -370,7 +370,7 @@ def main():
         print('        provider="cpu",')
         print("        provider_options={")
         for key, value in optimal_config.items():
-            if isinstance(value, bool) or isinstance(value, int):
+            if isinstance(value, (bool, int)):
                 print(f'            "{key}": {value},')
             else:
                 print(f'            "{key}": {value!r},')

@@ -22,10 +22,7 @@ from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
 
 # Japanese proverb about perseverance and continuous improvement
-TEXT = (
-    "七転び八起き。失敗を恐れず、何度でも立ち上がれ。"
-    "一歩一歩、着実に前へ進むことが大切です。"
-)
+TEXT = "七転び八起き。失敗を恐れず、何度でも立ち上がれ。一歩一歩、着実に前へ進むことが大切です。"
 
 VOICE = "jf_alpha"  # Japanese Female voice
 LANG = "ja"  # Japanese

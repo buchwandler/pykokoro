@@ -66,9 +66,7 @@ class SsmdDocumentParser:
                 and previous_start is not None
                 and previous_end is not None
             ):
-                boundary_pos = self._paragraph_boundary_pos(
-                    previous_start, previous_end
-                )
+                boundary_pos = self._paragraph_boundary_pos(previous_start, previous_end)
                 if boundary_pos is not None:
                     boundaries.append(
                         BoundaryEvent(
@@ -94,9 +92,7 @@ class SsmdDocumentParser:
             start, end, cursor = self._append_text(clean_parts, segment.text, cursor)
             attrs = self._metadata_to_attrs(segment.metadata)
             if attrs and end > start:
-                spans.append(
-                    AnnotationSpan(char_start=start, char_end=end, attrs=attrs)
-                )
+                spans.append(AnnotationSpan(char_start=start, char_end=end, attrs=attrs))
             if segment.pause_before > 0:
                 boundaries.append(
                     BoundaryEvent(
@@ -145,9 +141,7 @@ class SsmdDocumentParser:
     ) -> list[BoundaryEvent]:
         if not segments:
             return []
-        pause_positions = {
-            boundary.pos for boundary in boundaries if boundary.kind == "pause"
-        }
+        pause_positions = {boundary.pos for boundary in boundaries if boundary.kind == "pause"}
         out: list[BoundaryEvent] = []
         last_sentence = None
         last_paragraph = None
@@ -163,11 +157,7 @@ class SsmdDocumentParser:
                 last_end = segment.char_end
                 continue
             if sentence != last_sentence or paragraph != last_paragraph:
-                if (
-                    last_end is not None
-                    and last_paragraph == paragraph
-                    and last_end > 0
-                ):
+                if last_end is not None and last_paragraph == paragraph and last_end > 0:
                     boundary_pos = max(0, last_end - 1)
                     if boundary_pos not in pause_positions:
                         out.append(
@@ -192,9 +182,7 @@ class SsmdDocumentParser:
         if message not in trace.warnings:
             trace.warnings.append(message)
 
-    def _append_text(
-        self, clean_parts: list[str], text: str, cursor: int
-    ) -> tuple[int, int, int]:
+    def _append_text(self, clean_parts: list[str], text: str, cursor: int) -> tuple[int, int, int]:
         if not text:
             return cursor, cursor, cursor
         if clean_parts:

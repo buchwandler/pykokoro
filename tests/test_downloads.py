@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import urllib.request
+from types import SimpleNamespace
 from typing import Self
 
 import pytest
@@ -122,13 +123,9 @@ def test_download_lock_timeout(tmp_path, monkeypatch):
 
 
 def test_hf_v1_model_cache_path_uses_timestamped_suffix(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        backend, "get_user_cache_path", lambda folder=None: tmp_path / folder
-    )
+    monkeypatch.setattr(backend, "get_user_cache_path", lambda folder=None: tmp_path / folder)
 
-    model_path = backend.get_model_path(
-        quality="fp32", source="huggingface", variant="v1.0"
-    )
+    model_path = backend.get_model_path(quality="fp32", source="huggingface", variant="v1.0")
 
     assert model_path == (
         tmp_path / "models" / "huggingface" / "v1.0" / "onnx" / "model-timestamped.onnx"
@@ -136,10 +133,13 @@ def test_hf_v1_model_cache_path_uses_timestamped_suffix(tmp_path, monkeypatch):
 
 
 def test_hf_v1_download_ignores_old_non_timestamped_cache(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        backend, "get_user_cache_path", lambda folder=None: tmp_path / folder
-    )
+    monkeypatch.setattr(backend, "get_user_cache_path", lambda folder=None: tmp_path / folder)
     monkeypatch.setattr(backend, "_validate_onnx_file", lambda path: None)
+    monkeypatch.setattr(
+        backend,
+        "hf_model_spec",
+        lambda variant, filename: SimpleNamespace(revision="test", sha256=None),
+    )
 
     old_path = tmp_path / "models" / "huggingface" / "v1.0" / "onnx" / "model.onnx"
     old_path.parent.mkdir(parents=True)

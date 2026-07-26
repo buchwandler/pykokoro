@@ -23,24 +23,18 @@ def get_user_config_path() -> Path:
             config_dir = custom_dir
         else:
             config_dir = Path(
-                user_config_dir(
-                    "pykokoro", appauthor=False, roaming=True, ensure_exists=True
-                )
+                user_config_dir("pykokoro", appauthor=False, roaming=True, ensure_exists=True)
             )
     else:
         config_dir = Path(
-            user_config_dir(
-                "pykokoro", appauthor=False, roaming=True, ensure_exists=True
-            )
+            user_config_dir("pykokoro", appauthor=False, roaming=True, ensure_exists=True)
         )
     return config_dir / "config.json"
 
 
 def get_user_cache_path(folder: str | None = None) -> Path:
     """Get path to user cache directory, optionally with a subfolder."""
-    cache_dir = Path(
-        user_cache_dir("pykokoro", appauthor=False, opinion=True, ensure_exists=True)
-    )
+    cache_dir = Path(user_cache_dir("pykokoro", appauthor=False, opinion=True, ensure_exists=True))
     if folder:
         cache_dir = cache_dir / folder
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -326,15 +320,9 @@ def format_filename_template(
     # Sanitize all string values (but don't truncate yet - do that at the end)
     safe_book_title = sanitize_filename(effective_title, max_length=200)
     safe_author = sanitize_filename(author, max_length=100) if author else ""
-    safe_chapter_title = (
-        sanitize_filename(chapter_title, max_length=100) if chapter_title else ""
-    )
-    safe_input_stem = (
-        sanitize_filename(input_stem, max_length=100) if input_stem else ""
-    )
-    safe_chapters_range = (
-        sanitize_filename(chapters_range, max_length=50) if chapters_range else ""
-    )
+    safe_chapter_title = sanitize_filename(chapter_title, max_length=100) if chapter_title else ""
+    safe_input_stem = sanitize_filename(input_stem, max_length=100) if input_stem else ""
+    safe_chapters_range = sanitize_filename(chapters_range, max_length=50) if chapters_range else ""
 
     # Build the format kwargs
     format_kwargs = {

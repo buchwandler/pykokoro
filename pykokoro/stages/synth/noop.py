@@ -23,7 +23,5 @@ class NoopSynthesizerAdapter:
         trace: Trace,
     ) -> np.ndarray:
         _ = (cfg, trace)
-        total_samples = int(SAMPLE_RATE * self.seconds_per_segment) * len(
-            phoneme_segments
-        )
+        total_samples = int(SAMPLE_RATE * self.seconds_per_segment) * len(phoneme_segments)
         return np.zeros(total_samples, dtype=np.float32)

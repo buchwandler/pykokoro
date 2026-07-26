@@ -89,9 +89,7 @@ def main():
         if line.strip():
             print(line)
     print("...")
-    speaker_count = len(
-        [line for line in lines if line.strip() and line.startswith("@voice:")]
-    )
+    speaker_count = len([line for line in lines if line.strip() and line.startswith("@voice:")])
     print(f"({speaker_count} speaker segments)")
     print("-" * 70)
 

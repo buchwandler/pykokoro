@@ -107,7 +107,7 @@ There is no dedicated formatter configured; follow existing style and Ruff line-
 - Stages follow the order: doc parse (includes segmentation) -> g2p -> synth.
 - `PipelineConfig` and `GenerationConfig` are immutable dataclasses; use
   `dataclasses.replace` when overriding.
-- New stages should match `pykokoro/stages/base.py` protocols.
+- New stages should match the protocols in `pykokoro/stages/protocols.py`.
 
 ### Tests
 

@@ -111,10 +111,7 @@ def amplitude_to_db(
 
     magnitude = np.abs(S)
 
-    if callable(ref):
-        ref_value = ref(magnitude)
-    else:
-        ref_value = np.abs(ref)
+    ref_value = ref(magnitude) if callable(ref) else np.abs(ref)
 
     out_array = magnitude if isinstance(magnitude, np.ndarray) else None
     power = np.square(magnitude, out=out_array)
@@ -159,10 +156,7 @@ def power_to_db(
     else:
         magnitude = S
 
-    if callable(ref):
-        ref_value = ref(magnitude)
-    else:
-        ref_value = np.abs(ref)
+    ref_value = ref(magnitude) if callable(ref) else np.abs(ref)
 
     log_spec = 10.0 * np.log10(np.maximum(amin, magnitude))
     log_spec -= 10.0 * np.log10(np.maximum(amin, ref_value))
@@ -218,14 +212,9 @@ def frame(
     x_shape_trimmed[axis] -= frame_length - 1
 
     out_shape = tuple(x_shape_trimmed) + (frame_length,)
-    xw = as_strided(
-        x, strides=out_strides, shape=out_shape, subok=subok, writeable=writeable
-    )
+    xw = as_strided(x, strides=out_strides, shape=out_shape, subok=subok, writeable=writeable)
 
-    if axis < 0:
-        target_axis = axis - 1
-    else:
-        target_axis = axis + 1
+    target_axis = axis - 1 if axis < 0 else axis + 1
 
     xw = np.moveaxis(xw, -1, target_axis)
 
@@ -590,10 +579,7 @@ def zero_crossing_rate(frames: np.ndarray) -> np.ndarray:
     # Normalize to [0, 1] range
     zcr_min = zcr.min()
     zcr_max = zcr.max()
-    if zcr_max > zcr_min:
-        zcr_norm = (zcr - zcr_min) / (zcr_max - zcr_min)
-    else:
-        zcr_norm = np.zeros_like(zcr)
+    zcr_norm = (zcr - zcr_min) / (zcr_max - zcr_min) if zcr_max > zcr_min else np.zeros_like(zcr)
 
     return zcr_norm
 

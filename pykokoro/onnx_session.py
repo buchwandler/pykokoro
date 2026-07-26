@@ -77,7 +77,11 @@ class OnnxSessionManager:
         # Try to load ONNX model with automatic fallback
         last_error = None
 
-        for attempt, provider_list in enumerate([providers, ["CPUExecutionProvider"]]):
+        provider_lists: list[list[str | tuple[str, dict[str, str]]]] = [
+            providers,
+            ["CPUExecutionProvider"],
+        ]
+        for attempt, provider_list in enumerate(provider_lists):
             # Skip second attempt if we already tried CPU or
             # if explicit provider was requested
             if attempt == 1:
@@ -108,8 +112,7 @@ class OnnxSessionManager:
                 # Warn if we had to fallback
                 if attempt == 1:
                     logger.warning(
-                        f"Primary provider {providers[0]} failed, "
-                        f"fell back to CPUExecutionProvider"
+                        f"Primary provider {providers[0]} failed, fell back to CPUExecutionProvider"
                     )
 
                 return session
@@ -118,8 +121,7 @@ class OnnxSessionManager:
                 last_error = e
                 if attempt == 0:
                     logger.warning(
-                        f"Failed to load with {provider_list}: {e}. "
-                        f"Will try CPU fallback..."
+                        f"Failed to load with {provider_list}: {e}. Will try CPU fallback..."
                     )
 
         # If we get here, all attempts failed
@@ -209,9 +211,7 @@ class OnnxSessionManager:
             # Get user-provided provider-specific options
             provider_opts = {}
             if self._provider_options:
-                provider_opts = self._get_provider_specific_options(
-                    prov, self._provider_options
-                )
+                provider_opts = self._get_provider_specific_options(prov, self._provider_options)
 
             # Merge defaults with user options (user options take precedence)
             merged_opts = {**default_opts, **provider_opts}
@@ -284,8 +284,7 @@ class OnnxSessionManager:
         selected = provider_map.get(provider.lower())
         if not selected:
             raise ValueError(
-                f"Unknown provider: {provider}. "
-                f"Valid options: {list(provider_map.keys())}"
+                f"Unknown provider: {provider}. Valid options: {list(provider_map.keys())}"
             )
 
         if selected not in available:
@@ -296,9 +295,7 @@ class OnnxSessionManager:
                 "DmlExecutionProvider": "pip install pykokoro[directml]",
                 "CoreMLExecutionProvider": "pip install pykokoro[coreml]",
             }
-            hint = install_hints.get(
-                selected, f"install the required package for {selected}"
-            )
+            hint = install_hints.get(selected, f"install the required package for {selected}")
             raise RuntimeError(
                 f"{provider.upper()} provider requested but not available.\n"
                 f"Install with: {hint}\n"

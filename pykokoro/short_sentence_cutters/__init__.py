@@ -15,9 +15,7 @@ _CUTTERS: dict[str, PhraseCutter] = {
 }
 
 
-def cut_phrase_audio(
-    audio: np.ndarray, metadata: dict[str, object]
-) -> np.ndarray | None:
+def cut_phrase_audio(audio: np.ndarray, metadata: dict[str, object]) -> np.ndarray | None:
     """Cut phrase-generated audio using the configured cutter."""
     cutter_name = str(metadata.get("cutter", "energy-valley"))
     cutter = _CUTTERS.get(cutter_name)

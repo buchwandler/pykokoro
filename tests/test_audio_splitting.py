@@ -84,9 +84,7 @@ def test_preprocess_pipeline_splits_segments():
         pause_after=0.7,
     )
 
-    processed = generator._preprocess_segments(
-        [segment], enable_short_sentence_override=False
-    )
+    processed = generator._preprocess_segments([segment], enable_short_sentence_override=False)
 
     assert len(processed) == 2
     assert processed[0].id == "seg_1_ph0"
@@ -117,9 +115,7 @@ def test_preprocess_wraps_short_segments_when_enabled():
         pause_after=0.7,
     )
 
-    processed = generator._preprocess_segments(
-        [segment], enable_short_sentence_override=True
-    )
+    processed = generator._preprocess_segments([segment], enable_short_sentence_override=True)
 
     assert len(processed) == 1
     pretext = ShortSentenceConfig().phoneme_pretext
@@ -145,9 +141,7 @@ def test_preprocess_does_not_wrap_short_segments_when_disabled():
         tokens=[],
     )
 
-    processed = generator._preprocess_segments(
-        [segment], enable_short_sentence_override=False
-    )
+    processed = generator._preprocess_segments([segment], enable_short_sentence_override=False)
 
     assert processed[0].phonemes == "abc"
     assert len(processed[0].tokens) == len("abc")
@@ -169,9 +163,7 @@ def test_preprocess_uses_custom_short_sentence_pretext():
         tokens=[],
     )
 
-    processed = generator._preprocess_segments(
-        [segment], enable_short_sentence_override=True
-    )
+    processed = generator._preprocess_segments([segment], enable_short_sentence_override=True)
 
     assert processed[0].phonemes == "...abc..."
 
@@ -192,9 +184,7 @@ def test_preprocess_does_not_wrap_long_segments():
         tokens=[],
     )
 
-    processed = generator._preprocess_segments(
-        [segment], enable_short_sentence_override=True
-    )
+    processed = generator._preprocess_segments([segment], enable_short_sentence_override=True)
 
     assert processed[0].phonemes == "abcde"
 
@@ -214,12 +204,8 @@ def test_preprocess_punctuation_only_segments_follow_short_sentence_override():
         tokens=[],
     )
 
-    enabled = generator._preprocess_segments(
-        [segment], enable_short_sentence_override=True
-    )
-    disabled = generator._preprocess_segments(
-        [segment], enable_short_sentence_override=False
-    )
+    enabled = generator._preprocess_segments([segment], enable_short_sentence_override=True)
+    disabled = generator._preprocess_segments([segment], enable_short_sentence_override=False)
 
     assert enabled[0].phonemes == ""
     assert enabled[0].tokens == []
@@ -263,9 +249,7 @@ def test_preprocess_phrase_mode_uses_phrase_phonemes_and_metadata(monkeypatch):
         tokens=[],
     )
 
-    processed = generator._preprocess_segments(
-        [segment], enable_short_sentence_override=True
-    )
+    processed = generator._preprocess_segments([segment], enable_short_sentence_override=True)
 
     assert processed[0].phonemes == "abc def."
     assert processed[0].tokens == list(range(8))
@@ -313,9 +297,7 @@ def test_preprocess_randomized_phrase_mode_uses_configured_phrases(monkeypatch):
         tokens=[],
     )
 
-    processed = generator._preprocess_segments(
-        [segment], enable_short_sentence_override=True
-    )
+    processed = generator._preprocess_segments([segment], enable_short_sentence_override=True)
 
     assert processed[0].phonemes == "abc option."
     assert processed[0].ssmd_metadata is not None
@@ -360,9 +342,7 @@ def test_preprocess_phrase_mode_uses_end_phrase_for_period(monkeypatch):
         tokens=[],
     )
 
-    processed = generator._preprocess_segments(
-        [segment], enable_short_sentence_override=True
-    )
+    processed = generator._preprocess_segments([segment], enable_short_sentence_override=True)
 
     assert processed[0].ssmd_metadata is not None
     metadata = processed[0].ssmd_metadata[SHORT_SENTENCE_META_KEY]
@@ -402,9 +382,7 @@ def test_preprocess_phrase_mode_adds_ranked_phrase_fallbacks(monkeypatch):
         tokens=[],
     )
 
-    processed = generator._preprocess_segments(
-        [segment], enable_short_sentence_override=True
-    )
+    processed = generator._preprocess_segments([segment], enable_short_sentence_override=True)
 
     assert processed[0].ssmd_metadata is not None
     metadata = processed[0].ssmd_metadata[SHORT_SENTENCE_META_KEY]
@@ -449,9 +427,7 @@ def test_preprocess_phrase_fallbacks_skip_used_template_not_index(monkeypatch):
         tokens=[],
     )
 
-    processed = generator._preprocess_segments(
-        [segment], enable_short_sentence_override=True
-    )
+    processed = generator._preprocess_segments([segment], enable_short_sentence_override=True)
 
     assert processed[0].ssmd_metadata is not None
     metadata = processed[0].ssmd_metadata[SHORT_SENTENCE_META_KEY]
@@ -481,9 +457,7 @@ def test_preprocess_randomized_phrase_mode_adds_following_fallbacks(monkeypatch)
         resolve_mode="randomized-phrase",
     )
 
-    monkeypatch.setattr(
-        short_sentence_handler.random, "choice", lambda choices: choices[2]
-    )
+    monkeypatch.setattr(short_sentence_handler.random, "choice", lambda choices: choices[2])
 
     def fake_phonemize(segment: PhonemeSegment, phrase_template: str):
         assert segment.text == "Go"
@@ -509,9 +483,7 @@ def test_preprocess_randomized_phrase_mode_adds_following_fallbacks(monkeypatch)
         tokens=[],
     )
 
-    processed = generator._preprocess_segments(
-        [segment], enable_short_sentence_override=True
-    )
+    processed = generator._preprocess_segments([segment], enable_short_sentence_override=True)
 
     assert processed[0].ssmd_metadata is not None
     metadata = processed[0].ssmd_metadata[SHORT_SENTENCE_META_KEY]
@@ -617,9 +589,7 @@ def test_preprocess_phrase_mode_can_force_end_phrase_for_neutral_text(monkeypatc
         tokens=[],
     )
 
-    processed = generator._preprocess_segments(
-        [segment], enable_short_sentence_override=True
-    )
+    processed = generator._preprocess_segments([segment], enable_short_sentence_override=True)
 
     assert processed[0].ssmd_metadata is not None
     metadata = processed[0].ssmd_metadata[SHORT_SENTENCE_META_KEY]
@@ -663,9 +633,7 @@ def test_preprocess_phrase_mode_can_force_neutral_phrase_for_period(monkeypatch)
         tokens=[],
     )
 
-    processed = generator._preprocess_segments(
-        [segment], enable_short_sentence_override=True
-    )
+    processed = generator._preprocess_segments([segment], enable_short_sentence_override=True)
 
     assert processed[0].ssmd_metadata is not None
     metadata = processed[0].ssmd_metadata[SHORT_SENTENCE_META_KEY]
@@ -709,9 +677,7 @@ def test_preprocess_randomized_phrase_mode_can_force_end_phrases(monkeypatch):
         tokens=[],
     )
 
-    processed = generator._preprocess_segments(
-        [segment], enable_short_sentence_override=True
-    )
+    processed = generator._preprocess_segments([segment], enable_short_sentence_override=True)
 
     assert processed[0].ssmd_metadata is not None
     metadata = processed[0].ssmd_metadata[SHORT_SENTENCE_META_KEY]
@@ -755,9 +721,7 @@ def test_postprocess_phrase_mode_leaves_audio_when_timestamps_are_missing():
     assert len(processed[0].processed_audio) == len(audio)
 
 
-def test_phrase_modes_fall_back_to_wrap_once_without_timestamp_output(
-    monkeypatch, capsys
-):
+def test_phrase_modes_fall_back_to_wrap_once_without_timestamp_output(monkeypatch, capsys):
     tokenizer = DummyTokenizer(factor=1)
     config = ShortSentenceConfig(
         resolve_modes={"phrase": PhraseResolveMode()},

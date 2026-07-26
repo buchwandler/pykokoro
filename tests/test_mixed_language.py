@@ -20,9 +20,7 @@ def test_mixed_language_preserves_existing_annotations(monkeypatch):
         calls.append(kwargs["text"])
         return f'[{kwargs["text"]}]{{lang="de"}}'
 
-    monkeypatch.setattr(
-        mixed_language_handler, "preprocess_multilang", fake_preprocess_multilang
-    )
+    monkeypatch.setattr(mixed_language_handler, "preprocess_multilang", fake_preprocess_multilang)
 
     text = 'Hello[Bonjour]{lang="fr"}World'
     result = handler.preprocess_text(text, default_language="en-us")
@@ -39,9 +37,7 @@ def test_mixed_language_all_annotated_returns_original(monkeypatch):
         calls.append(kwargs["text"])
         return f'[{kwargs["text"]}]{{lang="de"}}'
 
-    monkeypatch.setattr(
-        mixed_language_handler, "preprocess_multilang", fake_preprocess_multilang
-    )
+    monkeypatch.setattr(mixed_language_handler, "preprocess_multilang", fake_preprocess_multilang)
 
     text = '[Bonjour]{lang="fr"}'
     result = handler.preprocess_text(text, default_language="en-us")

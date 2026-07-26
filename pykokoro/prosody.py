@@ -223,9 +223,7 @@ def apply_pitch(audio: np.ndarray, pitch: str, sample_rate: int) -> np.ndarray:
 
         # Fall back to librosa
         if LIBROSA_AVAILABLE:
-            shifted = librosa.effects.pitch_shift(
-                audio, sr=sample_rate, n_steps=semitones
-            )
+            shifted = librosa.effects.pitch_shift(audio, sr=sample_rate, n_steps=semitones)
             return shifted.astype(audio.dtype)
 
         return audio
@@ -278,9 +276,7 @@ def apply_rate(audio: np.ndarray, rate: str, sample_rate: int = 24000) -> np.nda
                 stretched = augmenter(samples=audio, sample_rate=sample_rate)
                 return stretched.astype(audio.dtype)
             except (RuntimeError, OSError, ValueError) as e:
-                logger.debug(
-                    f"Audiomentations TimeStretch failed, falling back to librosa: {e}"
-                )
+                logger.debug(f"Audiomentations TimeStretch failed, falling back to librosa: {e}")
 
         # Fall back to librosa
         if LIBROSA_AVAILABLE:

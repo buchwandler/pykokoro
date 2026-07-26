@@ -30,13 +30,11 @@ def check_segment_invariants(
     for seg in segments:
         if seg.char_start < 0 or seg.char_end < seg.char_start:
             errors.append(
-                "Segment has invalid offsets: "
-                f"{_format_segment(seg)} (len={len(clean_text)})."
+                f"Segment has invalid offsets: {_format_segment(seg)} (len={len(clean_text)})."
             )
         if seg.char_end > len(clean_text):
             errors.append(
-                "Segment exceeds document length: "
-                f"{_format_segment(seg)} (len={len(clean_text)})."
+                f"Segment exceeds document length: {_format_segment(seg)} (len={len(clean_text)})."
             )
 
     for prev, current in _pairwise(segments):
@@ -83,8 +81,7 @@ def _check_coverage(
     overlap_positions = [idx for idx, count in enumerate(coverage) if count > 1]
     if overlap_positions:
         errors.append(
-            "Coverage overlap detected at positions: "
-            f"{_format_positions(overlap_positions)}."
+            f"Coverage overlap detected at positions: {_format_positions(overlap_positions)}."
         )
 
     if allow_whitespace_gaps:

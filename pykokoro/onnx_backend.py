@@ -1,7 +1,9 @@
 """ONNX backend for pykokoro - native ONNX TTS without external dependencies."""
 
 import contextlib
+import hashlib
 import io
+import json
 import logging
 import os
 import shutil
@@ -17,6 +19,12 @@ import numpy as np
 import onnxruntime as rt
 from huggingface_hub import hf_hub_download
 
+from .artifact_manifest import (
+    GITHUB_RELEASE_REVISIONS,
+    hf_config_spec,
+    hf_model_spec,
+    hf_voice_spec,
+)
 from .audio_generator import AudioGenerator
 from .exceptions import ConfigurationError
 from .onnx_session import OnnxSessionManager
@@ -40,6 +48,11 @@ MIN_ONNX_BYTES = 1_000_000
 MIN_VOICE_ARCHIVE_BYTES = 1_000_000
 MIN_VOICE_BIN_BYTES = 100_000
 MIN_CONFIG_BYTES = 100
+
+
+class ArtifactValidationError(RuntimeError):
+    """Raised when a cached or downloaded artifact fails integrity checks."""
+
 
 # Model quality type
 ModelQuality = Literal[
@@ -139,7 +152,9 @@ GITHUB_VOICES_FILENAME_V1_1_ZH = "voices-v1.1-zh.bin"
 
 GITHUB_REPO_GERMAN = "holgern/kokoro-onnx-model"
 GITHUB_RELEASE_TAG_V1_1_DE = "model-files-german-v1.1"
-GITHUB_BASE_URL_V1_1_DE = f"https://github.com/{GITHUB_REPO_GERMAN}/releases/download/{GITHUB_RELEASE_TAG_V1_1_DE}"
+GITHUB_BASE_URL_V1_1_DE = (
+    f"https://github.com/{GITHUB_REPO_GERMAN}/releases/download/{GITHUB_RELEASE_TAG_V1_1_DE}"
+)
 
 GITHUB_VOICES_FILENAME_V1_1_DE = "voices-german-v1.1.bin"
 # All available voice names for v1.0 (54 voices - English/multilingual)
@@ -476,8 +491,7 @@ def get_model_path(
     if quality not in quality_files:
         available = ", ".join(quality_files.keys())
         raise ValueError(
-            f"Quality '{quality}' not available for {source}/{variant}. "
-            f"Available: {available}"
+            f"Quality '{quality}' not available for {source}/{variant}. Available: {available}"
         )
 
     filename = quality_files[quality]
@@ -536,11 +550,7 @@ def are_voices_downloaded() -> bool:
 
 def are_models_downloaded(quality: ModelQuality = DEFAULT_MODEL_QUALITY) -> bool:
     """Check if model, config, and voices.bin are downloaded."""
-    return (
-        is_config_downloaded()
-        and is_model_downloaded(quality)
-        and are_voices_downloaded()
-    )
+    return is_config_downloaded() and is_model_downloaded(quality) and are_voices_downloaded()
 
 
 # =============================================================================
@@ -548,10 +558,21 @@ def are_models_downloaded(quality: ModelQuality = DEFAULT_MODEL_QUALITY) -> bool
 # =============================================================================
 
 
+def _huggingface_repo_for_variant(variant: ModelVariant) -> str:
+    repositories = {
+        "v1.0": HF_REPO_V1_0,
+        "v1.1-zh": HF_REPO_V1_1_ZH,
+    }
+    try:
+        return repositories[variant]
+    except KeyError as exc:
+        raise ValueError(f"Unknown variant: {variant}") from exc
+
+
 def _validate_min_size(path: Path, min_size: int) -> None:
     size = path.stat().st_size
     if size < min_size:
-        raise RuntimeError(
+        raise ArtifactValidationError(
             f"Downloaded file {path.name} is too small ({size} bytes). "
             f"Expected at least {min_size} bytes."
         )
@@ -570,7 +591,7 @@ def _validate_onnx_file(path: Path) -> None:
             providers=["CPUExecutionProvider"],
         )
     except Exception as exc:
-        raise RuntimeError(
+        raise ArtifactValidationError(
             f"Downloaded ONNX model '{path.name}' is invalid: {exc}"
         ) from exc
 
@@ -590,7 +611,7 @@ def _validate_voice_archive(path: Path) -> None:
                 voice_name=first_key,
             )
     except Exception as exc:
-        raise RuntimeError(
+        raise ArtifactValidationError(
             f"Downloaded voice archive '{path.name}' is invalid: {exc}"
         ) from exc
 
@@ -600,9 +621,61 @@ def _validate_voice_bin(path: Path) -> None:
 
     size = path.stat().st_size
     if size % 4 != 0:
-        raise RuntimeError(
+        raise ArtifactValidationError(
             f"Downloaded voice file '{path.name}' has invalid byte size {size}."
         )
+
+
+def _validate_sha256(path: Path, expected_sha256: str | None) -> None:
+    if expected_sha256 is None:
+        return
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(DOWNLOAD_CHUNK_SIZE), b""):
+            digest.update(chunk)
+    actual = digest.hexdigest()
+    if actual.lower() != expected_sha256.lower():
+        raise ArtifactValidationError(
+            f"Artifact '{path.name}' has checksum {actual}; expected {expected_sha256}."
+        )
+
+
+def _validate_artifact(
+    path: Path,
+    *,
+    min_size: int | None = None,
+    validator: Callable[[Path], None] | None = None,
+    expected_sha256: str | None = None,
+) -> None:
+    if min_size is not None:
+        _validate_min_size(path, min_size)
+    if validator is not None:
+        validator(path)
+    _validate_sha256(path, expected_sha256)
+
+
+def _remove_invalid_cached_file(
+    path: Path,
+    *,
+    min_size: int | None = None,
+    validator: Callable[[Path], None] | None = None,
+    expected_sha256: str | None = None,
+) -> bool:
+    if not path.exists():
+        return False
+    try:
+        _validate_artifact(
+            path,
+            min_size=min_size,
+            validator=validator,
+            expected_sha256=expected_sha256,
+        )
+    except (OSError, ArtifactValidationError) as exc:
+        logger.warning("Removing invalid cached artifact %s: %s", path, exc)
+        with contextlib.suppress(FileNotFoundError):
+            path.unlink()
+        return True
+    return False
 
 
 @contextlib.contextmanager
@@ -615,13 +688,17 @@ def _download_lock(
     while True:
         try:
             fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.close(fd)
+            with os.fdopen(fd, "w", encoding="utf-8") as lock_file:
+                json.dump({"pid": os.getpid(), "created_at": time.time()}, lock_file)
             break
         except FileExistsError as e:
+            if _is_stale_download_lock(lock_path, timeout):
+                logger.warning("Recovering stale download lock %s", lock_path)
+                with contextlib.suppress(FileNotFoundError):
+                    lock_path.unlink()
+                continue
             if time.monotonic() - start > timeout:
-                raise RuntimeError(
-                    f"Timed out waiting for download lock on {target_path}"
-                ) from e
+                raise RuntimeError(f"Timed out waiting for download lock on {target_path}") from e
             time.sleep(0.1)
 
     try:
@@ -629,6 +706,24 @@ def _download_lock(
     finally:
         with contextlib.suppress(FileNotFoundError):
             lock_path.unlink()
+
+
+def _is_stale_download_lock(lock_path: Path, timeout: float) -> bool:
+    try:
+        metadata = json.loads(lock_path.read_text(encoding="utf-8"))
+        pid = int(metadata["pid"])
+        created_at = float(metadata["created_at"])
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+        return False
+    if time.time() - created_at <= timeout:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        return False
+    return False
 
 
 def _run_with_retries(
@@ -641,14 +736,13 @@ def _run_with_retries(
     for attempt in range(1, retries + 1):
         try:
             return action()
-        except OSError as exc:
+        except (OSError, ArtifactValidationError) as exc:
             last_error = exc
             if attempt == retries:
                 break
             delay = 2 ** (attempt - 1)
             logger.warning(
-                f"{description} failed on attempt {attempt}/{retries}: {exc}. "
-                f"Retrying in {delay}s."
+                f"{description} failed on attempt {attempt}/{retries}: {exc}. Retrying in {delay}s."
             )
             time.sleep(delay)
 
@@ -662,6 +756,7 @@ def _stream_download(
     timeout: float,
     min_size: int | None = None,
     validator: Callable[[Path], None] | None = None,
+    expected_sha256: str | None = None,
 ) -> Path:
     local_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -684,10 +779,12 @@ def _stream_download(
             raise
 
     try:
-        if min_size is not None:
-            _validate_min_size(tmp_path, min_size)
-        if validator is not None:
-            validator(tmp_path)
+        _validate_artifact(
+            tmp_path,
+            min_size=min_size,
+            validator=validator,
+            expected_sha256=expected_sha256,
+        )
         os.replace(tmp_path, local_path)
     except Exception:
         with contextlib.suppress(FileNotFoundError):
@@ -725,6 +822,9 @@ def _download_from_hf(
     min_size: int | None = None,
     validator: Callable[[Path], None] | None = None,
     retries: int = DOWNLOAD_RETRIES,
+    revision: str | None = None,
+    expected_sha256: str | None = None,
+    offline: bool = False,
 ) -> Path:
     """
     Download a file from Hugging Face Hub.
@@ -751,27 +851,38 @@ def _download_from_hf(
             target_path = local_dir_path / subfolder / target_filename
         target_path.parent.mkdir(parents=True, exist_ok=True)
 
+    force_download = force
+
     def _download() -> Path:
+        nonlocal force_download
         use_local_dir = local_dir_path is not None and local_filename is None
+        if offline:
+            raise RuntimeError(
+                f"Offline mode is enabled and {filename} is not available in the cache."
+            )
         downloaded_path = hf_hub_download(
             repo_id=repo_id,
             filename=filename,
             subfolder=subfolder,
             local_dir=str(local_dir_path) if use_local_dir else None,
-            force_download=force,
+            force_download=force_download,
+            revision=revision,
         )
         downloaded = Path(downloaded_path)
         delete_on_error = use_local_dir
         try:
-            if min_size is not None:
-                _validate_min_size(downloaded, min_size)
-            if validator is not None:
-                validator(downloaded)
+            _validate_artifact(
+                downloaded,
+                min_size=min_size,
+                validator=validator,
+                expected_sha256=expected_sha256,
+            )
             if target_path is not None and downloaded != target_path:
                 _atomic_copy(downloaded, target_path)
                 downloaded = target_path
                 delete_on_error = True
-        except Exception:
+        except (OSError, ArtifactValidationError):
+            force_download = True
             if delete_on_error:
                 with contextlib.suppress(FileNotFoundError):
                     downloaded.unlink()
@@ -780,20 +891,35 @@ def _download_from_hf(
 
     if target_path is not None:
         with _download_lock(target_path):
-            if target_path.exists() and not force:
+            if (
+                target_path.exists()
+                and not force
+                and not _remove_invalid_cached_file(
+                    target_path,
+                    min_size=min_size,
+                    validator=validator,
+                    expected_sha256=expected_sha256,
+                )
+            ):
                 return target_path
+            if offline:
+                raise RuntimeError(f"Offline mode is enabled and {target_path.name} is not cached.")
             return _run_with_retries(
                 _download, description=f"HF download of {filename}", retries=retries
             )
 
-    return _run_with_retries(
-        _download, description=f"HF download of {filename}", retries=retries
-    )
+    if offline:
+        raise RuntimeError(f"Offline mode is enabled and {filename} is not cached.")
+    return _run_with_retries(_download, description=f"HF download of {filename}", retries=retries)
 
 
 def download_config(
     variant: ModelVariant = DEFAULT_MODEL_VARIANT,
     force: bool = False,
+    *,
+    revision: str | None = None,
+    sha256: str | None = None,
+    offline: bool = False,
 ) -> Path:
     """
     Download config.json from hexgrad HuggingFace repository.
@@ -814,21 +940,30 @@ def download_config(
     """
     config_path = get_config_path(variant)
 
-    if config_path.exists() and not force:
-        logger.debug(f"Config already exists: {config_path}")
-        return config_path
-
     # Select hexgrad repo based on variant
-    if variant == "v1.0":
-        repo_id = HF_CONFIG_REPO_V1_0  # hexgrad/Kokoro-82M
-    elif variant == "v1.1-zh":
-        repo_id = HF_CONFIG_REPO_V1_1_ZH  # hexgrad/Kokoro-82M-v1.1-zh
-    elif variant == "v1.1-de":
-        repo_id = HF_CONFIG_REPO_V1_1_DE  # Tundragoon/Kokoro-German
-    else:
-        raise ValueError(f"Unknown variant: {variant}")
+    config_repositories = {
+        "v1.0": HF_CONFIG_REPO_V1_0,
+        "v1.1-zh": HF_CONFIG_REPO_V1_1_ZH,
+        "v1.1-de": HF_CONFIG_REPO_V1_1_DE,
+    }
+    try:
+        repo_id = config_repositories[variant]
+    except KeyError as exc:
+        raise ValueError(f"Unknown variant: {variant}") from exc
 
-    logger.info(f"Downloading config for {variant} from {repo_id}")
+    if revision is None:
+        try:
+            spec = hf_config_spec(variant)
+        except KeyError as exc:
+            raise ValueError(
+                f"No immutable artifact manifest is available for config variant {variant!r}; "
+                "pass an explicit revision and sha256."
+            ) from exc
+        revision = spec.revision
+        if sha256 is None:
+            sha256 = spec.sha256
+
+    logger.info(f"Downloading config for {variant} from {repo_id} at revision {revision}")
 
     return _download_from_hf(
         repo_id=repo_id,
@@ -836,6 +971,9 @@ def download_config(
         local_dir=config_path.parent,
         force=force,
         min_size=MIN_CONFIG_BYTES,
+        revision=revision,
+        expected_sha256=sha256,
+        offline=offline,
     )
 
 
@@ -876,8 +1014,7 @@ def load_vocab_from_config(
             config = json.load(f)
     except (OSError, ValueError) as e:
         logger.error(
-            f"Failed to load config from {config_path}: {e}. "
-            f"Falling back to default vocabulary."
+            f"Failed to load config from {config_path}: {e}. Falling back to default vocabulary."
         )
         return get_kokoro_vocab()
 
@@ -901,6 +1038,10 @@ def download_model(
     variant: ModelVariant = DEFAULT_MODEL_VARIANT,
     quality: ModelQuality = DEFAULT_MODEL_QUALITY,
     force: bool = False,
+    *,
+    revision: str | None = None,
+    sha256: str | None = None,
+    offline: bool = False,
 ) -> Path:
     """
     Download model from HuggingFace (onnx-community repos).
@@ -921,11 +1062,8 @@ def download_model(
         - v1.1-zh from: onnx-community/Kokoro-82M-v1.1-zh-ONNX
     """
     # Select onnx-community repo based on variant
-    if variant == "v1.0":
-        repo_id = HF_REPO_V1_0
-    elif variant == "v1.1-zh":
-        repo_id = HF_REPO_V1_1_ZH
-    else:
+    repo_id = _huggingface_repo_for_variant(variant)
+    if variant == "v1.1-de":
         raise ValueError(f"Unknown variant: {variant}")
 
     # Check if quality is available (both variants use same filenames)
@@ -934,16 +1072,14 @@ def download_model(
         raise ValueError(f"Quality '{quality}' not available. Available: {available}")
 
     filename = MODEL_QUALITY_FILES_HF[quality]
-    local_filename = (
-        MODEL_QUALITY_CACHE_FILES_HF_V1_0[quality] if variant == "v1.0" else filename
-    )
+    if revision is None:
+        spec = hf_model_spec(variant, filename)
+        revision = spec.revision
+        if sha256 is None:
+            sha256 = spec.sha256
+    local_filename = MODEL_QUALITY_CACHE_FILES_HF_V1_0[quality] if variant == "v1.0" else filename
     # Use new path structure
     model_dir = get_model_dir(source="huggingface", variant=variant)
-    local_path = model_dir / HF_MODEL_SUBFOLDER / local_filename
-
-    if local_path.exists() and not force:
-        logger.debug(f"Model already exists: {local_path}")
-        return local_path
 
     logger.info(f"Downloading {variant} model ({quality}) from {repo_id}")
 
@@ -955,6 +1091,9 @@ def download_model(
         local_filename=local_filename,
         force=force,
         validator=_validate_onnx_file,
+        revision=revision,
+        expected_sha256=sha256,
+        offline=offline,
     )
 
 
@@ -962,6 +1101,10 @@ def download_voice(
     voice_name: str,
     variant: ModelVariant = DEFAULT_MODEL_VARIANT,
     force: bool = False,
+    *,
+    revision: str | None = None,
+    sha256: str | None = None,
+    offline: bool = False,
 ) -> Path:
     """
     Download a single voice file from HuggingFace.
@@ -975,22 +1118,35 @@ def download_voice(
         Path to the downloaded voice file
     """
     # Select repo based on variant
-    if variant == "v1.0":
-        repo_id = HF_REPO_V1_0
-    elif variant == "v1.1-zh":
-        repo_id = HF_REPO_V1_1_ZH
-    else:
+    repo_id = _huggingface_repo_for_variant(variant)
+    if variant == "v1.1-de":
         raise ValueError(f"Unknown variant: {variant}")
 
     filename = f"{voice_name}.bin"
+    if revision is None:
+        spec = hf_voice_spec(variant, filename)
+        revision = spec.revision
+        if sha256 is None:
+            sha256 = spec.sha256
     # Use new path structure
     voices_dir = get_voices_dir(source="huggingface", variant=variant)
     voices_dir.mkdir(parents=True, exist_ok=True)
     local_path = voices_dir / filename
 
-    if local_path.exists() and not force:
+    if (
+        local_path.exists()
+        and not force
+        and not _remove_invalid_cached_file(
+            local_path,
+            min_size=MIN_VOICE_BIN_BYTES,
+            validator=_validate_voice_bin,
+            expected_sha256=sha256,
+        )
+    ):
         logger.debug(f"Voice already exists: {local_path}")
         return local_path
+    if offline:
+        raise RuntimeError(f"Offline mode is enabled and {local_path.name} is not cached.")
 
     logger.info(f"Downloading voice {voice_name} for {variant}")
 
@@ -1002,6 +1158,9 @@ def download_voice(
         force=force,
         min_size=MIN_VOICE_BIN_BYTES,
         validator=_validate_voice_bin,
+        revision=revision,
+        expected_sha256=sha256,
+        offline=offline,
     )
 
     with _download_lock(local_path):
@@ -1033,11 +1192,10 @@ def download_all_voices(
         - v1.1-zh: 103 voices from onnx-community/Kokoro-82M-v1.1-zh-ONNX
     """
     # Select repo and voice list based on variant
+    repo_id = _huggingface_repo_for_variant(variant)
     if variant == "v1.0":
-        repo_id = HF_REPO_V1_0
         voice_names = VOICE_NAMES_V1_0
     elif variant == "v1.1-zh":
-        repo_id = HF_REPO_V1_1_ZH
         voice_names = VOICE_NAMES_V1_1_ZH
     else:
         raise ValueError(f"Unknown variant: {variant}")
@@ -1110,9 +1268,7 @@ def download_all_voices(
                 # HuggingFace .bin files are raw float32 arrays
                 voice_data = np.fromfile(str(voice_path), dtype=np.float32)
                 if voice_data.size % 256 != 0:
-                    raise ValueError(
-                        f"Voice file length {voice_data.size} not divisible by 256"
-                    )
+                    raise ValueError(f"Voice file length {voice_data.size} not divisible by 256")
                 voice_data = voice_data.reshape(-1, 256)
                 voice_array = normalize_voice_style(
                     voice_data,
@@ -1148,9 +1304,7 @@ def download_all_voices(
                 with contextlib.suppress(FileNotFoundError):
                     tmp_path.unlink()
                 raise
-            logger.info(
-                f"Created combined voices.bin.npz with {len(voices_data)} voices"
-            )
+            logger.info(f"Created combined voices.bin.npz with {len(voices_data)} voices")
         else:
             raise RuntimeError(
                 "No valid voice files could be loaded. "
@@ -1194,9 +1348,7 @@ def download_all_models(
     # Download all voices
     if progress_callback:
         progress_callback("voices", 2, 3)
-    voices_dir = download_all_voices(
-        variant=variant, progress_callback=None, force=force
-    )
+    voices_dir = download_all_voices(variant=variant, progress_callback=None, force=force)
     paths["voices"] = voices_dir
 
     if progress_callback:
@@ -1219,6 +1371,8 @@ def _download_from_github(
     timeout: float = DOWNLOAD_TIMEOUT_SECONDS,
     retries: int = DOWNLOAD_RETRIES,
     lock_timeout: float = DOWNLOAD_LOCK_TIMEOUT_SECONDS,
+    expected_sha256: str | None = None,
+    offline: bool = False,
 ) -> Path:
     """
     Download a file from GitHub releases using urllib.
@@ -1232,9 +1386,20 @@ def _download_from_github(
         Path to the downloaded file
     """
     # Check if file already exists
-    if local_path.exists() and not force:
+    if (
+        local_path.exists()
+        and not force
+        and not _remove_invalid_cached_file(
+            local_path,
+            min_size=min_size,
+            validator=validator,
+            expected_sha256=expected_sha256,
+        )
+    ):
         logger.debug(f"File already exists: {local_path}")
         return local_path
+    if offline:
+        raise RuntimeError(f"Offline mode is enabled and {local_path.name} is not cached.")
 
     logger.info(f"Downloading from {url} to {local_path}")
 
@@ -1245,12 +1410,24 @@ def _download_from_github(
             timeout=timeout,
             min_size=min_size,
             validator=validator,
+            expected_sha256=expected_sha256,
         )
 
     with _download_lock(local_path, timeout=lock_timeout):
-        if local_path.exists() and not force:
+        if (
+            local_path.exists()
+            and not force
+            and not _remove_invalid_cached_file(
+                local_path,
+                min_size=min_size,
+                validator=validator,
+                expected_sha256=expected_sha256,
+            )
+        ):
             logger.debug(f"File already exists: {local_path}")
             return local_path
+        if offline:
+            raise RuntimeError(f"Offline mode is enabled and {local_path.name} is not cached.")
 
         return _run_with_retries(
             _download,
@@ -1290,6 +1467,7 @@ def download_model_github(
         base_url = GITHUB_BASE_URL_V1_1_DE
     else:
         raise ValueError(f"Unknown model variant: {variant}")
+    release_revision = GITHUB_RELEASE_REVISIONS[variant]
 
     # Check if quality is available for this variant
     if quality not in quality_files:
@@ -1306,6 +1484,8 @@ def download_model_github(
     # Use new path structure
     model_dir = get_model_dir(source="github", variant=variant)
     local_path = model_dir / filename
+
+    logger.info("Using immutable GitHub release commit %s", release_revision)
 
     # Download
     return _download_from_github(
@@ -1342,6 +1522,7 @@ def download_voices_github(
         base_url = GITHUB_BASE_URL_V1_1_DE
     else:
         raise ValueError(f"Unknown model variant: {variant}")
+    release_revision = GITHUB_RELEASE_REVISIONS[variant]
 
     # Construct URL
     url = f"{base_url}/{filename}"
@@ -1349,6 +1530,8 @@ def download_voices_github(
     # Use new path structure
     voices_dir = get_voices_dir(source="github", variant=variant)
     local_path = voices_dir / filename
+
+    logger.info("Using immutable GitHub release commit %s", release_revision)
 
     # Download
     return _download_from_github(
@@ -1581,9 +1764,7 @@ class Kokoro:
         if voices_path is None:
             if model_source == "huggingface":
                 # HuggingFace uses voices.bin.npz for both variants
-                voices_path = (
-                    get_voices_dir("huggingface", model_variant) / "voices.bin.npz"
-                )
+                voices_path = get_voices_dir("huggingface", model_variant) / "voices.bin.npz"
             elif model_source == "github":
                 # GitHub uses variant-specific filenames
                 if model_variant == "v1.0":
@@ -1683,9 +1864,7 @@ class Kokoro:
         # Download model if needed
         if not self._model_path.exists():
             if self._model_source == "github":
-                download_model_github(
-                    variant=self._model_variant, quality=self._model_quality
-                )
+                download_model_github(variant=self._model_variant, quality=self._model_quality)
             else:  # huggingface
                 download_model(variant=self._model_variant, quality=self._model_quality)
 
@@ -1699,9 +1878,7 @@ class Kokoro:
         # Download variant-specific config if needed
         if self._model_source == "github":
             if not is_config_downloaded(variant=self._model_variant):
-                logger.info(
-                    f"Downloading config for variant '{self._model_variant}'..."
-                )
+                logger.info(f"Downloading config for variant '{self._model_variant}'...")
                 download_config(variant=self._model_variant)
         else:  # huggingface - default v1.0
             if not is_config_downloaded():
@@ -1899,9 +2076,7 @@ class Kokoro:
         assert self._audio_generator is not None
         return self._audio_generator._postprocess_audio_segments(segments, trim_silence)
 
-    def concatenate_audio_segments(
-        self, segments: list["PhonemeSegment"]
-    ) -> np.ndarray:
+    def concatenate_audio_segments(self, segments: list["PhonemeSegment"]) -> np.ndarray:
         """Concatenate processed segments into a single waveform."""
         self._init_kokoro()
         assert self._audio_generator is not None
@@ -1921,9 +2096,7 @@ class Kokoro:
 
         # Register numpy array converter
         sqlite3.register_converter("array", self._convert_array)
-        self._voice_db = sqlite3.connect(
-            str(db_path), detect_types=sqlite3.PARSE_DECLTYPES
-        )
+        self._voice_db = sqlite3.connect(str(db_path), detect_types=sqlite3.PARSE_DECLTYPES)
 
     def _convert_array(self, blob: bytes) -> np.ndarray:
         """Convert binary blob back to numpy array."""

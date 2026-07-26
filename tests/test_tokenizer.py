@@ -151,9 +151,7 @@ class TestTokenizer:
 
         monkeypatch.setattr(tokenizer_module, "get_g2p", fake_get_g2p)
 
-        tokenizer = Tokenizer(
-            config=TokenizerConfig(use_spacy=True, spacy_model="en_core_web_trf")
-        )
+        tokenizer = Tokenizer(config=TokenizerConfig(use_spacy=True, spacy_model="en_core_web_trf"))
         tokenizer._get_g2p("en-us")
 
         assert captured["use_spacy"] is True
@@ -172,9 +170,7 @@ class TestTokenizer:
         monkeypatch.setattr(tokenizer_module, "get_g2p", fake_get_g2p)
 
         tokenizer = Tokenizer(
-            config=TokenizerConfig(
-                use_spacy=True, spacy_model="auto", spacy_model_size="lg"
-            )
+            config=TokenizerConfig(use_spacy=True, spacy_model="auto", spacy_model_size="lg")
         )
         tokenizer._get_g2p("de")
 
@@ -439,9 +435,7 @@ class TestKokorog2pIntegration:
             if token.text.lower() in ["hello", "world"]:
                 rating = token.get("rating")
                 # Rating 3-4 = dictionary, 1 = espeak
-                assert rating is None or rating >= 3, (
-                    f"Expected {token.text} to use dictionary"
-                )
+                assert rating is None or rating >= 3, f"Expected {token.text} to use dictionary"
 
     def test_unknown_word_handling(self, tokenizer):
         """Test that unknown words are handled via espeak fallback."""
@@ -507,9 +501,7 @@ class TestMixedLanguageSupport:
 
     def test_mixed_language_validation_unsupported_language(self):
         """Test validation fails with unsupported language."""
-        config = TokenizerConfig(
-            use_mixed_language=True, mixed_language_allowed=["xx-invalid"]
-        )
+        config = TokenizerConfig(use_mixed_language=True, mixed_language_allowed=["xx-invalid"])
         tokenizer = Tokenizer(config=config)
 
         with pytest.raises(ValueError, match="is not supported"):

@@ -178,10 +178,7 @@ class TestCreateBlendedVoice:
         assert blended.shape == (512, 1, 256)
 
         # Verify blend is correct weighted sum
-        expected = (
-            voice_data["voice1"][:, None, :] * 0.6
-            + voice_data["voice2"][:, None, :] * 0.4
-        )
+        expected = voice_data["voice1"][:, None, :] * 0.6 + voice_data["voice2"][:, None, :] * 0.4
         np.testing.assert_array_almost_equal(blended, expected)
 
     def test_create_blended_voice_single(self, mock_npz_file, voice_data):
@@ -253,10 +250,7 @@ class TestResolveVoice:
         blend = VoiceBlend(voices=[("voice1", 0.7), ("voice2", 0.3)])
         style = manager.resolve_voice(blend)
 
-        expected = (
-            voice_data["voice1"][:, None, :] * 0.7
-            + voice_data["voice2"][:, None, :] * 0.3
-        )
+        expected = voice_data["voice1"][:, None, :] * 0.7 + voice_data["voice2"][:, None, :] * 0.3
         np.testing.assert_array_almost_equal(style, expected)
 
     def test_resolve_voice_ndarray(self, mock_npz_file):

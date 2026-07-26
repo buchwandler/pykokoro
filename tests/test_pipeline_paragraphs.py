@@ -108,9 +108,7 @@ def test_pipeline_manual_paragraph_pause():
     res = pipeline.run(TEXT)
 
     assert len(res.phoneme_segments) == 4
-    paragraph_zero = [
-        segment for segment in res.phoneme_segments if segment.paragraph_idx == 0
-    ]
+    paragraph_zero = [segment for segment in res.phoneme_segments if segment.paragraph_idx == 0]
     assert paragraph_zero
     assert paragraph_zero[-1].pause_after == pytest.approx(generation.pause_paragraph)
 
@@ -123,7 +121,6 @@ def test_pipeline_explicit_break_pause():
 
     assert res.phoneme_segments
     assert any(
-        segment.pause_after == pytest.approx(0.5)
-        or segment.pause_before == pytest.approx(0.5)
+        segment.pause_after == pytest.approx(0.5) or segment.pause_before == pytest.approx(0.5)
         for segment in res.phoneme_segments
     )

@@ -19,7 +19,7 @@ import logging
 import random
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
 
@@ -50,9 +50,7 @@ class PhraseResolveMode:
 
     kind: Literal["phrase"] = "phrase"
     phrase_selection: PhraseSelection = "auto"
-    neutral_phrase: str = (
-        "The conversation stopped, {segment}, before someone answered."
-    )
+    neutral_phrase: str = "The conversation stopped, {segment}, before someone answered."
     end_phrase: str = "The conversation stopped after one last reply: {segment}"
     frame_duration_ms: int = 5
     energy_threshold: float = 0.05
@@ -103,9 +101,7 @@ class RandomizedPhraseResolveMode:
     cutter: Literal["energy-valley"] = "energy-valley"
 
 
-ShortSentenceResolveMode = (
-    WrapResolveMode | PhraseResolveMode | RandomizedPhraseResolveMode
-)
+ShortSentenceResolveMode = WrapResolveMode | PhraseResolveMode | RandomizedPhraseResolveMode
 
 
 @dataclass
@@ -188,6 +184,45 @@ class ShortSentenceConfig:
         }
     )
     phrase_fallback_tries: int = 5
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.min_phoneme_length, bool)
+            or not isinstance(self.min_phoneme_length, int)
+            or self.min_phoneme_length < 0
+        ):
+            raise ValueError(
+                "min_phoneme_length must be a non-negative integer, "
+                f"got {self.min_phoneme_length!r}"
+            )
+        if (
+            isinstance(self.phrase_fallback_tries, bool)
+            or not isinstance(self.phrase_fallback_tries, int)
+            or self.phrase_fallback_tries < 0
+        ):
+            raise ValueError(
+                "phrase_fallback_tries must be a non-negative integer, "
+                f"got {self.phrase_fallback_tries!r}"
+            )
+        if not isinstance(self.resolve_mode, (str, bool)) or (
+            isinstance(self.resolve_mode, bool) and self.resolve_mode
+        ):
+            raise ValueError(
+                f"resolve_mode must be a mode name or False, got {self.resolve_mode!r}"
+            )
+        if self.resolve_mode is not False and self.resolve_mode not in self.resolve_modes:
+            raise ValueError(
+                f"resolve_mode {self.resolve_mode!r} is not configured; "
+                f"choose one of {sorted(self.resolve_modes)} or False"
+            )
+        for mode in self.resolve_modes.values():
+            templates: list[str] = []
+            if isinstance(mode, PhraseResolveMode):
+                templates = [mode.neutral_phrase, mode.end_phrase]
+            elif isinstance(mode, RandomizedPhraseResolveMode):
+                templates = [*mode.neutral_phrases, *mode.end_phrases]
+            if any("{segment}" not in template for template in templates):
+                raise ValueError("phrase templates must contain the '{segment}' placeholder")
 
     def should_use_pause_surrounding(self, phoneme_length: int, text: str) -> bool:
         """Check if segment should use pause surrounding.
@@ -376,8 +411,7 @@ def apply_short_sentence_mode(
     phrase_phonemes, phrase_tokens, timing_tokens = _coerce_phrase_result(phrase_result)
     if len(phrase_tokens) > MAX_PHONEME_LENGTH:
         logger.warning(
-            "Short sentence phrase for '%s' exceeded max token length; "
-            "using original segment",
+            "Short sentence phrase for '%s' exceeded max token length; using original segment",
             segment.text[:50],
         )
         return ShortSentenceApplication(phonemes, tokens)
@@ -500,6 +534,8 @@ def _phrase_choices(
     mode: RandomizedPhraseResolveMode,
     phrase_defaults: PhraseResolveMode | None = None,
 ) -> list[str]:
+    if phrase_defaults is None:
+        phrase_defaults = PhraseResolveMode()
     use_end_phrase = _uses_end_phrase(segment_text, mode)
     if use_end_phrase:
         return mode.end_phrases or [phrase_defaults.end_phrase]
@@ -556,6 +592,18 @@ def _build_short_sentence_metadata(
     fallback_phonemes: str | None = None,
     fallback_tokens: list[int] | None = None,
 ) -> dict[str, object]:
+    if isinstance(mode, WrapResolveMode):
+        frame_duration_ms = 5
+        energy_threshold = 0.05
+        silence_threshold = 1e-4
+        min_silence_seconds = 0.02
+        cutter = "energy-valley"
+    else:
+        frame_duration_ms = mode.frame_duration_ms
+        energy_threshold = mode.energy_threshold
+        silence_threshold = mode.silence_threshold
+        min_silence_seconds = mode.min_silence_seconds
+        cutter = mode.cutter
     expected_cut_ratio = 1.0
     if generated_token_count > 0:
         expected_cut_ratio = original_token_count / generated_token_count
@@ -566,11 +614,11 @@ def _build_short_sentence_metadata(
         "original_token_count": original_token_count,
         "generated_token_count": generated_token_count,
         "expected_cut_ratio": max(0.01, min(0.99, expected_cut_ratio)),
-        "frame_duration_ms": mode.frame_duration_ms,
-        "energy_threshold": mode.energy_threshold,
-        "silence_threshold": mode.silence_threshold,
-        "min_silence_seconds": mode.min_silence_seconds,
-        "cutter": mode.cutter,
+        "frame_duration_ms": frame_duration_ms,
+        "energy_threshold": energy_threshold,
+        "silence_threshold": silence_threshold,
+        "min_silence_seconds": min_silence_seconds,
+        "cutter": cutter,
     }
     if timing_tokens:
         metadata["timing_tokens"] = timing_tokens
@@ -592,7 +640,7 @@ def _build_short_sentence_retry_metadata(
     phrase_template: str,
     timing_tokens: list[dict[str, object]],
 ) -> dict[str, object]:
-    original_token_count = int(base_metadata.get("original_token_count", 0))
+    original_token_count = int(cast(Any, base_metadata.get("original_token_count", 0)))
     expected_cut_ratio = 1.0
     if generated_token_count > 0 and original_token_count > 0:
         expected_cut_ratio = original_token_count / generated_token_count
@@ -620,17 +668,14 @@ def _build_short_sentence_retry_metadata(
 
 def _wrap_phonemes(phonemes: str, config: ShortSentenceConfig) -> str:
     wrap_mode = config.resolve_modes.get("wrap")
-    pretext = (
-        wrap_mode.phoneme_pretext if isinstance(wrap_mode, WrapResolveMode) else "â€”"
-    )
+    pretext = wrap_mode.phoneme_pretext if isinstance(wrap_mode, WrapResolveMode) else "â€”"
     if pretext == "â€”":
         pretext = config.phoneme_pretext
     return f"{pretext}{phonemes}{pretext}"
 
 
 def _coerce_phrase_result(
-    phrase_result: tuple[str, list[int]]
-    | tuple[str, list[int], list[dict[str, object]]],
+    phrase_result: tuple[str, list[int]] | tuple[str, list[int], list[dict[str, object]]],
 ) -> tuple[str, list[int], list[dict[str, object]]]:
     """Accept legacy two-item monkeypatched test tuples and new timing tuples."""
     if len(phrase_result) == 2:
@@ -647,7 +692,7 @@ def _build_timing_tokens(
     segment_end: int,
 ) -> list[dict[str, object]]:
     timing_tokens: list[dict[str, object]] = []
-    for token in tokens or []:
+    for token in cast(list[object], tokens or []):
         phonemes = _token_attr(token, "phonemes") or _token_attr(token, "phoneme") or ""
         text = str(_token_attr(token, "text") or "")
         whitespace = str(_token_attr(token, "whitespace") or "")

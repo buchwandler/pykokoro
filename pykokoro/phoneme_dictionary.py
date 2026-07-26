@@ -113,17 +113,13 @@ class PhonemeDictionary:
                 # Simple format: {word: phoneme}
                 phoneme_dict = data
         else:
-            raise TypeError(
-                f"Phoneme dictionary must be a JSON object, got {type(data)}"
-            )
+            raise TypeError(f"Phoneme dictionary must be a JSON object, got {type(data)}")
 
         # Validate and normalize all phoneme values (strip slashes if present)
         normalized_dict = {}
         for word, phoneme in phoneme_dict.items():
             if not isinstance(phoneme, str):
-                raise TypeError(
-                    f"Phoneme for '{word}' must be a string, got {type(phoneme)}"
-                )
+                raise TypeError(f"Phoneme for '{word}' must be a string, got {type(phoneme)}")
 
             # Strip /slashes/ if present (support legacy format)
             cleaned_phoneme = phoneme.strip()
@@ -160,9 +156,7 @@ class PhonemeDictionary:
         separator_pattern = r"(?:\s+|-)"
 
         # Sort by length (longest first) to handle multi-word entries correctly
-        sorted_words = sorted(
-            self._dictionary.items(), key=lambda x: len(x[0]), reverse=True
-        )
+        sorted_words = sorted(self._dictionary.items(), key=lambda x: len(x[0]), reverse=True)
 
         for word, phoneme in sorted_words:
             word_key = word.strip()

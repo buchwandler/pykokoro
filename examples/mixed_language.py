@@ -136,9 +136,7 @@ def demo_mixed_language(text: str, primary_lang: str, voice: str, output_file: s
     except ImportError as e:
         print("⚠ Warning: Mixed-language mode not available")
         print(f"  {e}")
-        print(
-            "  Install lingua-language-detector: pip install lingua-language-detector"
-        )
+        print("  Install lingua-language-detector: pip install lingua-language-detector")
         print("  Falling back to single-language mode...")
         print()
 

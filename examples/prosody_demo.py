@@ -43,10 +43,7 @@ try:
     from pykokoro.prosody import AUDIOMENTATIONS_AVAILABLE, LIBROSA_AVAILABLE
 
     if not AUDIOMENTATIONS_AVAILABLE and not LIBROSA_AVAILABLE:
-        print(
-            "WARNING: prosody libraries not installed. "
-            "Pitch and rate changes will be disabled."
-        )
+        print("WARNING: prosody libraries not installed. Pitch and rate changes will be disabled.")
         print("Install with: pip install pykokoro[prosody]")
     elif not AUDIOMENTATIONS_AVAILABLE:
         print("INFO: Using librosa (install audiomentations for better quality)")
@@ -80,9 +77,7 @@ def create_segment_with_prosody(
     tokens = tokenizer.tokenize(phonemes)
 
     # Create SSMD metadata with prosody
-    metadata = SSMDMetadata(
-        prosody_volume=volume, prosody_pitch=pitch, prosody_rate=rate
-    )
+    metadata = SSMDMetadata(prosody_volume=volume, prosody_pitch=pitch, prosody_rate=rate)
 
     # Create segment
     segment = PhonemeSegment(
@@ -117,23 +112,17 @@ def demo_volume(synth, cfg, tokenizer, lang):
         seg = create_segment_with_prosody(text, tokenizer, lang, volume=volume)
         segments.append(seg)
         # Add pause between samples
-        segments.append(
-            PhonemeSegment(text="", phonemes="", tokens=[], pause_after=0.5)
-        )
+        segments.append(PhonemeSegment(text="", phonemes="", tokens=[], pause_after=0.5))
 
     # Relative volume (dB)
     print("\nTesting relative dB values...")
     segments.append(
-        create_segment_with_prosody(
-            "This is plus six decibels.", tokenizer, lang, volume="+6dB"
-        )
+        create_segment_with_prosody("This is plus six decibels.", tokenizer, lang, volume="+6dB")
     )
     segments.append(PhonemeSegment(text="", phonemes="", tokens=[], pause_after=0.5))
 
     segments.append(
-        create_segment_with_prosody(
-            "This is minus three decibels.", tokenizer, lang, volume="-3dB"
-        )
+        create_segment_with_prosody("This is minus three decibels.", tokenizer, lang, volume="-3dB")
     )
     segments.append(PhonemeSegment(text="", phonemes="", tokens=[], pause_after=0.5))
 
@@ -183,23 +172,17 @@ def demo_pitch(synth, cfg, tokenizer, lang):
         seg = create_segment_with_prosody(text, tokenizer, lang, pitch=pitch)
         segments.append(seg)
         # Add pause between samples
-        segments.append(
-            PhonemeSegment(text="", phonemes="", tokens=[], pause_after=0.5)
-        )
+        segments.append(PhonemeSegment(text="", phonemes="", tokens=[], pause_after=0.5))
 
     # Relative pitch (semitones)
     print("\nTesting relative semitone values...")
     segments.append(
-        create_segment_with_prosody(
-            "This is two semitones higher.", tokenizer, lang, pitch="+2st"
-        )
+        create_segment_with_prosody("This is two semitones higher.", tokenizer, lang, pitch="+2st")
     )
     segments.append(PhonemeSegment(text="", phonemes="", tokens=[], pause_after=0.5))
 
     segments.append(
-        create_segment_with_prosody(
-            "This is one semitone lower.", tokenizer, lang, pitch="-1st"
-        )
+        create_segment_with_prosody("This is one semitone lower.", tokenizer, lang, pitch="-1st")
     )
 
     # Generate audio
@@ -233,23 +216,17 @@ def demo_rate(synth, cfg, tokenizer, lang):
         seg = create_segment_with_prosody(text, tokenizer, lang, rate=rate)
         segments.append(seg)
         # Add pause between samples
-        segments.append(
-            PhonemeSegment(text="", phonemes="", tokens=[], pause_after=0.5)
-        )
+        segments.append(PhonemeSegment(text="", phonemes="", tokens=[], pause_after=0.5))
 
     # Relative rate (percentage)
     print("\nTesting relative percentage values...")
     segments.append(
-        create_segment_with_prosody(
-            "This is twenty percent faster.", tokenizer, lang, rate="120%"
-        )
+        create_segment_with_prosody("This is twenty percent faster.", tokenizer, lang, rate="120%")
     )
     segments.append(PhonemeSegment(text="", phonemes="", tokens=[], pause_after=0.5))
 
     segments.append(
-        create_segment_with_prosody(
-            "This is twenty percent slower.", tokenizer, lang, rate="80%"
-        )
+        create_segment_with_prosody("This is twenty percent slower.", tokenizer, lang, rate="80%")
     )
 
     # Generate audio
@@ -271,9 +248,7 @@ def demo_combined(synth, cfg, tokenizer, lang):
     segments = []
 
     # Introduction
-    segments.append(
-        create_segment_with_prosody("Listen to these combinations.", tokenizer, lang)
-    )
+    segments.append(create_segment_with_prosody("Listen to these combinations.", tokenizer, lang))
     segments.append(PhonemeSegment(text="", phonemes="", tokens=[], pause_after=0.8))
 
     # Combination 1: Loud + High + Fast
@@ -317,9 +292,7 @@ def demo_combined(synth, cfg, tokenizer, lang):
     segments.append(PhonemeSegment(text="", phonemes="", tokens=[], pause_after=0.8))
 
     # Conclusion
-    segments.append(
-        create_segment_with_prosody("That completes the demo.", tokenizer, lang)
-    )
+    segments.append(create_segment_with_prosody("That completes the demo.", tokenizer, lang))
 
     # Generate audio
     audio = synth.synthesize(segments, cfg, Trace())

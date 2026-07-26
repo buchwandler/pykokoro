@@ -43,9 +43,7 @@ def main():
         voice_to_use = available_voices[0]
         print(f"Using voice: {voice_to_use}")
 
-        samples, sample_rate = kokoro.create(
-            test_text, voice=voice_to_use, speed=1.0, lang="en-us"
-        )
+        samples, sample_rate = kokoro.create(test_text, voice=voice_to_use, speed=1.0, lang="en-us")
 
         print("✓ Audio generated successfully!")
         print(f"  Duration: {len(samples) / sample_rate:.2f} seconds")

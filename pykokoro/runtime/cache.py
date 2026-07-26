@@ -6,6 +6,7 @@ import os
 import secrets
 import threading
 import time
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -13,6 +14,7 @@ from typing import Any, Protocol
 class Cache(Protocol):
     def get(self, key: str) -> Any | None: ...
     def set(self, key: str, value: Any) -> None: ...
+    def delete(self, key: str) -> None: ...
 
 
 def make_cache_key(*parts: Any) -> str:
@@ -21,9 +23,7 @@ def make_cache_key(*parts: Any) -> str:
         if isinstance(p, bytes | bytearray):
             b = bytes(p)
         else:
-            b = json.dumps(p, sort_keys=True, ensure_ascii=False, default=str).encode(
-                "utf-8"
-            )
+            b = json.dumps(p, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
         h.update(b)
         h.update(b"\x1f")
     return h.hexdigest()
@@ -69,6 +69,9 @@ class NullCache:
     def set(self, key: str, value: Any) -> None:
         return None
 
+    def delete(self, key: str) -> None:
+        return None
+
 
 class DiskCache:
     _replace_retries = 6
@@ -103,10 +106,8 @@ class DiskCache:
         try:
             return json.loads(p.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
-            try:
+            with suppress(OSError):
                 p.unlink()
-            except OSError:
-                pass
             return None
 
     def set(self, key: str, value: Any) -> None:
@@ -127,3 +128,7 @@ class DiskCache:
                 pass
             except OSError:
                 pass
+
+    def delete(self, key: str) -> None:
+        with suppress(FileNotFoundError):
+            self._path(key).unlink()

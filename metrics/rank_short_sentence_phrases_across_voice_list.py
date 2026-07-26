@@ -168,15 +168,10 @@ def main() -> None:
         voice_attempts = {voice: [] for voice in VOICES}
 
         for phrase_index, spec in enumerate(phrase_specs, start=1):
-            print(
-                f"Scoring phrase {phrase_index}/{len(phrase_specs)} "
-                f"[{spec.kind}] {spec.text!r}"
-            )
+            print(f"Scoring phrase {phrase_index}/{len(phrase_specs)} [{spec.kind}] {spec.text!r}")
             phrase_results_by_voice = {voice: [] for voice in VOICES}
             phrase_has_new_results = False
-            for voice_index, (voice, voice_style) in enumerate(
-                voice_styles.items(), start=1
-            ):
+            for voice_index, (voice, voice_style) in enumerate(voice_styles.items(), start=1):
                 cached_count = 0
                 computed_count = 0
                 for index, text in enumerate(DEMO_SEGMENTS):
@@ -210,11 +205,7 @@ def main() -> None:
             phrase_results_by_spec[spec] = phrase_results_by_voice
             score = summarize_phrase(
                 spec,
-                [
-                    attempt
-                    for attempts in phrase_results_by_voice.values()
-                    for attempt in attempts
-                ],
+                [attempt for attempts in phrase_results_by_voice.values() for attempt in attempts],
             )
             print(
                 f"Processed {score.kind} phrase {score.phrase!r} | "
@@ -226,15 +217,11 @@ def main() -> None:
     finally:
         kokoro.close()
 
-    voice_scores = [
-        summarize_voice(voice, attempts) for voice, attempts in voice_attempts.items()
-    ]
+    voice_scores = [summarize_voice(voice, attempts) for voice, attempts in voice_attempts.items()]
     ranked_voices = sorted_scores(voice_scores)
     print_voice_scores("Voices ranked across all phrases", ranked_voices)
 
-    top_voices = {
-        score.voice for score in ranked_voices[:TOP_VOICE_COUNT_FOR_PHRASE_RANKING]
-    }
+    top_voices = {score.voice for score in ranked_voices[:TOP_VOICE_COUNT_FOR_PHRASE_RANKING]}
     phrase_scores = [
         summarize_phrase(
             spec,
@@ -250,9 +237,7 @@ def main() -> None:
     ranked_neutral_phrases = sorted_scores(
         [score for score in phrase_scores if score.kind == "neutral"]
     )
-    ranked_end_phrases = sorted_scores(
-        [score for score in phrase_scores if score.kind == "end"]
-    )
+    ranked_end_phrases = sorted_scores([score for score in phrase_scores if score.kind == "end"])
     print_phrase_scores(
         f"Neutral phrases ranked across top {TOP_VOICE_COUNT_FOR_PHRASE_RANKING} voices",
         ranked_neutral_phrases,
@@ -371,9 +356,7 @@ def load_result_cache() -> ResultCache:
 
 def save_result_cache(result_cache: ResultCache) -> None:
     with RESULTS_PATH.open("w", encoding="utf-8") as results_file:
-        json.dump(
-            result_cache, results_file, ensure_ascii=False, indent=2, sort_keys=True
-        )
+        json.dump(result_cache, results_file, ensure_ascii=False, indent=2, sort_keys=True)
         results_file.write("\n")
 
 

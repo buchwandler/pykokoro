@@ -169,13 +169,9 @@ def main():
         config_neutral_phrase = neutral_phrase_short_sentence_config()
 
         # Generate with all configs
-        samples_pretext, sr = test_sentence_with_config(
-            text, config_pretext, "With wrap mode"
-        )
+        samples_pretext, sr = test_sentence_with_config(text, config_pretext, "With wrap mode")
 
-        samples_disabled, sr = test_sentence_with_config(
-            text, config_disabled, "Without handling"
-        )
+        samples_disabled, sr = test_sentence_with_config(text, config_disabled, "Without handling")
 
         samples_neutral_phrase, sr = test_sentence_with_config(
             text, config_neutral_phrase, "With phrase mode"
@@ -201,9 +197,7 @@ def main():
     # Save combined audio
     print_separator("Saving Combined Audio")
 
-    combined_samples = np.concatenate(
-        disabled_samples + pretext_samples + neutral_phrase_samples
-    )
+    combined_samples = np.concatenate(disabled_samples + pretext_samples + neutral_phrase_samples)
     output_file = "short_sentence_demo.wav"
     sf.write(output_file, combined_samples, sample_rate)
 

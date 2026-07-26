@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import asdict
 from types import ModuleType
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from ...constants import MAX_PHONEME_LENGTH, SUPPORTED_LANGUAGES
 from ...runtime.cache import cache_from_dir, make_g2p_key
@@ -21,17 +21,27 @@ if TYPE_CHECKING:
 
 
 class KokoroG2PAdapter(G2PAdapter):
+    _cache_schema = 1
+
     def __init__(self) -> None:
         self._g2p: ModuleType | None = None
-        self._g2p_instances: dict[str, G2PBase] = {}
+        self._g2p_instances: dict[tuple[tuple[str, object], ...], G2PBase] = {}
 
     def _load(self) -> ModuleType:
         if self._g2p is not None:
             return self._g2p
         try:
             import kokorog2p
+        except ModuleNotFoundError as exc:
+            if exc.name == "kokorog2p":
+                raise RuntimeError(
+                    "kokorog2p is not installed; install the pykokoro runtime dependencies."
+                ) from exc
+            raise RuntimeError(
+                "kokorog2p is installed but failed to import one of its dependencies."
+            ) from exc
         except Exception as exc:
-            raise RuntimeError("kokorog2p is not installed") from exc
+            raise RuntimeError("kokorog2p is installed but failed to initialize.") from exc
         self._g2p = kokorog2p
         return self._g2p
 
@@ -82,9 +92,7 @@ class KokoroG2PAdapter(G2PAdapter):
                 text=segment.text,
                 lang=lang,
                 is_phonemes=generation.is_phonemes,
-                tokenizer_config=asdict(cfg.tokenizer_config)
-                if cfg.tokenizer_config
-                else None,
+                tokenizer_config=asdict(cfg.tokenizer_config) if cfg.tokenizer_config else None,
                 phoneme_override=phoneme_override,
                 kokorog2p_version=getattr(g2p, "__version__", None),
                 model_quality=cfg.model_quality,
@@ -92,10 +100,14 @@ class KokoroG2PAdapter(G2PAdapter):
                 model_variant=cfg.model_variant,
             )
             cached = cache.get(cache_key)
-            if cached is not None:
-                phonemes = cached.get("phonemes", "")
-                tokens = cached.get("tokens", []) or []
+            cached_payload = self._read_cache_payload(cached)
+            if cached_payload is not None:
+                phonemes, tokens, cached_warnings = cached_payload
+                trace.warnings.extend(cached_warnings)
             else:
+                if cached is not None:
+                    cache.delete(cache_key)
+                result_warnings: list[str] = []
                 if generation.is_phonemes:
                     phonemes = segment.text
                     tokens = g2p.phonemes_to_ids(phonemes, model=model_version)
@@ -111,18 +123,22 @@ class KokoroG2PAdapter(G2PAdapter):
                         return_ids=True,
                         g2p=g2p_instance,
                     )
-                    phonemes = getattr(result, "phonemes", None) or getattr(
-                        result, "phoneme", ""
+                    phonemes = str(
+                        getattr(result, "phonemes", None) or getattr(result, "phoneme", "")
                     )
-                    tokens = getattr(result, "ids", None) or getattr(
-                        result, "token_ids", []
-                    )
-                    result_warnings = cast(list[str], getattr(result, "warnings", []))
+                    tokens = getattr(result, "ids", None) or getattr(result, "token_ids", [])
+                    result_warnings = [str(warning) for warning in getattr(result, "warnings", [])]
                     if result_warnings:
-                        trace.warnings.extend(
-                            [str(warning) for warning in result_warnings]
-                        )
-                cache.set(cache_key, {"phonemes": phonemes, "tokens": tokens})
+                        trace.warnings.extend(result_warnings)
+                cache.set(
+                    cache_key,
+                    {
+                        "schema": self._cache_schema,
+                        "phonemes": str(phonemes),
+                        "tokens": list(tokens),
+                        "warnings": result_warnings,
+                    },
+                )
 
             pause_before, pause_after = self._resolve_pauses(seg_boundaries, generation)
             phoneme_batches = self._split_phoneme_batches(
@@ -159,11 +175,24 @@ class KokoroG2PAdapter(G2PAdapter):
 
         return out
 
-    def _get_g2p_instance(self, lang: str, cfg: PipelineConfig) -> G2PBase:
-        cache_key = lang
-        if cache_key in self._g2p_instances:
-            return self._g2p_instances[cache_key]
+    @classmethod
+    def _read_cache_payload(cls, cached: Any) -> tuple[str, list[int], list[str]] | None:
+        if not isinstance(cached, dict) or cached.get("schema") != cls._cache_schema:
+            return None
+        phonemes = cached.get("phonemes")
+        tokens = cached.get("tokens")
+        warnings = cached.get("warnings")
+        if not isinstance(phonemes, str) or not isinstance(tokens, list):
+            return None
+        if not all(isinstance(token, int) and not isinstance(token, bool) for token in tokens):
+            return None
+        if not isinstance(warnings, list) or not all(
+            isinstance(warning, str) for warning in warnings
+        ):
+            return None
+        return phonemes, tokens, warnings
 
+    def _get_g2p_instance(self, lang: str, cfg: PipelineConfig) -> G2PBase:
         tokenizer_config = cfg.tokenizer_config
         kokorog2p_lang = SUPPORTED_LANGUAGES.get(lang, lang)
         version = self._get_model_version(cfg)
@@ -190,6 +219,10 @@ class KokoroG2PAdapter(G2PAdapter):
                     "load_silver": tokenizer_config.load_silver,
                 }
             )
+
+        cache_key = tuple(sorted(kwargs.items()))
+        if cache_key in self._g2p_instances:
+            return self._g2p_instances[cache_key]
 
         g2p_module = self._load()
         g2p_instance = g2p_module.get_g2p(**kwargs)
@@ -229,9 +262,7 @@ class KokoroG2PAdapter(G2PAdapter):
         batches: list[tuple[str, list[int], float]] = []
         for start in range(0, len(tokens), MAX_PHONEME_LENGTH):
             chunk_tokens = tokens[start : start + MAX_PHONEME_LENGTH]
-            chunk_phonemes = g2p_module.ids_to_phonemes(
-                chunk_tokens, model=model_version
-            )
+            chunk_phonemes = g2p_module.ids_to_phonemes(chunk_tokens, model=model_version)
             batches.append((chunk_phonemes, chunk_tokens, 0.0))
         return batches
 
@@ -253,15 +284,11 @@ class KokoroG2PAdapter(G2PAdapter):
         current = ""
         for part in parts:
             candidate = f"{current}{part}" if current else part
-            candidate_tokens = g2p_module.phonemes_to_ids(
-                candidate, model=model_version
-            )
+            candidate_tokens = g2p_module.phonemes_to_ids(candidate, model=model_version)
             if len(candidate_tokens) > MAX_PHONEME_LENGTH:
                 if not current:
                     return []
-                current_tokens = g2p_module.phonemes_to_ids(
-                    current, model=model_version
-                )
+                current_tokens = g2p_module.phonemes_to_ids(current, model=model_version)
                 if len(current_tokens) > MAX_PHONEME_LENGTH:
                     return []
                 batches.append((current, current_tokens))
@@ -279,9 +306,7 @@ class KokoroG2PAdapter(G2PAdapter):
             return []
         return batches
 
-    def _apply_span_metadata(
-        self, attrs: dict[str, str], metadata: dict[str, str]
-    ) -> None:
+    def _apply_span_metadata(self, attrs: dict[str, str], metadata: dict[str, str]) -> None:
         if not attrs:
             return
         if "voice" in attrs:
@@ -319,10 +344,7 @@ class KokoroG2PAdapter(G2PAdapter):
         for span in spans:
             if "ph" not in span.attrs and "phonemes" not in span.attrs:
                 continue
-            if (
-                span.char_start == segment.char_start
-                and span.char_end == segment.char_end
-            ):
+            if span.char_start == segment.char_start and span.char_end == segment.char_end:
                 override_value = span.attrs.get("ph") or span.attrs.get("phonemes")
                 if phoneme_override and override_value != phoneme_override:
                     warnings.append(
@@ -330,10 +352,7 @@ class KokoroG2PAdapter(G2PAdapter):
                         f"{segment.char_start}:{segment.char_end}."
                     )
                 phoneme_override = override_value
-            elif (
-                span.char_end > segment.char_start
-                and span.char_start < segment.char_end
-            ):
+            elif span.char_end > segment.char_start and span.char_start < segment.char_end:
                 warnings.append(
                     "Skipped phoneme override span at "
                     f"{span.char_start}:{span.char_end} for segment "

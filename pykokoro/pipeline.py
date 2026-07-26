@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from dataclasses import replace
+from dataclasses import fields, is_dataclass, replace
 from pathlib import Path
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any
 
+from typing_extensions import Self
+
+from .config_types import LANG_CODE_TO_ONNX
 from .constants import SAMPLE_RATE
 from .generation_config import GenerationConfig
-from .onnx_backend import LANG_CODE_TO_ONNX
 from .pipeline_config import PipelineConfig
 from .runtime.tracing import trace_timing
 from .spacy_models import SpacyModelSize
@@ -41,9 +43,7 @@ def _coerce_generation(base: GenerationConfig, value: Any) -> GenerationConfig:
         return value
     if isinstance(value, Mapping):
         return replace(base, **dict(value))
-    raise TypeError(
-        f"generation must be GenerationConfig | Mapping | None, got {type(value)!r}"
-    )
+    raise TypeError(f"generation must be GenerationConfig | Mapping | None, got {type(value)!r}")
 
 
 def _coerce_paths_inplace(data: dict[str, Any]) -> None:
@@ -75,9 +75,7 @@ def _coerce_pipeline_config(
 
         return cfg
 
-    raise TypeError(
-        f"config must be PipelineConfig | Mapping | None, got {type(value)!r}"
-    )
+    raise TypeError(f"config must be PipelineConfig | Mapping | None, got {type(value)!r}")
 
 
 def _merge_config(
@@ -358,11 +356,11 @@ class KokoroPipeline:
             cfg.model_source,
             cfg.model_variant,
             cfg.provider,
-            cfg.provider_options,
-            cfg.session_options,
-            cfg.tokenizer_config,
-            cfg.espeak_config,
-            cfg.short_sentence_config,
+            _freeze_config_value(cfg.provider_options),
+            _freeze_config_value(cfg.session_options),
+            _freeze_config_value(cfg.tokenizer_config),
+            _freeze_config_value(cfg.espeak_config),
+            _freeze_config_value(cfg.short_sentence_config),
         )
 
     @staticmethod
@@ -377,11 +375,11 @@ class KokoroPipeline:
         kokoro_key = self._kokoro_key(cfg)
         if self._kokoro is not None and self._kokoro_config_key == kokoro_key:
             return self._kokoro, False
-        if self._kokoro is not None and self._owns_kokoro:
-            self._kokoro.close()
         from .onnx_backend import Kokoro
 
-        self._kokoro = Kokoro(
+        previous_kokoro = self._kokoro
+        previous_owned = self._owns_kokoro
+        new_kokoro = Kokoro(
             model_path=Path(cfg.model_path) if cfg.model_path else None,
             voices_path=Path(cfg.voices_path) if cfg.voices_path else None,
             model_quality=cfg.model_quality,
@@ -394,24 +392,34 @@ class KokoroPipeline:
             espeak_config=cfg.espeak_config,
             short_sentence_config=cfg.short_sentence_config,
         )
+        self._kokoro = new_kokoro
         self._kokoro_config_key = kokoro_key
         self._owns_kokoro = True
-        return self._kokoro, True
+        if previous_kokoro is not None and previous_owned:
+            try:
+                previous_kokoro.close()
+            except Exception:
+                logger.warning("Failed to close replaced Kokoro backend", exc_info=True)
+        return new_kokoro, True
+
+    def _resolve_run_config(self, overrides: dict[str, Any]) -> PipelineConfig:
+        if not overrides:
+            return _default_lang_from_voice(self.config)
+        overrides = dict(overrides)
+        lang = overrides.pop("lang", None)
+        has_generation_override = "generation" in overrides
+        generation = _coerce_generation(
+            self.config.generation,
+            overrides.pop("generation", None),
+        )
+        if lang is not None:
+            generation = replace(generation, lang=lang)
+        if has_generation_override or lang is not None:
+            overrides["generation"] = generation
+        return _default_lang_from_voice(replace(self.config, **overrides))
 
     def run(self, text: str, **overrides: Any) -> AudioResult:
-        if overrides:
-            lang = overrides.pop("lang", None)
-            if lang is not None:
-                generation = overrides.get("generation")
-                if generation is None:
-                    generation = replace(self.config.generation, lang=lang)
-                else:
-                    generation = replace(generation, lang=lang)
-                overrides["generation"] = generation
-            cfg = replace(self.config, **overrides)
-        else:
-            cfg = self.config
-        cfg = _default_lang_from_voice(cfg)
+        cfg = self._resolve_run_config(overrides)
         trace = Trace()
 
         with trace_timing(trace, "doc", "parse"):
@@ -440,29 +448,19 @@ class KokoroPipeline:
         audio_generator = self.audio_generation
         audio_postprocessor = self.audio_postprocessing
 
-        if (
-            phoneme_processor is None
-            or audio_generator is None
-            or audio_postprocessor is None
-        ):
+        if phoneme_processor is None or audio_generator is None or audio_postprocessor is None:
             kokoro, kokoro_changed = self._ensure_kokoro(cfg)
-            if phoneme_processor is None or (
-                kokoro_changed and self._owns_phoneme_processing
-            ):
+            if phoneme_processor is None or (kokoro_changed and self._owns_phoneme_processing):
                 phoneme_processor = OnnxPhonemeProcessorAdapter(kokoro)
                 if self.phoneme_processing is None or self._owns_phoneme_processing:
                     self.phoneme_processing = phoneme_processor
                     self._owns_phoneme_processing = True
-            if audio_generator is None or (
-                kokoro_changed and self._owns_audio_generation
-            ):
+            if audio_generator is None or (kokoro_changed and self._owns_audio_generation):
                 audio_generator = OnnxAudioGenerationAdapter(kokoro)
                 if self.audio_generation is None or self._owns_audio_generation:
                     self.audio_generation = audio_generator
                     self._owns_audio_generation = True
-            if audio_postprocessor is None or (
-                kokoro_changed and self._owns_audio_postprocessing
-            ):
+            if audio_postprocessor is None or (kokoro_changed and self._owns_audio_postprocessing):
                 audio_postprocessor = OnnxAudioPostprocessingAdapter(kokoro)
                 if self.audio_postprocessing is None or self._owns_audio_postprocessing:
                     self.audio_postprocessing = audio_postprocessor
@@ -477,9 +475,7 @@ class KokoroPipeline:
             phoneme_segments = phoneme_processor.process(phoneme_segments, cfg, trace)
 
         with trace_timing(trace, "audio_generation", "generate"):
-            logger.debug(
-                "Generating audio for %d phoneme segments", len(phoneme_segments)
-            )
+            logger.debug("Generating audio for %d phoneme segments", len(phoneme_segments))
             phoneme_segments = audio_generator.generate(phoneme_segments, cfg, trace)
 
         with trace_timing(trace, "audio_postprocessing", "postprocess"):
@@ -496,3 +492,33 @@ class KokoroPipeline:
 
     def __call__(self, text: str, **overrides: Any) -> AudioResult:
         return self.run(text, **overrides)
+
+
+def _freeze_config_value(value: Any) -> object:
+    """Return an immutable snapshot for values used in backend cache keys."""
+    if value is None or isinstance(value, (bool, int, float, str, bytes)):
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, Mapping):
+        items: list[tuple[object, object]] = []
+        for key, item in value.items():
+            items.append((_freeze_config_value(key), _freeze_config_value(item)))
+        return ("mapping", tuple(sorted(items, key=lambda item: repr(item[0]))))
+    if isinstance(value, (list, tuple)):
+        return (
+            type(value).__name__,
+            tuple(_freeze_config_value(item) for item in value),
+        )
+    if isinstance(value, (set, frozenset)):
+        set_items: list[object] = [_freeze_config_value(item) for item in value]
+        return (type(value).__name__, tuple(sorted(set_items, key=repr)))
+    if is_dataclass(value):
+        return (
+            type(value).__qualname__,
+            tuple(
+                (field.name, _freeze_config_value(getattr(value, field.name)))
+                for field in fields(value)
+            ),
+        )
+    return (type(value).__qualname__, id(value))

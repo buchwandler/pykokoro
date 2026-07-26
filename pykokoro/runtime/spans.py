@@ -20,8 +20,7 @@ def slice_spans(
             if span.char_start < seg_start or span.char_end > seg_end:
                 if warnings is not None:
                     warnings.append(
-                        "Dropped partial annotation span at "
-                        f"{span.char_start}:{span.char_end}"
+                        f"Dropped partial annotation span at {span.char_start}:{span.char_end}"
                     )
                 continue
             start = span.char_start - seg_start

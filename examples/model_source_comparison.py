@@ -128,11 +128,7 @@ def main():
     print(f"Available voices in v1.1-zh: {len(available_voices_v11zh)}")
 
     # Use af_maple (English female voice from v1.1-zh)
-    voice_v11zh = (
-        "af_maple"
-        if "af_maple" in available_voices_v11zh
-        else available_voices_v11zh[0]
-    )
+    voice_v11zh = "af_maple" if "af_maple" in available_voices_v11zh else available_voices_v11zh[0]
     print(f"Using English voice: {voice_v11zh}")
     print(f"\nGenerating audio with HuggingFace v1.1-zh using voice '{voice_v11zh}'...")
     pipeline_hf_v11zh = build_pipeline(kokoro_hf_v11zh, voice_v11zh, "en-us")
@@ -176,9 +172,7 @@ def main():
 
     # Use the same voice as Example 1 if available
     voice_github = (
-        voice_to_use
-        if voice_to_use in available_voices_github
-        else available_voices_github[0]
+        voice_to_use if voice_to_use in available_voices_github else available_voices_github[0]
     )
     print(f"\nGenerating audio with GitHub v1.0 using voice '{voice_github}'...")
     pipeline_github_v10 = build_pipeline(kokoro_github_v10, voice_github, "en-us")
@@ -222,9 +216,7 @@ def main():
 
     # Find English voices (af_maple, af_sol, bf_vale)
     english_voices = [
-        v
-        for v in available_voices_github_v11zh
-        if v in ["af_maple", "af_sol", "bf_vale"]
+        v for v in available_voices_github_v11zh if v in ["af_maple", "af_sol", "bf_vale"]
     ]
     english_list = ", ".join(english_voices) if english_voices else "None found"
     print(f"English voices: {english_list}")
@@ -235,15 +227,9 @@ def main():
         if "af_maple" in available_voices_github_v11zh
         else available_voices_github_v11zh[0]
     )
-    print(
-        f"\nGenerating audio with GitHub v1.1-zh using voice '{voice_github_v11zh}'..."
-    )
-    pipeline_github_v11zh = build_pipeline(
-        kokoro_github_v11zh, voice_github_v11zh, "en-us"
-    )
-    result_github_v11zh = pipeline_github_v11zh.run(
-        ENGLISH_TEXT, voice=voice_github_v11zh
-    )
+    print(f"\nGenerating audio with GitHub v1.1-zh using voice '{voice_github_v11zh}'...")
+    pipeline_github_v11zh = build_pipeline(kokoro_github_v11zh, voice_github_v11zh, "en-us")
+    result_github_v11zh = pipeline_github_v11zh.run(ENGLISH_TEXT, voice=voice_github_v11zh)
     samples_github_v11zh, sample_rate = (
         result_github_v11zh.audio,
         result_github_v11zh.sample_rate,
@@ -269,34 +255,18 @@ def main():
     print(f"HuggingFace v1.0:    {duration_hf_v10:.2f}s - {output_file_hf_v10}")
     print(f"HuggingFace v1.1-zh: {duration_hf_v11zh:.2f}s - {output_file_hf_v11zh}")
     print(f"GitHub v1.0:         {duration_github_v10:.2f}s - {output_file_github_v10}")
-    print(
-        f"GitHub v1.1-zh:      {duration_github_v11zh:.2f}s - "
-        f"{output_file_github_v11zh}"
-    )
+    print(f"GitHub v1.1-zh:      {duration_github_v11zh:.2f}s - {output_file_github_v11zh}")
     print("\nComparison complete! You can now listen to the generated audio files.")
     print("\nModel Source Characteristics:")
-    print(
-        "  • HuggingFace v1.0:    54 voices, 8 quality options "
-        "(fp32, fp16, q8, q4, etc.)"
-    )
-    print(
-        "  • HuggingFace v1.1-zh: 103 voices, 8 quality options "
-        "(fp32, fp16, q8, q4, etc.)"
-    )
-    print(
-        "  • GitHub v1.0:         54 voices, 4 quality options "
-        "(fp32, fp16, fp16-gpu, q8)"
-    )
+    print("  • HuggingFace v1.0:    54 voices, 8 quality options (fp32, fp16, q8, q4, etc.)")
+    print("  • HuggingFace v1.1-zh: 103 voices, 8 quality options (fp32, fp16, q8, q4, etc.)")
+    print("  • GitHub v1.0:         54 voices, 4 quality options (fp32, fp16, fp16-gpu, q8)")
     print("  • GitHub v1.1-zh:      103 voices, 1 quality option (fp32 only)")
     print("\nKey Differences:")
     print("  • v1.0 models: 54 voices (English, Spanish, French, German, etc.)")
     print("  • v1.1-zh models: 103 voices (includes all v1.0 + Chinese voices)")
-    print(
-        "  • HuggingFace: More quantization options, downloads individual voice files"
-    )
-    print(
-        "  • GitHub: Faster setup with pre-combined voices.bin, fewer quality options"
-    )
+    print("  • HuggingFace: More quantization options, downloads individual voice files")
+    print("  • GitHub: Faster setup with pre-combined voices.bin, fewer quality options")
 
 
 if __name__ == "__main__":

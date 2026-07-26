@@ -255,9 +255,7 @@ def main():
 
     # Initialize Kokoro
     pipe = KokoroPipeline(
-        PipelineConfig(
-            voice=VOICE, generation=GenerationConfig(lang="en-us", speed=1.0)
-        )
+        PipelineConfig(voice=VOICE, generation=GenerationConfig(lang="en-us", speed=1.0))
     )
 
     # Demo 1: Numbers

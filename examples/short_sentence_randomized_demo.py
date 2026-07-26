@@ -220,9 +220,7 @@ def main() -> None:
                 all_samples.extend([audio, pause])
             all_samples.append(group_pause)
 
-    combined = (
-        np.concatenate(all_samples) if all_samples else np.array([], dtype=np.float32)
-    )
+    combined = np.concatenate(all_samples) if all_samples else np.array([], dtype=np.float32)
     sf.write(OUTPUT_FILE, combined, sample_rate)
 
     print_separator("OUTPUT")

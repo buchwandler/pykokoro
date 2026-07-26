@@ -141,10 +141,7 @@ def main():
         pause_sentence=0.6,
     )
 
-    print(
-        f"Base config: speed={base_config.speed}, "
-        f"pause_sentence={base_config.pause_sentence}s"
-    )
+    print(f"Base config: speed={base_config.speed}, pause_sentence={base_config.pause_sentence}s")
     print("Override: speed=1.5 (kwargs take priority)")
 
     samples, sr = kokoro.create(

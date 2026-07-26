@@ -50,9 +50,7 @@ def build_kokoro(cfg: PipelineConfig) -> Kokoro:
     )
 
 
-def run_pipeline(
-    label: str, pipeline: KokoroPipeline, text: str, output_path: str
-) -> None:
+def run_pipeline(label: str, pipeline: KokoroPipeline, text: str, output_path: str) -> None:
     result = pipeline.run(text)
     result.save_wav(output_path)
     print(f"[{label}] Wrote {output_path}")

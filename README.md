@@ -30,8 +30,13 @@ A Python library for Kokoro TTS (Text-to-Speech) using ONNX runtime.
 ### Basic Installation (CPU only)
 
 ```bash
-pip install pykokoro
+pip install "pykokoro[cpu]"
 ```
+
+The ONNX Runtime distributions are alternatives. Install exactly one provider extra for
+inference: `cpu`, `gpu`, `openvino`, or `directml`. The `coreml` extra uses the macOS
+CPU distribution plus CoreML tooling. The `all` extra only adds optional audio features
+and never installs multiple ONNX Runtime wheels.
 
 ### GPU and Accelerator Support
 
@@ -64,7 +69,7 @@ pip install pykokoro[directml]
 pip install pykokoro[coreml]
 ```
 
-#### All Accelerators
+#### Optional Features
 
 ```bash
 pip install pykokoro[all]
@@ -145,8 +150,8 @@ res = pipe.run("Hello")
 ### Automatic Provider Selection (Recommended)
 
 ```python
-# Auto-select best available provider (CUDA > CoreML > DirectML > CPU)
-# Note: OpenVINO is attempted but will fall back to next priority if incompatible
+# Auto-select first available accelerator (CUDA > OpenVINO > CoreML > DirectML > CPU)
+# The selected accelerator is paired with CPU fallback when the session supports it.
 from pykokoro import KokoroPipeline, PipelineConfig
 
 pipe = KokoroPipeline(PipelineConfig(provider="auto", voice="af_sarah"))

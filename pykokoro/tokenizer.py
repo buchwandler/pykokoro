@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, TypeAlias
 
 import kokorog2p as _kokorog2p
 from kokorog2p import phonemize
@@ -20,8 +21,8 @@ from .phoneme_dictionary import PhonemeDictionary
 from .spacy_models import SpacyModelSize, resolve_configured_spacy_model
 
 N_TOKENS = _kokorog2p.N_TOKENS
-BackendType = _kokorog2p.BackendType
-GToken = _kokorog2p.GToken
+BackendType: TypeAlias = str
+GToken: TypeAlias = Any
 filter_for_kokoro = _kokorog2p.filter_for_kokoro
 get_g2p = _kokorog2p.get_g2p
 get_kokoro_vocab = _kokorog2p.get_kokoro_vocab
@@ -183,11 +184,7 @@ class Tokenizer:
         else:
             self._kokorog2p_model = "1.0"
 
-        self.vocab = (
-            vocab
-            if vocab is not None
-            else get_kokoro_vocab(model=self._kokorog2p_model)
-        )
+        self.vocab = vocab if vocab is not None else get_kokoro_vocab(model=self._kokorog2p_model)
         self._reverse_vocab: dict[int, str] | None = None
         self.config = config or TokenizerConfig()
 
@@ -229,12 +226,8 @@ class Tokenizer:
                 )
 
         # Log if espeak_config was provided (deprecated)
-        if espeak_config is not None and (
-            espeak_config.lib_path or espeak_config.data_path
-        ):
-            logger.warning(
-                "EspeakConfig is deprecated. kokorog2p manages espeak internally."
-            )
+        if espeak_config is not None and (espeak_config.lib_path or espeak_config.data_path):
+            logger.warning("EspeakConfig is deprecated. kokorog2p manages espeak internally.")
 
     def _validate_mixed_language_config(self) -> None:
         """Delegate to MixedLanguageHandler.validate_config (backward compatibility)."""
@@ -350,9 +343,7 @@ class Tokenizer:
 
         # Preprocess for mixed-language detection (before custom dictionary)
         if self.config.use_mixed_language:
-            text = self._mixed_language_handler.preprocess_text(
-                text, default_language=lang
-            )
+            text = self._mixed_language_handler.preprocess_text(text, default_language=lang)
         # Apply custom phoneme dictionary first
         processed_text = self._apply_phoneme_dictionary(text)
         g2p = self._get_g2p(lang)
@@ -485,9 +476,7 @@ class Tokenizer:
         for token in tokens:
             if token.phonemes and token.text.strip():
                 # Filter phonemes for Kokoro vocabulary
-                filtered_phonemes = filter_for_kokoro(
-                    token.phonemes, model=self._kokorog2p_model
-                )
+                filtered_phonemes = filter_for_kokoro(token.phonemes, model=self._kokorog2p_model)
                 result.append((token.text, filtered_phonemes))
 
         return result

@@ -12,9 +12,7 @@ def test_with_spacy_model_size_creates_tokenizer_config_when_missing():
 
 
 def test_with_spacy_model_size_overrides_existing_tokenizer_config():
-    cfg = PipelineConfig(
-        tokenizer_config=TokenizerConfig(spacy_model="en_core_web_trf")
-    )
+    cfg = PipelineConfig(tokenizer_config=TokenizerConfig(spacy_model="en_core_web_trf"))
     updated = with_spacy_model_size(cfg, size="sm")
 
     assert updated.tokenizer_config is not None

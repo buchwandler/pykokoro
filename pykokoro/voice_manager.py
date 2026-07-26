@@ -48,15 +48,12 @@ def normalize_voice_style(
 
     if array.dtype == object:
         raise ConfigurationError(
-            f"{label} contains object dtype data. "
-            "Re-download voices to fix the archive."
+            f"{label} contains object dtype data. Re-download voices to fix the archive."
         )
 
     if require_dtype:
         if array.dtype not in VOICE_STYLE_DTYPES:
-            raise ConfigurationError(
-                f"{label} must be float16 or float32, got {array.dtype}."
-            )
+            raise ConfigurationError(f"{label} must be float16 or float32, got {array.dtype}.")
     else:
         if not np.issubdtype(array.dtype, np.floating):
             raise ConfigurationError(f"{label} must be a floating point array.")
@@ -72,9 +69,7 @@ def normalize_voice_style(
                 f"{label} has shape {array.shape}. Explicit broadcasting is required."
             )
         if expected_length is None:
-            raise ConfigurationError(
-                f"{label} broadcast requires expected_length to be set."
-            )
+            raise ConfigurationError(f"{label} broadcast requires expected_length to be set.")
         normalized = np.tile(array[:, None, :], (expected_length, 1, 1))
     elif array.ndim == 1 and array.shape == (VOICE_STYLE_TAIL_SHAPE[-1],):
         if not allow_broadcast:
@@ -82,28 +77,20 @@ def normalize_voice_style(
                 f"{label} has shape {array.shape}. Explicit broadcasting is required."
             )
         if expected_length is None:
-            raise ConfigurationError(
-                f"{label} broadcast requires expected_length to be set."
-            )
+            raise ConfigurationError(f"{label} broadcast requires expected_length to be set.")
         normalized = np.tile(array.reshape(1, 1, -1), (expected_length, 1, 1))
-    elif (
-        array.ndim == 1
-        and expected_length is not None
-        and array.shape == (expected_length,)
-    ):
+    elif array.ndim == 1 and expected_length is not None and array.shape == (expected_length,):
         raise ConfigurationError(
             f"{label} has ambiguous shape {array.shape}. Expected (N, 1, 256)."
         )
     else:
         raise ConfigurationError(
-            f"{label} has unsupported shape {array.shape}. "
-            "Expected (N, 1, 256) or (N, 256)."
+            f"{label} has unsupported shape {array.shape}. Expected (N, 1, 256) or (N, 256)."
         )
 
     if expected_length is not None and normalized.shape[0] != expected_length:
         raise ConfigurationError(
-            f"{label} length {normalized.shape[0]} does not "
-            f"match expected {expected_length}."
+            f"{label} length {normalized.shape[0]} does not match expected {expected_length}."
         )
 
     if normalized.dtype not in VOICE_STYLE_DTYPES:
@@ -322,9 +309,7 @@ class VoiceManager:
                 ) from exc
 
         self._voices_data = self._normalize_loaded_voices(voices, voices_path)
-        logger.info(
-            f"Successfully loaded {len(self._voices_data)} voices from {voices_path}"
-        )
+        logger.info(f"Successfully loaded {len(self._voices_data)} voices from {voices_path}")
         logger.debug(f"Available voices: {', '.join(sorted(self._voices_data.keys()))}")
 
     def _load_voices_bin_github(self, voices_path: Path) -> dict[str, np.ndarray]:
@@ -344,8 +329,7 @@ class VoiceManager:
             voices_npz = np.load(str(voices_path), allow_pickle=False)
         except (ValueError, TypeError, EOFError) as exc:
             raise ConfigurationError(
-                "Voice archive contains unsupported data. "
-                "Re-download voices to fix the archive."
+                "Voice archive contains unsupported data. Re-download voices to fix the archive."
             ) from exc
 
         # Convert NpzFile to dictionary
@@ -385,9 +369,7 @@ class VoiceManager:
         length_counts = Counter(lengths)
         most_common = length_counts.most_common()
         max_count = most_common[0][1]
-        candidate_lengths = [
-            length for length, count in most_common if count == max_count
-        ]
+        candidate_lengths = [length for length, count in most_common if count == max_count]
         target_length = min(candidate_lengths)
 
         if len(lengths) > 1:
@@ -459,9 +441,7 @@ class VoiceManager:
 
         if voice_name not in self._voices_data:
             available = ", ".join(sorted(self._voices_data.keys()))
-            raise KeyError(
-                f"Voice '{voice_name}' not found. Available voices: {available}"
-            )
+            raise KeyError(f"Voice '{voice_name}' not found. Available voices: {available}")
 
         return self._voices_data[voice_name]
 
@@ -526,10 +506,7 @@ class VoiceManager:
         for voice_name, weight in blend.voices:
             style = resolver(voice_name)
             weighted = style * weight
-            if blended is None:
-                blended = weighted
-            else:
-                blended = np.add(blended, weighted)
+            blended = weighted if blended is None else np.add(blended, weighted)
 
         # This should never be None if blend.voices is not empty
         assert blended is not None, "No voices in blend"
@@ -598,9 +575,7 @@ class VoiceManager:
 
         if voice_name not in self._voices_data:
             available = ", ".join(sorted(self._voices_data.keys()))
-            raise KeyError(
-                f"Voice '{voice_name}' not found. Available voices: {available}"
-            )
+            raise KeyError(f"Voice '{voice_name}' not found. Available voices: {available}")
 
         return self._voices_data[voice_name]
 

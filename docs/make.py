@@ -35,10 +35,7 @@ def main():
         build_dir = os.path.join("docs", "_build")
         source_dir = "docs"
 
-    if len(sys.argv) < 2:
-        target = "html"
-    else:
-        target = sys.argv[1]
+    target = "html" if len(sys.argv) < 2 else sys.argv[1]
 
     if target == "clean":
         if os.path.exists(build_dir):

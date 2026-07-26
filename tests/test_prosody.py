@@ -277,9 +277,7 @@ class TestProsodyApplication:
     def test_apply_prosody_all_parameters(self):
         """Test applying all prosody parameters together."""
         audio = np.random.randn(1000).astype(np.float32)
-        result = apply_prosody(
-            audio, sample_rate=24000, volume="+6dB", pitch="+2st", rate="fast"
-        )
+        result = apply_prosody(audio, sample_rate=24000, volume="+6dB", pitch="+2st", rate="fast")
 
         # Result should be different from input
         assert not np.array_equal(result, audio)
@@ -310,9 +308,7 @@ class TestProsodyApplication:
         audio = np.ones(1000, dtype=np.float32)
 
         # Apply prosody with all parameters
-        result = apply_prosody(
-            audio, sample_rate=24000, volume="loud", pitch="+2st", rate="fast"
-        )
+        result = apply_prosody(audio, sample_rate=24000, volume="loud", pitch="+2st", rate="fast")
 
         # Length should be affected by rate (faster = shorter)
         # but not by volume or pitch (allow reasonable tolerance)

@@ -146,8 +146,7 @@ class ProviderConfigManager:
 
             if known_options and key not in known_options:
                 logger.warning(
-                    f"Unknown option '{key}' for {provider}. "
-                    f"Known options: {known_options}"
+                    f"Unknown option '{key}' for {provider}. Known options: {known_options}"
                 )
                 continue
 

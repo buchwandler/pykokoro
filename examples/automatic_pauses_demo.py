@@ -100,10 +100,7 @@ def main():
     print("   → SSMD breaks automatically detected and processed")
     print()
     print("3. Automatic pause control (this example):")
-    print(
-        "   pipe.run(text, voice='af_sarah', "
-        "generation=GenerationConfig(pause_mode='auto'))"
-    )
+    print("   pipe.run(text, voice='af_sarah', generation=GenerationConfig(pause_mode='auto'))")
     print("   → PyKokoro controls pauses precisely at linguistic boundaries")
     print()
 

@@ -26,21 +26,15 @@ def test_pause_propagation_for_single_batch(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "kokorog2p", fake_g2p)
 
-    generation = GenerationConfig(
-        is_phonemes=True, pause_mode="manual", pause_paragraph=1.25
-    )
+    generation = GenerationConfig(is_phonemes=True, pause_mode="manual", pause_paragraph=1.25)
     cfg = PipelineConfig(generation=generation)
 
     text = "aaaaa.\n\nbbbbb."
     doc = DocumentResult(
         clean_text=text,
         boundary_events=[
-            BoundaryEvent(
-                pos=0, kind="pause", duration_s=None, attrs={"strength": "p"}
-            ),
-            BoundaryEvent(
-                pos=5, kind="pause", duration_s=None, attrs={"strength": "p"}
-            ),
+            BoundaryEvent(pos=0, kind="pause", duration_s=None, attrs={"strength": "p"}),
+            BoundaryEvent(pos=5, kind="pause", duration_s=None, attrs={"strength": "p"}),
         ],
     )
     segments = [

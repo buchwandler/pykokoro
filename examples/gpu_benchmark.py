@@ -202,10 +202,7 @@ def main():
             precision = fastest[0].split("_")[1].upper()
             print("  kokoro = pykokoro.Kokoro(")
             print(f'      provider="{base_provider}",')
-            print(
-                f'      provider_options={{"precision": "{precision}", '
-                f'"num_of_threads": 8}}'
-            )
+            print(f'      provider_options={{"precision": "{precision}", "num_of_threads": 8}}')
             print("  )")
     else:
         print(f'  kokoro = pykokoro.Kokoro(provider="{fastest[0]}")')

@@ -66,9 +66,7 @@ def main():
     print("\n" + "=" * 50)
 
     pipe = KokoroPipeline(
-        PipelineConfig(
-            voice="af_sarah", generation=GenerationConfig(lang="en-us", speed=1.0)
-        )
+        PipelineConfig(voice="af_sarah", generation=GenerationConfig(lang="en-us", speed=1.0))
     )
 
     # Generate audio with heading pauses

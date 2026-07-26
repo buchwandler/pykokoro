@@ -127,12 +127,9 @@ def split_into_words_with_positions(text):
         word_matches = re.finditer(r"\b\w+(?:\'[a-z]+)?\b", line, re.IGNORECASE)
         word_position = 0
 
-        for match in word_matches:
+        for word_position, match in enumerate(word_matches, start=1):
             word = match.group()
-            word_position += 1
-            words_with_pos.append(
-                (word, line_num, word_position, char_position + match.start())
-            )
+            words_with_pos.append((word, line_num, word_position, char_position + match.start()))
 
         char_position += len(line) + 1  # +1 for newline
 
@@ -383,9 +380,7 @@ def generate_audio_narration(differences, output_file="phoneme_diff_report.wav")
 
             # Pronounce using pykokoro phonemes directly
             label1 = "Pykokoro:"
-            label1_s, _ = kokoro.create(
-                label1, voice="af_bella", speed=1.0, lang="en-us"
-            )
+            label1_s, _ = kokoro.create(label1, voice="af_bella", speed=1.0, lang="en-us")
             all_samples.append(silence)
             all_samples.append(label1_s)
 
@@ -397,9 +392,7 @@ def generate_audio_narration(differences, output_file="phoneme_diff_report.wav")
 
             # Pronounce using misaki phonemes
             label2 = "Misaki:"
-            label2_s, _ = kokoro.create(
-                label2, voice="af_bella", speed=1.0, lang="en-us"
-            )
+            label2_s, _ = kokoro.create(label2, voice="af_bella", speed=1.0, lang="en-us")
             all_samples.append(silence)
             all_samples.append(label2_s)
 
@@ -470,10 +463,7 @@ def main():
             text = DEFAULT_TEST_TEXT.strip()
     else:
         print("\nNo input file provided. Using default test text.")
-        print(
-            "(To analyze a custom file, run: "
-            "python phoneme_diff_comparison.py your_file.txt)"
-        )
+        print("(To analyze a custom file, run: python phoneme_diff_comparison.py your_file.txt)")
         text = DEFAULT_TEST_TEXT.strip()
 
     print("\nTest Text:")

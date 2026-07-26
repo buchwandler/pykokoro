@@ -7,10 +7,9 @@ import logging
 import random
 import re
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
-import onnxruntime as rt
 
 from .constants import MAX_PHONEME_LENGTH, SAMPLE_RATE
 from .prosody import apply_prosody
@@ -27,6 +26,8 @@ from .utils import generate_silence
 from .voice_manager import normalize_voice_style
 
 if TYPE_CHECKING:
+    import onnxruntime as rt
+
     from .short_sentence_handler import ShortSentenceConfig
 
 logger = logging.getLogger(__name__)
@@ -82,9 +83,7 @@ class AudioGenerator:
         trimmed = phonemes[:MAX_PHONEME_LENGTH]
         return self._tokenizer.tokenize(trimmed)
 
-    def _select_voice_style(
-        self, voice_style: np.ndarray, token_count: int
-    ) -> np.ndarray:
+    def _select_voice_style(self, voice_style: np.ndarray, token_count: int) -> np.ndarray:
         voice_style = normalize_voice_style(voice_style, expected_length=None)
         max_style_idx = voice_style.shape[0] - 1 if len(voice_style.shape) > 0 else 0
         style_idx = min(token_count, MAX_PHONEME_LENGTH - 1, max_style_idx)
@@ -288,11 +287,7 @@ class AudioGenerator:
                 audio, _ = trim_audio(audio)
             audio_parts.append(audio)
 
-        return (
-            np.concatenate(audio_parts)
-            if audio_parts
-            else np.array([], dtype=np.float32)
-        )
+        return np.concatenate(audio_parts) if audio_parts else np.array([], dtype=np.float32)
 
     def _resolve_segment_voice(
         self,
@@ -341,14 +336,10 @@ class AudioGenerator:
                 if effective_config is None:
                     effective_config = ShortSentenceConfig(enabled=True)
                 else:
-                    effective_config = dataclasses.replace(
-                        effective_config, enabled=True
-                    )
+                    effective_config = dataclasses.replace(effective_config, enabled=True)
             else:
                 if effective_config is not None:
-                    effective_config = dataclasses.replace(
-                        effective_config, enabled=False
-                    )
+                    effective_config = dataclasses.replace(effective_config, enabled=False)
         elif effective_config is None:
             effective_config = ShortSentenceConfig()
 
@@ -391,9 +382,7 @@ class AudioGenerator:
     ) -> list[PhonemeSegment]:
         from .short_sentence_handler import is_segment_empty, is_segment_short
 
-        effective_config = self._resolve_short_sentence_config(
-            enable_short_sentence_override
-        )
+        effective_config = self._resolve_short_sentence_config(enable_short_sentence_override)
         phrase_rng = random.Random(random_seed) if random_seed is not None else None
         processed: list[PhonemeSegment] = []
 
@@ -452,9 +441,7 @@ class AudioGenerator:
                             phonemes=batch_phonemes,
                             tokens=list(batch_tokens),
                             pause_before=segment.pause_before if idx == 0 else 0.0,
-                            pause_after=(
-                                segment.pause_after if idx == total_batches - 1 else 0.0
-                            ),
+                            pause_after=(segment.pause_after if idx == total_batches - 1 else 0.0),
                             raw_audio=None,
                             processed_audio=None,
                         )
@@ -486,12 +473,8 @@ class AudioGenerator:
                 segment.raw_audio = None
                 continue
 
-            segment_voice_style = self._resolve_segment_voice(
-                segment, voice_style, voice_resolver
-            )
-            audio, pred_dur = self._run_onnx(
-                segment.phonemes, segment_voice_style, speed
-            )
+            segment_voice_style = self._resolve_segment_voice(segment, voice_style, voice_resolver)
+            audio, pred_dur = self._run_onnx(segment.phonemes, segment_voice_style, speed)
             self._log_short_sentence_timestamps(segment, pred_dur)
             segment.raw_audio = self._prepare_short_sentence_phrase_audio(
                 segment,
@@ -509,9 +492,7 @@ class AudioGenerator:
     ) -> None:
         if pred_dur is None:
             return
-        short_sentence_metadata = (segment.ssmd_metadata or {}).get(
-            SHORT_SENTENCE_META_KEY
-        )
+        short_sentence_metadata = (segment.ssmd_metadata or {}).get(SHORT_SENTENCE_META_KEY)
         if not isinstance(short_sentence_metadata, dict):
             return
         timing_tokens = short_sentence_metadata.get("timing_tokens")
@@ -527,13 +508,10 @@ class AudioGenerator:
                 continue
             start_ts = token.get("start_ts")
             end_ts = token.get("speech_end_ts", token.get("end_ts"))
-            if not isinstance(start_ts, (int, float)) or not isinstance(
-                end_ts, (int, float)
-            ):
+            if not isinstance(start_ts, (int, float)) or not isinstance(end_ts, (int, float)):
                 continue
             logger.debug(
-                "Short sentence target timestamp: segment='%s' token='%s' "
-                "start=%.4f end=%.4f",
+                "Short sentence target timestamp: segment='%s' token='%s' start=%.4f end=%.4f",
                 segment.text[:50],
                 str(token.get("text") or ""),
                 float(start_ts),
@@ -548,9 +526,7 @@ class AudioGenerator:
         speed: float,
     ) -> np.ndarray:
         """Accept confident phrase cuts or regenerate a wrap fallback."""
-        short_sentence_metadata = (segment.ssmd_metadata or {}).get(
-            SHORT_SENTENCE_META_KEY
-        )
+        short_sentence_metadata = (segment.ssmd_metadata or {}).get(SHORT_SENTENCE_META_KEY)
         if not isinstance(short_sentence_metadata, dict):
             return audio
         if short_sentence_metadata.get("kind") not in {"phrase", "randomized-phrase"}:
@@ -659,8 +635,7 @@ class AudioGenerator:
                 continue
 
             logger.info(
-                "Short sentence phrase cut for '%s' succeeded using fallback phrase "
-                "'%s' (%d/%d).",
+                "Short sentence phrase cut for '%s' succeeded using fallback phrase '%s' (%d/%d).",
                 segment.text[:50],
                 template,
                 retry_attempts,
@@ -691,15 +666,11 @@ class AudioGenerator:
                 continue
 
             audio = segment.raw_audio
-            short_sentence_metadata = (segment.ssmd_metadata or {}).get(
-                SHORT_SENTENCE_META_KEY
-            )
-            if isinstance(
-                short_sentence_metadata, dict
-            ) and not short_sentence_metadata.get("cut_applied"):
-                cut_audio = cut_short_sentence_phrase_audio(
-                    audio, short_sentence_metadata
-                )
+            short_sentence_metadata = (segment.ssmd_metadata or {}).get(SHORT_SENTENCE_META_KEY)
+            if isinstance(short_sentence_metadata, dict) and not short_sentence_metadata.get(
+                "cut_applied"
+            ):
+                cut_audio = cut_short_sentence_phrase_audio(audio, short_sentence_metadata)
                 if cut_audio is not None:
                     audio = cut_audio
             if trim_silence:
@@ -719,11 +690,7 @@ class AudioGenerator:
             if segment.pause_after > 0:
                 audio_parts.append(generate_silence(segment.pause_after, SAMPLE_RATE))
 
-        return (
-            np.concatenate(audio_parts)
-            if audio_parts
-            else np.array([], dtype=np.float32)
-        )
+        return np.concatenate(audio_parts) if audio_parts else np.array([], dtype=np.float32)
 
     def generate_from_segments(
         self,
@@ -772,9 +739,7 @@ class AudioGenerator:
         processed = self._postprocess_audio_segments(generated, trim_silence)
         return self._concatenate_audio_segments(processed)
 
-    def _apply_segment_prosody(
-        self, audio: np.ndarray, segment: PhonemeSegment
-    ) -> np.ndarray:
+    def _apply_segment_prosody(self, audio: np.ndarray, segment: PhonemeSegment) -> np.ndarray:
         """Apply prosody modifications from segment metadata to audio.
 
         Args:
@@ -793,9 +758,7 @@ class AudioGenerator:
 
         # Apply prosody if any prosody metadata is present
         if volume or pitch or rate:
-            audio = apply_prosody(
-                audio, SAMPLE_RATE, volume=volume, pitch=pitch, rate=rate
-            )
+            audio = apply_prosody(audio, SAMPLE_RATE, volume=volume, pitch=pitch, rate=rate)
 
         return audio
 
@@ -823,9 +786,7 @@ class AudioGenerator:
 
         # Split phonemes into batches and generate audio
         batches = self.split_phonemes(phonemes)
-        audio = self.generate_from_phoneme_batches(
-            batches, voice_style, speed, trim_silence=False
-        )
+        audio = self.generate_from_phoneme_batches(batches, voice_style, speed, trim_silence=False)
 
         return audio, SAMPLE_RATE
 
@@ -899,10 +860,10 @@ def populate_short_sentence_boundary_metadata(
         token for token in target_tokens if _is_spoken_token(token)
     ] or target_tokens
     metadata["target_start_ts"] = min(
-        float(token["start_ts"]) for token in target_boundary_tokens
+        float(cast(Any, token["start_ts"])) for token in target_boundary_tokens
     )
     metadata["target_end_ts"] = max(
-        float(token.get("speech_end_ts", token["end_ts"]))
+        float(cast(Any, token.get("speech_end_ts", token["end_ts"])))
         for token in target_boundary_tokens
     )
 
@@ -926,9 +887,9 @@ def populate_short_sentence_boundary_metadata(
             "speech_end_ts",
             previous_tokens[-1]["end_ts"],
         )
-        metadata["previous_token_end_ts"] = float(previous_end)
+        metadata["previous_token_end_ts"] = float(cast(Any, previous_end))
     if next_tokens:
-        metadata["next_token_start_ts"] = float(next_tokens[0]["start_ts"])
+        metadata["next_token_start_ts"] = float(cast(Any, next_tokens[0]["start_ts"]))
 
 
 def _short_sentence_phrase_fallback_limit(
@@ -938,7 +899,7 @@ def _short_sentence_phrase_fallback_limit(
 ) -> int:
     value = metadata.get("phrase_fallback_tries", default)
     try:
-        return max(0, int(value))
+        return max(0, int(cast(Any, value)))
     except (TypeError, ValueError):
         return max(0, int(default))
 

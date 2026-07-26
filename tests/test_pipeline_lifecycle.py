@@ -59,9 +59,7 @@ class DummyKokoro:
         _ = voice_name
         return np.zeros((1, 1), dtype=np.float32)
 
-    def generate_raw_audio_segments(
-        self, phoneme_segments, voice_style, speed, voice_resolver
-    ):
+    def generate_raw_audio_segments(self, phoneme_segments, voice_style, speed, voice_resolver):
         _ = voice_style
         _ = speed
         _ = voice_resolver
@@ -136,9 +134,7 @@ def test_phoneme_processor_passes_random_seed_to_short_sentence_preprocess():
             super().__init__()
             self.random_seed = None
 
-        def preprocess_segments(
-            self, phoneme_segments, enable_short_sentence, random_seed=None
-        ):
+        def preprocess_segments(self, phoneme_segments, enable_short_sentence, random_seed=None):
             _ = enable_short_sentence
             self.random_seed = random_seed
             return phoneme_segments

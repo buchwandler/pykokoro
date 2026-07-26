@@ -242,9 +242,7 @@ def _convert_break_strength_to_duration(
         duration = _parse_break_time(time)
         if duration is not None:
             return duration
-        logger.warning(
-            "Invalid SSMD break duration '%s'; falling back to strength.", time
-        )
+        logger.warning("Invalid SSMD break duration '%s'; falling back to strength.", time)
 
     # Otherwise use strength mapping
     if strength:
@@ -325,17 +323,11 @@ def _collect_pause_durations(segments: list[SSMDSegment]) -> list[float]:
     return durations
 
 
-def _breaks_satisfied(
-    expected: list[float], actual: list[float], tolerance: float = 1e-6
-) -> bool:
+def _breaks_satisfied(expected: list[float], actual: list[float], tolerance: float = 1e-6) -> bool:
     remaining = list(actual)
     for target in expected:
         match_index = next(
-            (
-                idx
-                for idx, value in enumerate(remaining)
-                if abs(value - target) <= tolerance
-            ),
+            (idx for idx, value in enumerate(remaining) if abs(value - target) <= tolerance),
             None,
         )
         if match_index is None:
@@ -395,9 +387,7 @@ def _fallback_break_segments(
                 chunk, paragraph_idx, sentence_idx
             )
             if chunk_segments:
-                chunk_segments[-1].pause_after = max(
-                    chunk_segments[-1].pause_after, duration
-                )
+                chunk_segments[-1].pause_after = max(chunk_segments[-1].pause_after, duration)
                 segments.extend(chunk_segments)
             elif segments:
                 segments[-1].pause_after = max(segments[-1].pause_after, duration)
@@ -459,9 +449,7 @@ def _build_segments_from_paragraphs(
                 segment_lang = ssmd_seg.language or lang
 
                 # Map SSMD segment to PyKokoro metadata
-                seg_text, metadata = _map_ssmd_segment_to_metadata(
-                    ssmd_seg, segment_lang
-                )
+                seg_text, metadata = _map_ssmd_segment_to_metadata(ssmd_seg, segment_lang)
 
                 # Apply voice context if segment doesn't have its own voice
                 if not metadata.voice_name and voice_metadata.voice_name:
@@ -756,9 +744,7 @@ def parse_ssmd_to_segments(
                     fallback_durations = _collect_pause_durations(fallback_segments)
                     if _breaks_satisfied(expected_nonzero, fallback_durations):
                         return 0.0, fallback_segments
-            logger.warning(
-                "SSMD parser dropped explicit breaks; using fallback parser."
-            )
+            logger.warning("SSMD parser dropped explicit breaks; using fallback parser.")
             return _fallback_break_segments(
                 text,
                 pause_none=pause_none,

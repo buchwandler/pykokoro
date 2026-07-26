@@ -98,9 +98,7 @@ class TestProviderSelection:
             if provider_map[prov] not in available:
                 provider_value = cast(ProviderType, prov)
                 manager = OnnxSessionManager(provider=provider_value)
-                with pytest.raises(
-                    RuntimeError, match="provider requested but not available"
-                ):
+                with pytest.raises(RuntimeError, match="provider requested but not available"):
                     manager._select_providers(provider_value, False)
                 return
 
@@ -169,9 +167,7 @@ class TestProviderOptions:
             "num_threads": 4,  # SessionOptions attribute, should be filtered
         }
 
-        cuda_opts = manager._get_provider_specific_options(
-            "CUDAExecutionProvider", all_options
-        )
+        cuda_opts = manager._get_provider_specific_options("CUDAExecutionProvider", all_options)
 
         assert "device_id" in cuda_opts
         assert "gpu_mem_limit" in cuda_opts
@@ -183,9 +179,7 @@ class TestProviderOptions:
         manager = OnnxSessionManager()
         all_options = {"device_id": 0}  # Integer value
 
-        opts = manager._get_provider_specific_options(
-            "CUDAExecutionProvider", all_options
-        )
+        opts = manager._get_provider_specific_options("CUDAExecutionProvider", all_options)
 
         assert opts["device_id"] == "0"  # Should be string
         assert isinstance(opts["device_id"], str)
@@ -210,10 +204,7 @@ class TestSessionOptions:
         sess_opt = manager._create_session_options()
 
         assert isinstance(sess_opt, rt.SessionOptions)
-        assert (
-            sess_opt.graph_optimization_level
-            == rt.GraphOptimizationLevel.ORT_ENABLE_ALL
-        )
+        assert sess_opt.graph_optimization_level == rt.GraphOptimizationLevel.ORT_ENABLE_ALL
         assert sess_opt.execution_mode == rt.ExecutionMode.ORT_SEQUENTIAL
 
     def test_create_session_options_user_provided(self):
@@ -298,8 +289,7 @@ class TestSessionCreation:
             # Accept either error: provider not available or session creation failed
             with pytest.raises(
                 RuntimeError,
-                match="(Failed to create ONNX session|"
-                "CUDA provider requested but not available)",
+                match="(Failed to create ONNX session|CUDA provider requested but not available)",
             ):
                 manager.create_session(model_path, allow_fallback=False)
 
@@ -336,9 +326,7 @@ class TestSessionCreation:
 
                 assert session is not None
                 # Should have warning about fallback
-                assert any(
-                    "fell back to" in record.message for record in caplog.records
-                )
+                assert any("fell back to" in record.message for record in caplog.records)
 
 
 class TestProviderMergeLogic:
@@ -399,10 +387,7 @@ class TestLogging:
         manager = OnnxSessionManager(provider="auto")
         manager._select_providers("auto", False)
 
-        assert any(
-            "Auto" in record.message or "CPU" in record.message
-            for record in caplog.records
-        )
+        assert any("Auto" in record.message or "CPU" in record.message for record in caplog.records)
 
     def test_session_options_application_logged(self, caplog):
         """Test that applying session options is logged."""
@@ -410,6 +395,4 @@ class TestLogging:
         manager = OnnxSessionManager(provider_options={"num_threads": 4})
         manager._create_session_options()
 
-        assert any(
-            "Applying provider options" in record.message for record in caplog.records
-        )
+        assert any("Applying provider options" in record.message for record in caplog.records)

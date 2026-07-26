@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import numpy as np
 
 from pykokoro.constants import SAMPLE_RATE
@@ -18,9 +20,9 @@ def cut_with_vad(audio: np.ndarray, metadata: dict[str, object]) -> np.ndarray |
 
     runs = _quiet_runs(
         audio,
-        frame_duration_ms=int(metadata.get("frame_duration_ms", 5)),
-        energy_threshold=float(metadata.get("energy_threshold", 0.05)),
-        min_silence_seconds=float(metadata.get("min_silence_seconds", 0.02)),
+        frame_duration_ms=int(cast(Any, metadata.get("frame_duration_ms", 5))),
+        energy_threshold=float(cast(Any, metadata.get("energy_threshold", 0.05))),
+        min_silence_seconds=float(cast(Any, metadata.get("min_silence_seconds", 0.02))),
     )
     left_cut = _left_cut(runs, windows) if windows.has_left_context else 0
     right_cut = _right_cut(runs, windows) if windows.has_right_context else len(audio)
@@ -64,8 +66,10 @@ def _left_cut(runs: list[tuple[int, int]], windows: BoundaryWindows) -> int | No
     candidates = _overlapping_runs(runs, windows.left_window)
     if not candidates:
         return None
-    run = max(candidates, key=lambda value: min(value[1], windows.left_window[1]))
-    return min(run[1], windows.left_window[1])
+    window = windows.left_window
+    assert window is not None
+    run = max(candidates, key=lambda value: min(value[1], window[1]))
+    return min(run[1], window[1])
 
 
 def _right_cut(runs: list[tuple[int, int]], windows: BoundaryWindows) -> int | None:
@@ -73,8 +77,10 @@ def _right_cut(runs: list[tuple[int, int]], windows: BoundaryWindows) -> int | N
     candidates = _overlapping_runs(runs, windows.right_window)
     if not candidates:
         return None
-    run = min(candidates, key=lambda value: max(value[0], windows.right_window[0]))
-    return max(run[0], windows.right_window[0])
+    window = windows.right_window
+    assert window is not None
+    run = min(candidates, key=lambda value: max(value[0], window[0]))
+    return max(run[0], window[0])
 
 
 def _overlapping_runs(

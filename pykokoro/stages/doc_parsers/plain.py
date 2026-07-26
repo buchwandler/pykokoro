@@ -33,9 +33,7 @@ class PlainTextDocumentParser:
         splitter = PhrasplitSentenceSplitter()
         doc.segments = splitter.split(doc, cfg, trace)
         if cfg.generation.pause_mode == "auto":
-            doc.boundary_events.extend(
-                self._sentence_boundaries(doc.segments, doc.boundary_events)
-            )
+            doc.boundary_events.extend(self._sentence_boundaries(doc.segments, doc.boundary_events))
         return doc
 
     @staticmethod
@@ -63,9 +61,7 @@ class PlainTextDocumentParser:
     ) -> list[BoundaryEvent]:
         if not segments:
             return []
-        pause_positions = {
-            boundary.pos for boundary in boundaries if boundary.kind == "pause"
-        }
+        pause_positions = {boundary.pos for boundary in boundaries if boundary.kind == "pause"}
         out: list[BoundaryEvent] = []
         last_sentence = None
         last_paragraph = None
@@ -81,11 +77,7 @@ class PlainTextDocumentParser:
                 last_end = segment.char_end
                 continue
             if sentence != last_sentence or paragraph != last_paragraph:
-                if (
-                    last_end is not None
-                    and last_paragraph == paragraph
-                    and last_end > 0
-                ):
+                if last_end is not None and last_paragraph == paragraph and last_end > 0:
                     boundary_pos = max(0, last_end - 1)
                     if boundary_pos not in pause_positions:
                         out.append(
@@ -172,10 +164,7 @@ class PhrasplitSentenceSplitter:
                     reason = "invalid offsets"
                 else:
                     slice_text = chunk[seg_start:seg_end]
-                    if (
-                        slice_text != seg_text
-                        and slice_text.strip() != seg_text.strip()
-                    ):
+                    if slice_text != seg_text and slice_text.strip() != seg_text.strip():
                         offsets_valid = False
                         reason = "offset slice mismatch"
                     elif seg_start < cursor:
@@ -191,8 +180,7 @@ class PhrasplitSentenceSplitter:
                         seg_start = cursor
                         seg_end = cursor + len(seg_text)
                     trace.warnings.append(
-                        "Adjusted splitter offsets for segment "
-                        f"{seg_idx} ({seg_text!r}): {reason}."
+                        f"Adjusted splitter offsets for segment {seg_idx} ({seg_text!r}): {reason}."
                     )
 
                 assert seg_start is not None and seg_end is not None
@@ -211,9 +199,7 @@ class PhrasplitSentenceSplitter:
                 elif seg_start > cursor:
                     gap = chunk[cursor:seg_start]
                     if gap.strip():
-                        offset = next(
-                            idx for idx, ch in enumerate(gap) if not ch.isspace()
-                        )
+                        offset = next(idx for idx, ch in enumerate(gap) if not ch.isspace())
                         adjusted_start = cursor + offset
                         trace.warnings.append(
                             "Adjusted splitter offsets to avoid dropping "
@@ -231,21 +217,13 @@ class PhrasplitSentenceSplitter:
                     sentence_idx += 1
                 else:
                     sentence_idx = max(sentence_idx, sent + 1)
-                if (
-                    para is None
-                    or paragraph_breaks
-                    and para == 0
-                    and range_paragraph != 0
-                ):
+                if para is None or paragraph_breaks and para == 0 and range_paragraph != 0:
                     resolved_paragraph = range_paragraph
                 else:
                     resolved_paragraph = para
                 resolved_clause = clause if clause is not None else 0
                 segment_id = (
-                    f"p{resolved_paragraph}"
-                    f"_s{resolved_sentence}"
-                    f"_c{resolved_clause}"
-                    f"_seg{seg_idx}"
+                    f"p{resolved_paragraph}_s{resolved_sentence}_c{resolved_clause}_seg{seg_idx}"
                 )
                 segments.append(
                     Segment(
@@ -283,9 +261,7 @@ class PhrasplitSentenceSplitter:
                     segment.char_end,
                     segment.text,
                 )
-            recon = "".join(
-                text[segment.char_start : segment.char_end] for segment in segments
-            )
+            recon = "".join(text[segment.char_start : segment.char_end] for segment in segments)
             if recon != text:
                 mismatch = _first_mismatch(recon, text)
                 logger.debug(
@@ -363,9 +339,7 @@ class PhrasplitSentenceSplitter:
                     return []
         elif hasattr(phrasplit_module, "iter_split_with_offsets"):
             try:
-                segments = list(
-                    phrasplit_module.iter_split_with_offsets(text, **kwargs)
-                )
+                segments = list(phrasplit_module.iter_split_with_offsets(text, **kwargs))
             except (OSError, TypeError):
                 try:
                     segments = list(

@@ -99,9 +99,7 @@ def main():
     print(f"Voice: {VOICE}")
     print(f"Language: {LANG}")
 
-    pipe = KokoroPipeline(
-        PipelineConfig(voice=VOICE, generation=GenerationConfig(lang=LANG))
-    )
+    pipe = KokoroPipeline(PipelineConfig(voice=VOICE, generation=GenerationConfig(lang=LANG)))
 
     # Test each backend
     all_samples = []
@@ -239,9 +237,7 @@ def main():
                 f"{result['tokens']:<10} {result['duration']:<10.2f}s"
             )
         else:
-            print(
-                f"{result['name']:<40} {'✗':<10} {result.get('error', 'Unknown')[:30]}"
-            )
+            print(f"{result['name']:<40} {'✗':<10} {result.get('error', 'Unknown')[:30]}")
 
     print("\nBackend Comparison:")
     print("  • gold+silver+espeak: Default, best coverage and quality")

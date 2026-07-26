@@ -87,9 +87,7 @@ class TestBugFix2_VoiceStyleBoundsChecking:
 
         # Create voice style array that's SMALLER than MAX_PHONEME_LENGTH
         # This should trigger the bounds check
-        small_voice_style = np.random.randn(10, 1, 256).astype(
-            np.float32
-        )  # Only 10 elements
+        small_voice_style = np.random.randn(10, 1, 256).astype(np.float32)  # Only 10 elements
 
         # This should NOT raise IndexError
         try:
@@ -178,9 +176,7 @@ class TestBugFix2_VoiceStyleBoundsChecking:
         )
 
         voice_style = np.random.randn(512, 256).astype(np.float32)
-        generator.generate_from_phonemes(
-            phonemes="test", voice_style=voice_style, speed=1.0
-        )
+        generator.generate_from_phonemes(phonemes="test", voice_style=voice_style, speed=1.0)
 
         assert "style" in captured_inputs
         style_input = np.asarray(captured_inputs["style"])
@@ -312,9 +308,7 @@ class TestBugFix3Integration:
 
         # Test that the methods work
         opts1 = session_manager._get_default_provider_options("CUDAExecutionProvider")
-        opts2 = ProviderConfigManager.get_default_provider_options(
-            "CUDAExecutionProvider", "fp32"
-        )
+        opts2 = ProviderConfigManager.get_default_provider_options("CUDAExecutionProvider", "fp32")
 
         # Should have same structure
         assert set(opts1.keys()) == set(opts2.keys())

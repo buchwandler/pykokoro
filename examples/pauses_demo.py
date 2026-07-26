@@ -36,9 +36,7 @@ def main():
     """Generate example audio files with pauses."""
     print("Initializing TTS engine...")
     pipe = KokoroPipeline(
-        PipelineConfig(
-            voice="af_sarah", generation=GenerationConfig(lang="en-us", speed=1.0)
-        )
+        PipelineConfig(voice="af_sarah", generation=GenerationConfig(lang="en-us", speed=1.0))
     )
 
     # Example 1: Basic SSMD pause markers

@@ -4,7 +4,9 @@ This module provides the GenerationConfig dataclass for configuring
 audio generation parameters in the KokoroPipeline.
 """
 
+import math
 from dataclasses import dataclass
+from numbers import Real
 from typing import Any, Literal
 
 
@@ -112,40 +114,28 @@ class GenerationConfig:
 
     def __post_init__(self) -> None:
         """Validate configuration parameters after initialization."""
-        # Validate speed
-        if self.speed <= 0.0:
-            raise ValueError(
-                f"speed must be > 0.0, got {self.speed}. "
-                f"Use 0.5 for half speed, 1.0 for normal, 2.0 for double speed."
-            )
+        _validate_real("speed", self.speed, minimum=0.0, exclusive_minimum=True)
+        for field_name in (
+            "pause_clause",
+            "pause_sentence",
+            "pause_paragraph",
+            "pause_variance",
+        ):
+            _validate_real(field_name, getattr(self, field_name), minimum=0.0)
 
-        # Validate pause durations
-        if self.pause_clause < 0.0:
-            raise ValueError(
-                f"pause_clause must be >= 0.0 seconds, got {self.pause_clause}"
-            )
-        if self.pause_sentence < 0.0:
-            raise ValueError(
-                f"pause_sentence must be >= 0.0 seconds, got {self.pause_sentence}"
-            )
-        if self.pause_paragraph < 0.0:
-            raise ValueError(
-                f"pause_paragraph must be >= 0.0 seconds, got {self.pause_paragraph}"
-            )
-        if self.pause_variance < 0.0:
-            raise ValueError(
-                f"pause_variance must be >= 0.0 seconds, got {self.pause_variance}"
-            )
+        if self.random_seed is not None and (
+            isinstance(self.random_seed, bool) or not isinstance(self.random_seed, int)
+        ):
+            raise ValueError(f"random_seed must be an integer or None, got {self.random_seed!r}")
 
         # Validate pause_mode
         if self.pause_mode not in ("tts", "manual", "auto"):
             raise ValueError(
-                "pause_mode must be 'tts', 'manual', or 'auto', "
-                f"got '{self.pause_mode}'"
+                f"pause_mode must be 'tts', 'manual', or 'auto', got '{self.pause_mode}'"
             )
 
         # Validate lang is non-empty
-        if not self.lang or not isinstance(self.lang, str):
+        if not isinstance(self.lang, str) or not self.lang:
             raise ValueError(f"lang must be a non-empty string, got {self.lang!r}")
 
     def merge_with_kwargs(self, **kwargs: Any) -> dict[str, Any]:
@@ -189,3 +179,20 @@ class GenerationConfig:
                 result[key] = kwargs[key]
 
         return result
+
+
+def _validate_real(
+    field_name: str,
+    value: object,
+    *,
+    minimum: float,
+    exclusive_minimum: bool = False,
+) -> None:
+    if isinstance(value, bool) or not isinstance(value, Real):
+        raise ValueError(f"{field_name} must be a real number, got {value!r}")
+    numeric_value = float(value)
+    if not math.isfinite(numeric_value):
+        raise ValueError(f"{field_name} must be finite, got {value!r}")
+    if (numeric_value <= minimum) if exclusive_minimum else (numeric_value < minimum):
+        comparator = ">" if exclusive_minimum else ">="
+        raise ValueError(f"{field_name} must be {comparator} {minimum}, got {value!r}")

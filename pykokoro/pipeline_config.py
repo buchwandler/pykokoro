@@ -4,18 +4,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from .generation_config import GenerationConfig
-from .onnx_backend import (
+from .config_types import (
     DEFAULT_MODEL_SOURCE,
     DEFAULT_MODEL_VARIANT,
     ModelQuality,
     ModelSource,
     ModelVariant,
     ProviderType,
-    VoiceBlend,
 )
+from .generation_config import GenerationConfig
 from .short_sentence_handler import ShortSentenceConfig
 from .tokenizer import EspeakConfig, TokenizerConfig
+from .voice_manager import VoiceBlend
 
 
 @dataclass(frozen=True)

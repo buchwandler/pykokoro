@@ -21,10 +21,7 @@ import soundfile as sf
 import pykokoro
 
 # Test sentence
-TEST_TEXT = (
-    "PyKokoro supports multiple hardware acceleration "
-    "providers for optimal performance."
-)
+TEST_TEXT = "PyKokoro supports multiple hardware acceleration providers for optimal performance."
 
 
 def print_provider_info():

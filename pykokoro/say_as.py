@@ -326,9 +326,7 @@ def normalize_telephone(text: str, lang: str = "en-us", **kwargs: Any) -> str:
         # Convert digit
         try:
             if digit == "0":
-                words.append(
-                    "oh" if lang.startswith("en") else num2words(0, lang=locale)
-                )
+                words.append("oh" if lang.startswith("en") else num2words(0, lang=locale))
             else:
                 words.append(num2words(int(digit), lang=locale))
         except (NotImplementedError, ValueError, TypeError):
@@ -494,9 +492,7 @@ def normalize_say_as(
     normalizer = NORMALIZERS.get(interpret_as.lower())
 
     if normalizer is None:
-        logger.warning(
-            f"Unknown interpret-as type '{interpret_as}', returning original text"
-        )
+        logger.warning(f"Unknown interpret-as type '{interpret_as}', returning original text")
         return text
 
     try:

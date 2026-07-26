@@ -1,11 +1,35 @@
 """Tests for pykokoro.short_sentence_handler module."""
 
 from pykokoro.short_sentence_handler import (
+    PhraseResolveMode,
     ShortSentenceConfig,
     is_segment_empty,
     is_segment_short,
 )
 from pykokoro.types import PhonemeSegment
+
+
+def test_short_sentence_config_rejects_negative_thresholds_and_retries():
+    import pytest
+
+    with pytest.raises(ValueError, match="min_phoneme_length"):
+        ShortSentenceConfig(min_phoneme_length=-1)
+    with pytest.raises(ValueError, match="phrase_fallback_tries"):
+        ShortSentenceConfig(phrase_fallback_tries=-1)
+
+
+def test_short_sentence_config_rejects_unknown_mode_and_malformed_template():
+    import pytest
+
+    with pytest.raises(ValueError, match="resolve_mode"):
+        ShortSentenceConfig(resolve_mode="missing")
+    with pytest.raises(ValueError, match="placeholder"):
+        ShortSentenceConfig(
+            resolve_mode="phrase",
+            resolve_modes={
+                "phrase": PhraseResolveMode(neutral_phrase="missing target"),
+            },
+        )
 
 
 def make_segment(text: str, phonemes: str) -> PhonemeSegment:

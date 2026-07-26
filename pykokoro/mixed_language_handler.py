@@ -22,9 +22,7 @@ if TYPE_CHECKING:
     from .tokenizer import TokenizerConfig
 
 logger = logging.getLogger(__name__)
-ANNOTATION_REGEX = getattr(
-    _kokorog2p, "ANNOTATION_REGEX", re.compile(r"\[[^\]]+\]\{[^}]+\}")
-)
+ANNOTATION_REGEX = getattr(_kokorog2p, "ANNOTATION_REGEX", re.compile(r"\[[^\]]+\]\{[^}]+\}"))
 
 
 class MixedLanguageHandler:
@@ -138,9 +136,7 @@ class MixedLanguageHandler:
                     kokorog2p_primary,
                     allowed_langs,
                 )
-            return self._run_preprocess_multilang(
-                text, kokorog2p_primary, allowed_langs
-            )
+            return self._run_preprocess_multilang(text, kokorog2p_primary, allowed_langs)
         except ImportError:
             logger.warning(
                 "Mixed-language mode requested but lingua-language-detector is "

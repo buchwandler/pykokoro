@@ -35,9 +35,7 @@ def boundary_windows_from_metadata(
     right_window = None
 
     if has_left_context:
-        previous_end = _sample_index(
-            metadata.get("previous_token_end_ts"), audio_length
-        )
+        previous_end = _sample_index(metadata.get("previous_token_end_ts"), audio_length)
         if previous_end is None or previous_end > target_start:
             return None
         left_window = (previous_end, target_start)

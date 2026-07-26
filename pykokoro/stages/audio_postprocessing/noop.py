@@ -37,8 +37,4 @@ class NoopAudioPostprocessingAdapter:
             if segment.pause_after > 0:
                 audio_parts.append(generate_silence(segment.pause_after, SAMPLE_RATE))
 
-        return (
-            np.concatenate(audio_parts)
-            if audio_parts
-            else np.array([], dtype=np.float32)
-        )
+        return np.concatenate(audio_parts) if audio_parts else np.array([], dtype=np.float32)

@@ -206,9 +206,7 @@ def main():
 
     # Prepare all versions
     versions = {
-        "First version: processing each sentence separately": version1_individual(
-            SENTENCES
-        ),
+        "First version: processing each sentence separately": version1_individual(SENTENCES),
         "Second version: combining sentences in pairs": version2_paired(SENTENCES),
         f"Third version: batching with {MIN_PHONEME_THRESHOLD} phoneme threshold": version3_threshold(
             SENTENCES, kokoro, MIN_PHONEME_THRESHOLD
@@ -276,9 +274,7 @@ def main():
     print()
 
     kokoro.close()
-    print(
-        "Done! Listen to the file to hear the differences in prosody and naturalness."
-    )
+    print("Done! Listen to the file to hear the differences in prosody and naturalness.")
 
 
 if __name__ == "__main__":

@@ -39,9 +39,7 @@ def analyze_short_sentence(text: str = "Hi!", voice: str = "af_sarah"):
     print("\nThe algorithm will:")
     print(f"  1. Generate audio for 'Two. {text}'")
     print("  2. Frame the signal (20ms frames, 10ms hop)")
-    print(
-        "  3. Extract Short-Time Energy (STE), Zero Crossing Rate (ZCR), Spectral Flux"
-    )
+    print("  3. Extract Short-Time Energy (STE), Zero Crossing Rate (ZCR), Spectral Flux")
     print("  4. Smooth features with median filter")
     print("  5. Combine features to find valleys")
     print("  6. Detect speech boundaries dynamically")
@@ -94,9 +92,7 @@ def analyze_short_sentence(text: str = "Hi!", voice: str = "af_sarah"):
 
 if __name__ == "__main__":
     # Enable DEBUG logging to see all details
-    logging.basicConfig(
-        level=logging.DEBUG, format="%(levelname)-8s [%(name)s] - %(message)s"
-    )
+    logging.basicConfig(level=logging.DEBUG, format="%(levelname)-8s [%(name)s] - %(message)s")
 
     # Example 1: Analyze "Hi!"
     print("\n\n")

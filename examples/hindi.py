@@ -22,10 +22,7 @@ from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
 
 # Hindi wisdom about life and perseverance
-TEXT = (
-    "जीवन में सफलता उन्हें मिलती है जो कभी हार नहीं मानते। "
-    "हर सुबह एक नई शुरुआत है, हर दिन एक नया अवसर है।"
-)
+TEXT = "जीवन में सफलता उन्हें मिलती है जो कभी हार नहीं मानते। हर सुबह एक नई शुरुआत है, हर दिन एक नया अवसर है।"
 
 VOICE = "hf_alpha"  # Hindi Female voice
 LANG = "hi"  # Hindi

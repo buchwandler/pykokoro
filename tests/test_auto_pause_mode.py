@@ -51,16 +51,12 @@ def test_ssmd_parser_auto_sentence_boundaries():
     doc = SsmdDocumentParser().parse(text, cfg, Trace())
 
     sentence_indices = [
-        segment.sentence_idx
-        for segment in doc.segments
-        if segment.sentence_idx is not None
+        segment.sentence_idx for segment in doc.segments if segment.sentence_idx is not None
     ]
     assert sentence_indices
     first_sentence = min(sentence_indices)
     first_end = max(
-        segment.char_end
-        for segment in doc.segments
-        if segment.sentence_idx == first_sentence
+        segment.char_end for segment in doc.segments if segment.sentence_idx == first_sentence
     )
     expected_pos = max(0, first_end - 1)
     sentence_boundaries = [
@@ -87,9 +83,7 @@ def test_auto_clause_pause_in_g2p(monkeypatch):
     monkeypatch.setitem(sys.modules, "kokorog2p", fake_g2p)
 
     text = "a" * 300 + "," + "b" * 300 + "," + "c" * 300
-    generation = GenerationConfig(
-        is_phonemes=True, pause_mode="auto", pause_clause=0.25
-    )
+    generation = GenerationConfig(is_phonemes=True, pause_mode="auto", pause_clause=0.25)
     cfg = PipelineConfig(generation=generation)
     doc = DocumentResult(clean_text=text)
     segments = [

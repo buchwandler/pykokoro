@@ -35,18 +35,12 @@ def test_kokorog2p_abbreviations_have_phonemes():
 
     for abbr in ("mr", "mrs", "ms", "dr"):
         token = next(
-            (
-                t
-                for t in tokens
-                if _normalize_abbreviation(getattr(t, "text", "")) == abbr
-            ),
+            (t for t in tokens if _normalize_abbreviation(getattr(t, "text", "")) == abbr),
             None,
         )
         assert token is not None
         if not _token_phonemes(token).strip():
-            pytest.xfail(
-                "kokorog2p does not emit phonemes for Ms./and with punctuation"
-            )
+            pytest.xfail("kokorog2p does not emit phonemes for Ms./and with punctuation")
 
 
 def test_kokorog2p_punctuation():

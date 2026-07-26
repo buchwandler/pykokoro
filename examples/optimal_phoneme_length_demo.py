@@ -87,9 +87,7 @@ def analyze_segments(segments: list, title: str) -> dict:
 
         # Show first 5 and last 1 segments
         if i <= 5 or i == len(segments):
-            short_marker = (
-                " [SHORT - will use short-sentence handling]" if is_short else ""
-            )
+            short_marker = " [SHORT - will use short-sentence handling]" if is_short else ""
             print(f"\nSegment {i}:{short_marker}")
             print(f"  Text: '{seg.text[:60]}{'...' if len(seg.text) > 60 else ''}'")
             print(f"  Phonemes: {phoneme_length} chars")

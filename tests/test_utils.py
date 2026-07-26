@@ -353,16 +353,12 @@ class TestFormatFilenameTemplate:
 
     def test_empty_book_title_fallback_to_input_stem(self):
         """Empty book title should fall back to input_stem."""
-        result = format_filename_template(
-            "{book_title}", book_title="", input_stem="my_file"
-        )
+        result = format_filename_template("{book_title}", book_title="", input_stem="my_file")
         assert result == "my_file"
 
     def test_empty_book_title_fallback_to_default(self):
         """Empty book title with no input_stem should fall back to default."""
-        result = format_filename_template(
-            "{book_title}", book_title="", default_title="Untitled"
-        )
+        result = format_filename_template("{book_title}", book_title="", default_title="Untitled")
         assert result == "Untitled"
 
     def test_special_characters_sanitized(self):
@@ -386,9 +382,7 @@ class TestFormatFilenameTemplate:
 
     def test_empty_chapters_range(self):
         """Empty chapters range should produce clean filename."""
-        result = format_filename_template(
-            "{book_title}", book_title="My Book", chapters_range=""
-        )
+        result = format_filename_template("{book_title}", book_title="My Book", chapters_range="")
         assert result == "My_Book"
 
     def test_input_stem_variable(self):
@@ -402,9 +396,7 @@ class TestFormatFilenameTemplate:
 
     def test_max_length_truncation(self):
         """Long filenames should be truncated to max_length."""
-        result = format_filename_template(
-            "{book_title}", book_title="A" * 200, max_length=50
-        )
+        result = format_filename_template("{book_title}", book_title="A" * 200, max_length=50)
         assert len(result) <= 50
 
     def test_invalid_template_variable_fallback(self):
@@ -447,9 +439,7 @@ class TestFormatFilenameTemplate:
 
     def test_empty_author(self):
         """Empty author should not cause issues."""
-        result = format_filename_template(
-            "{author}_{book_title}", book_title="My Book", author=""
-        )
+        result = format_filename_template("{author}_{book_title}", book_title="My Book", author="")
         # Empty author gets sanitized, result should still be valid
         assert "My_Book" in result
 

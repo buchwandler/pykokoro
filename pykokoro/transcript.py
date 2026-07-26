@@ -106,9 +106,7 @@ def validate_transcript(transcript: dict[str, Any]) -> None:
     _optional_str(prosody.get("pitch"), "defaults.prosody.pitch")
     _optional_str(prosody.get("volume"), "defaults.prosody.volume")
 
-    short_sentence = _require_dict(
-        defaults.get("short_sentence"), "defaults.short_sentence"
-    )
+    short_sentence = _require_dict(defaults.get("short_sentence"), "defaults.short_sentence")
     _require_bool(short_sentence.get("enabled"), "defaults.short_sentence.enabled")
     _require_number(
         short_sentence.get("min_phoneme_length"),
@@ -162,20 +160,14 @@ def validate_transcript(transcript: dict[str, Any]) -> None:
             seg_voice = _require_dict(segment.get("voice"), f"segments[{index}].voice")
             _optional_str(seg_voice.get("name"), f"segments[{index}].voice.name")
             _optional_str(seg_voice.get("variant"), f"segments[{index}].voice.variant")
-            _optional_str(
-                seg_voice.get("language"), f"segments[{index}].voice.language"
-            )
+            _optional_str(seg_voice.get("language"), f"segments[{index}].voice.language")
             _optional_str(seg_voice.get("gender"), f"segments[{index}].voice.gender")
 
         if "prosody" in segment:
-            seg_prosody = _require_dict(
-                segment.get("prosody"), f"segments[{index}].prosody"
-            )
+            seg_prosody = _require_dict(segment.get("prosody"), f"segments[{index}].prosody")
             _optional_str(seg_prosody.get("rate"), f"segments[{index}].prosody.rate")
             _optional_str(seg_prosody.get("pitch"), f"segments[{index}].prosody.pitch")
-            _optional_str(
-                seg_prosody.get("volume"), f"segments[{index}].prosody.volume"
-            )
+            _optional_str(seg_prosody.get("volume"), f"segments[{index}].prosody.volume")
 
         if "flags" in segment:
             flags = _require_dict(segment.get("flags"), f"segments[{index}].flags")
@@ -197,7 +189,5 @@ def validate_transcript(transcript: dict[str, Any]) -> None:
 
         if include_tokens:
             tokens = segment.get("tokens")
-            if not isinstance(tokens, list) or not all(
-                isinstance(token, int) for token in tokens
-            ):
+            if not isinstance(tokens, list) or not all(isinstance(token, int) for token in tokens):
                 raise ValueError(f"segments[{index}].tokens must be a list of integers")

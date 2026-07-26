@@ -6,9 +6,6 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 include = [
     "pykokoro*",
-    "pykokoro.stages.*",
-    "pykokoro.runtime.*",
-    "pykokoro.compat.*",
 ]
 
 [project]
@@ -26,7 +23,6 @@ dependencies = [
     "kokorog2p[espeak,en]>=0.6.6",
     "phrasplit>=0.3.1",
     "numpy",
-    "onnxruntime>=1.17.0",
     "platformdirs",
     "chardet",
     "charset-normalizer",
@@ -34,7 +30,8 @@ dependencies = [
     "ssmd>=0.7.1",
     "num2words>=0.5.12",
     "babel>=2.12.0",
-    "soundfile"
+    "soundfile",
+    "typing_extensions>=4.0"
 ]
 classifiers=[
     'Development Status :: 4 - Beta',
@@ -66,16 +63,13 @@ prosody = [
     "audiomentations>=0.36.0",  # Primary, highest quality
     "librosa>=0.10.0",          # Fallback
 ]
+cpu = ["onnxruntime>=1.17.0"]
 gpu = ["onnxruntime-gpu>=1.17.0"]
 openvino = ["onnxruntime-openvino>=1.17.0"]
 directml = ["onnxruntime-directml>=1.17.0"]
-coreml = ["coremltools>=7.0"]
+coreml = ["onnxruntime>=1.17.0", "coremltools>=7.0"]
 sounddevice = ["sounddevice"]
 all = [
-    "onnxruntime-gpu>=1.17.0",
-    "onnxruntime-openvino>=1.17.0",
-    "onnxruntime-directml>=1.17.0",
-    "coremltools>=7.0",
     "audiomentations>=0.36.0",
     "librosa>=0.10.0",
     "sounddevice",
@@ -83,6 +77,7 @@ all = [
 
 [tool.setuptools_scm]
 write_to = "pykokoro/_version.py"
+fallback_version = "0.6.5"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

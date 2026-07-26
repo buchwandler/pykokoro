@@ -79,9 +79,7 @@ def _plot_segments(samples: np.ndarray, sample_rate: int, segments: list) -> Non
     cursor = 0.0
     for segment in segments:
         if segment.pause_before > 0:
-            ax.axvspan(
-                cursor, cursor + segment.pause_before, color="#f4a261", alpha=0.3
-            )
+            ax.axvspan(cursor, cursor + segment.pause_before, color="#f4a261", alpha=0.3)
             cursor += segment.pause_before
         if segment.processed_audio is not None:
             cursor += len(segment.processed_audio) / sample_rate
@@ -173,9 +171,7 @@ def main():
 
     generated_segments = audio_generation.generate(processed_segments, cfg, trace)
     trim_silence = generation.pause_mode == "manual"
-    processed_audio_segments = kokoro.postprocess_audio_segments(
-        generated_segments, trim_silence
-    )
+    processed_audio_segments = kokoro.postprocess_audio_segments(generated_segments, trim_silence)
     samples = kokoro.concatenate_audio_segments(processed_audio_segments)
     sample_rate = SAMPLE_RATE
 
@@ -202,27 +198,16 @@ def main():
     }
 
     total_pause_time = (
-        pause_counts["...c"] * 0.3
-        + pause_counts["...s"] * 0.6
-        + pause_counts["...p"] * 1.2
+        pause_counts["...c"] * 0.3 + pause_counts["...s"] * 0.6 + pause_counts["...p"] * 1.2
     )
 
     print("SSMD pause statistics:")
     clause_total = pause_counts["...c"] * 0.3
     sentence_total = pause_counts["...s"] * 0.6
     paragraph_total = pause_counts["...p"] * 1.2
-    print(
-        f"  Clause pauses (...c):     "
-        f"{pause_counts['...c']} × 0.3s = {clause_total:.1f}s"
-    )
-    print(
-        f"  Sentence pauses (...s):   "
-        f"{pause_counts['...s']} × 0.6s = {sentence_total:.1f}s"
-    )
-    print(
-        f"  Paragraph pauses (...p):  "
-        f"{pause_counts['...p']} × 1.2s = {paragraph_total:.1f}s"
-    )
+    print(f"  Clause pauses (...c):     {pause_counts['...c']} × 0.3s = {clause_total:.1f}s")
+    print(f"  Sentence pauses (...s):   {pause_counts['...s']} × 0.6s = {sentence_total:.1f}s")
+    print(f"  Paragraph pauses (...p):  {pause_counts['...p']} × 1.2s = {paragraph_total:.1f}s")
     print(f"  Total pause time:         ~{total_pause_time:.1f}s")
     print(f"  Estimated speech time:    ~{duration - total_pause_time:.1f}s")
     print()

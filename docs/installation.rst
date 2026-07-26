@@ -1,7 +1,7 @@
 Installation Guide
 ==================
 
-PyKokoro can be installed using pip and requires Python 3.9 or higher.
+PyKokoro can be installed using pip and requires Python 3.10 or higher.
 
 Basic Installation
 ------------------
@@ -10,9 +10,10 @@ Install the latest stable version from PyPI:
 
 .. code-block:: bash
 
-   pip install pykokoro
+   pip install "pykokoro[cpu]"
 
-This will install PyKokoro with CPU support using ONNX Runtime.
+The ``cpu``, ``gpu``, ``openvino``, and ``directml`` extras are alternative
+ONNX Runtime distributions. Install exactly one provider extra per environment.
 
 GPU Support
 -----------
@@ -24,7 +25,7 @@ NVIDIA CUDA
 
 .. code-block:: bash
 
-   pip install pykokoro[gpu]
+   pip install "pykokoro[gpu]"
 
 This installs ``onnxruntime-gpu`` for NVIDIA CUDA support.
 
@@ -35,7 +36,7 @@ For AMD GPUs with ROCm:
 
 .. code-block:: bash
 
-   pip install pykokoro
+   pip install "pykokoro[cpu]"
    pip install onnxruntime-rocm
 
 Custom ONNX Runtime
@@ -54,8 +55,8 @@ System Requirements
 Python Version
 ~~~~~~~~~~~~~~
 
-* Python 3.9 or higher
-* Tested on Python 3.9, 3.10, 3.11, 3.12, and 3.13
+* Python 3.10 or higher
+* Tested on Python 3.10, 3.11, 3.12, and 3.13
 
 Dependencies
 ~~~~~~~~~~~~

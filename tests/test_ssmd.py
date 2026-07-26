@@ -169,9 +169,7 @@ class TestSSMDAudioSegments:
             metadata=SSMDMetadata(audio_src="clip.wav", audio_alt_text="Hello"),
         )
 
-        clean_text, spans, boundaries, doc_segments = parser._build_document(
-            [segment], 0.0, trace
-        )
+        clean_text, spans, boundaries, doc_segments = parser._build_document([segment], 0.0, trace)
 
         assert clean_text == "Hello"
         assert spans[0].attrs["audio_src"] == "clip.wav"
@@ -191,9 +189,7 @@ class TestSSMDAudioSegments:
             metadata=SSMDMetadata(audio_src="clip.wav", audio_alt_text=""),
         )
 
-        clean_text, spans, boundaries, doc_segments = parser._build_document(
-            [segment], 0.0, trace
-        )
+        clean_text, spans, boundaries, doc_segments = parser._build_document([segment], 0.0, trace)
 
         assert clean_text == ""
         assert spans == []
@@ -230,10 +226,7 @@ class TestSSMDVoiceSwitching:
         from pykokoro.ssmd_parser import parse_ssmd_to_segments
 
         # Test 1: Block directives (<div voice="name">)
-        text = (
-            '<div voice="af_sarah">Hello ...s</div>\n\n'
-            '<div voice="am_michael">World</div>'
-        )
+        text = '<div voice="af_sarah">Hello ...s</div>\n\n<div voice="am_michael">World</div>'
         _initial_pause, segments = parse_ssmd_to_segments(text)
 
         assert any(seg.metadata.voice_name == "af_sarah" for seg in segments)

@@ -13,9 +13,7 @@ def test_phrasplit_splits_on_phoneme_override(monkeypatch):
     text = "Hello world"
     doc = DocumentResult(
         clean_text=text,
-        annotation_spans=[
-            AnnotationSpan(char_start=0, char_end=5, attrs={"ph": "OVERRIDE"})
-        ],
+        annotation_spans=[AnnotationSpan(char_start=0, char_end=5, attrs={"ph": "OVERRIDE"})],
     )
     fake_module = SimpleNamespace(split_with_offsets=lambda *_args, **_kwargs: [])
     monkeypatch.setitem(sys.modules, "phrasplit", fake_module)

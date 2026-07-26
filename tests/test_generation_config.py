@@ -254,3 +254,17 @@ class TestGenerationConfigEdgeCases:
         for lang in languages:
             config = GenerationConfig(lang=lang)
             assert config.lang == lang
+
+    @pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf"), True])
+    def test_numeric_fields_reject_non_finite_and_boolean_values(self, value):
+        with pytest.raises(ValueError, match="speed"):
+            GenerationConfig(speed=value)
+
+    @pytest.mark.parametrize("field_name", ["pause_clause", "pause_sentence", "pause_paragraph"])
+    def test_pause_fields_reject_non_real_values(self, field_name):
+        with pytest.raises(ValueError, match=field_name):
+            GenerationConfig(**{field_name: "slow"})
+
+    def test_random_seed_rejects_boolean(self):
+        with pytest.raises(ValueError, match="random_seed"):
+            GenerationConfig(random_seed=True)

@@ -69,9 +69,7 @@ try:
             lang="en-us",
         )
         sf.write("provider_demo_openvino.wav", audio, sr)
-        print(
-            f"✓ Generated audio with OpenVINO FP16: {len(audio)} samples at {sr} Hz\n"
-        )
+        print(f"✓ Generated audio with OpenVINO FP16: {len(audio)} samples at {sr} Hz\n")
         kokoro_openvino.close()
     else:
         print("⚠ OpenVINO provider not available")
@@ -102,10 +100,7 @@ try:
             lang="en-us",
         )
         sf.write("provider_demo_cuda.wav", audio, sr)
-        print(
-            f"✓ Generated audio with CUDA (2GB limit): "
-            f"{len(audio)} samples at {sr} Hz\n"
-        )
+        print(f"✓ Generated audio with CUDA (2GB limit): {len(audio)} samples at {sr} Hz\n")
         kokoro_cuda.close()
     else:
         print("⚠ CUDA provider not available")

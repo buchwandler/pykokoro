@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import numpy as np
 
 from pykokoro.constants import SAMPLE_RATE
@@ -30,18 +32,16 @@ def find_energy_valley_cut_bounds(
     if windows is None:
         return None
 
-    frame_duration_ms = int(metadata.get("frame_duration_ms", 5))
+    frame_duration_ms = int(cast(Any, metadata.get("frame_duration_ms", 5)))
     frame_length = max(1, int(SAMPLE_RATE * frame_duration_ms / 1000))
     energy = _normalized_frame_energy(audio, frame_length)
     if energy.size == 0:
         return None
     min_frames = max(
         1,
-        int(
-            float(metadata.get("min_silence_seconds", 0.02)) * 1000 / frame_duration_ms
-        ),
+        int(float(cast(Any, metadata.get("min_silence_seconds", 0.02))) * 1000 / frame_duration_ms),
     )
-    threshold = float(metadata.get("energy_threshold", 0.05))
+    threshold = float(cast(Any, metadata.get("energy_threshold", 0.05)))
 
     left_cut = (
         _valley_cut(
@@ -98,9 +98,7 @@ def _valley_cut(
         return None
     window_start, window_end = window
     first_frame = max(0, window_start // frame_length)
-    last_frame = min(
-        len(energy) - 1, max(first_frame, (window_end - 1) // frame_length)
-    )
+    last_frame = min(len(energy) - 1, max(first_frame, (window_end - 1) // frame_length))
     if last_frame < first_frame:
         return None
 
@@ -113,9 +111,7 @@ def _valley_cut(
     qualifying_offsets = np.flatnonzero(rolling_mean <= threshold)
     if qualifying_offsets.size == 0:
         return None
-    best_offset = int(
-        qualifying_offsets[-1] if side == "left" else qualifying_offsets[0]
-    )
+    best_offset = int(qualifying_offsets[-1] if side == "left" else qualifying_offsets[0])
 
     quiet_start = first_frame + best_offset
     quiet_end = quiet_start + min_frames

@@ -93,9 +93,7 @@ def main():
     print("\n=== Example 3: Custom Phonemes with Markdown ===")
     # You can also use markdown notation like in the kokoro-onnx example:
     # [word](/phoneme/)
-    custom_text = (
-        '[PyKokoro]{ph="paɪkəkˈoʊɹoʊ"} is a Python library for text-to-speech.'
-    )
+    custom_text = '[PyKokoro]{ph="paɪkəkˈoʊɹoʊ"} is a Python library for text-to-speech.'
 
     samples_custom = pipe.run(custom_text).audio
     sample_rate = res.sample_rate
