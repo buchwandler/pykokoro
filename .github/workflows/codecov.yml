@@ -19,7 +19,7 @@ jobs:
         pip install -r requirements-test.txt
         pip install spacy
         python -m spacy download en_core_web_sm
-        pip install -e .
+        pip install -e ".[cpu,dev]"
         pytest --cov --junitxml=junit.xml 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v5
