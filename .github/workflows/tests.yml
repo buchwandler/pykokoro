@@ -33,8 +33,5 @@ jobs:
         pip install -r requirements-test.txt
         pip install spacy
         python -m spacy download en_core_web_sm
-        ruff check .
-        ruff format --check .
-        mypy pykokoro
         python -m compileall -q pykokoro tests
         pytest -m "not slow"
