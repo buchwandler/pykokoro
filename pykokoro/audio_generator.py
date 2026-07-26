@@ -70,7 +70,12 @@ class AudioGenerator:
         )
         get_outputs = getattr(session, "get_outputs", None)
         outputs = get_outputs() if callable(get_outputs) else []
-        self._has_timestamp_output = len(outputs) > 1
+        try:
+            self._has_timestamp_output = len(outputs) > 1
+        except TypeError:
+            # Some lightweight test doubles expose get_outputs() as a bare Mock.
+            # Treat an unsized result as no timestamp output.
+            self._has_timestamp_output = False
         self._reported_missing_timestamp_output = False
 
     def _tokenize_phonemes(self, phonemes: str) -> list[int]:
@@ -520,6 +525,20 @@ class AudioGenerator:
         for token in timestamped:
             if not token.get("is_target"):
                 continue
+            start_ts = token.get("start_ts")
+            end_ts = token.get("speech_end_ts", token.get("end_ts"))
+            if not isinstance(start_ts, (int, float)) or not isinstance(
+                end_ts, (int, float)
+            ):
+                continue
+            logger.debug(
+                "Short sentence target timestamp: segment='%s' token='%s' "
+                "start=%.4f end=%.4f",
+                segment.text[:50],
+                str(token.get("text") or ""),
+                float(start_ts),
+                float(end_ts),
+            )
 
     def _prepare_short_sentence_phrase_audio(
         self,
@@ -640,12 +659,12 @@ class AudioGenerator:
                 continue
 
             logger.info(
-                "Short sentence phrase cut for '%s' lacked confident boundaries; "
-                "trying another phrase %d/%d. Failed with: '%s'",
+                "Short sentence phrase cut for '%s' succeeded using fallback phrase "
+                "'%s' (%d/%d).",
                 segment.text[:50],
+                template,
                 retry_attempts,
                 max_attempts,
-                failed_template if isinstance(failed_template, str) else "",
             )
             short_sentence_metadata.clear()
             short_sentence_metadata.update(retry.metadata)

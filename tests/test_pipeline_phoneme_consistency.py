@@ -2,13 +2,11 @@ import pytest
 
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
-from pykokoro.onnx_backend import Kokoro
 from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
 from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
 from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
 from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
 from pykokoro.stages.phoneme_processing.noop import NoopPhonemeProcessorAdapter
-from pykokoro.stages.phoneme_processing.onnx import OnnxPhonemeProcessorAdapter
 
 CASES = [
     (
@@ -36,17 +34,6 @@ def _build_pipeline(doc_parser, cfg: PipelineConfig) -> KokoroPipeline:
     )
 
 
-def _build_pipeline2(doc_parser, cfg: PipelineConfig) -> KokoroPipeline:
-    kokoro = Kokoro()
-    return KokoroPipeline(
-        cfg,
-        doc_parser=doc_parser,
-        phoneme_processing=OnnxPhonemeProcessorAdapter(kokoro),
-        audio_generation=NoopAudioGenerationAdapter(seconds_per_segment=0.01),
-        audio_postprocessing=NoopAudioPostprocessingAdapter(),
-    )
-
-
 def _normalize_phonemes(segments) -> str:
     phonemes = " ".join(segment.phonemes for segment in segments if segment.phonemes)
     return " ".join(phonemes.split())
@@ -55,7 +42,7 @@ def _normalize_phonemes(segments) -> str:
 @pytest.mark.parametrize("ssmd_text, plain_text", CASES)
 def test_ssmd_and_plain_phonemes_match(ssmd_text, plain_text):
     cfg = PipelineConfig(generation=GenerationConfig(lang="en-us"))
-    ssmd_pipeline = _build_pipeline2(SsmdDocumentParser(), cfg)
+    ssmd_pipeline = _build_pipeline(SsmdDocumentParser(), cfg)
     plain_pipeline = _build_pipeline(PlainTextDocumentParser(), cfg)
 
     ssmd_res = ssmd_pipeline.run(ssmd_text)

@@ -114,7 +114,7 @@ class OnnxSessionManager:
 
                 return session
 
-            except RuntimeError as e:
+            except Exception as e:
                 last_error = e
                 if attempt == 0:
                     logger.warning(
