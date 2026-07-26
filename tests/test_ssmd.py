@@ -27,8 +27,13 @@ class TestSSMDDetection:
         """Test detection of annotations."""
         from pykokoro.ssmd_parser import has_ssmd_markup
 
-        assert has_ssmd_markup("[Bonjour]{lang='fr'}")
-        assert has_ssmd_markup("[Bonjour]{ph='abc'}")
+        assert has_ssmd_markup('[Bonjour]{lang="fr"}')
+        assert has_ssmd_markup('[Bonjour]{voice-lang="fr-FR"}')
+        assert has_ssmd_markup("[Bonjour]{lang=fr}")
+        assert has_ssmd_markup(r'[quote]{sub="say \\"hello\\""}')
+        assert has_ssmd_markup('[Bonjour]{ph="abc"}')
+        assert has_ssmd_markup('[]{src="beep.mp3"}')
+        assert not has_ssmd_markup("[Bonjour](fr)")
         assert not has_ssmd_markup("No markup here")
 
     def test_has_ssmd_markup_markers(self):
@@ -36,6 +41,7 @@ class TestSSMDDetection:
         from pykokoro.ssmd_parser import has_ssmd_markup
 
         assert has_ssmd_markup("Text with @marker")
+        assert not has_ssmd_markup("@voice: af_sarah")
         assert not has_ssmd_markup("Email@example.com")  # @ in email
         assert not has_ssmd_markup("Plain text")
 
@@ -88,6 +94,69 @@ class TestSSMDSegmentConversion:
         # Markup should be stripped from text
         assert "Hello this is great." in segments[0].text
         assert "Really!" in segments[1].text
+
+
+class TestSSMDNativeSyntax:
+    """Tests for the native SSMD 0.7 annotation and directive contract."""
+
+    def test_legacy_markdown_link_syntax_is_literal_text(self):
+        """Do not reinterpret ordinary Markdown links as SSMD metadata."""
+        from pykokoro.ssmd_parser import parse_ssmd_to_segments
+
+        _initial, segments = parse_ssmd_to_segments("[Bonjour](fr)")
+
+        assert len(segments) == 1
+        assert segments[0].text == "[Bonjour](fr)"
+        assert segments[0].metadata.language is None
+
+    def test_div_context_is_inherited_and_inline_values_override(self):
+        """Sentence-level div attributes flow into each adapted segment."""
+        from pykokoro.ssmd_parser import parse_ssmd_to_segments
+
+        text = (
+            '<div lang="fr" volume="loud" rate="slow" pitch="high" '
+            'voice="af_sarah" voice-lang="fr-FR">\n'
+            '[Bonjour]{pitch="low" gender="female" variant="2"}\n'
+            "</div>"
+        )
+        _initial, segments = parse_ssmd_to_segments(text)
+
+        assert len(segments) == 1
+        metadata = segments[0].metadata
+        assert metadata.language == "fr"
+        assert metadata.prosody_volume == "loud"
+        assert metadata.prosody_rate == "slow"
+        assert metadata.prosody_pitch == "low"
+        assert metadata.voice_name == "af_sarah"
+        assert metadata.voice_language == "fr-FR"
+        assert metadata.voice_gender == "female"
+        assert metadata.voice_variant == "2"
+
+    def test_xsampa_override_uses_ssmd_converter(self, monkeypatch):
+        """Convert SSMD X-SAMPA before passing a phoneme override downstream."""
+        from ssmd import segment as ssmd_segment
+
+        from pykokoro.ssmd_parser import parse_ssmd_to_segments
+
+        monkeypatch.setattr(
+            ssmd_segment,
+            "xsampa_to_ipa",
+            lambda value: f"ipa:{value}",
+        )
+
+        _initial, segments = parse_ssmd_to_segments('[dictionary]{sampa="dIkS@n@ri"}')
+
+        assert segments[0].metadata.phonemes == "ipa:dIkS@n@ri"
+
+    def test_adjacent_breaks_are_cumulative(self):
+        """Preserve multiple SSMD breaks at the same segment boundary."""
+        import pytest
+
+        from pykokoro.ssmd_parser import parse_ssmd_to_segments
+
+        _initial, segments = parse_ssmd_to_segments("Hello ...c ...s world")
+
+        assert segments[0].pause_after == pytest.approx(0.9)
 
 
 class TestSSMDMetadata:
@@ -236,7 +305,7 @@ class TestSSMDVoiceSwitching:
         """Test that inline voice annotations work."""
         from pykokoro.ssmd_parser import parse_ssmd_to_segments
 
-        # Test 2: Inline voice annotations ([text](voice: name))
+        # Test 2: Inline voice annotations ([text]{voice="name"})
         text = "[Hello]{voice='af_sarah'} ...s\n\n[World]{voice='am_michael'}"
         _initial_pause, segments = parse_ssmd_to_segments(text)
 

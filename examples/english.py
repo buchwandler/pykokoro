@@ -33,7 +33,7 @@ from pykokoro.tokenizer import Tokenizer
 TEXT = (
     "The best way to predict the future is to create it. "
     "Technology is nothing without the imagination to use it wisely. "
-    "[tomato](ph: təˈmeɪtoʊ)[tomato](ph: ………………)"
+    '[tomato]{ipa="təˈmeɪtoʊ"} and [dictionary]{sampa="dIkS@n@ri"}. '
     "Every great innovation begins with a simple question: what if?"
 )
 
@@ -89,11 +89,11 @@ def main():
     print(f"Created {output_file_phonemes}")
     print(f"Duration: {duration_phonemes:.2f} seconds")
 
-    # Example 3: Custom phonemes with markdown notation
-    print("\n=== Example 3: Custom Phonemes with Markdown ===")
-    # You can also use markdown notation like in the kokoro-onnx example:
-    # [word](/phoneme/)
-    custom_text = '[PyKokoro]{ph="paɪkəkˈoʊɹoʊ"} is a Python library for text-to-speech.'
+    # Example 3: Custom phonemes with native SSMD annotations
+    print("\n=== Example 3: Custom Phonemes with SSMD ===")
+    # SSMD supports IPA via {ipa="..."} (or {ph="..."}) and X-SAMPA via
+    # {sampa="..."}.
+    custom_text = '[PyKokoro]{ipa="paɪkəkˈoʊɹoʊ"} is a Python library for text-to-speech.'
 
     samples_custom = pipe.run(custom_text).audio
     sample_rate = res.sample_rate

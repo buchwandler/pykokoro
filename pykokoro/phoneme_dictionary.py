@@ -20,8 +20,18 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+def _format_ssmd_attr(key: str, value: str) -> str:
+    """Format one SSMD annotation attribute without corrupting phoneme text."""
+    raw_value = str(value)
+    quote = "'" if '"' in raw_value and "'" not in raw_value else '"'
+    escaped = raw_value.replace("\\", "\\\\")
+    escaped = escaped.replace("{", "\\{").replace("}", "\\}")
+    escaped = escaped.replace('"', '\\"') if quote == '"' else escaped.replace("'", "\\'")
+    return f"{key}={quote}{escaped}{quote}"
+
+
 def _format_ph_override(word: str, phoneme: str) -> str:
-    return f'[{word}]{{ph="{phoneme}"}}'
+    return f"[{word}]{{{_format_ssmd_attr('ph', phoneme)}}}"
 
 
 class PhonemeDictionary:

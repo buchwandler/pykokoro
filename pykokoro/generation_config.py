@@ -32,7 +32,7 @@ class GenerationConfig:
         lang: Default language code for text-to-phoneme conversion.
             Examples: 'en-us', 'en-gb', 'es', 'fr', 'de', 'it', 'pt', 'ja',
             'ko', 'zh', 'hi'. Can be overridden per-segment with SSMD
-            [text](lang) syntax. Default: "en-us"
+            [text]{lang="fr"} syntax. Default: "en-us"
         is_phonemes: If True, treat input text as IPA phonemes instead of
             regular text, bypassing text-to-phoneme conversion. Default: False
         pause_mode: Pause handling strategy:

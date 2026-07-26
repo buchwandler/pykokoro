@@ -4,11 +4,12 @@ This module provides integration with the SSMD library to support
 rich markup syntax for TTS generation including:
 - Breaks/Pauses: ...c (comma), ...s (sentence), ...p (paragraph), ...500ms
 - Emphasis: *text* (moderate), **text** (strong)
-- Prosody: +loud+, >fast>, ^high^, etc.
-- Language switching: [Bonjour](fr)
-- Phonetic pronunciation: [tomato](ph: təˈmeɪtoʊ)
-- Substitution: [H2O](sub: water)
-- Say-as: [123](as: cardinal), [3rd](as: ordinal), [+1-555-0123](as: telephone)
+- Prosody: [text]{volume="loud" rate="fast" pitch="high"}
+- Language switching: [Bonjour]{lang="fr"}
+- Phonetic pronunciation: [tomato]{ipa="təˈmeɪtoʊ"}
+- Substitution: [H2O]{sub="water"}
+- Say-as: [123]{as="cardinal"}, [3rd]{as="ordinal"},
+  [+1-555-0123]{as="telephone"}
 - Voice directives: <div voice="name"> ... </div> and [text]{voice="name"}
 - Markers: @marker_name
 
@@ -26,7 +27,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ssmd import SSMDSegment as SSMDParserSegment
+    from ssmd.segment import Segment as SSMDParserSegment
 
 _SSMD_IMPORTS: tuple[type, Any] | None = None
 
@@ -34,6 +35,8 @@ _SSMD_IMPORTS: tuple[type, Any] | None = None
 def _load_ssmd() -> tuple[type, Any]:
     global _SSMD_IMPORTS
     if _SSMD_IMPORTS is None:
+        # Importing any ssmd submodule executes ssmd.__init__, whose current
+        # compatibility re-exports emit this dependency-owned warning.
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 "ignore",
@@ -43,28 +46,18 @@ def _load_ssmd() -> tuple[type, Any]:
                 ),
                 category=DeprecationWarning,
             )
-            from ssmd import TTSCapabilities, parse_paragraphs
+            from ssmd.capabilities import TTSCapabilities
+            from ssmd.parser import parse_paragraphs
 
         _SSMD_IMPORTS = (TTSCapabilities, parse_paragraphs)
     return _SSMD_IMPORTS
 
 
 ANNOTATION_RE = re.compile(
-    r"""
-    \[
-        [^\]]+                      # [text]
-    \]
-    \{
-        \s*\w+\s*=\s*
-        (?:'[^']+'|"[^"]+")         # 'value' OR "value"
-        (?:\s+\w+\s*=\s*(?:'[^']+'|"[^"]+"))*
-        \s*
-    \}
-    """,
-    re.VERBOSE,
+    r"\[[^\]]*\]\{(?:\\.|[^}])*\}",
 )
 
-LANG_SHORTHAND_RE = re.compile(r"\[([^\]]+)\]\(([a-zA-Z]{2,3}(?:-[a-zA-Z]{2})?)\)")
+
 BREAK_TIME_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(ms|s)\s*$", re.IGNORECASE)
 BREAK_MARKER_RE = re.compile(
     r"\.\.\.\s*(?P<token>(?:[nwcsp])|(?:\d+(?:\.\d+)?\s*(?:ms|s)))"
@@ -185,12 +178,12 @@ def has_ssmd_markup(text: str) -> bool:
     if re.search(r"\*\w[^*]*\*|\*[^*]*\w\*", text):
         return True
 
-    # Annotations: [text]{annotation)
+    # Annotations: [text]{key="value"}
     if bool(ANNOTATION_RE.search(text)):
         return True
 
-    # Markers: @name
-    if re.search(r"(?:^|\s)@\w+", text):
+    # Markers: @name. ``@voice:`` is not an SSMD voice directive.
+    if re.search(r"(?:^|\s)@(?!voice(?::|\())\w+(?=\s|$)", text, re.IGNORECASE):
         return True
 
     return "<div" in text.lower() and bool(
@@ -259,6 +252,30 @@ def _convert_break_strength_to_duration(
     return 0.0
 
 
+def _convert_breaks_to_duration(
+    breaks: Sequence[Any],
+    *,
+    pause_none: float,
+    pause_weak: float,
+    pause_clause: float,
+    pause_sentence: float,
+    pause_paragraph: float,
+) -> float:
+    """Convert consecutive SSMD breaks into one cumulative pause duration."""
+    return sum(
+        _convert_break_strength_to_duration(
+            brk.strength,
+            brk.time,
+            pause_none=pause_none,
+            pause_weak=pause_weak,
+            pause_clause=pause_clause,
+            pause_sentence=pause_sentence,
+            pause_paragraph=pause_paragraph,
+        )
+        for brk in breaks
+    )
+
+
 def _break_duration_from_token(
     token: str,
     *,
@@ -325,15 +342,22 @@ def _collect_pause_durations(segments: list[SSMDSegment]) -> list[float]:
 
 def _breaks_satisfied(expected: list[float], actual: list[float], tolerance: float = 1e-6) -> bool:
     remaining = list(actual)
+    all_individual_breaks_matched = True
     for target in expected:
         match_index = next(
             (idx for idx, value in enumerate(remaining) if abs(value - target) <= tolerance),
             None,
         )
         if match_index is None:
-            return False
+            all_individual_breaks_matched = False
+            break
         remaining.pop(match_index)
-    return True
+    if all_individual_breaks_matched:
+        return True
+
+    # Consecutive SSMD breaks at one boundary are represented by PyKokoro as a
+    # single cumulative pause.
+    return abs(sum(expected) - sum(actual)) <= tolerance
 
 
 def _fallback_segments_from_chunk(
@@ -387,17 +411,17 @@ def _fallback_break_segments(
                 chunk, paragraph_idx, sentence_idx
             )
             if chunk_segments:
-                chunk_segments[-1].pause_after = max(chunk_segments[-1].pause_after, duration)
+                chunk_segments[-1].pause_after += duration
                 segments.extend(chunk_segments)
             elif segments:
-                segments[-1].pause_after = max(segments[-1].pause_after, duration)
+                segments[-1].pause_after += duration
             else:
-                initial_pause = max(initial_pause, duration)
+                initial_pause += duration
         else:
             if segments:
-                segments[-1].pause_after = max(segments[-1].pause_after, duration)
+                segments[-1].pause_after += duration
             else:
-                initial_pause = max(initial_pause, duration)
+                initial_pause += duration
         cursor = match.end()
 
     tail = text[cursor:]
@@ -407,6 +431,32 @@ def _fallback_break_segments(
         )
         segments.extend(tail_segments)
     return initial_pause, segments
+
+
+def _inherit_voice_metadata(metadata: SSMDMetadata, voice: Any | None) -> None:
+    """Fill missing inline voice fields from a sentence-level voice directive."""
+    if voice is None:
+        return
+    if metadata.voice_name is None:
+        metadata.voice_name = voice.name
+    if metadata.voice_language is None:
+        metadata.voice_language = voice.language
+    if metadata.voice_gender is None:
+        metadata.voice_gender = voice.gender
+    if metadata.voice_variant is None and voice.variant is not None:
+        metadata.voice_variant = str(voice.variant)
+
+
+def _inherit_prosody_metadata(metadata: SSMDMetadata, prosody: Any | None) -> None:
+    """Fill missing inline prosody fields from a sentence-level directive."""
+    if prosody is None:
+        return
+    if metadata.prosody_volume is None:
+        metadata.prosody_volume = prosody.volume
+    if metadata.prosody_rate is None:
+        metadata.prosody_rate = prosody.rate
+    if metadata.prosody_pitch is None:
+        metadata.prosody_pitch = prosody.pitch
 
 
 def _build_segments_from_paragraphs(
@@ -424,16 +474,6 @@ def _build_segments_from_paragraphs(
 
     for paragraph_idx, paragraph in enumerate(paragraphs):
         for sentence in paragraph.sentences:
-            # Extract voice context for this sentence
-            voice_metadata = SSMDMetadata()
-            if sentence.voice:
-                voice_metadata.voice_name = sentence.voice.name
-                voice_metadata.voice_language = sentence.voice.language
-                voice_metadata.voice_gender = sentence.voice.gender
-                voice_metadata.voice_variant = (
-                    str(sentence.voice.variant) if sentence.voice.variant else None
-                )
-
             resolved_paragraph = getattr(sentence, "paragraph_index", paragraph_idx)
             resolved_sentence = getattr(sentence, "sentence_index", None)
             if resolved_sentence is None:
@@ -444,30 +484,25 @@ def _build_segments_from_paragraphs(
 
             # Process each segment in sentence
             for seg_idx, ssmd_seg in enumerate(sentence.segments):
-                # Determine language for this segment
-                # Priority: segment lang > sentence lang > default
-                segment_lang = ssmd_seg.language or lang
+                # Resolve inherited directive context. Inline annotations override
+                # sentence-level <div> values field by field.
+                explicit_language = ssmd_seg.language or sentence.language
+                segment_lang = explicit_language or lang
 
-                # Map SSMD segment to PyKokoro metadata
+                # Map SSMD segment to PyKokoro metadata.
                 seg_text, metadata = _map_ssmd_segment_to_metadata(ssmd_seg, segment_lang)
-
-                # Apply voice context if segment doesn't have its own voice
-                if not metadata.voice_name and voice_metadata.voice_name:
-                    metadata.voice_name = voice_metadata.voice_name
-                    metadata.voice_language = voice_metadata.voice_language
-                    metadata.voice_gender = voice_metadata.voice_gender
-                    metadata.voice_variant = voice_metadata.voice_variant
+                if explicit_language is not None:
+                    metadata.language = explicit_language
+                _inherit_voice_metadata(metadata, sentence.voice)
+                _inherit_prosody_metadata(metadata, sentence.prosody)
 
                 # Calculate pause before this segment (for headings)
                 pause_before = 0.0
 
                 # Check for breaks before this segment
                 if ssmd_seg.breaks_before:
-                    # Use the last break if multiple
-                    last_break = ssmd_seg.breaks_before[-1]
-                    pause_before = _convert_break_strength_to_duration(
-                        last_break.strength,
-                        last_break.time,
+                    pause_before = _convert_breaks_to_duration(
+                        ssmd_seg.breaks_before,
                         pause_none=pause_none,
                         pause_weak=pause_weak,
                         pause_clause=pause_clause,
@@ -480,11 +515,8 @@ def _build_segments_from_paragraphs(
 
                 # Check for breaks after this segment
                 if ssmd_seg.breaks_after:
-                    # Use the last break if multiple
-                    last_break = ssmd_seg.breaks_after[-1]
-                    pause_after = _convert_break_strength_to_duration(
-                        last_break.strength,
-                        last_break.time,
+                    pause_after = _convert_breaks_to_duration(
+                        ssmd_seg.breaks_after,
                         pause_none=pause_none,
                         pause_weak=pause_weak,
                         pause_clause=pause_clause,
@@ -495,17 +527,14 @@ def _build_segments_from_paragraphs(
                 # If this is the last segment in the sentence,
                 # check sentence-level breaks
                 if seg_idx == len(sentence.segments) - 1 and sentence.breaks_after:
-                    last_break = sentence.breaks_after[-1]
-                    sentence_pause = _convert_break_strength_to_duration(
-                        last_break.strength,
-                        last_break.time,
+                    pause_after += _convert_breaks_to_duration(
+                        sentence.breaks_after,
                         pause_none=pause_none,
                         pause_weak=pause_weak,
                         pause_clause=pause_clause,
                         pause_sentence=pause_sentence,
                         pause_paragraph=pause_paragraph,
                     )
-                    pause_after = max(pause_after, sentence_pause)
 
                 # Create PyKokoro SSMDSegment with paragraph tracking
                 pykokoro_segments.append(
@@ -577,10 +606,16 @@ def _map_ssmd_segment_to_metadata(
         text = ssmd_seg.substitution
         metadata.substitution = ssmd_seg.substitution
     elif ssmd_seg.phoneme:
-        # Access phoneme string from PhonemeAttrs object
-        # ssmd_seg.phoneme has .ph (phoneme string) and .alphabet ("ipa" or "x-sampa")
-        metadata.phonemes = ssmd_seg.phoneme.ph
-        # Keep original text for display, phoneme will override during synthesis
+        # PyKokoro consumes IPA-like phoneme strings. SSMD accepts both IPA and
+        # X-SAMPA, so normalize X-SAMPA before forwarding the override.
+        phonemes = ssmd_seg.phoneme.ph
+        alphabet = (ssmd_seg.phoneme.alphabet or "ipa").lower()
+        if alphabet in {"sampa", "x-sampa"}:
+            from ssmd.segment import xsampa_to_ipa
+
+            phonemes = xsampa_to_ipa(phonemes)
+        metadata.phonemes = phonemes
+        # Keep original text for display; the phoneme override is used downstream.
 
     # Emphasis - SSMD supports: True, "moderate", "strong", "reduced", "none"
     if ssmd_seg.emphasis:
@@ -642,10 +677,10 @@ def parse_ssmd_to_segments(
     - Text segments with substitutions applied
     - Pause durations from break markers (...c, ...s, ...p, ...500ms)
     - Metadata (emphasis, prosody, language, phonemes, voice, etc.)
-    - Voice markers (@voice: name) with proper propagation
+    - Voice annotations and ``<div voice="...">`` directives
     - Text transformations (say-as, substitution, phoneme, audio)
     - Markers (@marker_name)
-    - Audio segments ([audio](file.mp3))
+    - Audio segments ([description]{src="file.mp3" alt="fallback text"})
 
     Args:
         text: Input text with SSMD markup
@@ -664,17 +699,16 @@ def parse_ssmd_to_segments(
         Tuple of (initial_pause, segments) where segments is a list of SSMDSegment
 
     Example:
-        >>> segments = parse_ssmd_to_segments(
-        ...     "Hello ...c *important* ...s [Bonjour](fr)",
+        >>> initial_pause, segments = parse_ssmd_to_segments(
+        ...     'Hello ...c *important* ...s [Bonjour]{lang="fr"}',
         ... )
-        >>> segments = parse_ssmd_to_segments(
-        ...     "@voice: sarah\\nHello!\\n\\n@voice: michael\\nWorld!",
+        >>> initial_pause, segments = parse_ssmd_to_segments(
+        ...     '<div voice="sarah">\\nHello!\\n</div>\\n'
+        ...     '<div voice="michael">\\nWorld!\\n</div>',
         ... )
     """
     text = _normalize_div_directives(text)
 
-    # Convert shorthand language annotations like [Bonjour](fr)
-    text = LANG_SHORTHAND_RE.sub(r'[\1]{lang="\2"}', text)
     expected_breaks = _scan_break_markers(
         text,
         pause_none=pause_none,

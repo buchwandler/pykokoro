@@ -4,7 +4,7 @@ SSMD (Speech Synthesis Markdown) Demo for pykokoro.
 
 This example demonstrates the comprehensive SSMD markup features supported
 by pykokoro, including breaks, emphasis, language switching, phonetic
-pronunciation using kokorog2p format, substitution, and markers.
+pronunciation using SSMD IPA annotations, substitution, and markers.
 
 SSMD provides a rich, readable way to control TTS output with markup that
 looks natural in text form.
@@ -18,9 +18,9 @@ Output:
 Features demonstrated:
     - Break markers: ...c ...s ...p ...800ms ...2s
     - Emphasis: *moderate* **strong**
-    - Language switching: [Bonjour](fr)
-    - Phonetic pronunciation: [creak](/kri:k/) using kokorog2p format
-    - Substitution: [H2O](sub: water)
+    - Language switching: [Bonjour]{lang="fr"}
+    - Phonetic pronunciation: [creak]{ipa="kɹiːk"}
+    - Substitution: [H2O]{sub="water"}
     - Markers: @location @moment
 """
 
@@ -30,35 +30,35 @@ from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
 
 # Story with comprehensive SSMD markup
-# Note: Using kokorog2p format [word](/phoneme/) instead of SSMD ph: syntax
+# Native SSMD phoneme annotations use {ipa="..."} or {sampa="..."}.
 story = """
 Chapter 3: The Discovery
 
-[Emma](en-GB) stepped into the dusty library ...800ms her eyes adjusting to
+[Emma]{lang="en-GB"} stepped into the dusty library ...800ms her eyes adjusting to
 the dim light. **"This is it"** she whispered to herself.
 
 The ancient book lay on the pedestal @book_location, exactly where the
 map had indicated.
 
 She approached slowly ...c her footsteps echoing in the silence.
-Each step seemed to make a [creak](/kri:k/) sound in the quiet.
+Each step seemed to make a [creak]{ipa="kɹiːk"} sound in the quiet.
 
 The Revelation
 
 As she opened the book ...1s a brilliant *golden light* erupted from the pages!
-The mysterious symbol looked like [H2O](sub: water) but glowed with power.
+The mysterious symbol looked like [H2O]{sub="water"} but glowed with power.
 
-[Emma](en-GB) felt a warmth spreading through her fingers.
+[Emma]{lang="en-GB"} felt a warmth spreading through her fingers.
 She knew @moment_of_truth that her life would never be the same again ...2s
 
-[Fin](fr)
+[Fin]{lang="fr"}
 """
 
 # Alternative: French story example
 french_story = """
 Chapitre 1: La Decouverte
 
-[Marie](fr-fr) marchait dans la vieille bibliotheque ...800ms
+[Marie]{lang="fr-fr"} marchait dans la vieille bibliotheque ...800ms
 ses pas resonnaient dans le silence.
 
 **"C'est incroyable"** murmura-t-elle ...s admirant les livres anciens.
@@ -68,9 +68,9 @@ l'avait indique ...c puis elle l'ouvrit lentement.
 
 Une *lumiere doree* jaillit des pages! ...1s
 
-[Marie](fr-fr) savait @moment_important que sa vie allait changer ...2s
+[Marie]{lang="fr-fr"} savait @moment_important que sa vie allait changer ...2s
 
-[The End](en-us)
+[The End]{lang="en-us"}
 """
 
 VOICE = "af_sarah"  # American Female voice
@@ -158,7 +158,7 @@ Custom 2 second pause ...2s like this.
     emphasis_text = """
 This is *moderate emphasis*.
 This is **strong emphasis**.
-The formula [H2O](sub: water) is essential for life.
+The formula [H2O]{sub="water"} is essential for life.
 """
     print("Emphasis examples:")
     print(emphasis_text)
@@ -173,9 +173,9 @@ The formula [H2O](sub: water) is essential for life.
     # Demo 5: Voice switching
     print("\n--- Demo 5: Voice Switching ---")
     voice_switching_text = """
-[Hello, I'm Sarah!](voice: af_sarah) ...s
-[And I'm Michael!](voice: am_michael) ...s
-[Nice to meet you both!](voice: af_nicole)
+[Hello, I'm Sarah!]{voice="af_sarah"} ...s
+[And I'm Michael!]{voice="am_michael"} ...s
+[Nice to meet you both!]{voice="af_nicole"}
 """
     print("Voice switching example:")
     print(voice_switching_text)
@@ -194,14 +194,13 @@ The formula [H2O](sub: water) is essential for life.
     print("\nSSMD Features Used:")
     print("  ✓ Break markers: ...c ...s ...p ...500ms ...2s")
     print("  ✓ Emphasis: *moderate* **strong**")
-    print("  ✓ Language switching: [text](lang-code)")
-    print("  ✓ Phonetic pronunciation: [word](ph: phoneme)")
-    print("  ✓ Substitution: [text](sub: replacement)")
+    print('  ✓ Language switching: [text]{lang="fr"}')
+    print('  ✓ Phonetic pronunciation: [word]{ipa="phonemes"}')
+    print('  ✓ Substitution: [text]{sub="replacement"}')
     print("  ✓ Markers: @marker_name")
-    print("  ✓ Voice switching: [text](voice: name) - NEW!")
-    print("\nNote: PyKokoro uses SSMD [word](ph: phoneme) syntax for phonemes.")
-    print("\nVoice switching happens automatically per segment!")
-    print("Each [text](voice: name) annotation switches to that voice.")
+    print('  ✓ Voice switching: [text]{voice="name"}')
+    print('\nSSMD phonemes can use {ipa="..."} or {sampa="..."}.')
+    print("\nVoice switching happens automatically per annotated segment.")
 
 
 if __name__ == "__main__":

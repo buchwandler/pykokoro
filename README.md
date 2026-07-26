@@ -407,8 +407,12 @@ You can switch voices per segment using SSMD directives. Block directives use
 
 ```python
 text = (
-    '<div voice="af_sarah">Hello there.</div>\n\n'
-    '<div voice="am_michael">General Kenobi.</div>'
+    '<div voice="af_sarah">\n'
+    'Hello there.\n'
+    '</div>\n\n'
+    '<div voice="am_michael">\n'
+    'General Kenobi.\n'
+    '</div>'
 )
 
 pipe = KokoroPipeline(PipelineConfig(voice="af"))
@@ -432,47 +436,47 @@ from pykokoro.generation_config import GenerationConfig
 pipe = KokoroPipeline(PipelineConfig(voice="af_sarah"))
 
 # Cardinal numbers
-text = "I have [123](as: cardinal) apples"
+text = 'I have [123]{as="cardinal"} apples'
 res = pipe.run(text)
 # TTS says: "I have one hundred twenty-three apples"
 
 # Ordinal numbers
-text = "I came in [3](as: ordinal) place"
+text = 'I came in [3]{as="ordinal"} place'
 res = pipe.run(text)
 # TTS says: "I came in third place"
 
 # Digits (spell out)
-text = "My PIN is [1234](as: digits)"
+text = 'My PIN is [1234]{as="digits"}'
 res = pipe.run(text)
 # TTS says: "My PIN is one two three four"
 
 # Telephone numbers
-text = "Call [+1-555-0123](as: telephone)"
+text = 'Call [+1-555-0123]{as="telephone"}'
 res = pipe.run(text)
 # TTS says: "Call plus one five five five oh one two three"
 
 # Dates with custom formatting
-text = "Today is [12/31/2024](as: date, format: mdy)"
+text = 'Today is [12/31/2024]{as="date" format="mdy"}'
 res = pipe.run(text)
 # TTS says: "Today is December thirty-first, two thousand twenty-four"
 
 # Time (12-hour or 24-hour)
-text = "The time is [14:30](as: time)"
+text = 'The time is [14:30]{as="time"}'
 res = pipe.run(text)
 # TTS says: "The time is two thirty PM"
 
 # Characters (spell out)
-text = "The code is [ABC](as: characters)"
+text = 'The code is [ABC]{as="characters"}'
 res = pipe.run(text)
 # TTS says: "The code is A B C"
 
 # Fractions
-text = "Add [1/2](as: fraction) cup of sugar"
+text = 'Add [1/2]{as="fraction"} cup of sugar'
 res = pipe.run(text)
 # TTS says: "Add one half cup of sugar"
 
 # Units
-text = "The package weighs [5kg](as: unit)"
+text = 'The package weighs [5kg]{as="unit"}'
 res = pipe.run(text)
 # TTS says: "The package weighs five kilograms"
 ```
@@ -501,7 +505,7 @@ from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
 
 # French cardinal
-text = "[123](as: cardinal)"
+text = '[123]{as="cardinal"}'
 pipe = KokoroPipeline(
     PipelineConfig(voice="ff_siwis", generation=GenerationConfig(lang="fr-fr"))
 )
@@ -509,7 +513,7 @@ res = pipe.run(text)
 # TTS says: "cent vingt-trois"
 
 # German ordinal
-text = "[3](as: ordinal)"
+text = '[3]{as="ordinal"}'
 pipe = KokoroPipeline(
     PipelineConfig(voice="gf_maria", generation=GenerationConfig(lang="de-de"))
 )
@@ -523,13 +527,13 @@ Say-as works seamlessly with all SSMD features:
 
 ```python
 # With prosody
-text = "[100](as: cardinal) +loud+ dollars!"
+text = '[100]{as="cardinal" volume="loud"} dollars!'
 
 # With pauses
-text = "[First](as: ordinal) ...c [second](as: ordinal) ...c [third](as: ordinal)!"
+text = '[First]{as="ordinal"} ...c [second]{as="ordinal"} ...c [third]{as="ordinal"}!'
 
 # With emphasis
-text = "The winner is *[1](as: ordinal)*!"
+text = 'The winner is [1]{as="ordinal" emphasis="moderate"}!'
 ```
 
 See `examples/say_as_demo.py` for comprehensive examples.

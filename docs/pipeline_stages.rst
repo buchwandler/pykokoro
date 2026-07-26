@@ -174,13 +174,15 @@ strengths into durations.
 Supported SSMD features include:
 
 * Break markers: ``...c``, ``...s``, ``...p``, ``...500ms``
-* Language overrides: ``[Bonjour](fr)``
-* Phoneme overrides: ``[tomato](ph: t eh m aa t ow)``
-* Prosody markup (rate/pitch/volume) and emphasis
-* Voice markers: ``[Hello]{voice="af_sarah"}``
+* Language overrides: ``[Bonjour]{lang="fr"}``
+* IPA phoneme overrides: ``[tomato]{ipa="təˈmeɪtoʊ"}``
+* Prosody annotations: ``[text]{rate="fast" pitch="high" volume="loud"}``
+* Inline voice annotations and ``<div voice="af_sarah">`` directives
 
 The parser attaches SSMD metadata to annotation spans so later stages can
-select per-segment voices and prosody.
+select per-segment language, voices, phonemes, and prosody. Sentence-level
+``<div>`` language, voice, and prosody directives are inherited by contained
+segments, while inline annotations override individual fields.
 
 Plain text sentence splitting
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

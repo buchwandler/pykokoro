@@ -3,11 +3,11 @@
 Podcast-style multi-voice conversation using SSMD voice annotations.
 
 This example demonstrates creating a podcast with multiple speakers using
-SSMD voice annotations. The entire podcast is written as a single text string
-with inline voice switching using the syntax: [text](voice: name)
+SSMD voice directives. The entire podcast is written as a single text string
+with one ``<div voice="name">`` block per speaker turn.
 
 Features demonstrated:
-- Inline voice switching with SSMD annotations
+- Block-level voice switching with SSMD directives
 - Automatic pause insertion between speakers
 - Clean, readable podcast script format
 - Single API call generates entire multi-voice conversation
@@ -21,57 +21,72 @@ Output:
 
 import soundfile as sf
 
-import pykokoro
+from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro.generation_config import GenerationConfig
 
-# Podcast script using SSMD voice annotations
-# Each speaker's dialogue is wrapped in [text](voice: name) annotation
-# Pauses are added with SSMD break markers: ...s (sentence pause)
+# Podcast script using SSMD block voice directives.
+# Inline voice changes can use: [short phrase]{voice="af_sarah"}
 # fmt: off
 PODCAST_SCRIPT = """
-@voice: af_sarah
+<div voice="af_sarah">
 Welcome to Tech Talk! I'm Sarah, and today we're diving into the fascinating world of text-to-speech technology.
+</div>
 
-@voice: am_michael
+<div voice="am_michael">
 And I'm Michael! We've got an amazing episode lined up. The advances in neural TTS have been incredible lately.
+</div>
 
-@voice: af_sarah
+<div voice="af_sarah">
 Absolutely! And we have a special guest with us today. Please welcome our AI researcher, Nicole!
+</div>
 
-@voice: af_nicole
+<div voice="af_nicole">
 Thanks for having me! I'm thrilled to be here. I've been working on voice synthesis for the past five years.
+</div>
 
-@voice: am_michael
+<div voice="am_michael">
 Nicole, can you tell us about the latest breakthroughs in making synthetic voices sound more natural?
+</div>
 
-@voice: af_nicole
+<div voice="af_nicole">
 Of course! The key innovation has been in capturing prosody and emotional nuance. Modern models like Kokoro can generate speech that's nearly indistinguishable from human voices.
+</div>
 
-@voice: af_sarah
+<div voice="af_sarah">
 That's fascinating! What do you see as the main applications for this technology?
+</div>
 
-@voice: af_nicole
+<div voice="af_nicole">
 There are so many! Audiobook production, accessibility tools, language learning, and even preserving voices of people who might lose their ability to speak.
+</div>
 
-@voice: am_michael
+<div voice="am_michael">
 The accessibility angle is really compelling. Imagine being able to give a voice to those who can't speak.
+</div>
 
-@voice: af_sarah
+<div voice="af_sarah">
 Exactly! And with open-source models, this technology is becoming available to everyone.
+</div>
 
-@voice: af_nicole
+<div voice="af_nicole">
 That's what excites me most. Democratizing access to high-quality speech synthesis opens up so many possibilities.
+</div>
 
-@voice: am_michael
+<div voice="am_michael">
 Well, this has been an enlightening discussion! Any final thoughts, Nicole?
+</div>
 
-@voice: af_nicole
+<div voice="af_nicole">
 Just that we're at an inflection point. The next few years will bring even more amazing developments. Stay curious!
+</div>
 
-@voice: af_sarah
+<div voice="af_sarah">
 Thank you so much for joining us, Nicole! And thank you to our listeners for tuning in.
+</div>
 
-@voice: am_michael
+<div voice="am_michael">
 Until next time, keep exploring the future of technology!
+</div>
 """
 # fmt: on
 
@@ -81,7 +96,7 @@ def main():
     print("SSMD MULTI-VOICE PODCAST DEMO")
     print("=" * 70)
 
-    print("\nPodcast Script (SSMD format with voice annotations):")
+    print("\nPodcast Script (SSMD format with voice directives):")
     print("-" * 70)
     # Show first few lines as preview
     lines = PODCAST_SCRIPT.strip().split("\n")
@@ -89,24 +104,28 @@ def main():
         if line.strip():
             print(line)
     print("...")
-    speaker_count = len([line for line in lines if line.strip() and line.startswith("@voice:")])
+    speaker_count = sum(1 for line in lines if line.lstrip().startswith("<div voice="))
     print(f"({speaker_count} speaker segments)")
     print("-" * 70)
 
     print("\nInitializing TTS engine...")
-    kokoro = pykokoro.Kokoro()
+    pipe = KokoroPipeline(
+        PipelineConfig(
+            voice="af_sarah",
+            generation=GenerationConfig(
+                lang="en-us",
+                speed=1.0,
+                pause_mode="manual",
+            ),
+        )
+    )
 
     print("\nGenerating podcast with automatic voice switching...")
-    print("Voice switching happens automatically based on SSMD annotations!")
+    print("Voice switching follows the SSMD <div voice=...> directives.")
 
-    # Single API call generates entire multi-voice podcast
-    samples, sample_rate = kokoro.create(
-        PODCAST_SCRIPT,
-        voice="af_sarah",  # Default voice (fallback if segment has no annotation)
-        speed=1.0,
-        lang="en-us",
-        pause_mode="manual",  # PyKokoro controls pauses precisely
-    )
+    # A single pipeline run generates the multi-voice podcast.
+    result = pipe.run(PODCAST_SCRIPT)
+    samples, sample_rate = result.audio, result.sample_rate
 
     # Save to file
     output_file = "podcast_ssmd_demo.wav"
@@ -116,15 +135,14 @@ def main():
     print(f"\nSuccess! Created {output_file}")
     print(f"Duration: {duration:.1f} seconds ({duration / 60:.1f} minutes)")
 
-    kokoro.close()
-
     print("\n" + "=" * 70)
     print("HOW IT WORKS")
     print("=" * 70)
-    print("\nSSMD Voice Annotation Syntax:")
-    print("  [text](voice: name) - Speaks 'text' using voice 'name'")
+    print("\nSSMD Voice Syntax:")
+    print('  <div voice="name">...</div> - Voice block for a speaker turn')
+    print('  [text]{voice="name"} - Inline voice change for a short phrase')
     print("\nExample:")
-    print("  [Hello!](voice: af_sarah) ...s [Goodbye!](voice: am_michael)")
+    print('  [Hello!]{voice="af_sarah"} ...s [Goodbye!]{voice="am_michael"}')
     print("\nAvailable voices:")
     print("  - af_sarah, af_nicole, af_sky (American Female)")
     print("  - am_adam, am_michael (American Male)")
@@ -136,7 +154,7 @@ def main():
     print("  ...p - Paragraph pause (1.0s)")
     print("  ...500ms - Custom duration")
     print("\nProcess:")
-    print("  1. SSMD parser extracts voice metadata from annotations")
+    print("  1. SSMD parser extracts voice metadata from directives and annotations")
     print("  2. Each segment is associated with its voice name")
     print("  3. AudioGenerator automatically switches voices per segment")
     print("  4. Single seamless audio output!")

@@ -310,7 +310,7 @@ SSMD say-as syntax converts numbers, dates, and other formats:
 
    from pykokoro import KokoroPipeline, PipelineConfig
 
-   text = "I have [123](as: cardinal) apples and [12/31/2024](as: date, format: mdy)."
+   text = 'I have [123]{as="cardinal"} apples and [12/31/2024]{as="date" format="mdy"}.'
    pipe = KokoroPipeline(PipelineConfig(voice="af_sarah"))
    result = pipe.run(text)
 

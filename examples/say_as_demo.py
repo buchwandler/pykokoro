@@ -43,22 +43,22 @@ def demo_numbers(pipe):
 Welcome to the number normalization demo.
 
 Cardinal numbers convert digits to words.
-I have [123](as: cardinal) apples.
-That's [1000](as: cardinal) more than yesterday.
+I have [123]{as="cardinal"} apples.
+That's [1000]{as="cardinal"} more than yesterday.
 
 Ordinal numbers show position or rank.
-I came in [3](as: ordinal) place.
-This is my [21](as: ordinal) attempt.
+I came in [3]{as="ordinal"} place.
+This is my [21]{as="ordinal"} attempt.
 
 Digits speak each number separately.
-My PIN is [1234](as: digits).
-The code is [5-5-5](as: digits).
+My PIN is [1234]{as="digits"}.
+The code is [5-5-5]{as="digits"}.
 
 Fractions are also supported.
-Use [1/2](as: fraction) cup of sugar.
-Add [3/4](as: fraction) teaspoon of salt.
+Use [1/2]{as="fraction"} cup of sugar.
+Add [3/4]{as="fraction"} teaspoon of salt.
 
-The alias [456](as: number) works like cardinal.
+The alias [456]{as="number"} works like cardinal.
 """
 
     print(f"\nInput text:\n{script.strip()}\n")
@@ -78,12 +78,12 @@ def demo_text_normalization(pipe):
 Text normalization examples.
 
 The characters type spells out letters.
-Please spell [ABC](as: characters).
-My initials are [J.K.R.](as: characters).
+Please spell [ABC]{as="characters"}.
+My initials are [J.K.R.]{as="characters"}.
 
 Expletive censoring for content filtering.
-This replaces [inappropriate](as: expletive) words.
-No more [profanity](as: expletive) in output.
+This replaces [inappropriate]{as="expletive"} words.
+No more [profanity]{as="expletive"} in output.
 """
 
     print(f"\nInput text:\n{script.strip()}\n")
@@ -103,12 +103,12 @@ def demo_datetime(pipe):
 Date and time examples.
 
 Dates are formatted naturally.
-Today is [12/31/2024](as: date).
-The meeting is on [2024-01-15](as: date).
+Today is [12/31/2024]{as="date"}.
+The meeting is on [2024-01-15]{as="date"}.
 
 Times work in multiple formats.
-The call is at [14:30](as: time).
-Lunch is at [12:00](as: time).
+The call is at [14:30]{as="time"}.
+Lunch is at [12:00]{as="time"}.
 """
 
     print(f"\nInput text:\n{script.strip()}\n")
@@ -128,13 +128,13 @@ def demo_telephone_and_units(pipe):
 Telephone and unit examples.
 
 Phone numbers are spoken digit by digit.
-Call [+1-555-0123](as: telephone).
-My number is [555-7890](as: telephone).
+Call [+1-555-0123]{as="telephone"}.
+My number is [555-7890]{as="telephone"}.
 
 Units are expanded naturally.
-Add [5kg](as: unit) of flour.
-The distance is [10km](as: unit).
-It weighs [2.5lb](as: unit).
+Add [5kg]{as="unit"} of flour.
+The distance is [10km]{as="unit"}.
+It weighs [2.5lb]{as="unit"}.
 """
 
     print(f"\nInput text:\n{script.strip()}\n")
@@ -153,22 +153,22 @@ def demo_mixed_features(pipe):
     script = """
 Welcome to the complete say-as demonstration.
 
-Start by calling [+1-555-0123](as: telephone).
-The date is [01/15/2024](as: date).
-Meeting time: [14:30](as: time).
+Start by calling [+1-555-0123]{as="telephone"}.
+The date is [01/15/2024]{as="date"}.
+Meeting time: [14:30]{as="time"}.
 
-We have [1234](as: cardinal) participants.
-You're our [100](as: ordinal) caller!
-Enter code [9-8-7-6](as: digits).
+We have [1234]{as="cardinal"} participants.
+You're our [100]{as="ordinal"} caller!
+Enter code [9-8-7-6]{as="digits"}.
 
 Measurements needed:
-[2.5kg](as: unit) sugar.
-[1/2](as: fraction) cup milk.
-[250ml](as: unit) water.
+[2.5kg]{as="unit"} sugar.
+[1/2]{as="fraction"} cup milk.
+[250ml]{as="unit"} water.
 
-Spell your name using [A-B-C](as: characters).
+Spell your name using [A-B-C]{as="characters"}.
 
-Thank you, and watch your [language](as: expletive)!
+Thank you, and watch your [language]{as="expletive"}!
 """
 
     print(f"\nInput text:\n{script.strip()}\n")
@@ -186,8 +186,8 @@ def demo_multilingual(pipe):
 
     # English
     script_en = """
-English: I have [123](as: cardinal) items.
-The [3](as: ordinal) person wins.
+English: I have [123]{as="cardinal"} items.
+The [3]{as="ordinal"} person wins.
 """
 
     # Note: For other languages, you'd need to switch voices
@@ -208,18 +208,18 @@ def demo_error_handling(pipe):
 Error handling examples.
 
 Invalid numbers fall back to original text.
-This is [invalid](as: cardinal) input.
+This is [invalid]{as="cardinal"} input.
 
 Empty strings are handled gracefully.
-Here's an empty cardinal: [](as: cardinal).
+Here's an empty cardinal: []{as="cardinal"}.
 
 Unsupported types return original text.
-This uses [test](as: unknown_type) markup.
+This uses [test]{as="unknown_type"} markup.
 
 Mixed valid and invalid:
-Valid: [42](as: cardinal).
-Invalid: [abc](as: ordinal).
-Valid: [XYZ](as: characters).
+Valid: [42]{as="cardinal"}.
+Invalid: [abc]{as="ordinal"}.
+Valid: [XYZ]{as="characters"}.
 """
 
     print(f"\nInput text:\n{script.strip()}\n")
@@ -329,20 +329,20 @@ def main():
     print("    ✓ address - Address formatting (basic)")
 
     print("\nSyntax:")
-    print("  [text](as: interpret-as)")
-    print("  [text](as: interpret-as, format: fmt)")
-    print("  [text](as: interpret-as, detail: N)")
+    print('  [text]{as="interpret-as"}')
+    print('  [text]{as="interpret-as" format="fmt"}')
+    print('  [text]{as="interpret-as" detail="N"}')
 
     print("\nExamples:")
-    print('  [123](as: cardinal) → "one hundred twenty-three"')
-    print('  [3](as: ordinal) → "third"')
-    print('  [1234](as: digits) → "one two three four"')
-    print('  [ABC](as: characters) → "A B C"')
-    print('  [+1-555-0123](as: telephone) → "plus one five five five..."')
-    print('  [12/31/2024](as: date) → "December thirty-first, 2024"')
-    print('  [14:30](as: time) → "two thirty PM"')
-    print('  [5kg](as: unit) → "five kilograms"')
-    print('  [1/2](as: fraction) → "one half"')
+    print('  [123]{as="cardinal"} → "one hundred twenty-three"')
+    print('  [3]{as="ordinal"} → "third"')
+    print('  [1234]{as="digits"} → "one two three four"')
+    print('  [ABC]{as="characters"} → "A B C"')
+    print('  [+1-555-0123]{as="telephone"} → "plus one five five five..."')
+    print('  [12/31/2024]{as="date"} → "December thirty-first, 2024"')
+    print('  [14:30]{as="time"} → "two thirty PM"')
+    print('  [5kg]{as="unit"} → "five kilograms"')
+    print('  [1/2]{as="fraction"} → "one half"')
 
     print("\nLanguage Support:")
     print("  The say-as feature supports multiple languages through num2words:")
@@ -355,10 +355,10 @@ def main():
 
     print("\nIntegration with SSMD:")
     print("  Say-as is fully integrated with other SSMD features:")
-    print("  - Combines with prosody: [+1-555-0123](as: telephone) +loud+")
-    print("  - Combines with pauses: [123](as: cardinal) ...s items")
-    print("  - Combines with emphasis: *[42](as: ordinal)* place!")
-    print("  - Works with voice switching: @voice: sarah [100](as: cardinal)")
+    print('  - Combines with prosody: [+1-555-0123]{as="telephone" volume="loud"}')
+    print('  - Combines with pauses: [123]{as="cardinal"} ...s items')
+    print('  - Combines with emphasis: [42]{as="ordinal" emphasis="moderate"} place!')
+    print('  - Works with voice switching: [100]{as="cardinal" voice="af_sarah"}')
 
 
 if __name__ == "__main__":
