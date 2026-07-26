@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import urllib.request
 from types import SimpleNamespace
-from typing import Self
 
 import pytest
+from typing_extensions import Self
 
 import pykokoro.onnx_backend as backend
 from pykokoro.onnx_backend import _download_from_github

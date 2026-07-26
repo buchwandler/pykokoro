@@ -5,6 +5,7 @@ flake8
 nose
 pytest
 pytest-cov
+tomli>=2.0.1; python_version < '3.11'
 coverage
 tox
 lingua-language-detector
