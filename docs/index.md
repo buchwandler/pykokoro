@@ -1,7 +1,7 @@
 # PyKokoro Documentation
 
-PyKokoro is a Python library for text-to-speech synthesis using the Kokoro TTS model.
-It provides high-quality, natural-sounding speech generation with support for multiple
+PyKokoro is a Python library for text-to-speech synthesis using the Kokoro TTS model. It
+provides high-quality, natural-sounding speech generation with support for multiple
 languages, voices, and advanced features like pause control and text splitting.
 
 ```{toctree}
@@ -21,14 +21,20 @@ changelog
 ## Features
 
 - **High-Quality TTS**: Natural-sounding speech synthesis using the Kokoro model
-- **Multiple Languages**: Support for English (US/GB), Spanish, French, German, Italian, Portuguese, Hindi, Japanese, Korean, and Chinese
-- **Voice Selection**: Choose from 54 voices (v1.0) or 103 voices (v1.1-zh) with various styles and accents
+- **Multiple Languages**: Support for English (US/GB), Spanish, French, German, Italian,
+  Portuguese, Hindi, Japanese, Korean, and Chinese
+- **Voice Selection**: Choose from 54 voices (v1.0) or 103 voices (v1.1-zh) with various
+  styles and accents
 - **Voice Blending**: Create custom voice styles by blending multiple voices
-- **Text Normalization**: Automatic say-as support for numbers, dates, phone numbers, and more using SSMD markup
-- **Pause Control**: Add precise pauses using SSMD break syntax: `...c`, `...s`, `...p`, `...500ms`
-- **Smart Text Splitting**: Automatically split long text at sentence, paragraph, or clause boundaries
+- **Text Normalization**: Automatic say-as support for numbers, dates, phone numbers,
+  and more using SSMD markup
+- **Pause Control**: Add precise pauses using SSMD break syntax: `...c`, `...s`, `...p`,
+  `...500ms`
+- **Smart Text Splitting**: Automatically split long text at sentence, paragraph, or
+  clause boundaries
 - **Language-Aware spaCy Models**: Auto-resolve spaCy package names from language + size
-- **Phoneme-Based Generation**: Generate speech directly from phonemes for precise control
+- **Phoneme-Based Generation**: Generate speech directly from phonemes for precise
+  control
 - **GPU Acceleration**: Optional GPU support for faster generation
 - **Flexible Audio Processing**: Trim silence, adjust speed, and more
 - **Composable Pipeline Stages**: Swap doc parsing, splitting, g2p, and audio stages
@@ -80,8 +86,8 @@ pip install pykokoro[gpu]
 
 ## License
 
-PyKokoro is released under the MIT License. The Kokoro model itself is subject
-to its own license terms.
+PyKokoro is released under the MIT License. The Kokoro model itself is subject to its
+own license terms.
 
 # Indices and tables
 

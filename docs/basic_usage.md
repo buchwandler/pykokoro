@@ -56,8 +56,8 @@ print(result.sample_rate)
 
 ### Using Local Model Files
 
-If you already have the ONNX model and voices files locally, pass their paths
-through `PipelineConfig`:
+If you already have the ONNX model and voices files locally, pass their paths through
+`PipelineConfig`:
 
 ```python
 from pathlib import Path
@@ -163,7 +163,8 @@ wavfile.write("output.wav", result.sample_rate, audio_int16)
 
 Voice names follow the pattern: `{accent}_{gender}_{name}`
 
-- **Accent**: `af` (American Female), `am` (American Male), `bf` (British Female), `bm` (British Male)
+- **Accent**: `af` (American Female), `am` (American Male), `bf` (British Female), `bm`
+  (British Male)
 - **Gender**: `f` (female), `m` (male)
 - **Name**: Specific voice identifier
 

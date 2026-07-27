@@ -4,18 +4,27 @@
 
 **Bug Fixes:**
 
-- Fixed deprecated `local_dir_use_symlinks` parameter in HuggingFace downloads (removes deprecation warnings)
-- Fixed Windows CI test failures related to temporary file permissions in encoding detection tests
-- Properly close temporary files before deletion to support Windows file locking behavior
+- Fixed deprecated `local_dir_use_symlinks` parameter in HuggingFace downloads (removes
+  deprecation warnings)
+- Fixed Windows CI test failures related to temporary file permissions in encoding
+  detection tests
+- Properly close temporary files before deletion to support Windows file locking
+  behavior
 
 **Breaking Changes:**
 
-- Removed redundant `v1.1-zh-hf` model variant - Use `model_variant="v1.1-zh"` with `model_source="huggingface"` instead
-- Changed cache directory structure to `~/.cache/pykokoro/{models|voices}/{source}/{variant}/`
-- Removed deprecated functions: `download_model_hf_v11zh()`, `download_voices_hf_v11zh()`, `download_all_models_hf_v11zh()`
-- Function signatures updated: `download_model()`, `download_voice()`, `download_all_voices()`, and `download_all_models()` now require `variant` parameter
-- Path helper functions `get_model_dir()` and `get_voices_dir()` now require `source` and `variant` parameters
-- **API Simplification:** Replaced `split_mode` and `trim_silence` parameters with single `pause_mode` parameter in `Kokoro.create()`
+- Removed redundant `v1.1-zh-hf` model variant - Use `model_variant="v1.1-zh"` with
+  `model_source="huggingface"` instead
+- Changed cache directory structure to
+  `~/.cache/pykokoro/{models|voices}/{source}/{variant}/`
+- Removed deprecated functions: `download_model_hf_v11zh()`,
+  `download_voices_hf_v11zh()`, `download_all_models_hf_v11zh()`
+- Function signatures updated: `download_model()`, `download_voice()`,
+  `download_all_voices()`, and `download_all_models()` now require `variant` parameter
+- Path helper functions `get_model_dir()` and `get_voices_dir()` now require `source`
+  and `variant` parameters
+- **API Simplification:** Replaced `split_mode` and `trim_silence` parameters with
+  single `pause_mode` parameter in `Kokoro.create()`
 
 **Migration Guide:**
 
@@ -62,8 +71,10 @@ audio, sr = kokoro.create(
 The new `pause_mode` parameter simplifies pause control:
 
 - `pause_mode="tts"` (default): TTS generates pauses naturally. Best for most content.
-- `pause_mode="manual"`: PyKokoro controls pauses precisely. Best for podcasts, voice switching, and precise timing.
-- `pause_mode="auto"`: PyKokoro inserts pauses at sentence/paragraph boundaries and trims silence.
+- `pause_mode="manual"`: PyKokoro controls pauses precisely. Best for podcasts, voice
+  switching, and precise timing.
+- `pause_mode="auto"`: PyKokoro inserts pauses at sentence/paragraph boundaries and
+  trims silence.
 
 **Improvements:**
 
@@ -71,16 +82,19 @@ The new `pause_mode` parameter simplifies pause control:
 - Consolidated duplicate download functions for cleaner API
 - Shared configuration files between HuggingFace and GitHub sources
 - Improved code maintainability with consistent path handling
-- All quantization levels supported for v1.1-zh: fp32, fp16, q8, q8f16, q4, q4f16, uint8, uint8f16
+- All quantization levels supported for v1.1-zh: fp32, fp16, q8, q8f16, q4, q4f16,
+  uint8, uint8f16
 - Simplified API with clearer parameter semantics
 
 **New Features:**
 
-- Added support for HuggingFace Kokoro v1.1-zh model (`onnx-community/Kokoro-82M-v1.1-zh-ONNX`)
+- Added support for HuggingFace Kokoro v1.1-zh model
+  (`onnx-community/Kokoro-82M-v1.1-zh-ONNX`)
 - Added 103 voices for v1.1-zh variant
 - Voice files automatically combined into efficient .npz format
 - Progress callbacks for voice downloads
-- Added `pause_mode` parameter for simplified pause control, including `"auto"` boundary pauses
+- Added `pause_mode` parameter for simplified pause control, including `"auto"` boundary
+  pauses
 
 **Documentation:**
 
@@ -141,10 +155,14 @@ The new `pause_mode` parameter simplifies pause control:
 
 - Added `split_and_phonemize_text()` function for standalone text processing
 - Added `enable_pauses` parameter to `create()` method for pause marker support
-- Added pause markers: `(.)`, `(..)`, `(...)` for controlling speech pauses (DEPRECATED - use SSMD break syntax instead: `...c`, `...s`, `...p`)
-- Added `pause_short`, `pause_medium`, `pause_long` parameters for custom pause durations
-- Added `split_mode` parameter to `create()` for intelligent text splitting (DEPRECATED in v0.4.0 - use `pause_mode` instead)
-- Added `trim_silence` parameter for removing silence between segments (DEPRECATED in v0.4.0 - use `pause_mode="manual"` instead)
+- Added pause markers: `(.)`, `(..)`, `(...)` for controlling speech pauses
+  (DEPRECATED - use SSMD break syntax instead: `...c`, `...s`, `...p`)
+- Added `pause_short`, `pause_medium`, `pause_long` parameters for custom pause
+  durations
+- Added `split_mode` parameter to `create()` for intelligent text splitting (DEPRECATED
+  in v0.4.0 - use `pause_mode` instead)
+- Added `trim_silence` parameter for removing silence between segments (DEPRECATED in
+  v0.4.0 - use `pause_mode="manual"` instead)
 - Added `pause_after` field to `PhonemeSegment` class
 
 **Improvements:**
@@ -177,7 +195,8 @@ The new `pause_mode` parameter simplifies pause control:
 
 - Text-to-speech synthesis using Kokoro model
 - Support for 54 voices (v1.0) across multiple languages
-- Support for English (US/GB), Spanish, French, German, Italian, Portuguese, Hindi, Japanese, Korean, Chinese
+- Support for English (US/GB), Spanish, French, German, Italian, Portuguese, Hindi,
+  Japanese, Korean, Chinese
 - Voice blending capabilities
 - Phoneme-based generation
 - GPU acceleration support (CUDA/ROCm)

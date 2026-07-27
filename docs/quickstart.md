@@ -40,7 +40,8 @@ That's it! You've generated your first audio file.
 
 ### Choosing a Voice
 
-PyKokoro comes with 54 voices (v1.0) or 103 voices (v1.1-zh). Here are some popular ones:
+PyKokoro comes with 54 voices (v1.0) or 103 voices (v1.1-zh). Here are some popular
+ones:
 
 ```python
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
@@ -74,8 +75,8 @@ pipe = KokoroPipeline(
 audio6 = pipe.run("Bonjour le monde").audio
 ```
 
-To see all available voices, check the README or use the voice listing examples
-in `examples/voices.py`.
+To see all available voices, check the README or use the voice listing examples in
+`examples/voices.py`.
 
 ### Adjusting Speech Speed
 
@@ -124,11 +125,9 @@ import soundfile as sf
 sf.write("with_pauses.wav", result.audio, result.sample_rate)
 ```
 
-Pause syntax (SSMD breaks):
-\* `...c` - Short/comma pause (0.3 seconds, default)
-\* `...s` - Medium/sentence pause (0.6 seconds, default)
-\* `...p` - Long/paragraph pause (1.0 seconds, default)
-\* `...500ms` - Custom duration pause (e.g., 500 milliseconds)
+Pause syntax (SSMD breaks): \* `...c` - Short/comma pause (0.3 seconds, default) \*
+`...s` - Medium/sentence pause (0.6 seconds, default) \* `...p` - Long/paragraph pause
+(1.0 seconds, default) \* `...500ms` - Custom duration pause (e.g., 500 milliseconds)
 
 ### Reusing the Pipeline
 
@@ -145,8 +144,8 @@ for sentence in ["Hello", "How are you?", "Goodbye!"]:
 
 ### Choosing spaCy Model Size (Auto)
 
-If you use spaCy-based tokenization/splitting, you can keep language-aware
-auto selection and choose only the model size:
+If you use spaCy-based tokenization/splitting, you can keep language-aware auto
+selection and choose only the model size:
 
 ```python
 from pykokoro import (

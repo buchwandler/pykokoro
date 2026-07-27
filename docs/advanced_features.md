@@ -272,15 +272,15 @@ with Kokoro() as kokoro:
 
 **Pause Variance Details:**
 
-The `pause_variance` parameter adds Gaussian (normal distribution) variance to
-pause durations, making speech sound more natural:
+The `pause_variance` parameter adds Gaussian (normal distribution) variance to pause
+durations, making speech sound more natural:
 
 - **0.0** - No variance, exact pause durations
 - **0.05** - Default, ±100ms at 95% confidence interval
 - **0.1** - Higher variance, ±200ms at 95% confidence
 
-The variance ensures that pauses are never exactly the same length, mimicking
-natural human speech rhythm.
+The variance ensures that pauses are never exactly the same length, mimicking natural
+human speech rhythm.
 
 **Reproducibility:**
 
@@ -598,8 +598,8 @@ print(f"Trim info: {trim_info}")
 
 ## Short Sentence Handling
 
-PyKokoro improves short sentences by adding context before synthesis. You can tune settings via
-`ShortSentenceConfig`:
+PyKokoro improves short sentences by adding context before synthesis. You can tune
+settings via `ShortSentenceConfig`:
 
 ```python
 from pykokoro.short_sentence_handler import ShortSentenceConfig
@@ -612,18 +612,18 @@ short_config = ShortSentenceConfig(
 )
 ```
 
-Phrase-based modes use the `energy-valley` cutter, which may fail to find confident boundaries.
-In that case, phrase modes try up to
-`phrase_fallback_tries` alternate phrase templates before falling back to wrap mode.
+Phrase-based modes use the `energy-valley` cutter, which may fail to find confident
+boundaries. In that case, phrase modes try up to `phrase_fallback_tries` alternate
+phrase templates before falling back to wrap mode.
 
-Phrase-based short-sentence handling can slow down processing because
-of these retries, but it usually improves the audio for very short segments
-much more than simple wrapping.
+Phrase-based short-sentence handling can slow down processing because of these retries,
+but it usually improves the audio for very short segments much more than simple
+wrapping.
 
-For phrase-based short-sentence handling, prefer these
-voices in order: `am_santa`, `af_nicole`, `bm_lewis`, `bm_george`,
-`af_bella`, `am_echo`, `af_sky`, `af_sarah`, `bm_fable`, `af_heart`,
-`am_michael`, `af_alloy`, `af_nova`, `bf_isabella`, and `am_adam`.
+For phrase-based short-sentence handling, prefer these voices in order: `am_santa`,
+`af_nicole`, `bm_lewis`, `bm_george`, `af_bella`, `am_echo`, `af_sky`, `af_sarah`,
+`bm_fable`, `af_heart`, `am_michael`, `af_alloy`, `af_nova`, `bf_isabella`, and
+`am_adam`.
 
 ## Configuration Management
 
@@ -676,13 +676,15 @@ print(f"Config: {config_path}")
 
 5. **Use pause_mode for Long Text**
 
-   Using `pause_mode="auto"` with appropriate pause settings improves quality for long text.
+   Using `pause_mode="auto"` with appropriate pause settings improves quality for long
+   text.
 
 ## Internal Architecture
 
 ### Understanding PyKokoro's Internal Structure
 
-PyKokoro uses a modular architecture with specialized manager classes for different responsibilities:
+PyKokoro uses a modular architecture with specialized manager classes for different
+responsibilities:
 
 **OnnxSessionManager** (`pykokoro/onnx_session.py`)
 
@@ -726,7 +728,8 @@ Custom word-to-phoneme mappings:
 
 ### Using Manager Classes Directly
 
-While most users interact with the high-level `Kokoro` API, advanced users can work with manager classes directly:
+While most users interact with the high-level `Kokoro` API, advanced users can work with
+manager classes directly:
 
 ```python
 from pykokoro.onnx_session import OnnxSessionManager

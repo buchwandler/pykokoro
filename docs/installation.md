@@ -10,8 +10,8 @@ Install the latest stable version from PyPI:
 pip install "pykokoro[cpu]"
 ```
 
-The `cpu`, `gpu`, `openvino`, and `directml` extras are alternative
-ONNX Runtime distributions. Install exactly one provider extra per environment.
+The `cpu`, `gpu`, `openvino`, and `directml` extras are alternative ONNX Runtime
+distributions. Install exactly one provider extra per environment.
 
 ## GPU Support
 
@@ -97,8 +97,8 @@ choco install espeak-ng
 
 ### Installing spaCy (Optional)
 
-For advanced text splitting with `pause_mode="auto"` and language-aware
-spaCy tokenization in G2P:
+For advanced text splitting with `pause_mode="auto"` and language-aware spaCy
+tokenization in G2P:
 
 ```bash
 pip install spacy
@@ -164,7 +164,8 @@ If you get errors about espeak-ng not being found:
 If GPU acceleration isn't working:
 
 1. Verify CUDA/ROCm is installed: `nvidia-smi` (NVIDIA) or `rocm-smi` (AMD)
-2. Check ONNX Runtime GPU: `python -c "import onnxruntime; print(onnxruntime.get_available_providers())"`
+2. Check ONNX Runtime GPU:
+   `python -c "import onnxruntime; print(onnxruntime.get_available_providers())"`
 3. Ensure you have the correct ONNX Runtime version for your CUDA version
 
 ### Model Download Issues
@@ -178,7 +179,8 @@ If model downloads fail:
 
 **Manual Model Download:**
 
-PyKokoro automatically downloads models on first use, but you can trigger downloads manually:
+PyKokoro automatically downloads models on first use, but you can trigger downloads
+manually:
 
 ```python
 from pykokoro import Kokoro
@@ -209,7 +211,11 @@ kokoro = Kokoro(
 
 Models are cached in:
 
-- **HuggingFace v1.0**: `~/.cache/pykokoro/models/huggingface/v1.0/` and `~/.cache/pykokoro/voices/huggingface/v1.0/`
-- **HuggingFace v1.1-zh**: `~/.cache/pykokoro/models/huggingface/v1.1-zh/` and `~/.cache/pykokoro/voices/huggingface/v1.1-zh/`
-- **GitHub v1.0**: `~/.cache/pykokoro/models/github/v1.0/` and `~/.cache/pykokoro/voices/github/v1.0/`
-- **GitHub v1.1-zh**: `~/.cache/pykokoro/models/github/v1.1-zh/` and `~/.cache/pykokoro/voices/github/v1.1-zh/`
+- **HuggingFace v1.0**: `~/.cache/pykokoro/models/huggingface/v1.0/` and
+  `~/.cache/pykokoro/voices/huggingface/v1.0/`
+- **HuggingFace v1.1-zh**: `~/.cache/pykokoro/models/huggingface/v1.1-zh/` and
+  `~/.cache/pykokoro/voices/huggingface/v1.1-zh/`
+- **GitHub v1.0**: `~/.cache/pykokoro/models/github/v1.0/` and
+  `~/.cache/pykokoro/voices/github/v1.0/`
+- **GitHub v1.1-zh**: `~/.cache/pykokoro/models/github/v1.1-zh/` and
+  `~/.cache/pykokoro/voices/github/v1.1-zh/`

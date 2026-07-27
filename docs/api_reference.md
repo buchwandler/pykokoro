@@ -150,8 +150,8 @@ print(phonemes)
 
 ## Model and Voice Utilities
 
-These utilities live in `pykokoro.onnx_backend` and are used for model and
-voice management.
+These utilities live in `pykokoro.onnx_backend` and are used for model and voice
+management.
 
 ```{eval-rst}
 .. autofunction:: pykokoro.onnx_backend.download_model
