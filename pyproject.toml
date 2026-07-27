@@ -18,7 +18,11 @@ authors = [
     {name = "Holger Nahrstaedt", email = "nahrstaedt@gmail.com"}
 ]
 keywords = ["tts", "text-to-speech", "kokoro", "phonemizer", "espeak"]
-urls = { Homepage = "https://github.com/holgern/pykokoro" }
+[project.urls]
+Homepage = "https://github.com/buchwandler/pykokoro"
+Repository = "https://github.com/buchwandler/pykokoro"
+Issues = "https://github.com/buchwandler/pykokoro/issues"
+Changelog = "https://github.com/buchwandler/pykokoro/releases"
 dependencies = [
     "kokorog2p[espeak,en]>=0.6.6",
     "phrasplit>=0.3.1",

@@ -1,7 +1,7 @@
 [![PyPI - Version](https://img.shields.io/pypi/v/pykokoro)](https://pypi.org/project/pykokoro/)
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/pykokoro)
 ![PyPI - Downloads](https://img.shields.io/pypi/dm/pykokoro)
-[![codecov](https://codecov.io/gh/holgern/pykokoro/graph/badge.svg?token=iCHXwbjAXG)](https://codecov.io/gh/holgern/pykokoro)
+[![codecov](https://codecov.io/gh/buchwandler/pykokoro/graph/badge.svg?token=iCHXwbjAXG)](https://codecov.io/gh/buchwandler/pykokoro)
 
 # PyKokoro
 
@@ -1031,6 +1031,6 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## Links
 
-- **GitHub**: https://github.com/holgern/pykokoro
+- **GitHub**: https://github.com/buchwandler/pykokoro
 - **PyPI**: https://pypi.org/project/pykokoro/
 - **Documentation**: https://pykokoro.readthedocs.io/
