@@ -27,7 +27,19 @@ extensions = [
     "sphinx.ext.intersphinx",
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
+    "myst_parser",
 ]
+
+# All authored Sphinx pages are MyST Markdown.
+source_suffix = {
+    ".md": "markdown",
+}
+
+# Required for readable Markdown-native admonitions.
+myst_enable_extensions = ["colon_fence"]
+
+# Current documentation contains headings through H4.
+myst_heading_anchors = 4
 
 # Napoleon settings for NumPy-style docstrings
 napoleon_google_docstring = False
@@ -59,7 +71,7 @@ templates_path = ["_templates"]
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "README.md"]
 
 
 # -- Options for HTML output -------------------------------------------------

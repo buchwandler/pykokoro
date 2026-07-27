@@ -58,14 +58,14 @@ make clean
 
 ## Documentation Structure
 
-- `index.rst` - Main documentation index
-- `quickstart.rst` - Quick start guide for new users
-- `installation.rst` - Installation instructions
-- `basic_usage.rst` - Basic usage guide
-- `advanced_features.rst` - Advanced features and techniques
-- `examples.rst` - Practical examples
-- `api_reference.rst` - Complete API reference
-- `changelog.rst` - Version history and changes
+- `index.md` - Main documentation index
+- `quickstart.md` - Quick start guide for new users
+- `installation.md` - Installation instructions
+- `basic_usage.md` - Basic usage guide
+- `advanced_features.md` - Advanced features and techniques
+- `examples.md` - Practical examples
+- `api_reference.md` - Complete API reference
+- `changelog.md` - Version history and changes
 - `conf.py` - Sphinx configuration
 
 ## Publishing to Read the Docs
@@ -78,15 +78,15 @@ The documentation is configured to work with Read the Docs automatically:
 
 ## Documentation Style Guide
 
-- Use reStructuredText (.rst) format
+- Use MyST Markdown (.md) for all Sphinx source pages
 - Follow NumPy docstring style for API documentation
 - Include code examples for all features
 - Keep line length to ~80-100 characters
-- Use proper Sphinx directives (.. code-block::, .. note::, etc.)
+- Use MyST directives for Sphinx-only features such as toctrees and autodoc
 
 ## Updating Documentation
 
-1. Edit the relevant .rst files
+1. Edit the relevant .md files
 2. Build locally to test: `make html`
 3. Review changes in browser
 4. Commit and push to repository

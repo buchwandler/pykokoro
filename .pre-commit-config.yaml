@@ -51,8 +51,6 @@ repos:
       - id: check-docstring-first
       - id: check-executables-have-shebangs
       - id: check-merge-conflict
-        # exclude files where underlines are not distinguishable from merge conflicts
-        exclude: /README\.rst$|^docs/.*\.rst$
   - repo: https://github.com/pre-commit/mirrors-prettier
     rev: v4.0.0-alpha.8
     hooks:

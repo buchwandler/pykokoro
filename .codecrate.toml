@@ -4,10 +4,21 @@ keep_docstrings = true
 dedupe = true
 metadata = false
 respect_gitignore = true
-exclude = ["*/.venv/*"]
+exclude = ["*/.venv/*", "context_pykokoro.*"]
 gitignore_allow = ["pykokoro/_version.py"]
-include = ["**/*.py", "**/*.toml", "**/*.rst", "**/*.md", "LICENSE"]
+include = [
+  "**/*.py",
+  "**/*.toml",
+  "**/*.md",
+  "**/*.json",
+  "**/*.txt",
+  "**/*.csv",
+  "**/*.tsv",
+  "**/*.yaml",
+  "**/*.yml",
+  "LICENSE",
+]
 split_max_chars = 0
 layout = "full"
-ptofile = "portable-agent"
+profile = "portable-agent"
 emit_standalone_unpacker = true
