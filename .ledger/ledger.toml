@@ -1,0 +1,16 @@
+schema_version = 3
+
+[project]
+uuid = "26fbefd4-a9f0-477b-b901-5b130180007c"
+
+[ledgers.releaseledger.mounts.data]
+storage = "project"
+
+[ledgers.releaseledger.mounts.indexes]
+storage = "cache"
+
+[ledgers.taskledger.mounts.data]
+storage = "project"
+
+[ledgers.taskledger.mounts.indexes]
+storage = "cache"

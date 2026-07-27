@@ -1,0 +1,461 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 6
+release_version: 0.7.0
+git_base_ref: v0.6.5
+git_base_sha: eabdeb5531180455b0255ced1a00093faf1d0fef
+git_head_ref: HEAD
+git_head_sha: c5edbdd5b8afb9f095a61f8ef4e920835159f4b9
+git_range: eabdeb5531180455b0255ced1a00093faf1d0fef..c5edbdd5b8afb9f095a61f8ef4e920835159f4b9
+commit_count: 13
+rows:
+  - sha: ee0cabf0f4caa3b0bab6b1966ff089ee7aeaf561
+    source_ref: git:ee0cabf0f4caa3b0bab6b1966ff089ee7aeaf561
+    short_sha: ee0cabf
+    changed_paths:
+      - README.md
+      - docs/advanced_features.rst
+      - examples/optimal_phoneme_length_demo.py
+      - examples/short_sentence_demo.py
+      - examples/short_sentence_randomized_demo.py
+      - examples/short_sentence_voices_demo.py
+      - metrics/.gitignore
+      - metrics/find_short_sentence_end_phrase_candidates.py
+      - metrics/find_short_sentence_phrase_candidates.py
+      - metrics/rank_short_sentence_phrases_across_voice_list.py
+      - pykokoro/audio_generator.py
+      - pykokoro/generation_config.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/short_sentence_cutters/__init__.py
+      - pykokoro/short_sentence_cutters/energy_valley.py
+      - pykokoro/short_sentence_cutters/shared.py
+      - pykokoro/short_sentence_cutters/vad.py
+      - pykokoro/short_sentence_handler.py
+      - pykokoro/stages/phoneme_processing/onnx.py
+      - pykokoro/stages/synth/onnx.py
+      - tests/test_audio_splitting.py
+      - tests/test_downloads.py
+      - tests/test_pipeline_lifecycle.py
+      - tests/test_short_sentence_handler.py
+    stats:
+      files_changed: 0
+      insertions: 4092
+      deletions: 172
+    inspected: true
+    inspected_paths:
+      - pykokoro/short_sentence_cutters/__init__.py
+      - pykokoro/short_sentence_cutters/energy_valley.py
+      - pykokoro/short_sentence_handler.py
+      - pykokoro/audio_generator.py
+    observed_behavior: Phrase-based short-sentence handling with energy-valley cutting
+    public_impact: public
+    decision: accepted
+    evidence_subject: "feat: phrase short-sentence handling"
+    target_entry_id: entry-0001
+  - sha: 58cb25dcce79d734d0917f9750fec3070fd30b68
+    source_ref: git:58cb25dcce79d734d0917f9750fec3070fd30b68
+    short_sha: 58cb25d
+    changed_paths:
+      - .codecrate.toml
+      - .github/workflows/pre-commit.yml
+      - .gitignore
+      - .pre-commit-config.yaml
+      - .ruff.toml
+      - README.md
+      - examples/backend_comparison.py
+      - examples/cpu_benchmark.py
+      - examples/dash_variations.py
+      - examples/optimal_phoneme_length_demo.py
+      - examples/phoneme_diff_comparison.py
+      - examples/podcast.py
+      - examples/short_sentence_demo.py
+      - examples/short_sentence_randomized_demo.py
+      - examples/short_sentence_voices_demo.py
+      - examples/token_length_effects.py
+      - metrics/.gitignore
+      - metrics/find_short_sentence_phrase_candidates.py
+      - metrics/rank_short_sentence_phrases_across_voice_list.py
+      - pykokoro/__init__.py
+      - pykokoro/audio_generator.py
+      - pykokoro/generation_config.py
+      - pykokoro/mixed_language_handler.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/onnx_session.py
+      - pykokoro/phoneme_dictionary.py
+      - pykokoro/pipeline.py
+      - pykokoro/prosody.py
+      - pykokoro/provider_config.py
+      - pykokoro/say_as.py
+      - pykokoro/short_sentence_cutters/__init__.py
+      - pykokoro/short_sentence_cutters/energy_valley.py
+      - pykokoro/short_sentence_cutters/shared.py
+      - pykokoro/short_sentence_cutters/vad.py
+      - pykokoro/short_sentence_handler.py
+      - pykokoro/ssmd_parser.py
+      - pykokoro/stages/doc_parsers/plain.py
+      - pykokoro/tokenizer.py
+      - pykokoro/transcript.py
+      - pykokoro/trim.py
+      - pykokoro/utils.py
+      - pykokoro/voice_manager.py
+      - tests/conftest.py
+      - tests/test_audio_splitting.py
+      - tests/test_bug_fixes.py
+      - tests/test_downloads.py
+      - tests/test_mixed_language.py
+      - tests/test_pipeline_lifecycle.py
+      - tests/test_say_as.py
+      - tests/test_ssmd.py
+      - tests/test_tokenizer.py
+      - tests/test_utils.py
+    stats:
+      files_changed: 0
+      insertions: 291
+      deletions: 240
+    inspected: true
+    inspected_paths:
+      - .pre-commit-config.yaml
+      - .ruff.toml
+    observed_behavior: Pre-commit and tooling configuration updates
+    public_impact: internal
+    decision: internal
+    evidence_subject: "chore: update pre-commit"
+    target_entry_id: entry-0008
+  - sha: 9f22f63dc1b0d658c331e00a5e2d87016ecc863a
+    source_ref: git:9f22f63dc1b0d658c331e00a5e2d87016ecc863a
+    short_sha: 9f22f63
+    changed_paths:
+      - pykokoro/audio_generator.py
+      - pykokoro/onnx_session.py
+      - tests/test_pipeline_phoneme_consistency.py
+    stats:
+      files_changed: 0
+      insertions: 25
+      deletions: 19
+    inspected: true
+    inspected_paths:
+      - pykokoro/audio_generator.py
+      - tests/test_pipeline_phoneme_consistency.py
+    observed_behavior: Fix pytest test errors
+    public_impact: internal
+    decision: internal
+    evidence_subject: "fix: fix pytest errors"
+    target_entry_id: entry-0009
+  - sha: 8755b82767b906a2d0f2493013383084d565ef20
+    source_ref: git:8755b82767b906a2d0f2493013383084d565ef20
+    short_sha: 8755b82
+    changed_paths:
+      - examples/english.py
+    stats:
+      files_changed: 0
+      insertions: 0
+      deletions: 1
+    inspected: true
+    inspected_paths:
+      - examples/english.py
+    observed_behavior: Fix voice name in example
+    public_impact: docs
+    decision: accepted
+    evidence_subject: "fix: voice name"
+    target_entry_id: entry-0006
+  - sha: 9f51f7697825528ab0277da300c618210a6f25cf
+    source_ref: git:9f51f7697825528ab0277da300c618210a6f25cf
+    short_sha: 9f51f76
+    changed_paths:
+      - .codecrate.toml
+      - .github/workflows/tests.yml
+      - .pre-commit-config.yaml
+      - .ruff.toml
+      - AGENTS.md
+      - README.md
+      - docs/installation.rst
+      - docs/make.py
+      - examples/automatic_pauses_demo.py
+      - examples/backend_comparison.py
+      - examples/boundary_detection_analysis.py
+      - examples/contractions_advanced.py
+      - examples/cpu_benchmark.py
+      - examples/english.py
+      - examples/generation_config_demo.py
+      - examples/gpu_benchmark.py
+      - examples/headings_demo.py
+      - examples/hf_v11zh_demo.py
+      - examples/hindi.py
+      - examples/japanese.py
+      - examples/mixed_language.py
+      - examples/model_source_comparison.py
+      - examples/optimal_phoneme_length_demo.py
+      - examples/pauses_demo.py
+      - examples/pauses_with_splitting.py
+      - examples/phoneme_diff_comparison.py
+      - examples/pipeline_stage_showcase.py
+      - examples/podcast.py
+      - examples/prosody_demo.py
+      - examples/provider_config_demo.py
+      - examples/provider_info.py
+      - examples/say_as_demo.py
+      - examples/short_sentence_demo.py
+      - examples/short_sentence_randomized_demo.py
+      - examples/token_length_effects.py
+      - examples/voice_slerp_demo.py
+      - metrics/find_short_sentence_phrase_candidates.py
+      - metrics/rank_short_sentence_phrases_across_voice_list.py
+      - pykokoro/__init__.py
+      - pykokoro/artifact_manifest.py
+      - pykokoro/audio_generator.py
+      - pykokoro/config_types.py
+      - pykokoro/debug/segment_invariants.py
+      - pykokoro/generation_config.py
+      - pykokoro/mixed_language_handler.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/onnx_session.py
+      - pykokoro/phoneme_dictionary.py
+      - pykokoro/pipeline.py
+      - pykokoro/pipeline_config.py
+      - pykokoro/prosody.py
+      - pykokoro/provider_config.py
+      - pykokoro/runtime/cache.py
+      - pykokoro/runtime/spans.py
+      - pykokoro/say_as.py
+      - pykokoro/short_sentence_cutters/__init__.py
+      - pykokoro/short_sentence_cutters/energy_valley.py
+      - pykokoro/short_sentence_cutters/shared.py
+      - pykokoro/short_sentence_cutters/vad.py
+      - pykokoro/short_sentence_handler.py
+      - pykokoro/ssmd_parser.py
+      - pykokoro/stages/audio_postprocessing/noop.py
+      - pykokoro/stages/audio_postprocessing/onnx.py
+      - pykokoro/stages/doc_parsers/plain.py
+      - pykokoro/stages/doc_parsers/ssmd.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/stages/synth/noop.py
+      - pykokoro/tokenizer.py
+      - pykokoro/transcript.py
+      - pykokoro/trim.py
+      - pykokoro/utils.py
+      - pykokoro/voice_manager.py
+      - pyproject.toml
+      - setup.py
+      - tests/test_audio_splitting.py
+      - tests/test_auto_pause_mode.py
+      - tests/test_bug_fixes.py
+      - tests/test_downloads.py
+      - tests/test_g2p_abbreviations.py
+      - tests/test_g2p_pause_propagation.py
+      - tests/test_generation_config.py
+      - tests/test_import_boundaries.py
+      - tests/test_maintainer_review4_download_cache.py
+      - tests/test_maintainer_review4_reproductions.py
+      - tests/test_mixed_language.py
+      - tests/test_packaging_metadata.py
+      - tests/test_phrasplit_fallbacks.py
+      - tests/test_phrasplit_overrides.py
+      - tests/test_pipeline_lifecycle.py
+      - tests/test_pipeline_paragraphs.py
+      - tests/test_pipeline_spacy.py
+      - tests/test_prosody.py
+      - tests/test_session_manager.py
+      - tests/test_short_sentence_handler.py
+      - tests/test_splitter_no_overlap.py
+      - tests/test_ssmd.py
+      - tests/test_ssmd_deterministic_breaks.py
+      - tests/test_tokenizer.py
+      - tests/test_utils.py
+      - tests/test_voice_manager.py
+    stats:
+      files_changed: 0
+      insertions: 1524
+      deletions: 1147
+    inspected: true
+    inspected_paths:
+      - pykokoro/artifact_manifest.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/onnx_session.py
+      - pykokoro/voice_manager.py
+      - pykokoro/pipeline.py
+      - pykokoro/runtime/cache.py
+    observed_behavior:
+      SHA256 verification, artifact manifests, offline mode, stale lock recovery,
+      timestamped models
+    public_impact: public
+    decision: accepted
+    evidence_subject:
+      "feat: improve caching and model versioning and other improvements"
+    target_entry_id: entry-0002
+  - sha: 33a18b8d34d4b3bd2b6c1b0f0c28e19f95ff5c95
+    source_ref: git:33a18b8d34d4b3bd2b6c1b0f0c28e19f95ff5c95
+    short_sha: 33a18b8
+    changed_paths:
+      - .codecrate.toml
+      - README.md
+      - docs/basic_usage.rst
+      - docs/pipeline_stages.rst
+      - examples/english.py
+      - examples/podcast.py
+      - examples/prosody_demo.py
+      - examples/say_as_demo.py
+      - examples/ssmd_demo.py
+      - pykokoro/generation_config.py
+      - pykokoro/phoneme_dictionary.py
+      - pykokoro/ssmd_parser.py
+      - tests/test_phoneme_dictionary.py
+      - tests/test_ssmd.py
+    stats:
+      files_changed: 0
+      insertions: 452
+      deletions: 592
+    inspected: true
+    inspected_paths:
+      - pykokoro/ssmd_parser.py
+      - pykokoro/generation_config.py
+      - pykokoro/phoneme_dictionary.py
+    observed_behavior: SSMD syntax updated to key=value annotation format
+    public_impact: public
+    decision: accepted
+    evidence_subject: "feat: update ssmd syntax"
+    target_entry_id: entry-0003
+  - sha: 1081a61df60e79eaf920426305f1ce3358f75579
+    source_ref: git:1081a61df60e79eaf920426305f1ce3358f75579
+    short_sha: 1081a61
+    changed_paths:
+      - .github/workflows/tests.yml
+    stats:
+      files_changed: 0
+      insertions: 0
+      deletions: 3
+    inspected: true
+    inspected_paths:
+      - .github/workflows/tests.yml
+    observed_behavior: Remove ruff from CI workflow
+    public_impact: internal
+    decision: internal
+    evidence_subject: "chore: remove ruff from ci"
+    target_entry_id: entry-0010
+  - sha: 4c77715e9b7f7828294c2b7f97879637f4b44078
+    source_ref: git:4c77715e9b7f7828294c2b7f97879637f4b44078
+    short_sha: 4c77715
+    changed_paths:
+      - pyproject.toml
+      - requirements-test.txt
+      - tests/test_downloads.py
+      - tests/test_packaging_metadata.py
+    stats:
+      files_changed: 0
+      insertions: 7
+      deletions: 2
+    inspected: true
+    inspected_paths:
+      - pyproject.toml
+      - requirements-test.txt
+    observed_behavior: Fix package metadata and test dependencies
+    public_impact: internal
+    decision: internal
+    evidence_subject: "chore: fix package"
+    target_entry_id: entry-0011
+  - sha: 47bdfca3146b1c96cea84dbd94a1dcdcf721da07
+    source_ref: git:47bdfca3146b1c96cea84dbd94a1dcdcf721da07
+    short_sha: 47bdfca
+    changed_paths:
+      - pykokoro/onnx_backend.py
+      - tests/test_maintainer_review4_download_cache.py
+    stats:
+      files_changed: 0
+      insertions: 21
+      deletions: 0
+    inspected: true
+    inspected_paths:
+      - pykokoro/onnx_backend.py
+    observed_behavior: Fix Windows download cache handling
+    public_impact: public
+    decision: accepted
+    evidence_subject: "fix: windows fix"
+    target_entry_id: entry-0005
+  - sha: 837c1492e312c1c647266ccee8b5abe9b9335842
+    source_ref: git:837c1492e312c1c647266ccee8b5abe9b9335842
+    short_sha: 837c149
+    changed_paths:
+      - .github/workflows/codecov.yml
+    stats:
+      files_changed: 0
+      insertions: 1
+      deletions: 1
+    inspected: true
+    inspected_paths:
+      - .github/workflows/codecov.yml
+    observed_behavior: Fix codecov CI configuration
+    public_impact: internal
+    decision: internal
+    evidence_subject: "fix: codecov"
+    target_entry_id: entry-0012
+  - sha: 4c577b043692b4603a304579a4ac357a41578bf2
+    source_ref: git:4c577b043692b4603a304579a4ac357a41578bf2
+    short_sha: 4c577b0
+    changed_paths:
+      - .codecrate.toml
+      - .pre-commit-config.yaml
+      - docs/README.md
+      - docs/advanced_features.md
+      - docs/advanced_features.rst
+      - docs/api_reference.md
+      - docs/basic_usage.md
+      - docs/basic_usage.rst
+      - docs/changelog.md
+      - docs/changelog.rst
+      - docs/conf.py
+      - docs/examples.md
+      - docs/examples.rst
+      - docs/index.md
+      - docs/index.rst
+      - docs/installation.md
+      - docs/installation.rst
+      - docs/pipeline_stages.md
+      - docs/pipeline_stages.rst
+      - docs/quickstart.md
+      - docs/quickstart.rst
+      - docs/requirements.txt
+    stats:
+      files_changed: 0
+      insertions: 2499
+      deletions: 2567
+    inspected: true
+    inspected_paths:
+      - docs/advanced_features.md
+      - docs/basic_usage.md
+      - docs/installation.md
+      - docs/pipeline_stages.md
+      - docs/quickstart.md
+      - docs/index.md
+      - docs/conf.py
+    observed_behavior: Documentation migrated from RST to Markdown
+    public_impact: docs
+    decision: accepted
+    evidence_subject: "doc: migrate doc feom rst ro md"
+    target_entry_id: entry-0007
+  - sha: c5edbdd5b8afb9f095a61f8ef4e920835159f4b9
+    source_ref: git:c5edbdd5b8afb9f095a61f8ef4e920835159f4b9
+    short_sha: c5edbdd
+    changed_paths:
+      - docs/advanced_features.md
+      - docs/api_reference.md
+      - docs/basic_usage.md
+      - docs/changelog.md
+      - docs/index.md
+      - docs/installation.md
+      - docs/pipeline_stages.md
+      - docs/quickstart.md
+    stats:
+      files_changed: 0
+      insertions: 159
+      deletions: 129
+    inspected: true
+    inspected_paths:
+      - docs/advanced_features.md
+      - docs/api_reference.md
+      - docs/basic_usage.md
+    observed_behavior: Pre-commit formatting fixes for docs
+    public_impact: internal
+    decision: internal
+    evidence_subject: "chore: pre-commit"
+    target_entry_id: entry-0013

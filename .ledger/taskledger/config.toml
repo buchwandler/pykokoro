@@ -1,0 +1,16 @@
+# Taskledger project-local configuration (canonical layout).
+config_version = 2
+taskledger_dir = '../ledger/task/pykokoro'
+project_uuid = "eeb058c6-c9cc-47e1-b466-7a45aca90786"
+project_name = "pykokoro"
+
+# Branch-scoped state.
+ledger_ref = "main"
+ledger_parent_ref = ""
+ledger_next_task_number = 4
+ledger_branch_guard = "off"
+
+# Cross-ledger identity.
+[ledger]
+code = "tl"
+name = "taskledger"
