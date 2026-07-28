@@ -17,7 +17,8 @@ A Python library for Kokoro TTS (Text-to-Speech) using ONNX runtime.
 - **Multiple Model Sources**: Download models from HuggingFace or GitHub (v1.0/v1.1-zh)
 - **Model Quality Options**: Choose from fp32, fp16, q8, q4, and uint8 quantization
   levels
-- **GPU Acceleration**: Optional CUDA, CoreML, or DirectML support
+- **ONNX Execution Providers**: Capability-driven CUDA, NNAPI, XNNPACK, CoreML,
+  DirectML, and other runtime-reported providers
 - **Phoneme Support**: Advanced phoneme-based generation with kokorog2p
 - **Language-Aware spaCy Models**: Automatic spaCy model name resolution from language
   with configurable size (`sm`/`md`/`lg`/`trf`)
@@ -150,7 +151,7 @@ res = pipe.run("Hello")
 ### Automatic Provider Selection (Recommended)
 
 ```python
-# Auto-select first available accelerator (CUDA > OpenVINO > CoreML > DirectML > CPU)
+# Auto-select by runtime capability (CUDA > NNAPI > OpenVINO > CoreML > DirectML > XNNPACK > CPU)
 # The selected accelerator is paired with CPU fallback when the session supports it.
 from pykokoro import KokoroPipeline, PipelineConfig
 
@@ -165,6 +166,8 @@ res = pipe.run("Hello")
 from pykokoro import KokoroPipeline, PipelineConfig
 
 pipe = KokoroPipeline(PipelineConfig(provider="cuda", voice="af_sarah"))      # NVIDIA CUDA
+pipe = KokoroPipeline(PipelineConfig(provider="nnapi", voice="af_sarah"))     # Android NNAPI
+pipe = KokoroPipeline(PipelineConfig(provider="xnnpack", voice="af_sarah"))   # XNNPACK
 pipe = KokoroPipeline(PipelineConfig(provider="openvino", voice="af_sarah"))  # Intel OpenVINO
 pipe = KokoroPipeline(PipelineConfig(provider="directml", voice="af_sarah"))  # Windows DirectML
 pipe = KokoroPipeline(PipelineConfig(provider="coreml", voice="af_sarah"))    # Apple CoreML
@@ -187,6 +190,19 @@ python examples/gpu_benchmark.py
 # Force a specific provider via environment variable
 export ONNX_PROVIDER="OpenVINOExecutionProvider"
 python your_script.py
+```
+
+Provider aliases and full names returned by ONNX Runtime are accepted. Inspect and
+resolve providers without duplicating platform-specific mappings:
+
+```python
+from pykokoro.onnx_session import (
+    get_available_execution_providers,
+    resolve_execution_provider,
+)
+
+print(get_available_execution_providers())
+print(resolve_execution_provider("auto"))
 ```
 
 ## Usage Examples
@@ -847,6 +863,27 @@ pipe = KokoroPipeline(
     )
 )
 ```
+
+### Source-Aware Asset Inspection
+
+Model, config, and voice status checks use the exact `(source, variant, quality)`
+configuration. Voice archives use source- and variant-specific names, including
+`voices-v1.0.bin`, `voices-v1.1-zh.bin`, and `voices-german-v1.1.bin` for GitHub.
+
+```python
+from pykokoro.model_assets import are_models_downloaded, get_model_asset_paths
+
+assets = get_model_asset_paths(
+    source="github",
+    variant="v1.0",
+    quality="fp32",
+)
+print(assets.model, assets.voices, assets.missing)
+print(are_models_downloaded(source="github", variant="v1.0", quality="fp32"))
+```
+
+Inspection only checks for nonempty regular files; it does not download assets or
+consult another source, variant, or quality.
 
 ## Configuration
 

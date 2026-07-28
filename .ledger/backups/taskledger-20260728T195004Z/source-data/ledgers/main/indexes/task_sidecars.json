@@ -1,0 +1,98 @@
+{
+  "entries": {
+    "task-0001": {
+      "handoffs": {
+        "open": 0
+      },
+      "locks": {
+        "expires_at": null,
+        "has_lock": false,
+        "run_id": null,
+        "stage": null
+      },
+      "questions": {
+        "open": 0,
+        "required_open": 0
+      },
+      "reviews": {
+        "has_review_for_latest_implementation_run": false,
+        "latest_implementation_run": "run-0005"
+      },
+      "runs": {
+        "latest_implementation_status": "finished",
+        "latest_validation_status": "finished",
+        "running": []
+      },
+      "todos": {
+        "done": 8,
+        "first_open_id": null,
+        "open": 0,
+        "total": 8
+      }
+    },
+    "task-0002": {
+      "handoffs": {
+        "open": 0
+      },
+      "locks": {
+        "expires_at": null,
+        "has_lock": false,
+        "run_id": null,
+        "stage": null
+      },
+      "questions": {
+        "open": 0,
+        "required_open": 0
+      },
+      "reviews": {
+        "has_review_for_latest_implementation_run": false,
+        "latest_implementation_run": "run-0002"
+      },
+      "runs": {
+        "latest_implementation_status": "finished",
+        "latest_validation_status": "finished",
+        "running": []
+      },
+      "todos": {
+        "done": 5,
+        "first_open_id": null,
+        "open": 0,
+        "total": 5
+      }
+    },
+    "task-0003": {
+      "handoffs": {
+        "open": 0
+      },
+      "locks": {
+        "expires_at": null,
+        "has_lock": false,
+        "run_id": null,
+        "stage": null
+      },
+      "questions": {
+        "open": 0,
+        "required_open": 0
+      },
+      "reviews": {
+        "has_review_for_latest_implementation_run": false,
+        "latest_implementation_run": "run-0002"
+      },
+      "runs": {
+        "latest_implementation_status": "finished",
+        "latest_validation_status": "finished",
+        "running": []
+      },
+      "todos": {
+        "done": 18,
+        "first_open_id": null,
+        "open": 0,
+        "total": 18
+      }
+    }
+  },
+  "generated_at": "2026-07-27T07:11:32Z",
+  "ledger_ref": "main",
+  "object_type": "task_sidecar_index",
+  "schema_version": 1
+}

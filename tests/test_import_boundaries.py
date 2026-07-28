@@ -21,6 +21,7 @@ def test_lightweight_imports_do_not_require_onnxruntime() -> None:
         "builtins.__import__ = blocked\n"
         "import pykokoro.runtime.cache\n"
         "import pykokoro.generation_config\n"
+        "import pykokoro.model_assets\n"
         "print('ok')\n"
     )
     result = subprocess.run(

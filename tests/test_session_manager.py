@@ -8,7 +8,13 @@ import onnxruntime as rt
 import pytest
 
 from pykokoro.exceptions import ConfigurationError
-from pykokoro.onnx_session import OnnxSessionManager, ProviderType
+from pykokoro.onnx_session import (
+    OnnxSessionManager,
+    ProviderType,
+    get_available_execution_providers,
+    normalize_execution_provider,
+    resolve_execution_provider,
+)
 
 
 @pytest.fixture
@@ -77,7 +83,7 @@ class TestProviderSelection:
         """Test that invalid provider raises ValueError."""
         invalid_provider = cast(ProviderType, "invalid")
         manager = OnnxSessionManager(provider=invalid_provider)
-        with pytest.raises(ValueError, match="Unknown provider"):
+        with pytest.raises(ConfigurationError, match="Requested.*invalid"):
             manager._select_providers(invalid_provider, False)
 
     def test_unavailable_provider_raises_error(self):
@@ -98,7 +104,7 @@ class TestProviderSelection:
             if provider_map[prov] not in available:
                 provider_value = cast(ProviderType, prov)
                 manager = OnnxSessionManager(provider=provider_value)
-                with pytest.raises(RuntimeError, match="provider requested but not available"):
+                with pytest.raises(ConfigurationError, match="Requested.*available providers"):
                     manager._select_providers(provider_value, False)
                 return
 
@@ -119,6 +125,72 @@ class TestProviderSelection:
 
         with pytest.raises(ConfigurationError, match="ONNX_PROVIDER"):
             manager._select_providers("cpu", False)
+
+    def test_public_provider_inspection_preserves_runtime_order(self, monkeypatch):
+        providers = [
+            "NnapiExecutionProvider",
+            "XnnpackExecutionProvider",
+            "CPUExecutionProvider",
+        ]
+        monkeypatch.setattr(rt, "get_available_providers", lambda: providers)
+        assert get_available_execution_providers() == tuple(providers)
+
+    @pytest.mark.parametrize(
+        ("requested", "expected"),
+        [
+            ("nnapi", "NnapiExecutionProvider"),
+            ("NNAPI", "NnapiExecutionProvider"),
+            (" nnapiexecutionprovider ", "NnapiExecutionProvider"),
+            ("xnnpack", "XnnpackExecutionProvider"),
+            ("XnnpackExecutionProvider", "XnnpackExecutionProvider"),
+            ("cpu", "CPUExecutionProvider"),
+        ],
+    )
+    def test_normalize_provider_aliases_and_runtime_names(self, requested, expected):
+        available = (
+            "NnapiExecutionProvider",
+            "XnnpackExecutionProvider",
+            "CPUExecutionProvider",
+        )
+        assert normalize_execution_provider(requested, available=available) == expected
+
+    @pytest.mark.parametrize("requested", ["", "unknown", "UnknownExecutionProvider"])
+    def test_normalize_provider_errors_include_context(self, requested):
+        available = ("NnapiExecutionProvider", "CPUExecutionProvider")
+        with pytest.raises(ConfigurationError, match="Requested.*available providers"):
+            normalize_execution_provider(requested, available=available)
+
+    def test_resolve_provider_auto_and_legacy_gpu(self):
+        available = (
+            "NnapiExecutionProvider",
+            "XnnpackExecutionProvider",
+            "CPUExecutionProvider",
+        )
+        assert resolve_execution_provider("auto", available=available) == "NnapiExecutionProvider"
+        assert (
+            resolve_execution_provider(None, use_gpu=True, available=available)
+            == "NnapiExecutionProvider"
+        )
+        assert resolve_execution_provider(None, available=("CPUExecutionProvider",)) == (
+            "CPUExecutionProvider"
+        )
+
+    def test_resolve_provider_environment_precedence(self, monkeypatch):
+        available = (
+            "NnapiExecutionProvider",
+            "XnnpackExecutionProvider",
+            "CPUExecutionProvider",
+        )
+        monkeypatch.setenv("ONNX_PROVIDER", "XNNPACK")
+        assert resolve_execution_provider("cpu", available=available) == "XnnpackExecutionProvider"
+        monkeypatch.setenv("ONNX_PROVIDER", "XnnpackExecutionProvider")
+        assert resolve_execution_provider("cpu", available=available) == "XnnpackExecutionProvider"
+
+    def test_auto_selects_xnnpack_when_nnapi_missing(self):
+        available = ("XnnpackExecutionProvider", "CPUExecutionProvider")
+        assert resolve_execution_provider("auto", available=available) == (
+            "XnnpackExecutionProvider"
+        )
 
 
 class TestProviderOptions:
@@ -193,6 +265,19 @@ class TestProviderOptions:
         manager._get_provider_specific_options("CUDAExecutionProvider", all_options)
 
         assert any("Unknown option" in record.message for record in caplog.records)
+
+    @pytest.mark.parametrize("provider", ["NnapiExecutionProvider", "XnnpackExecutionProvider"])
+    def test_platform_provider_has_no_default_options(self, provider):
+        manager = OnnxSessionManager()
+        assert manager._get_default_provider_options(provider) == {}
+
+    def test_unknown_provider_options_pass_through_as_strings(self):
+        manager = OnnxSessionManager()
+        options = manager._get_provider_specific_options(
+            "XnnpackExecutionProvider",
+            {"custom_option": 3, "num_threads": 2},
+        )
+        assert options == {"custom_option": "3"}
 
 
 class TestSessionOptions:
@@ -288,10 +373,47 @@ class TestSessionCreation:
 
             # Accept either error: provider not available or session creation failed
             with pytest.raises(
-                RuntimeError,
-                match="(Failed to create ONNX session|CUDA provider requested but not available)",
+                (ConfigurationError, RuntimeError),
+                match="(Failed to create ONNX session|Requested execution provider)",
             ):
                 manager.create_session(model_path, allow_fallback=False)
+
+    @pytest.mark.parametrize("provider", ["nnapi", "xnnpack"])
+    def test_explicit_platform_provider_does_not_retry_cpu(self, provider, monkeypatch, tmp_path):
+        available = [
+            "NnapiExecutionProvider",
+            "XnnpackExecutionProvider",
+            "CPUExecutionProvider",
+        ]
+        monkeypatch.setattr(rt, "get_available_providers", lambda: available)
+        with patch("pykokoro.onnx_session.rt.InferenceSession") as mock_session:
+            mock_session.side_effect = RuntimeError("provider failed")
+            manager = OnnxSessionManager(provider=provider)
+            with pytest.raises(RuntimeError, match="Failed to create ONNX session"):
+                manager.create_session(tmp_path / "model.onnx")
+            assert mock_session.call_count == 1
+
+    def test_auto_provider_may_retry_cpu(self, monkeypatch, tmp_path):
+        available = ["NnapiExecutionProvider", "CPUExecutionProvider"]
+        monkeypatch.setattr(rt, "get_available_providers", lambda: available)
+        with patch("pykokoro.onnx_session.rt.InferenceSession") as mock_session:
+            session = MagicMock()
+            session.get_providers.return_value = ["CPUExecutionProvider"]
+            mock_session.side_effect = [RuntimeError("provider failed"), session]
+            manager = OnnxSessionManager(provider="auto")
+            assert manager.create_session(tmp_path / "model.onnx") is session
+            assert mock_session.call_count == 2
+
+    def test_environment_explicit_provider_is_strict(self, monkeypatch, tmp_path):
+        available = ["NnapiExecutionProvider", "CPUExecutionProvider"]
+        monkeypatch.setattr(rt, "get_available_providers", lambda: available)
+        monkeypatch.setenv("ONNX_PROVIDER", "nnapi")
+        with patch("pykokoro.onnx_session.rt.InferenceSession") as mock_session:
+            mock_session.side_effect = RuntimeError("provider failed")
+            manager = OnnxSessionManager(provider="auto")
+            with pytest.raises(RuntimeError, match="Failed to create ONNX session"):
+                manager.create_session(tmp_path / "model.onnx")
+            assert mock_session.call_count == 1
 
     def test_create_session_logs_fallback(self, caplog, tmp_path):
         """Test that fallback is logged."""

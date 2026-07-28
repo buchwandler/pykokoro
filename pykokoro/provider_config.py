@@ -6,14 +6,11 @@ across different PyKokoro components.
 
 import logging
 from pathlib import Path
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar
+
+from .config_types import ModelQuality
 
 logger = logging.getLogger(__name__)
-
-# Model quality type
-ModelQuality = Literal[
-    "fp32", "fp16", "fp16-gpu", "q8", "q8f16", "q4", "q4f16", "uint8", "uint8f16"
-]
 
 
 class ProviderConfigManager:

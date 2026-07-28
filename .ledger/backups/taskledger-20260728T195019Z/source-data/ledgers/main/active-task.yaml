@@ -1,0 +1,19 @@
+schema_version: 1
+object_type: active_task
+file_version: v2
+task_id: task-0003
+activated_at: "2026-07-26T22:43:45Z"
+activated_by:
+  actor_type: user
+  actor_name: u0_a992
+  tool: null
+  session_id: null
+  host: localhost
+  pid: 31914
+  actor_id: null
+  role: null
+  harness_id: null
+  command_pid: null
+  pid_scope: null
+reason: null
+previous_task_id: task-0002

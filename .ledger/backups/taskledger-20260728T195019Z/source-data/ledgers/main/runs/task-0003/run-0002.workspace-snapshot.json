@@ -1,0 +1,243 @@
+{
+  "captured_at": "2026-07-27T07:07:02Z",
+  "content_hash": "sha256:48c0627e9c1926a0d67fd4dc02fe45e92001b5fbee072c775eb3435af4bf1230",
+  "dirty": true,
+  "entries": [
+    {
+      "content_hash": "sha256:0c2215935f95c9c5cf45f552fd918d70ff8cccf04e36b1b8bbc8be66edf344f1",
+      "exists": true,
+      "kind": "file",
+      "path": ".codecrate.toml",
+      "size": 460,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:94d6efd42688c7dbe0228fe8576632f11c0485093cbf36c5af315ce1353bd5ee",
+      "exists": true,
+      "kind": "file",
+      "path": ".pre-commit-config.yaml",
+      "size": 2124,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:3fad6b5ca24bd1d5e28e2b5bd525d3d4d8b62e538410aa73c66566eeddd74071",
+      "exists": true,
+      "kind": "file",
+      "path": ".taskledger.toml",
+      "size": 2816,
+      "status": "untracked"
+    },
+    {
+      "content_hash": "sha256:37d29d38213b271c8d5fbc84189c0219da48ce93dfaaa3e13667d6366b6d3176",
+      "exists": true,
+      "kind": "file",
+      "path": "=2.0.0",
+      "size": 6754,
+      "status": "untracked"
+    },
+    {
+      "content_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exists": true,
+      "kind": "file",
+      "path": "=7.0.0",
+      "size": 0,
+      "status": "untracked"
+    },
+    {
+      "content_hash": "sha256:42cff6c39b58e06ffb3386628c85e96e447da2a28e2ba429e0a019babedb895c",
+      "exists": true,
+      "kind": "file",
+      "path": "CHANGELOG.md",
+      "size": 1640,
+      "status": "untracked"
+    },
+    {
+      "content_hash": "sha256:f510fef395dde15482becb6f00660bbd011ed7949b95dbabed33603b7b63dfa0",
+      "exists": true,
+      "kind": "file",
+      "path": "docs/README.md",
+      "size": 2161,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:e122f4cd2e6f034f623f42e3c560fe941ac45c6767f0104bc91395b73bd62c96",
+      "exists": true,
+      "kind": "file",
+      "path": "docs/advanced_features.md",
+      "size": 19158,
+      "status": "untracked"
+    },
+    {
+      "content_hash": null,
+      "exists": false,
+      "kind": "missing",
+      "path": "docs/advanced_features.rst",
+      "size": null,
+      "status": "deleted"
+    },
+    {
+      "content_hash": "sha256:c1ffc48547955f29f309c89e2d6673e6aa32f431f93df6c4376d3c86ae128550",
+      "exists": true,
+      "kind": "file",
+      "path": "docs/api_reference.md",
+      "size": 3496,
+      "status": "untracked"
+    },
+    {
+      "content_hash": null,
+      "exists": false,
+      "kind": "missing",
+      "path": "docs/api_reference.rst",
+      "size": null,
+      "status": "deleted"
+    },
+    {
+      "content_hash": "sha256:d01a78f60633b61db3c56b5205bccff14a430d7b1d5aa594a2b306cc8c558ec1",
+      "exists": true,
+      "kind": "file",
+      "path": "docs/basic_usage.md",
+      "size": 8248,
+      "status": "untracked"
+    },
+    {
+      "content_hash": null,
+      "exists": false,
+      "kind": "missing",
+      "path": "docs/basic_usage.rst",
+      "size": null,
+      "status": "deleted"
+    },
+    {
+      "content_hash": "sha256:602e30f0080400e268a16108ae9401f0f84c00901bc4d41beacc606ebce5f3b0",
+      "exists": true,
+      "kind": "file",
+      "path": "docs/changelog.md",
+      "size": 7206,
+      "status": "untracked"
+    },
+    {
+      "content_hash": null,
+      "exists": false,
+      "kind": "missing",
+      "path": "docs/changelog.rst",
+      "size": null,
+      "status": "deleted"
+    },
+    {
+      "content_hash": "sha256:0b8a3e88f7dfe3ceffa5dec3111985fe349129051bbd7aff5ae247308cbc5f52",
+      "exists": true,
+      "kind": "file",
+      "path": "docs/conf.py",
+      "size": 3230,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:76a0466d13174f5c27f562a4b66db2ea04f0b3ca22dd929d2e25ce704fcb531a",
+      "exists": true,
+      "kind": "file",
+      "path": "docs/examples.md",
+      "size": 5377,
+      "status": "untracked"
+    },
+    {
+      "content_hash": null,
+      "exists": false,
+      "kind": "missing",
+      "path": "docs/examples.rst",
+      "size": null,
+      "status": "deleted"
+    },
+    {
+      "content_hash": "sha256:9aba434d08f436c67466b6cd9402f36c7615da26741e837cc73e81665d4e6b3d",
+      "exists": true,
+      "kind": "file",
+      "path": "docs/index.md",
+      "size": 2620,
+      "status": "untracked"
+    },
+    {
+      "content_hash": null,
+      "exists": false,
+      "kind": "missing",
+      "path": "docs/index.rst",
+      "size": null,
+      "status": "deleted"
+    },
+    {
+      "content_hash": "sha256:01c3d745865e64ed22c4c882fe9fbd8f5737ef58c1ec88277cd5d96e56fa4571",
+      "exists": true,
+      "kind": "file",
+      "path": "docs/installation.md",
+      "size": 5181,
+      "status": "untracked"
+    },
+    {
+      "content_hash": null,
+      "exists": false,
+      "kind": "missing",
+      "path": "docs/installation.rst",
+      "size": null,
+      "status": "deleted"
+    },
+    {
+      "content_hash": "sha256:605ccd26bb669904429147c0e72da2afa4f714cbd0baf09a1dc3b17e152954d8",
+      "exists": true,
+      "kind": "file",
+      "path": "docs/pipeline_stages.md",
+      "size": 9767,
+      "status": "untracked"
+    },
+    {
+      "content_hash": null,
+      "exists": false,
+      "kind": "missing",
+      "path": "docs/pipeline_stages.rst",
+      "size": null,
+      "status": "deleted"
+    },
+    {
+      "content_hash": "sha256:86a9318507f9723639ebc070a18964e463a29afc8e220c0205bd6f51cd4d8bce",
+      "exists": true,
+      "kind": "file",
+      "path": "docs/quickstart.md",
+      "size": 5937,
+      "status": "untracked"
+    },
+    {
+      "content_hash": null,
+      "exists": false,
+      "kind": "missing",
+      "path": "docs/quickstart.rst",
+      "size": null,
+      "status": "deleted"
+    },
+    {
+      "content_hash": "sha256:053648167dd32ff724f4bccd49d281a6c851d0cdd2e80eaa1a9b4173bf3314f4",
+      "exists": true,
+      "kind": "file",
+      "path": "docs/requirements.txt",
+      "size": 91,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:979dc4a5e4d7f7eaba452f91995eac53aebb97542038a79a2e094a19acc3652a",
+      "exists": true,
+      "kind": "file",
+      "path": "plan.md",
+      "size": 9171,
+      "status": "untracked"
+    },
+    {
+      "content_hash": "sha256:54e229baf655801372216405213d0621abcf4d295b15185929c4e58ad81eb499",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro_rst_to_myst_migration_plan.md",
+      "size": 27654,
+      "status": "untracked"
+    }
+  ],
+  "entry_count": 29,
+  "format": "worktree-content:v1",
+  "git_commit": "837c1492e312c1c647266ccee8b5abe9b9335842",
+  "paths_hash": "sha256:0bdb0cd1ac75c59ef3cf3d2f65ee819277ad4d36249e04e1e64a4611358da75e"
+}

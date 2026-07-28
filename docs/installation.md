@@ -13,6 +13,22 @@ pip install "pykokoro[cpu]"
 The `cpu`, `gpu`, `openvino`, and `directml` extras are alternative ONNX Runtime
 distributions. Install exactly one provider extra per environment.
 
+### Android/Termux Providers
+
+PyKokoro accepts any provider spelling reported by the installed ONNX Runtime. For the
+Android/Termux runtime, both aliases and runtime names are valid:
+
+```python
+from pykokoro import Kokoro
+
+kokoro = Kokoro(provider="nnapi")
+kokoro = Kokoro(provider="xnnpack")
+```
+
+Use `provider="auto"` to select the highest-priority available provider by capability.
+PyKokoro does not infer availability from platform names and does not suppress ONNX
+Runtime warnings.
+
 ## GPU Support
 
 For GPU acceleration, install with the GPU extras:
@@ -219,3 +235,16 @@ Models are cached in:
   `~/.cache/pykokoro/voices/github/v1.0/`
 - **GitHub v1.1-zh**: `~/.cache/pykokoro/models/github/v1.1-zh/` and
   `~/.cache/pykokoro/voices/github/v1.1-zh/`
+
+The config is stored under `~/.cache/pykokoro/config/{variant}/config.json`. A
+source/variant/quality asset set is complete only when its config, model, and exact
+voice archive are all nonempty regular files. Downstream integrations can inspect the
+same paths without importing ONNX Runtime:
+
+```python
+from pykokoro.model_assets import get_model_asset_paths
+
+assets = get_model_asset_paths(source="github", variant="v1.0", quality="fp32")
+if not assets.complete:
+    print("Missing:", assets.missing)
+```

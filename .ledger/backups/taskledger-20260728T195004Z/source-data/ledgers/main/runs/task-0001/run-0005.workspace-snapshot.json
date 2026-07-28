@@ -1,0 +1,835 @@
+{
+  "captured_at": "2026-07-26T11:35:25Z",
+  "content_hash": "sha256:b095c31a3090ba1dab5beb82ff3d6d67f45c1991271083d3767a826dc2650d85",
+  "dirty": true,
+  "entries": [
+    {
+      "content_hash": "sha256:a1031047ce92c59c82c75a4fa181e0f6ebbb1b005f5fce111873dffb558a060d",
+      "exists": true,
+      "kind": "file",
+      "path": ".codecrate.toml",
+      "size": 365,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:d2813bbb7e338ba774d8782e3dca41666f9678598590644cd7ff0e89fe4bc2b1",
+      "exists": true,
+      "kind": "file",
+      "path": ".github/workflows/tests.yml",
+      "size": 1179,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:6e239089830765314ce6f0be4e55ad977c83af991acce666adcd86722f46a5ec",
+      "exists": true,
+      "kind": "file",
+      "path": ".pre-commit-config.yaml",
+      "size": 2266,
+      "status": "modified"
+    },
+    {
+      "content_hash": null,
+      "exists": false,
+      "kind": "missing",
+      "path": ".ruff.toml",
+      "size": null,
+      "status": "deleted"
+    },
+    {
+      "content_hash": "sha256:76bb26efa3595ed01f669bc79301bfd70fea086232f46df05f12e17bc644e652",
+      "exists": true,
+      "kind": "file",
+      "path": ".taskledger.toml",
+      "size": 2816,
+      "status": "untracked"
+    },
+    {
+      "content_hash": "sha256:ae58b90ea0f9a6b9d85043f0b53f59c2ad0da2e56e813740e04d303ab722946b",
+      "exists": true,
+      "kind": "file",
+      "path": "AGENTS.md",
+      "size": 4457,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:cf37bbb012c1161dc12a19e4f6d2192e1ed68bcbaf937b4c600882e71ea73295",
+      "exists": true,
+      "kind": "file",
+      "path": "PYKOKORO_MAINTAINER_REVIEW-4.md",
+      "size": 31160,
+      "status": "untracked"
+    },
+    {
+      "content_hash": "sha256:bae4a8474a80bb63f227104e3e23edd16bf92bc5e0eebfec436e018206e21654",
+      "exists": true,
+      "kind": "file",
+      "path": "README.md",
+      "size": 29219,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:654a777bb1b0ec32485699a675b64d03a0d06570b9fb303c93fdee4b88c20a97",
+      "exists": true,
+      "kind": "file",
+      "path": "docs/installation.rst",
+      "size": 5735,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:8ba68f35a514134a1d6c37086a26497d1a179b2bb2c076f95f1ff6203fc2be9e",
+      "exists": true,
+      "kind": "file",
+      "path": "docs/make.py",
+      "size": 2341,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:dd454decbf7b1e51026a66c478a137d5cf15cc5e2f0de067bdcb6f4a12d2b500",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/automatic_pauses_demo.py",
+      "size": 4474,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:e795bf8a5f8e69389d8136e45047e59b403565c2af8c65bf2aa7822e628f1bad",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/backend_comparison.py",
+      "size": 9156,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:2efd0eac449bc582f6e05826705b9b12d47c9c222cb0bb91e75976de44dc3387",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/boundary_detection_analysis.py",
+      "size": 4150,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:883237cfa592c235199e3ac04a84682bb9145927d9572fbcfb3333cdefd04478",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/contractions_advanced.py",
+      "size": 18161,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:5811b05547a706872b622638313bfe0996f99f4ae4534253b0374cee23e32449",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/cpu_benchmark.py",
+      "size": 13774,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:8e1a229aae5f050ca942a6c047e6c901547b0765f5d9ebb10fe94dcff7aac6de",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/english.py",
+      "size": 3774,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:abfca3b4c69f4181c81c727ca2248cdfdab14e9e1f8b22c7c63865852a5d3b6b",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/generation_config_demo.py",
+      "size": 6985,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:9b337d4368f40d30d868e16056fe609fe4f666a98263b6004c5c3c1db92abdfa",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/gpu_benchmark.py",
+      "size": 8065,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:1693520f251bd3b8e0928ffcf92c4e821fe8d93da95c604ff14eedd58afae003",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/headings_demo.py",
+      "size": 3524,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:27e23d7190f48cd0523809f5be9ba0af561d2ebefc1162a92ffb25766c05d819",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/hf_v11zh_demo.py",
+      "size": 2179,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:3731b53dda83af00924caa82a1079fb3df8dd14a5879dcc21aa77194e4c2b746",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/hindi.py",
+      "size": 1527,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:a74f5cfe4452839ea180863aa94e9256474208a9e3527005890c3a8316c34bfc",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/japanese.py",
+      "size": 1478,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:12ec424fd95ddcf096dd4d88283401705fc7577df4be3265a62bbacf22573a14",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/mixed_language.py",
+      "size": 8113,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:c10d6f2fd80c1fd0a23d9e80572b7727842613e156df802f257d02c5e7b867a2",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/model_source_comparison.py",
+      "size": 11964,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:72bca658448d769fb22951a8c7c9e0268ea1aa282db904d98071211cacb1fd69",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/optimal_phoneme_length_demo.py",
+      "size": 7232,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:6c6727af2d8111bc7a30b41b13111fc91d4bf9061399b091dd81d2373d9c4b89",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/pauses_demo.py",
+      "size": 4804,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:2b3611bd6cd0e0f521c3845430f3c88a9240843631a912c21cd0a0b8768b0c2a",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/pauses_with_splitting.py",
+      "size": 8984,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:f98f878bf7a8ca3fe97e25d5179fc0fe0f8a9054333e777c9009873960db9e94",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/phoneme_diff_comparison.py",
+      "size": 16856,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:3705199512af90d2d433920862c3d0a2916a199d6d3c94835eebfad9c82588b6",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/pipeline_stage_showcase.py",
+      "size": 3677,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:2c5c1066e65dbfb9d6887e2a033e73be929d1faa7a2862d16bf3ba143bc85960",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/podcast.py",
+      "size": 5285,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:6381ec667f785418645bce64608360a4a45e9e6cd9465cb30f009e5cbbf8cba5",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/prosody_demo.py",
+      "size": 13125,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:77c7cef61f30a56b7eb0e3b682d1872294fcd48e7318865552b15ecc97efb5bf",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/provider_config_demo.py",
+      "size": 5958,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:38392a5b542d93ec198223c4d0448d04062b0a4c14199be66768af7a13f5100c",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/provider_info.py",
+      "size": 6642,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:1eff90da059e30edee7f39cf4385199bb66a5e9881f1e2bef121210f64b7b2d5",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/say_as_demo.py",
+      "size": 11159,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:75da19f7212f956ce4845f9f032734e01160ec559f82c021c9e0541d759b65bb",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/short_sentence_demo.py",
+      "size": 8840,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:65dc8abdc9af388348e48f05a092ab6e16121a0483d1014f8a67df092e6b5a5c",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/short_sentence_randomized_demo.py",
+      "size": 7062,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:4a7eca865322c8f6e9b2d45bced4a0602d3fed6201de7fb365a690fab51d8f6b",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/token_length_effects.py",
+      "size": 8908,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:df74511f02732fb629f3e26200fa7fbfdda3579c7dad2ac7e4521e3df7cfc9f4",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/voice_slerp_demo.py",
+      "size": 6541,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:0cf9d543a1eac12e42907133a9ca53363ff32123cde5d7e1990112d20d84d858",
+      "exists": true,
+      "kind": "file",
+      "path": "metrics/find_short_sentence_phrase_candidates.py",
+      "size": 11176,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:5ee8a4739d758f3055c1434405bff9fee895f46c1a6dad7fb001c99c34aa996c",
+      "exists": true,
+      "kind": "file",
+      "path": "metrics/rank_short_sentence_phrases_across_voice_list.py",
+      "size": 16298,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:e107207d8d6b9ec307586abc49ad926721137d330784b2b745b3e817b647e59c",
+      "exists": true,
+      "kind": "file",
+      "path": "plan.md",
+      "size": 10576,
+      "status": "untracked"
+    },
+    {
+      "content_hash": "sha256:d05d63d6a01c24e87838c7233d98e973421a332727247eb533f637067dd45ba3",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/__init__.py",
+      "size": 1395,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:803b06384d0edb244977148a2c0b0749302f1b3d39c63adea173759173365c0a",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/artifact_manifest.py",
+      "size": 4006,
+      "status": "untracked"
+    },
+    {
+      "content_hash": "sha256:24a44fa3be3221c5e05e6ff1312b0595def3a0a9b230e28617120cc5a33fa465",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/audio_generator.py",
+      "size": 34774,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:ccdb02078ace624fb929b4855e006b8d1df7a92eae3384edaab294f346c427b6",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/config_types.py",
+      "size": 694,
+      "status": "untracked"
+    },
+    {
+      "content_hash": "sha256:5537c87d732c620f6bedff25aedeb1a27296fc8d53d721bd8a015c9c46f9145f",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/debug/segment_invariants.py",
+      "size": 5068,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:12d6395c23f911773d9192c576b36689970ef0bcd5adb7675bbba61f192b9938",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/generation_config.py",
+      "size": 8250,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:7caad95d8ec120b06be2fc3f94598ba9c41639b29fbe5ecb25affe8c892504d8",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/mixed_language_handler.py",
+      "size": 8771,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:f57e36424d06bd1bb03730fbdad8c47bf15881e6b51eb2369b807568db492908",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/onnx_backend.py",
+      "size": 73877,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:98910feb7622f2ab97bece2d0b4e9c8ef9df709ba1989a288f3c51c229e57270",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/onnx_session.py",
+      "size": 14819,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:25691f9c6c34c03b74e74c4cea0270ccc061f00beb941cc4047eebc9cab8ede1",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/phoneme_dictionary.py",
+      "size": 7721,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:ee9c85ddb929a2c57603f5b143d13a59e5c5804984e8d654e09080bf2caaddc5",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/pipeline.py",
+      "size": 19902,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:98b0cc94d09c6a63957b5a46247a39bf56c1af9844e6dc5f3754d2fac93ddc48",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/pipeline_config.py",
+      "size": 1527,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:fe700eb8e5822bf2f96e685adfee3850ad57526f7ace9fa7d165533a3c7c2525",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/prosody.py",
+      "size": 10367,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:3d8c5745b17cf0c57b4ec25300e6f9105b6124595bb63784255573aaa9103a3c",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/provider_config.py",
+      "size": 5662,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:173a8fb9b87e2cd10fcce5314d25846e34b6d188f4ec68f87fa77fe42dd0d8f1",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/runtime/cache.py",
+      "size": 3711,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:c34958c0d6da0b7c37d255df998692ce030ddb757925654ffa4e624dd072c4d7",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/runtime/spans.py",
+      "size": 1995,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:ceea66981bf78886374ebd34cd8ff1165d53649cf4925ee051d5da981eb84114",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/say_as.py",
+      "size": 15114,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:62e7be79d280ec0a303abaad1fe1a9a6d80c58b648f1c7d1ae81d67a35422d4e",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/short_sentence_cutters/__init__.py",
+      "size": 690,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:d17f4ef8053d709864021a117976fafecba1e48357833528a232c20e6174ca11",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/short_sentence_cutters/energy_valley.py",
+      "size": 3962,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:70bf33bbf2afb6c0c6ce05693602db6bb0613a50114a3c457217496f88610a4c",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/short_sentence_cutters/shared.py",
+      "size": 2096,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:52e8824204ae59bc180a58c6d4e8a1081a836e1d8c78c6e631d35283a7feaaf5",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/short_sentence_cutters/vad.py",
+      "size": 3268,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:7489f9f6ba7b187eb03a3e533addf06bdc2444a9f1766f0863ecf7e8eb2c5951",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/short_sentence_handler.py",
+      "size": 26903,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:d503cd9781449b5e4c1c744c1c66ff6c16288bee1bc1b4d9f88c5ee565b05e4f",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/ssmd_parser.py",
+      "size": 26984,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:7888355eece65d09530e9af0e232015954af8a7931100e419c15d9ea121980b8",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/stages/audio_postprocessing/noop.py",
+      "size": 1258,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:2ec9b6324a1e775e92cd47cacb1ace280b9913d6cab67e3806628475eef70a56",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/stages/audio_postprocessing/onnx.py",
+      "size": 925,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:ef99df67257269d05a4fde07b5e98d54c82609250ac0f6340c9475250c80e615",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/stages/doc_parsers/plain.py",
+      "size": 14972,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:e1844bacdca41b0f497a26cda03e38b8ebdb426cae66d034519ca52cd7362304",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/stages/doc_parsers/ssmd.py",
+      "size": 9479,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:246e2381319f5333462be030dbb008b5df9b5978288d26f4cbc51318b3c80f0e",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/stages/g2p/kokorog2p.py",
+      "size": 15908,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:3bbaba00322a325c26f3f005e4f3e690f736f15eeaac20a852d93e75782f3325",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/stages/synth/noop.py",
+      "size": 682,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:7d7bcbb4f63761e2831c0586b9ffd39756f092d313a30137add0cecc541d5de4",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/tokenizer.py",
+      "size": 19778,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:a6854f9581bd39b8238ea13e83355d1cd8e8108d4a4d875753d20b2946440921",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/transcript.py",
+      "size": 8189,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:1ac5f9786e9e5a3a3992a9c96bd299fcf4d33804326d9596cac0cc79e9910fc8",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/trim.py",
+      "size": 19598,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:7ee6e2b181b02cf93a71e89f1be36a70006b50ee5d9d4af91d2be0912e8aaa45",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/utils.py",
+      "size": 11132,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:283c471430012a3a2fb676c8d63c6c3db3a81f9dea1a6d1fecf3ed89c5fa4693",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/voice_manager.py",
+      "size": 21967,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:5affb31cf99e2ea05e7e4b1c582132e00ca3bfc66391a7aa171c1f8a364e44dd",
+      "exists": true,
+      "kind": "file",
+      "path": "pyproject.toml",
+      "size": 3396,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:843ac26c38a41abae578250bc0f9419194b320a0f67327d941037a4268f6cfe7",
+      "exists": true,
+      "kind": "file",
+      "path": "setup.py",
+      "size": 38,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:817acb3675f24d0e48419dda61dff5d04525cb8f91acae9ff7a2d5531b0e4838",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_audio_splitting.py",
+      "size": 41950,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:8649e58b6376cdc4623a42e48a3dabf810824e600a32d062e0b7c533b7f57fa8",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_auto_pause_mode.py",
+      "size": 3759,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:70bc9bd8fd75d738c37ea971de1abfe1a5fe64f04e0a3d4b0574e4a03b3251d0",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_bug_fixes.py",
+      "size": 12143,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:6d6c45c20cf10ac94bd99b431f3ddf750ea230d9e2e7a027f9f8956edc99c98d",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_downloads.py",
+      "size": 4981,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:df0af2ad132f1064566ad0b75c6ed999593b041d0eddd37be9b3f859f6f2bf91",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_g2p_abbreviations.py",
+      "size": 2259,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:c8a8ea1b6226cbcf92508468583b2d344ca02d67adaf0900211b9ead0ff593fa",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_g2p_pause_propagation.py",
+      "size": 2022,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:c05f1a545aeec07c9fd991cd6497681fdde3be054e697961f6337c68a90754b8",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_generation_config.py",
+      "size": 10085,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:74ea659a380eb428d78f77d9486c2599324ff158e1460bbc1aafc9fdeca2c1df",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_import_boundaries.py",
+      "size": 1550,
+      "status": "untracked"
+    },
+    {
+      "content_hash": "sha256:6fa8e78681377caacccf348a12c778c3bdccfde365b4b0f39b19e097891835b5",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_maintainer_review4_download_cache.py",
+      "size": 5885,
+      "status": "untracked"
+    },
+    {
+      "content_hash": "sha256:3ce7ae5338d67ed7507d02960816b676d8f922c2d418fafb8eea34e982289790",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_maintainer_review4_reproductions.py",
+      "size": 5503,
+      "status": "untracked"
+    },
+    {
+      "content_hash": "sha256:ab5c400f4de9e9964dc2e955dea44d81577834f1125b4123a5d7819db1127664",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_mixed_language.py",
+      "size": 1508,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:261e37cc1bef06cb31a5256c705b6651c36cee0772fb17ab4eff737344d9a611",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_packaging_metadata.py",
+      "size": 1211,
+      "status": "untracked"
+    },
+    {
+      "content_hash": "sha256:3bb076e53a557a58f084087a66ea86a719832d7da5c60b18fda7a7a3cddcb307",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_phrasplit_fallbacks.py",
+      "size": 1977,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:bc1a9679684cf489dda7e276c4d67f9a25f8e990e63a033861d095ee4c69f970",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_phrasplit_overrides.py",
+      "size": 924,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:93a56a35e994b3d946cc0cd8bcb74420e63f40632d20e2b503018d2e25b310ad",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_pipeline_lifecycle.py",
+      "size": 4826,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:bcbadf565960cf0ac1a5715e9fff270ee2a7b44d3dcc7cb788e0b13019e214ba",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_pipeline_paragraphs.py",
+      "size": 4419,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:784ecb7d11b9fd28d8dd8a3adabca75524571fe90791bdbc3236e7cc67a1d504",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_pipeline_spacy.py",
+      "size": 813,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:dc18520a96e2fa5391918ac83ca1fa1fc1235c92bbac7c2d2990e39168558988",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_prosody.py",
+      "size": 13402,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:a964f1deeb2018c9f25570a90b294d50b06df75277b09a002a59c3fb531380e5",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_session_manager.py",
+      "size": 15479,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:897c959259952ef9034c039ad3023aea43e9bcf0059ecbe1d8722c7016314df8",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_short_sentence_handler.py",
+      "size": 4151,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:bd47432501a79b7f90ac7ec72b8e892f0074c5ff910036693bf913f04c20a366",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_splitter_no_overlap.py",
+      "size": 3413,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:ef36423aae5417d4716eac994d5945dfe3121f2162cf836ab877a813eb07b7ee",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_ssmd.py",
+      "size": 13451,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:167808ca1ddf352e9aa3b072675af486cbad860ddacdf1f7822c372de58fdea5",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_ssmd_deterministic_breaks.py",
+      "size": 483,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:1138eb9cbf50f2c2f94ca04088b505e24e6d4872a30e3f01bdecc5579801d55e",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_tokenizer.py",
+      "size": 22730,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:bd1ca901bff4d2c8a397a15352f6154f1c18d4d3ed661de69aa7ecb44df8487c",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_utils.py",
+      "size": 16881,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:35815790c18220b5a1e1a4c2e122210f39e3ecb05a4cc6d69c2482a53d487fe1",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_voice_manager.py",
+      "size": 14268,
+      "status": "modified"
+    }
+  ],
+  "entry_count": 103,
+  "format": "worktree-content:v1",
+  "git_commit": "8755b82767b906a2d0f2493013383084d565ef20",
+  "paths_hash": "sha256:966f2d155a09362e3710d3af32f5295838e33c8930304891fa8822b63142eb2a"
+}

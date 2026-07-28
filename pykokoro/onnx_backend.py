@@ -13,7 +13,7 @@ import time
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import onnxruntime as rt
@@ -25,8 +25,45 @@ from .artifact_manifest import (
     hf_model_spec,
     hf_voice_spec,
 )
+from .asset_constants import (
+    GITHUB_VOICES_FILENAME_V1_0,
+    GITHUB_VOICES_FILENAME_V1_1_DE,
+    GITHUB_VOICES_FILENAME_V1_1_ZH,
+    HF_CONFIG_FILENAME,
+    HF_MODEL_SUBFOLDER,
+    MODEL_QUALITY_CACHE_FILES_HF_V1_0,
+    MODEL_QUALITY_FILES,
+    MODEL_QUALITY_FILES_GITHUB_V1_0,
+    MODEL_QUALITY_FILES_GITHUB_V1_1_DE,
+    MODEL_QUALITY_FILES_GITHUB_V1_1_ZH,
+    MODEL_QUALITY_FILES_HF,
+)
 from .audio_generator import AudioGenerator
+from .config_types import (
+    DEFAULT_MODEL_QUALITY,
+    DEFAULT_MODEL_SOURCE,
+    DEFAULT_MODEL_VARIANT,
+    ModelQuality,
+    ModelSource,
+    ModelVariant,
+    ProviderType,
+)
 from .exceptions import ConfigurationError
+from .model_assets import (
+    ModelAssetPaths,
+    _is_nonempty_file,
+    get_model_asset_paths,
+    get_voices_archive_path,
+)
+from .model_assets import (
+    are_models_downloaded as _are_models_downloaded,
+)
+from .model_assets import (
+    are_voices_downloaded as _are_voices_downloaded,
+)
+from .model_assets import (
+    is_model_downloaded as _is_model_downloaded,
+)
 from .onnx_session import OnnxSessionManager
 from .provider_config import ProviderConfigManager
 from .tokenizer import EspeakConfig, Tokenizer, TokenizerConfig
@@ -54,71 +91,6 @@ class ArtifactValidationError(RuntimeError):
     """Raised when a cached or downloaded artifact fails integrity checks."""
 
 
-# Model quality type
-ModelQuality = Literal[
-    "fp32", "fp16", "fp16-gpu", "q8", "q8f16", "q4", "q4f16", "uint8", "uint8f16"
-]
-DEFAULT_MODEL_QUALITY: ModelQuality = "fp32"
-
-# Provider type
-ProviderType = Literal["auto", "cpu", "cuda", "openvino", "directml", "coreml"]
-
-# Model source type
-ModelSource = Literal["huggingface", "github"]
-DEFAULT_MODEL_SOURCE: ModelSource = "huggingface"
-
-# Model variant type (for GitHub and HuggingFace sources)
-ModelVariant = Literal["v1.0", "v1.1-zh", "v1.1-de"]
-DEFAULT_MODEL_VARIANT: ModelVariant = "v1.0"
-
-# Quality to filename mapping (Hugging Face)
-MODEL_QUALITY_FILES_HF: dict[str, str] = {
-    "fp32": "model.onnx",
-    "fp16": "model_fp16.onnx",
-    "q8": "model_quantized.onnx",
-    "q8f16": "model_q8f16.onnx",
-    "q4": "model_q4.onnx",
-    "q4f16": "model_q4f16.onnx",
-    "uint8": "model_uint8.onnx",
-    "uint8f16": "model_uint8f16.onnx",
-}
-
-# Quality to filename mapping (GitHub v1.0 - English)
-MODEL_QUALITY_FILES_GITHUB_V1_0: dict[str, str] = {
-    "fp32": "kokoro-v1.0.onnx",
-    "fp16": "kokoro-v1.0.fp16.onnx",
-    "fp16-gpu": "kokoro-v1.0.fp16-gpu.onnx",
-    "q8": "kokoro-v1.0.int8.onnx",
-}
-
-# Quality to filename mapping (GitHub v1.1-zh - Chinese)
-MODEL_QUALITY_FILES_GITHUB_V1_1_ZH: dict[str, str] = {
-    "fp32": "kokoro-v1.1-zh.onnx",
-}
-
-MODEL_QUALITY_FILES_GITHUB_V1_1_DE: dict[str, str] = {
-    "fp32": "kokoro-german-v1.1.onnx",
-    "q8": "kokoro-german-v1.1.int8.onnx",
-}
-
-
-# Note: Both HF v1.0 and v1.1-zh use the same filename convention
-# (MODEL_QUALITY_FILES_HF)
-
-# Backward compatibility
-MODEL_QUALITY_FILES = MODEL_QUALITY_FILES_HF
-
-
-def _timestamped_model_filename(filename: str) -> str:
-    path = Path(filename)
-    return f"{path.stem}-timestamped{path.suffix}"
-
-
-MODEL_QUALITY_CACHE_FILES_HF_V1_0: dict[str, str] = {
-    quality: _timestamped_model_filename(filename)
-    for quality, filename in MODEL_QUALITY_FILES_HF.items()
-}
-
 # HuggingFace repositories for models and voices (onnx-community)
 HF_REPO_V1_0 = "onnx-community/Kokoro-82M-v1.0-ONNX-timestamped"
 HF_REPO_V1_1_ZH = "onnx-community/Kokoro-82M-v1.1-zh-ONNX"
@@ -128,10 +100,8 @@ HF_CONFIG_REPO_V1_0 = "hexgrad/Kokoro-82M"
 HF_CONFIG_REPO_V1_1_ZH = "hexgrad/Kokoro-82M-v1.1-zh"
 HF_CONFIG_REPO_V1_1_DE = "Tundragoon/Kokoro-German"
 
-# Subfolders and filenames within HuggingFace repos
-HF_MODEL_SUBFOLDER = "onnx"
+# Subfolders within HuggingFace repos
 HF_VOICES_SUBFOLDER = "voices"
-HF_CONFIG_FILENAME = "config.json"
 
 # URLs for model files (GitHub)
 GITHUB_REPO = "thewh1teagle/kokoro-onnx"
@@ -141,14 +111,12 @@ GITHUB_RELEASE_TAG_V1_0 = "model-files-v1.0"
 GITHUB_BASE_URL_V1_0 = (
     f"https://github.com/{GITHUB_REPO}/releases/download/{GITHUB_RELEASE_TAG_V1_0}"
 )
-GITHUB_VOICES_FILENAME_V1_0 = "voices-v1.0.bin"
 
 # GitHub v1.1-zh (Chinese)
 GITHUB_RELEASE_TAG_V1_1_ZH = "model-files-v1.1"
 GITHUB_BASE_URL_V1_1_ZH = (
     f"https://github.com/{GITHUB_REPO}/releases/download/{GITHUB_RELEASE_TAG_V1_1_ZH}"
 )
-GITHUB_VOICES_FILENAME_V1_1_ZH = "voices-v1.1-zh.bin"
 
 GITHUB_REPO_GERMAN = "holgern/kokoro-onnx-model"
 GITHUB_RELEASE_TAG_V1_1_DE = "model-files-german-v1.1"
@@ -156,7 +124,6 @@ GITHUB_BASE_URL_V1_1_DE = (
     f"https://github.com/{GITHUB_REPO_GERMAN}/releases/download/{GITHUB_RELEASE_TAG_V1_1_DE}"
 )
 
-GITHUB_VOICES_FILENAME_V1_1_DE = "voices-german-v1.1.bin"
 # All available voice names for v1.0 (54 voices - English/multilingual)
 # Used by both HuggingFace and GitHub sources
 # These are used for downloading individual voice files from HuggingFace
@@ -446,7 +413,11 @@ def get_config_path(variant: ModelVariant = DEFAULT_MODEL_VARIANT) -> Path:
 
 
 def get_voices_bin_path() -> Path:
-    """Get the path to the combined voices.bin.npz file."""
+    """Get the legacy global voice archive path.
+
+    New code should use :func:`get_voices_archive_path` with an explicit source
+    and variant instead.
+    """
     return get_user_cache_path() / "voices.bin.npz"
 
 
@@ -530,10 +501,13 @@ def is_config_downloaded(variant: ModelVariant = DEFAULT_MODEL_VARIANT) -> bool:
     return config_path.exists() and config_path.stat().st_size > 0
 
 
-def is_model_downloaded(quality: ModelQuality = DEFAULT_MODEL_QUALITY) -> bool:
-    """Check if a model file is already downloaded for a given quality."""
-    model_path = get_model_path(quality)
-    return model_path.exists() and model_path.stat().st_size > 0
+def is_model_downloaded(
+    quality: ModelQuality = DEFAULT_MODEL_QUALITY,
+    source: ModelSource = DEFAULT_MODEL_SOURCE,
+    variant: ModelVariant = DEFAULT_MODEL_VARIANT,
+) -> bool:
+    """Check if the requested source, variant, and quality model is downloaded."""
+    return _is_model_downloaded(quality, source, variant)
 
 
 def is_voice_downloaded(voice_name: str) -> bool:
@@ -542,15 +516,21 @@ def is_voice_downloaded(voice_name: str) -> bool:
     return voice_path.exists() and voice_path.stat().st_size > 0
 
 
-def are_voices_downloaded() -> bool:
-    """Check if the combined voices.bin file exists."""
-    voices_bin_path = get_voices_bin_path()
-    return voices_bin_path.exists() and voices_bin_path.stat().st_size > 0
+def are_voices_downloaded(
+    source: ModelSource = DEFAULT_MODEL_SOURCE,
+    variant: ModelVariant = DEFAULT_MODEL_VARIANT,
+) -> bool:
+    """Check if the requested source and variant voice archive is downloaded."""
+    return _are_voices_downloaded(source, variant)
 
 
-def are_models_downloaded(quality: ModelQuality = DEFAULT_MODEL_QUALITY) -> bool:
-    """Check if model, config, and voices.bin are downloaded."""
-    return is_config_downloaded() and is_model_downloaded(quality) and are_voices_downloaded()
+def are_models_downloaded(
+    quality: ModelQuality = DEFAULT_MODEL_QUALITY,
+    source: ModelSource = DEFAULT_MODEL_SOURCE,
+    variant: ModelVariant = DEFAULT_MODEL_VARIANT,
+) -> bool:
+    """Check if the requested config, model, and voice archive are downloaded."""
+    return _are_models_downloaded(quality, source, variant)
 
 
 # =============================================================================
@@ -1207,7 +1187,7 @@ def download_all_voices(
     voices_dir = get_voices_dir(source="huggingface", variant=variant)
     voices_dir.mkdir(parents=True, exist_ok=True)
 
-    voices_bin_path = voices_dir / "voices.bin.npz"
+    voices_bin_path = get_voices_archive_path("huggingface", variant)
     force_download = force
 
     if voices_dir.exists():
@@ -1532,8 +1512,7 @@ def download_voices_github(
     url = f"{base_url}/{filename}"
 
     # Use new path structure
-    voices_dir = get_voices_dir(source="github", variant=variant)
-    local_path = voices_dir / filename
+    local_path = get_voices_archive_path("github", variant)
 
     logger.info("Using immutable GitHub release commit %s", release_revision)
 
@@ -1760,24 +1739,23 @@ class Kokoro:
         self._model_quality: ModelQuality = resolved_quality
 
         # Resolve paths
+        asset_paths: ModelAssetPaths | None = None
         if model_path is None:
-            model_path = get_model_path(
-                quality=self._model_quality, source=model_source, variant=model_variant
+            asset_paths = get_model_asset_paths(
+                quality=self._model_quality,
+                source=model_source,
+                variant=model_variant,
             )
+            model_path = asset_paths.model
 
         if voices_path is None:
-            if model_source == "huggingface":
-                # HuggingFace uses voices.bin.npz for both variants
-                voices_path = get_voices_dir("huggingface", model_variant) / "voices.bin.npz"
-            elif model_source == "github":
-                # GitHub uses variant-specific filenames
-                if model_variant == "v1.0":
-                    filename = GITHUB_VOICES_FILENAME_V1_0
-                elif model_variant == "v1.1-de":
-                    filename = GITHUB_VOICES_FILENAME_V1_1_DE
-                else:  # v1.1-zh
-                    filename = GITHUB_VOICES_FILENAME_V1_1_ZH
-                voices_path = get_voices_dir("github", model_variant) / filename
+            if asset_paths is None:
+                asset_paths = get_model_asset_paths(
+                    quality=self._model_quality,
+                    source=model_source,
+                    variant=model_variant,
+                )
+            voices_path = asset_paths.voices
 
         self._model_path = model_path
         self._voices_path = voices_path
@@ -1866,14 +1844,14 @@ class Kokoro:
     def _ensure_models(self) -> None:
         """Ensure model, voice, and config files are downloaded for current variant."""
         # Download model if needed
-        if not self._model_path.exists():
+        if not _is_nonempty_file(self._model_path):
             if self._model_source == "github":
                 download_model_github(variant=self._model_variant, quality=self._model_quality)
             else:  # huggingface
                 download_model(variant=self._model_variant, quality=self._model_quality)
 
         # Download voices if needed
-        if not self._voices_path.exists() or self._voices_path.stat().st_size == 0:
+        if not _is_nonempty_file(self._voices_path):
             if self._model_source == "github":
                 download_voices_github(variant=self._model_variant)
             else:  # huggingface
@@ -1884,9 +1862,9 @@ class Kokoro:
             if not is_config_downloaded(variant=self._model_variant):
                 logger.info(f"Downloading config for variant '{self._model_variant}'...")
                 download_config(variant=self._model_variant)
-        else:  # huggingface - default v1.0
-            if not is_config_downloaded():
-                download_config()
+        else:
+            if not is_config_downloaded(variant=self._model_variant):
+                download_config(variant=self._model_variant)
 
     def _redownload_voices(self, force: bool = False) -> None:
         if self._model_source == "github":
@@ -1987,6 +1965,7 @@ class Kokoro:
             use_gpu=self._use_gpu,
             session_options=self._session_options,
             provider_options=self._provider_options,
+            model_quality=self._model_quality,
         )
         self._session = session_manager.create_session(model_path=self._model_path)
 

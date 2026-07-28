@@ -1,0 +1,163 @@
+{
+  "captured_at": "2026-07-26T14:16:04Z",
+  "content_hash": "sha256:ab56c68f772e2e03452a5ce2b79e95349ad863c890f91bd781999f6338209cf0",
+  "dirty": true,
+  "entries": [
+    {
+      "content_hash": "sha256:d58774ac37d7316556c4fcd24f2541eab620121c53127e03f001c52a8d07bb42",
+      "exists": true,
+      "kind": "file",
+      "path": ".codecrate.toml",
+      "size": 353,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:05b43afc95e707b2933ed594a88eb924976f706d68926e38bc84ff85114ea97e",
+      "exists": true,
+      "kind": "file",
+      "path": ".taskledger.toml",
+      "size": 2816,
+      "status": "untracked"
+    },
+    {
+      "content_hash": "sha256:42cff6c39b58e06ffb3386628c85e96e447da2a28e2ba429e0a019babedb895c",
+      "exists": true,
+      "kind": "file",
+      "path": "CHANGELOG.md",
+      "size": 1640,
+      "status": "untracked"
+    },
+    {
+      "content_hash": "sha256:14fe2d84705bc95ed466844cecc754be9d56d8a5bb11c886af5c91fe667a8148",
+      "exists": true,
+      "kind": "file",
+      "path": "PYKOKORO_SSMD_MAINTAINER_HANDOFF.md",
+      "size": 14379,
+      "status": "untracked"
+    },
+    {
+      "content_hash": "sha256:e16adfbca50f4fe053c2404a7c176169ac1d65b7ce85a23fcd9338578abbf498",
+      "exists": true,
+      "kind": "file",
+      "path": "README.md",
+      "size": 29296,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:34189f5c52c1332922c742ed094d0436942421f9d21d2742c602cc477b53935b",
+      "exists": true,
+      "kind": "file",
+      "path": "docs/basic_usage.rst",
+      "size": 9199,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:7e05e1f1ff452fff60ba2e6920027f78cf31c10f791e0e1faab19d536c56f801",
+      "exists": true,
+      "kind": "file",
+      "path": "docs/pipeline_stages.rst",
+      "size": 10644,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:077ac48f0867d2f2774fcaf85805986f31d1be919bdd330bbfdc6550d1a5e147",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/english.py",
+      "size": 3780,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:3944de7b78bd3d0c311365f3e17de29bb9b91e0b8f43e95fcb11bfc9ecf8672f",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/podcast.py",
+      "size": 5609,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:c706ebd14f62e9fffbaf7cdf2e8d46451410d3e3f11cfaff7535e110d38b0aab",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/prosody_demo.py",
+      "size": 3149,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:6e4cd9de29d97f5a98219604c453a4158834a55d6160dbab72661001f828c6ba",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/say_as_demo.py",
+      "size": 11244,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:dfaee35b18330a667b77f461f5f1c5a529b070888157f5fd2f9b3501c2c124ea",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/ssmd_demo.py",
+      "size": 6707,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:a358a91a7856d8b236c94af0383ac5df7b21973eeaac0ad09e88e8b59e9bfd6d",
+      "exists": true,
+      "kind": "file",
+      "path": "plan.md",
+      "size": 7331,
+      "status": "untracked"
+    },
+    {
+      "content_hash": "sha256:6a27ae80fa9115f40d55f363f4c647eece4d2e67c16dadec1cc4ef32393faf35",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/generation_config.py",
+      "size": 8255,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:bdb7ab49877f633e95a149777ec4535701ea966a0e117fae97898a6753d59353",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/phoneme_dictionary.py",
+      "size": 8247,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:1d2024da95eee4fadce2c004252afab8d53c9e767054d0a1671170d03ae31f2a",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/ssmd_parser.py",
+      "size": 28002,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:0397460eba1cce99743df633ccf5f145eacec53b9c11f2127dceedf8e9fad583",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro_ssmd_corrections.patch",
+      "size": 61512,
+      "status": "untracked"
+    },
+    {
+      "content_hash": "sha256:7a0c5319e64f232964692d0fb51d85e12e24739f817945ed2c52245e08dce02d",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_phoneme_dictionary.py",
+      "size": 1904,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:fad39462e29f38d04e05636f0cc5d3635194b3d52e0640b146b6b9ef811bce59",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_ssmd.py",
+      "size": 16204,
+      "status": "modified"
+    }
+  ],
+  "entry_count": 19,
+  "format": "worktree-content:v1",
+  "git_commit": "9f51f7697825528ab0277da300c618210a6f25cf",
+  "paths_hash": "sha256:9fb49667a03f7193b1231944717f7ed75005f69e16232c644e24909d2e0db1a8"
+}

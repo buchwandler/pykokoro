@@ -1,0 +1,8 @@
+schema_version: 1
+object_type: active_actor
+file_version: v2
+actor_type: agent
+actor_name: pi-agent
+role: implementer
+tool: null
+session_id: null

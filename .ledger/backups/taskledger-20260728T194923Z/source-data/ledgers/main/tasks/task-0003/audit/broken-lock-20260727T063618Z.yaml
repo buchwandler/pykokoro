@@ -1,0 +1,54 @@
+schema_version: 1
+object_type: lock
+file_version: v2
+lock_id: lock-20260726T224625Z-0001
+task_id: task-0003
+stage: implementing
+run_type: implementation
+run_id: run-0002
+created_at: "2026-07-26T22:46:25.107944+00:00"
+expires_at: "2026-07-27T00:46:25.107944+00:00"
+lease_seconds: 7200
+last_heartbeat_at: "2026-07-26T22:46:25.107944+00:00"
+reason: implement approved plan
+holder:
+  actor_type: agent
+  actor_name: pi-agent
+  tool: null
+  session_id: null
+  host: localhost
+  pid: null
+  actor_id: null
+  role: implementer
+  harness_id: harness-0001
+  command_pid: 14506
+  pid_scope: unverifiable_harness
+broken_at: "2026-07-27T06:36:18Z"
+broken_by: null
+broken_reason: "Expired lock released for resume: Continue after expired lock."
+actor:
+  actor_type: agent
+  actor_name: pi-agent
+  tool: null
+  session_id: null
+  host: localhost
+  pid: null
+  actor_id: null
+  role: implementer
+  harness_id: harness-0001
+  command_pid: 14506
+  pid_scope: unverifiable_harness
+harness:
+  harness_id: harness-0001
+  name: pi
+  kind: agent_harness
+  session_id: null
+  working_directory: null
+  command: null
+  version: null
+  capabilities: []
+  created_at: "2026-07-26T22:46:24Z"
+  schema_version: 1
+  object_type: harness
+transfer_history: []
+transfer_date: null

@@ -1,0 +1,930 @@
+[
+  {
+    "sha256": "3d796fec7ab509a48ea91f3d486becd5455f446a81e775d6200d21e376bbe8cb",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/storage.yaml"
+  },
+  {
+    "sha256": "d0408fe8f3645b06ba12405425d9726398cdfdd7d4823c6d1a2d657410d0743d",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/harness.yaml"
+  },
+  {
+    "sha256": "2305047b54c18ec2decebb102a1b5c02bb608badf5ff897b43697fc54b64543b",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/actor.yaml"
+  },
+  {
+    "sha256": "5211c9ef04df601e0e5cf627fda00519636021f8238a23a6f985cb588947774b",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/active-task.yaml"
+  },
+  {
+    "sha256": "6f00ef9f148c71810eb654e45f3d5220b469ca34abe40d34d4b8fb482876800c",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/events/2026-07-26.ndjson"
+  },
+  {
+    "sha256": "2922926de35c9bcea0e8e802cfd20bf0b74ba444e6ad2aeafcfd5bfda9d30b53",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/events/2026-07-27.ndjson"
+  },
+  {
+    "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/indexes/repos.json"
+  },
+  {
+    "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/indexes/active_locks.json"
+  },
+  {
+    "sha256": "1d03659384589349e08ba39b9e2cb3cb5a62c6726ac3ce699f97a75b386ffc2a",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/indexes/dependencies.json"
+  },
+  {
+    "sha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/indexes/introductions.json"
+  },
+  {
+    "sha256": "86fc986dfb537a323ce1868b8e5d84a71f5248f975ffb2f2cd7f1875615be988",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/indexes/tasks.json"
+  },
+  {
+    "sha256": "adde96dbffd4047b9073b34bd3d5a207503512edd5a5db771dd2fd0dbd51c595",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/indexes/task_sidecars.json"
+  },
+  {
+    "sha256": "e1048f0a37b9383e871c19036b2a8d79a63c443fe2e701fe672adbc2e3d3d447",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/runs/task-0001/run-0003.workspace-snapshot.json"
+  },
+  {
+    "sha256": "c9018bd5d9be1539681b87e1836659b53f088de3adc295bfafbd17a748913312",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/runs/task-0001/run-0005.workspace-snapshot.json"
+  },
+  {
+    "sha256": "5f4115ce7692201700d73525246607b52257ce2dc64989118f031c3cc9072a64",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/runs/task-0002/run-0002.workspace-snapshot.json"
+  },
+  {
+    "sha256": "5037b6ff5838befb4b4889a316a6be3330e079c05d67c8380bfc58bf1880b684",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/runs/task-0003/run-0002.workspace-snapshot.json"
+  },
+  {
+    "sha256": "5a96e8fda2485f6485bdf6e84b40793d10c263be35f05e831387ff6795ad38de",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/task.md"
+  },
+  {
+    "sha256": "e3d0f3dcb6001fcc33645404b7378ce801aee6c7031a51b006e698907e5142a8",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/task.md"
+  },
+  {
+    "sha256": "b573e0bbc58e17e1650e7f92b53274c03d9d9d576b464586f097343ef6457a6b",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/task.md"
+  },
+  {
+    "sha256": "a6a8be57f4d1d4b39dfd608475f0bcc813247742c598e0e0dbbecf1d7b49fd95",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/plans/plan-v1.md"
+  },
+  {
+    "sha256": "a8db2b809727af1275e23847cd39287ec0b62b3200c1844c7615a60a0d253b1a",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/todos/todo-0001.md"
+  },
+  {
+    "sha256": "73262e6e1fcbebbb29376bed4d7f5411fd3bbf6a6346094ae8a472a942e30b23",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/todos/todo-0002.md"
+  },
+  {
+    "sha256": "ea47c72cc4200daf2efc804c1f108f154a1a7076786cfb1add9a88c0cae01e9d",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/todos/todo-0003.md"
+  },
+  {
+    "sha256": "bd1ad443445139643f852841e7721608192588a98664ef5776c9238f0aabab7b",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/todos/todo-0004.md"
+  },
+  {
+    "sha256": "6e76f30876107d226030766c530db4daa4ac127bca61bd1e6ae16a573e8d2f9d",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/todos/todo-0005.md"
+  },
+  {
+    "sha256": "defac670ffeb9dadaa8cbd41edcaaf3e4d3f6de5a27ce231bc1978dac11bacec",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/todos/todo-0006.md"
+  },
+  {
+    "sha256": "8ab2dd7242568cfcbbde86354ef8184e55d0979462b276dc4515bd219f02f3de",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/todos/todo-0007.md"
+  },
+  {
+    "sha256": "f9026b0ab0f38caa796644551800ee9434858a4fbe61350e559e6e4162fc714b",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/todos/todo-0008.md"
+  },
+  {
+    "sha256": "4f62de5036a753004bd6c50981adcc6c51158e8b0bc8767396829cb0107b0e06",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/todos/todo-0009.md"
+  },
+  {
+    "sha256": "1cfa267f8f445f8e2c95b6e8c34ee66dc34ecfca9445211a954fefc92d6fb7cb",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/todos/todo-0010.md"
+  },
+  {
+    "sha256": "ebf74c9244653baa813ed7fcb377e8c7127ab2465d68f767062ef6c6333f6c22",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/todos/todo-0011.md"
+  },
+  {
+    "sha256": "71db17770faa7edf224281f126c32da392d992bb71205cfabd3fb4f8f8c09d44",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/todos/todo-0012.md"
+  },
+  {
+    "sha256": "0c0d7bcb24a1db27ead52bc4b2d0f3916bcba5163fc0b9dffc9cff939011c133",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/todos/todo-0013.md"
+  },
+  {
+    "sha256": "545b1f1cfda2136de57d713d944758d3dcb5c79afdd2f708c1b0bdd2dfaf84e8",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/todos/todo-0014.md"
+  },
+  {
+    "sha256": "6ff585d86efa9bcf5aca396a5a452152adc92d7796a0086d5df77ad535fc3934",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/todos/todo-0015.md"
+  },
+  {
+    "sha256": "b7bcf8e0a7b9324e7013620d7566caf00bbffe3afcf88db37f7baeba35d1a9b6",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/todos/todo-0016.md"
+  },
+  {
+    "sha256": "909c57cf90e83395a23c4e4e9d029e30cf4a5f2d26dad660197aad49c6ebc644",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/todos/todo-0017.md"
+  },
+  {
+    "sha256": "7f1f7501a56acf5624ff0b5ca472efabf5aba525d384d94a535c5688f326e521",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/todos/todo-0018.md"
+  },
+  {
+    "sha256": "bb5c98fb30d55d4f7e1c6b8a0f66f23838c79d2fc7e0fdfeaed0d6a6b047c53a",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/runs/run-0001.md"
+  },
+  {
+    "sha256": "9cdd2d45bf9752a446f0b57ab5d352ad8ab6aad9a2e1d2317373acd548c0e4b5",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/runs/run-0002.md"
+  },
+  {
+    "sha256": "0858bcf66fbdf3eb2854ee3faa5f8b3fd6c8ca32666a01cc59573d4452c45d89",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/runs/run-0003.md"
+  },
+  {
+    "sha256": "26a3ff14b8df4c3ddf55c329e2eca2d1588f63195ae6508be2e122267f451eac",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/changes/change-0001.md"
+  },
+  {
+    "sha256": "3494993472261dea9802b511429bc469d5b54a00a128fe76d23c67204d5a45dc",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/changes/change-0002.md"
+  },
+  {
+    "sha256": "9ce75dcebb4426d047d3645f1512b86efe864ead287dea8cc15f199f0ce004e4",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/changes/change-0003.md"
+  },
+  {
+    "sha256": "e72f7fed6bd29cf4a380e460295219b3439e727cb5225d2914063cb19677178d",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/changes/change-0004.md"
+  },
+  {
+    "sha256": "898cec3212eb66b1e125cf65b8d5dedc1649799b937c467abdf9fb2d483d731c",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/changes/change-0005.md"
+  },
+  {
+    "sha256": "41891a29687a6ab08b8d13be7b6c22178de06f23ad527689032c0f0d0d592100",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/changes/change-0006.md"
+  },
+  {
+    "sha256": "2cc6cedc5265c96256498473935184d294d07b56fc59f594308df3456f88f6e7",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/changes/change-0007.md"
+  },
+  {
+    "sha256": "64dd3761d4523d2d1f10a68ae0f65cacdd1e7eb98ba8a6f5cffd066cdf902ad8",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/changes/change-0008.md"
+  },
+  {
+    "sha256": "455a1eae44ab2a59ecab5a8ed1dca72607e9b85b983280a14f5cfe1572999f4b",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/changes/change-0009.md"
+  },
+  {
+    "sha256": "7088990b2e43bb328936d335fe27d52972ee128bc709b746c7a701c1a82e8f3e",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/changes/change-0010.md"
+  },
+  {
+    "sha256": "e981bb8d060794f27aac87bfa8c5afb1ef3da2e683f1b2adeb1684328a7b8839",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/changes/change-0011.md"
+  },
+  {
+    "sha256": "822e099bb8e135429880c5cca536b6f9fd65c2c8d0b8020a1eeb62968f24d1e4",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/changes/change-0012.md"
+  },
+  {
+    "sha256": "591efd7f248ba26434e0f21d17eeec6bf8aaec5479ee906ec7d3355d1acd2453",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/changes/change-0013.md"
+  },
+  {
+    "sha256": "59ca2b3e91081a51b6dad39aa3bc75569cda3bf521f44f57e43c0323a3f9ab93",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/changes/change-0014.md"
+  },
+  {
+    "sha256": "47a4957b6e94f72ab87dfdee9b94a5ce84c86c4d600bebf3d138202d4d191846",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/changes/change-0015.md"
+  },
+  {
+    "sha256": "ffb0877ae7ef7f8145a4967bf568cca0476c91fd92159c0de68951197a957717",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/changes/change-0016.md"
+  },
+  {
+    "sha256": "507f8155ea5d8a44452656fbd62963f3ea38466478e869f863bf178849420256",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/changes/change-0017.md"
+  },
+  {
+    "sha256": "c95a963de402efe321003b7d7b5b28dd7b009f14b4f819be3a0305fe86653358",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/changes/change-0018.md"
+  },
+  {
+    "sha256": "16ca2c084389bed1e22c09ce573062cc34aac2618b01949edf9fe7a43473029d",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0003/audit/broken-lock-20260727T063618Z.yaml"
+  },
+  {
+    "sha256": "63ecee9045b3fd94106280c15f36afba41553d27e40ee655154f138a75a82798",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/plans/plan-v1.md"
+  },
+  {
+    "sha256": "01a68f980a4eb5e61ff4dcc693a013768bec11bff00ab1a2eda1f28e6c97bd4f",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/todos/todo-0001.md"
+  },
+  {
+    "sha256": "9ce537096fe3dceee4c6cbd9c7c0ee4b30228935c60cd1fd23b3d412667e85e3",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/todos/todo-0002.md"
+  },
+  {
+    "sha256": "dadd2371a7c537abb836c6ca04d08fffc4665855b327c0114d1a0fb9fc1436ce",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/todos/todo-0003.md"
+  },
+  {
+    "sha256": "fbc11ddb2b35c53d10a7eb67719252eb96f827a0561e3be3a54366be9c2690b5",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/todos/todo-0004.md"
+  },
+  {
+    "sha256": "f0b71c65b9dcb9736fad9196c3e0260e9b4238ac445e6c9a229b95241d0e2e2c",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/todos/todo-0005.md"
+  },
+  {
+    "sha256": "d6f756b7284be0cbe3a2baf3a6f6d7b390c59342ac23d4691a096af4a765490a",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/links/link-06572a96.md"
+  },
+  {
+    "sha256": "a978d8ec5aa26ce730ef5abbcbdd89a5d10bde77caf6a0f288e25f7ee3076728",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/runs/run-0001.md"
+  },
+  {
+    "sha256": "6bc8246952fc61f96faf013786f93f012e90d2434b7ddf491c4b13c28d81514b",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/runs/run-0002.md"
+  },
+  {
+    "sha256": "6a92310d967884bb59e4d574c5683ae6aa9fbc74389784826644c083a634c4d9",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/runs/run-0003.md"
+  },
+  {
+    "sha256": "e1caf7a9d5cec81c97d96f46658d8ce9c2b8d4aa86a54d2d54fa03062375e2ef",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/changes/change-0001.md"
+  },
+  {
+    "sha256": "34813c0525a85efe62c1af59f4174058eb725e54dfdab378df5ed48e9cd59e28",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/changes/change-0002.md"
+  },
+  {
+    "sha256": "1270abd600311284cf1428fef92c3f7cf839b40752bb2e690a032173eda83f0d",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/changes/change-0003.md"
+  },
+  {
+    "sha256": "8596ecfde7f058a99b52ff591a4aed6f9ba2a762eb3565e488e1426bda12447b",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/changes/change-0004.md"
+  },
+  {
+    "sha256": "fea91ee806a3d4fc701d7c84f3a7bd9595d92e1058da04546f474480b8486c00",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/changes/change-0005.md"
+  },
+  {
+    "sha256": "8abf90b77a888a3c7adee93739e21d8227a568ff90c42e0c5605ccbc8cc3e52f",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/changes/change-0006.md"
+  },
+  {
+    "sha256": "11e63ab5404d1a91515a36a46e6879bcfd4b1d7d46fe3fa313646bb66f8ed84c",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/changes/change-0007.md"
+  },
+  {
+    "sha256": "1a7bf06c22a5b77bd436c71e043cfb4e563c20ca2b65060d9e2b57ef5ea67c4a",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/changes/change-0008.md"
+  },
+  {
+    "sha256": "79bfcb45a45dea99244be7a0393c8be625f18375925c489958334ec4a1c63b63",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/artifacts/run-0002-command-0001.log"
+  },
+  {
+    "sha256": "2d729d2d6417808779a9075e38fd32f4a6799f31e4a4977046265c721241b438",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/checks/check-0001.md"
+  },
+  {
+    "sha256": "4ec62c013e34edad2dfa0174250d2e44dad154e3874432c2d9689ce78a0a9232",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/checks/check-0002.md"
+  },
+  {
+    "sha256": "44d868d00063eac469ec55882492670220dd34c101afb380d11b7d76303de19c",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/checks/check-0003.md"
+  },
+  {
+    "sha256": "4c04894bdd227fb0cb9ecd39d07f2c51d00b169583d011b1b2073cec869c8d16",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/checks/check-0004.md"
+  },
+  {
+    "sha256": "997f3a2abebe120149b5ae91963db1e9b3dda6f8dc842e2e57f1c25a96349b85",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/checks/check-0005.md"
+  },
+  {
+    "sha256": "000cf01977d4d96a781fd03385b8558f6f943683eb21324f2c8769e09d58a848",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/checks/check-0006.md"
+  },
+  {
+    "sha256": "d9f02e5923bf351214c92b679eecbb00531c04a8b34b12b01a7bc5a966e76f00",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/checks/check-0007.md"
+  },
+  {
+    "sha256": "6cc6f1ba506b74c21380ef64754cc3b4771547544f419e6ef393c1a81103394b",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/checks/check-0008.md"
+  },
+  {
+    "sha256": "67827c4f4d5b15420793138cb33420265bad4118fba45720cabcbb3c22dcc413",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0002/checks/check-0009.md"
+  },
+  {
+    "sha256": "ddf83f7331aa99d7a9232e2d2885257b8a76a5faff345353d2bf9e23f6eb051f",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/plans/plan-v1.md"
+  },
+  {
+    "sha256": "15966f7a197b762d39ec1c3e5ea7e89bf70d9c3a6fe41f6bea7dc34fbe477a7c",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/plans/plan-v2.md"
+  },
+  {
+    "sha256": "b92ffdaae20e265ad66f126a6b82e825b4944a81d6c781694f7b67263eaa94b5",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/todos/todo-0001.md"
+  },
+  {
+    "sha256": "17fdf111c5fa567dae5e6c259fb7a80381995c750cd8b51eefa6ace69bf23dc0",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/todos/todo-0002.md"
+  },
+  {
+    "sha256": "ebfd32ff164fdc3b647d28b5e4dc4d6770a5e5075c497c041ecbe000e49d0970",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/todos/todo-0003.md"
+  },
+  {
+    "sha256": "486a3e3cbc4262171c2eed558a24b035ad802086402d47e2ab9b35ac6064d8e9",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/todos/todo-0004.md"
+  },
+  {
+    "sha256": "b18ff3f03e0cd54e7c1f652bd1b6972288388f53b4c19ecc00f8f2c3afb8153f",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/todos/todo-0005.md"
+  },
+  {
+    "sha256": "f5f34819212036a816ad698b178586c4d0243816da625553ba01f453c5ce82a5",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/todos/todo-0006.md"
+  },
+  {
+    "sha256": "b818f60aa847e0f78d3d1c26e4fcf8c04e408ea20cad06dbcb7349b13fc21502",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/todos/todo-0007.md"
+  },
+  {
+    "sha256": "73a3a3f2e32458ac7cf3f358f5835e9ff38b895ad86c0d0ba2559f4be3c568bf",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/todos/todo-0008.md"
+  },
+  {
+    "sha256": "c2354994082cb41de1c22b95fe58b84f37b555ed018ab078aab8add6c45b0952",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/runs/run-0001.md"
+  },
+  {
+    "sha256": "179a8dcaafc56de68afd25fad5f11e61b7181c278e5cbba1cf2d4cf426a398b4",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/runs/run-0002.md"
+  },
+  {
+    "sha256": "53c0f00a85d453a37862d1c833b47a80b9753ef2e7e2824d3c97700e913d6945",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/runs/run-0003.md"
+  },
+  {
+    "sha256": "d87fe60cd3eaa26562b17dba10858fc16a050ffc0d28764e4d6c115c8d26a381",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/runs/run-0004.md"
+  },
+  {
+    "sha256": "f3840b75bf100b29eeb9114b19c4419432fcdb02e2026b28cbe6ce27eb5ebe45",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/runs/run-0005.md"
+  },
+  {
+    "sha256": "feda0c4e5340a91b1548791cdcee5301f51a69c36329427590cc397be12a463e",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/runs/run-0006.md"
+  },
+  {
+    "sha256": "b07deda7051000296136ec20bd2157003550f84b819fc976d82cd55ae4b5b119",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0001.md"
+  },
+  {
+    "sha256": "f400a9ff70beb73fabcca0b9a4164ff51661e3b2403a872791ce2c43a7d20d6f",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0002.md"
+  },
+  {
+    "sha256": "3581ea9307ed3f8536e9331f680032fbc36339d5e7ab1d3c53ee6da0e7fae1da",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0003.md"
+  },
+  {
+    "sha256": "dcf4c2cbb0bcdeeaae7b6dbd8a374d44889ebf9efdc8778703027f047d513ac6",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0004.md"
+  },
+  {
+    "sha256": "dceb2f049939ec518ac725e02c7049fafed10dfa03cab5309b91aa32f8a89bfd",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0005.md"
+  },
+  {
+    "sha256": "7dd5c73ac53891d87afb0ac3fe4f907e23895ee24c7edc5f4be27f4eb1abc95e",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0006.md"
+  },
+  {
+    "sha256": "428128aa3b2b741f46a2808fc0ce422dd1a631f05cb52ac494c1da795994c1dd",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0007.md"
+  },
+  {
+    "sha256": "7b89e9c24bf73bf307f46fadbf5a9c30f1577eebd286d7afe37e737399191dc9",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0008.md"
+  },
+  {
+    "sha256": "8d0059646c1b708e7d27af20f86c5869db5bd3bde0a5273cfc34be4534b7795f",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0009.md"
+  },
+  {
+    "sha256": "740b81497f289be5cfa5ea06bf75b9748b054558683bcc9ece48557975b24f54",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0010.md"
+  },
+  {
+    "sha256": "2f84a62ada926b2497569d7701d5b1ff3d1410bfe468d693fdd6ce8ba4e40bb9",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0011.md"
+  },
+  {
+    "sha256": "756e38ef02ba7bb7d5099e0b04e0048fe10ee3788d76b1d6be0688574beed9fc",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0012.md"
+  },
+  {
+    "sha256": "685a68360f1166e95899217d71a3a774a2c4576daa0491ef84365ab789a81db2",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0013.md"
+  },
+  {
+    "sha256": "2c818342c22881cee65f6c0dab0b99e83fb6be61fe9d1453593b93b4f29cc00d",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0014.md"
+  },
+  {
+    "sha256": "4344fc328e549058e72e68360e68e9ee93bc14f48adfc1ae037347edfd1fe755",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0015.md"
+  },
+  {
+    "sha256": "35e7c36f27471ebf39dde53162c9f0b10713700d8d5d427579e55d8ed92817e0",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0016.md"
+  },
+  {
+    "sha256": "fdf72e409df8715dbfa0f0e0ee1cef0a6148b03503773f0302fbd479580c6202",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0017.md"
+  },
+  {
+    "sha256": "b13924bd963d2d7ee6c47be8937e5c75b3721869e4df67fc9c9a91c34756c2c5",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0018.md"
+  },
+  {
+    "sha256": "7500ecdb684b98bf2a74df7fdccb827b473bdf387121953e6bad27c6f16e0cba",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0019.md"
+  },
+  {
+    "sha256": "f25be4520c15f2775b313b349d4c77f6d686b329390e42b8317729d9fda856ee",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0020.md"
+  },
+  {
+    "sha256": "62b1120f95d66377d8776b2cc7a508cae2418cb7d6496da29869e8ca18fd6303",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0021.md"
+  },
+  {
+    "sha256": "8536660b6fb1568e1f75d4e6c9a894180c55eba0ca0fcabce1dfbd9449a79ee8",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0022.md"
+  },
+  {
+    "sha256": "090dd8f33ce063f453667a60ab0479ff5df5bad2ae88faaae0d3a9364ed9bda8",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0023.md"
+  },
+  {
+    "sha256": "6bead5fe40a3e450aaaa3ef57f388d804e73654dc516256b2d6edaede2e89e7d",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0024.md"
+  },
+  {
+    "sha256": "bfc265181cc52065ecbd1117d1878ed1d90a6a6ae6c76aef10754b149b30c26e",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0025.md"
+  },
+  {
+    "sha256": "6d9df5274d54c9fe600f580506f77f20c7a6fd887f87f7455b2b881d3f15573a",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0026.md"
+  },
+  {
+    "sha256": "78e237f8b6f9ade45befb0a7a0b590446acae79f018968ebe41fae338704302a",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0027.md"
+  },
+  {
+    "sha256": "dd0918518b04366037d3ac32b3dcbb07410a72b42a111c463b9c6fdb0f6747f2",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0028.md"
+  },
+  {
+    "sha256": "cb7c9e783beffe21e2e35382b277bb40b997e104a4e24b0d20b04e3cae0a65fa",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0029.md"
+  },
+  {
+    "sha256": "5c5ba888708c0b29491cc61cd77a53c90c77577a165fcee6e38d8d17f40f46b1",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0030.md"
+  },
+  {
+    "sha256": "2ac374dc4edb239ed6bd16d8091909172c75d6765084e752925c6f6582b4f9cc",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0031.md"
+  },
+  {
+    "sha256": "4c161937d56b968e291818f54880417cf451592930a377cfed1ba9efa54f2b05",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0032.md"
+  },
+  {
+    "sha256": "71c3cb8c7f8cd26cb4ba3cc7795715d19785d71eec61a8befeffd216e7cd7308",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0033.md"
+  },
+  {
+    "sha256": "1dac6731a64df50c746beba9abdb6122601cbc8678bc4df155f0c9e178f43f77",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0034.md"
+  },
+  {
+    "sha256": "35f2ea3c690cdd81672ed730d44162077d54d5dbaf1270071e02658d4a175fb2",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0035.md"
+  },
+  {
+    "sha256": "074955f6caec434db21b185f603427bcdd782078f0fa09757a4a1ec572e329bf",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0036.md"
+  },
+  {
+    "sha256": "227d23332d07f40b98ba0d246b2a2d4c7985df6dabe732464b58f4b8ea53dbec",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0037.md"
+  },
+  {
+    "sha256": "b2ef87c416103d37478932f54bb00247835237458c328363970dfe606cc333f1",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0038.md"
+  },
+  {
+    "sha256": "06b946ca85264a5b23d3c463f0f3fc023dae7e0573410bd3e7e4f329dff9b03c",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0039.md"
+  },
+  {
+    "sha256": "da7ce7b00b03a27acf8971fdc5f1cbf64bd0e7d27420f55f937ffbc915a1dc2a",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0040.md"
+  },
+  {
+    "sha256": "1fc98a9ffe9d543e38dd381375d52223c9b2d6e4620684b58fbf6e9e628a541f",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0041.md"
+  },
+  {
+    "sha256": "c26227ca20f53ec3213010c34041fea98e374c73da4e3880612941c0acf154d6",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0042.md"
+  },
+  {
+    "sha256": "4f5cd88fccab5bd07f02308f11eedafaae26508825eaf121215a347e7a141352",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0043.md"
+  },
+  {
+    "sha256": "296000cc87ef216134a6e3ceb060f5976632d8013bb11034a31201bdd267a251",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0044.md"
+  },
+  {
+    "sha256": "75f95aa577a0be921e32ddea498f97255aa9c5fdfc3e1f7a49c6994c197781b8",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0045.md"
+  },
+  {
+    "sha256": "3d453e356be6b924d626d83e01e8e2d46f3150aeb9a1a17dfd8d7d88e1dc2599",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0046.md"
+  },
+  {
+    "sha256": "826cb94cacd4365b53155d5f147310493f062c2cb79779869da0884309d09c81",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0047.md"
+  },
+  {
+    "sha256": "909b40703ea019056d153471dc8aab09c503d3b4b9c03bafc6720dcf77be0629",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/changes/change-0048.md"
+  },
+  {
+    "sha256": "7a2a29f377608a32cd80ed8edccc46ee8912564b49e27fdc379d12b630954426",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/artifacts/run-0003-command-0001.log"
+  },
+  {
+    "sha256": "a5413e8152ff85b6193ce3a9afb07737c1abacfe8af1845c7225b5b9801e1c5b",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/artifacts/run-0003-command-0002.log"
+  },
+  {
+    "sha256": "25062d12e6389dc59cd8a944e0df0365dfbcb87d9a5a143d380451ca40e8a967",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/artifacts/run-0003-command-0003.log"
+  },
+  {
+    "sha256": "915bd53ab3c4c968ab4ee7d59c525467a284c21ec263559f373c1f78f369b405",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/artifacts/run-0003-command-0004.log"
+  },
+  {
+    "sha256": "c6d3bfcb4ca789284fa0a8aa201d93ad80827f36af003ff66d420e3483537890",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/artifacts/run-0003-command-0005.log"
+  },
+  {
+    "sha256": "e97e0376a9637d342820ac2958f71622dcde36333945e303b7ae325ae14650cc",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/artifacts/run-0003-command-0006.log"
+  },
+  {
+    "sha256": "6f6bc8c7237e81e81d2f3e21c4980458f08594f08b44d25031fe73c47f9336c5",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/artifacts/run-0003-command-0007.log"
+  },
+  {
+    "sha256": "e0f2c1f7c584c73c259571ef20ab1bc3c9b912d6719c7deae2afa3c0ed173cc4",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/artifacts/run-0003-command-0008.log"
+  },
+  {
+    "sha256": "e97e0376a9637d342820ac2958f71622dcde36333945e303b7ae325ae14650cc",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/artifacts/run-0003-command-0009.log"
+  },
+  {
+    "sha256": "4a83d65d25ba315ceafec85a7f007c20d5539a36700b65b5a74715d3659c1e1f",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/artifacts/run-0003-command-0010.log"
+  },
+  {
+    "sha256": "ebd26070f605250b4537c4a01445f52f3a3adc772e8a8352f2503c4eaa4cad24",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/artifacts/run-0003-command-0011.log"
+  },
+  {
+    "sha256": "397dc9f1d6c3ba7d1bc91bb6296dd9cc7088245154b606eb61f57865ab03ba65",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/artifacts/run-0005-command-0001.log"
+  },
+  {
+    "sha256": "fbba4cd7363874fc73ccf4db51533faca79741f92cd78e2d52519ac9e1403c07",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/artifacts/run-0005-command-0002.log"
+  },
+  {
+    "sha256": "0fab728cf1e5ba12008c28d8c09019b870f165f1fd1f4325b20931baabbc948e",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/artifacts/run-0005-command-0003.log"
+  },
+  {
+    "sha256": "20fdda3867120e6ad0a7c24e31b3a52cfeb95ea93d5cf7aecb5891f224028577",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/artifacts/run-0005-command-0004.log"
+  },
+  {
+    "sha256": "f18256f3e85cca002b0628483fe36d22e8680d2984e3571839e428f4ebcd99a8",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0001.md"
+  },
+  {
+    "sha256": "abd4a5c34c91feecd3bb5e8a9ea7c6ccaaeb0c8fa2c6d42d27f89ca22c8ebf62",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0002.md"
+  },
+  {
+    "sha256": "1ad41e48bf31f3a6225b4d2b8349f273a7917688f4b9b6cb9b518ea756e4ab7d",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0003.md"
+  },
+  {
+    "sha256": "143ca646870464122ef0731cac0819e88f6f06f3e5481beb77aa7ee1f465dcd8",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0004.md"
+  },
+  {
+    "sha256": "2020c3d87c4d3a0fae8e57dab66c75f0d950a6b9d38b689fe6e2100bcf28a655",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0005.md"
+  },
+  {
+    "sha256": "53a71dac2aec99af01e24540eac0ab0a842d87a944d789c0c29fc4399214bf87",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0006.md"
+  },
+  {
+    "sha256": "e82231eb403712b2629d9e8e3f2918e6ce9d44e024a144ee32ff12dade74c800",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0007.md"
+  },
+  {
+    "sha256": "2c91b4ad688f4fb8ffa83808729badc4118629738b076a9bb5c464af52df19d0",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0008.md"
+  },
+  {
+    "sha256": "73d39dca09e7844e0ab9403043258d4b5261e5f1c5f7c93fbb58122f6e386632",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0009.md"
+  },
+  {
+    "sha256": "5ddc0d5bdabd5c87889fac48a4e9a52fe0b310f690e98144aa7fba3fcc4c7521",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0010.md"
+  },
+  {
+    "sha256": "917b68411cd0abee98024bbed4fdaf95c1dd588789871f3e4bf56dda7b033b1c",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0011.md"
+  },
+  {
+    "sha256": "1d0a3f7e13d5424ccb339fe004101818b621887dc695d88e85ba6833b47a845f",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0012.md"
+  },
+  {
+    "sha256": "e23804025944818f35d7d862f6736fc4db2aff39f5b9c477ee594d8359f1eacc",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0013.md"
+  },
+  {
+    "sha256": "e760210fb85112bd436a0d30bd140a800e3b53aece821c2a4362168bbff78243",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0014.md"
+  },
+  {
+    "sha256": "047c0a887643c0b0d13d9205adf674a79e847c23fb395188df50059b91d2b2db",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0015.md"
+  },
+  {
+    "sha256": "d268056b9c76572651394e94b933bb10088d34f58998030c969f27ea5fe5d875",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0016.md"
+  },
+  {
+    "sha256": "64865221837a56065791083235bf46b6a2046733c2337b25a5c9e98d814506b9",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0017.md"
+  },
+  {
+    "sha256": "254bdef2eff2f1237dba772f1b4ea3bcdbe29ed5ceb822590c7eeef0ccd8c983",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0018.md"
+  },
+  {
+    "sha256": "556c0be857a88e75250b41fccfee533f2d3b3ae9648514a38ccf8a0ddf65b06d",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0019.md"
+  },
+  {
+    "sha256": "adc48c0afcc479b5f538eeaf6791468797b60da06bc5c8ef56cd3c1a556a9988",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0020.md"
+  },
+  {
+    "sha256": "2319d524566c5576783990ac314df0a20a214d7f1bc519c56aabc3112482edc3",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0021.md"
+  },
+  {
+    "sha256": "79e4b8db6eafe6ff191d3ede7777810b5b4304d670b3f0455b0e6db966081cd1",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0022.md"
+  },
+  {
+    "sha256": "9184317b26dbe0e06d740bfd3429f7a6377212a87f98b354c9028c3d14af2655",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0023.md"
+  },
+  {
+    "sha256": "14d5d1858d55181ca7a0f55d8b18074c58c74750bb4249f3039634996e1e3f45",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0024.md"
+  },
+  {
+    "sha256": "4ff803b6f02a16a4ed2802deba13e63fa60286592f5beae708b576c340b652ab",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0025.md"
+  },
+  {
+    "sha256": "e623502e1046bb120b21fdf224292e12690e347399ac5356942a75a0468404bc",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0026.md"
+  },
+  {
+    "sha256": "a0a672dba069ae72b0a8f4f10fd9cb684715aac6622a1fe66e8f789de43314ac",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0027.md"
+  },
+  {
+    "sha256": "fd391fa58034ac9f635d43eee17fad1b26b848137a3eb1c5535c93757c49ccde",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0028.md"
+  },
+  {
+    "sha256": "75eeaaa6da9a1e5a2907c93f7c4d51a78a4f957d3dc868f57c350d68be8d121a",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0029.md"
+  },
+  {
+    "sha256": "9766be8b59e4913c721e9767008c71b6a04c511ca60a35fd0a223166adc95b9d",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0030.md"
+  },
+  {
+    "sha256": "2c484a9ab758627cf3a960a990e97767c37826ce4e3c76d7397878901052acee",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0031.md"
+  },
+  {
+    "sha256": "067fa45465d36a260e4e6fbfb70a416c54deeb2d0c37b9e52f105b2398a2a514",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0032.md"
+  },
+  {
+    "sha256": "6aa6caafa4a3e9580f38b8495f0947aa5009791e6a89e3aad7944229815b3249",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0033.md"
+  },
+  {
+    "sha256": "0471dae7bc2e3baa88d15ae5c5f7e9d873aa406d0dfcca84bd06c6f08e7ed6be",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0034.md"
+  },
+  {
+    "sha256": "f4379ffe975e140e9d42a9f965675c46ce0d44a4981617123add4bf38a6e3379",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0035.md"
+  },
+  {
+    "sha256": "4660b5d7877bd6e79305699449dd26fd674349982e70d00d60e0146ec01badcc",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0036.md"
+  },
+  {
+    "sha256": "f0b79d47e925fe70ef7a09323fd19301ee5982b5a687d4dc5f4a695c5bdd8890",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0037.md"
+  },
+  {
+    "sha256": "fb8933ffed0a3a0a61ff7af61a09783a3a920c0b353fe1b2b077ef2dff61b869",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0038.md"
+  },
+  {
+    "sha256": "44b4d779a744d28d93d42551a48ec2f7c36380c22b315af806fd9bd78227061c",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0039.md"
+  },
+  {
+    "sha256": "df156d27396b90f12c2e4bd1f391fd24c75e32da57b0bf077dbf3b2dd8124882",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0040.md"
+  },
+  {
+    "sha256": "6345248ce47e5175738b624b81c7c4d8e58eb574818b09d2c4deb4870f8db93e",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0041.md"
+  },
+  {
+    "sha256": "7788e39c7e5563dbfc0fd3ccebc6e9adde072e972ee152ac04f1d164424bc0bc",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0042.md"
+  },
+  {
+    "sha256": "7a0d89053c71774a0d466747c1b9bf4178e528405ad365ca897af4f52a2c788c",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0043.md"
+  },
+  {
+    "sha256": "b77443e4a906bf41c7272636b6e03752349bc212c5b369c742d334bddcf78c88",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0044.md"
+  },
+  {
+    "sha256": "38fa282b463b37ef25a3e7053a3ef13b059633133871a36e0383505a9f75caf2",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0045.md"
+  },
+  {
+    "sha256": "96d7b53a8b35174d2235c5b0178713c1906a4744f721b57b5586d0db6f1dfd38",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0046.md"
+  },
+  {
+    "sha256": "f31d7f2db2cfe200e84abb156e34fd360ac57a5bc2853c097a358578a462a422",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0047.md"
+  },
+  {
+    "sha256": "27fcd634ae1883111d97c9e14aba13fdd2288d4d8328dc2d42fbec3d1d6d2e6b",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0048.md"
+  },
+  {
+    "sha256": "6ba0e24bb6497669bcf780e5c9c0cf17ad2dd92cc467e018951f84d944f29f83",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0049.md"
+  },
+  {
+    "sha256": "221528b3e4ad996baba8ecff4dd826513880a45887a1d4dc24e185c095d746d6",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0050.md"
+  },
+  {
+    "sha256": "0f118fceb6fa268501327132b27b60b170509520f76768e9b51cdad75273f6e6",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0051.md"
+  },
+  {
+    "sha256": "dc2c25b20407ed13b3de17f0d08c52418dbcb59f3287e3ff43d76e957bceecf3",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0052.md"
+  },
+  {
+    "sha256": "38b6154eaf4ae4950e738bdf6d77228ca95371ca6d0336c2de7eef29f8369d01",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0053.md"
+  },
+  {
+    "sha256": "5ba18750ebef20440d9b07dfed28a00b3abe348ce4ff3ba66cfaae41793310ee",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0054.md"
+  },
+  {
+    "sha256": "ef1ed16035b26f60f24807b251f999d3b347c526f76309fa4c028a00fd3ac9ab",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0055.md"
+  },
+  {
+    "sha256": "799e8269074bbc84955add4267dc556208849d5d145275e2eb647b68021f644a",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0056.md"
+  },
+  {
+    "sha256": "c7a8963d2c8d8de2b1f8f27c01864fac77bde927c3d4a7fe2ae4c72143bfbc5b",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0057.md"
+  },
+  {
+    "sha256": "31b2c6e7cf3efb904ed27ea812bcc52c221ee18ee464ede63e732fd370e1d23e",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0058.md"
+  },
+  {
+    "sha256": "fb0bbd5ebbdeedb0cd9f6ba95d29ecf587c78d8f16b7c06772e9210151ddb6e0",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0059.md"
+  },
+  {
+    "sha256": "dd875ec4f30e9357bd88d01752dcd5488b0cc5e4ec230940cdef5d3e7540d117",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0060.md"
+  },
+  {
+    "sha256": "6530758508fd13f7aff55d286e521668308aeecb2a1573b75dfc582be3ba6405",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0061.md"
+  },
+  {
+    "sha256": "79ac759e5ceacb5cf008dc6342b4b4cc8d1ba309ff5720dd3c0ff9f279136b03",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0062.md"
+  },
+  {
+    "sha256": "720bb8691909ea0e8cf93c9b16bbd3c7d42419597c6a88eacb4812c71b1ac4c7",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0063.md"
+  },
+  {
+    "sha256": "3cfe893ab58899f0179e0bd127a004004a88d165e24c09296e8e2acb6834d06b",
+    "source": "/data/data/com.termux/files/home/src/ledger/task/pykokoro/ledgers/main/tasks/task-0001/checks/check-0064.md"
+  },
+  {
+    "sha256": "54ce02933fd2e825e37ece458ad362f23f080088af9478d95a987e3b0910dfe0",
+    "source": "/data/data/com.termux/files/home/src/pykokoro/.ledger/ledger.toml"
+  }
+]

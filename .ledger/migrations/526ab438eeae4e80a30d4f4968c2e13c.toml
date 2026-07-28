@@ -1,0 +1,54 @@
+schema_version = 3
+migration_id = "526ab438eeae4e80a30d4f4968c2e13c"
+project_uuid = "26fbefd4-a9f0-477b-b901-5b130180007c"
+phase = "failed"
+mode = "copy"
+verify = "sha256"
+project_root = "/data/data/com.termux/files/home/src/pykokoro"
+error = "migration hook quiescence_check failed: Invalid canonical Taskledger config /data/data/com.termux/files/home/src/pykokoro/.ledger/taskledger/config.toml: Cannot declare ('ledger',) twice (at line 8, column 8)"
+requires_staged_validation = false
+requires_activated_validation = false
+requires_finalization = false
+quiescence_completed = false
+staged_validated = []
+activated_validated = []
+finalized = false
+plan_digest = "da5d1fe9cec8d5c5b4062699faac8a1c3cadceba4d302a748ba4188742532395"
+created_at = "2026-07-28T19:50:04Z"
+updated_at = "2026-07-28T19:50:04Z"
+
+[lock_identity]
+migration_id = "526ab438eeae4e80a30d4f4968c2e13c"
+owner = "ledgercore"
+pid = 27831
+
+[items.0]
+item_index = 0
+component = "mount"
+tool_name = "taskledger"
+mount_name = "data"
+source = "/data/data/com.termux/files/home/src/ledger/task/pykokoro"
+destination = "/data/data/com.termux/files/home/src/ledger/taskledger/26fbefd4-a9f0-477b-b901-5b130180007c/data"
+strategy = "copy"
+destination_policy = "create-only"
+state = "pending"
+expected_before_state = "absent"
+stage_path = "/data/data/com.termux/files/home/src/ledger/taskledger/26fbefd4-a9f0-477b-b901-5b130180007c/.data.migrating-526ab438eeae4e80a30d4f4968c2e13c-0"
+backup_path = "/data/data/com.termux/files/home/src/ledger/taskledger/26fbefd4-a9f0-477b-b901-5b130180007c/.data.backup-526ab438eeae4e80a30d4f4968c2e13c-0"
+error = "migration hook quiescence_check failed: Invalid canonical Taskledger config /data/data/com.termux/files/home/src/pykokoro/.ledger/taskledger/config.toml: Cannot declare ('ledger',) twice (at line 8, column 8)"
+
+[items.0.source_binding]
+schema_version = 1
+layout_version = 3
+project_uuid = "26fbefd4-a9f0-477b-b901-5b130180007c"
+tool = "taskledger"
+mount = "data"
+storage = "project"
+
+[items.0.destination_binding]
+schema_version = 1
+layout_version = 3
+project_uuid = "26fbefd4-a9f0-477b-b901-5b130180007c"
+tool = "taskledger"
+mount = "data"
+storage = "external"

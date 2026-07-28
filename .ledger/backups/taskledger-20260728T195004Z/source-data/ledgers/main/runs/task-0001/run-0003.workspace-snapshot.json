@@ -1,0 +1,275 @@
+{
+  "captured_at": "2026-07-26T11:10:12Z",
+  "content_hash": "sha256:6a72484f23ce2c41e183c027116778d41796e3ed1e9a9f31772c701113a37e1d",
+  "dirty": true,
+  "entries": [
+    {
+      "content_hash": "sha256:a1031047ce92c59c82c75a4fa181e0f6ebbb1b005f5fce111873dffb558a060d",
+      "exists": true,
+      "kind": "file",
+      "path": ".codecrate.toml",
+      "size": 365,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:d2813bbb7e338ba774d8782e3dca41666f9678598590644cd7ff0e89fe4bc2b1",
+      "exists": true,
+      "kind": "file",
+      "path": ".github/workflows/tests.yml",
+      "size": 1179,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:6e239089830765314ce6f0be4e55ad977c83af991acce666adcd86722f46a5ec",
+      "exists": true,
+      "kind": "file",
+      "path": ".pre-commit-config.yaml",
+      "size": 2266,
+      "status": "modified"
+    },
+    {
+      "content_hash": null,
+      "exists": false,
+      "kind": "missing",
+      "path": ".ruff.toml",
+      "size": null,
+      "status": "deleted"
+    },
+    {
+      "content_hash": "sha256:76bb26efa3595ed01f669bc79301bfd70fea086232f46df05f12e17bc644e652",
+      "exists": true,
+      "kind": "file",
+      "path": ".taskledger.toml",
+      "size": 2816,
+      "status": "untracked"
+    },
+    {
+      "content_hash": "sha256:ae58b90ea0f9a6b9d85043f0b53f59c2ad0da2e56e813740e04d303ab722946b",
+      "exists": true,
+      "kind": "file",
+      "path": "AGENTS.md",
+      "size": 4457,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:cf37bbb012c1161dc12a19e4f6d2192e1ed68bcbaf937b4c600882e71ea73295",
+      "exists": true,
+      "kind": "file",
+      "path": "PYKOKORO_MAINTAINER_REVIEW-4.md",
+      "size": 31160,
+      "status": "untracked"
+    },
+    {
+      "content_hash": "sha256:bae4a8474a80bb63f227104e3e23edd16bf92bc5e0eebfec436e018206e21654",
+      "exists": true,
+      "kind": "file",
+      "path": "README.md",
+      "size": 29219,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:654a777bb1b0ec32485699a675b64d03a0d06570b9fb303c93fdee4b88c20a97",
+      "exists": true,
+      "kind": "file",
+      "path": "docs/installation.rst",
+      "size": 5735,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:8ba68f35a514134a1d6c37086a26497d1a179b2bb2c076f95f1ff6203fc2be9e",
+      "exists": true,
+      "kind": "file",
+      "path": "docs/make.py",
+      "size": 2341,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:5811b05547a706872b622638313bfe0996f99f4ae4534253b0374cee23e32449",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/cpu_benchmark.py",
+      "size": 13774,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:25f5aa17973566cc948dcb0421067ee0423250e3ca47d232751e7141c095d113",
+      "exists": true,
+      "kind": "file",
+      "path": "examples/phoneme_diff_comparison.py",
+      "size": 16983,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:e107207d8d6b9ec307586abc49ad926721137d330784b2b745b3e817b647e59c",
+      "exists": true,
+      "kind": "file",
+      "path": "plan.md",
+      "size": 10576,
+      "status": "untracked"
+    },
+    {
+      "content_hash": "sha256:d05d63d6a01c24e87838c7233d98e973421a332727247eb533f637067dd45ba3",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/__init__.py",
+      "size": 1395,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:d4e85a9e41114a412720d05d936ec6f07fb88d570f2a4afc84f0a67a5a3defdc",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/audio_generator.py",
+      "size": 35300,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:ccdb02078ace624fb929b4855e006b8d1df7a92eae3384edaab294f346c427b6",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/config_types.py",
+      "size": 694,
+      "status": "untracked"
+    },
+    {
+      "content_hash": "sha256:44f694137bd17eb1604d36c73c69739d71b86b426d636ae673d76394a59b3e74",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/generation_config.py",
+      "size": 8269,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:50427a4fc91fdaab351751f28a6e320e616c10e7c4841ecf8553d02d80ac283f",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/onnx_backend.py",
+      "size": 72956,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:45da77436ba1d09c4812c2b636cee72311e90da0808d1aff1f69dbcbee9ec7dc",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/pipeline.py",
+      "size": 20074,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:98b0cc94d09c6a63957b5a46247a39bf56c1af9844e6dc5f3754d2fac93ddc48",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/pipeline_config.py",
+      "size": 1527,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:a841395adcb4064759552afbc7ae280e1f3460620b810e5c17fa7040fa05b87a",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/runtime/cache.py",
+      "size": 3741,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:35f77a70ccdfdbb03f7d6e13ca36c9d2c2be7b6bf06ca94c1c477c1ed908f708",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/short_sentence_handler.py",
+      "size": 26387,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:8cce9149ab4ba79a80c8454b00cb7e083d15291848bffc099ba2f4dd54898b7d",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/stages/g2p/kokorog2p.py",
+      "size": 16353,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:e1de1e472daa8be078f9379ec404a14412d7fd186e98914d5d6c8e8453a77abf",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/trim.py",
+      "size": 19644,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:6225de30e3d95def5895715b91bf05965e17238fbca3e53eec575829800d65ad",
+      "exists": true,
+      "kind": "file",
+      "path": "pykokoro/voice_manager.py",
+      "size": 22258,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:5affb31cf99e2ea05e7e4b1c582132e00ca3bfc66391a7aa171c1f8a364e44dd",
+      "exists": true,
+      "kind": "file",
+      "path": "pyproject.toml",
+      "size": 3396,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:843ac26c38a41abae578250bc0f9419194b320a0f67327d941037a4268f6cfe7",
+      "exists": true,
+      "kind": "file",
+      "path": "setup.py",
+      "size": 38,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:c05f1a545aeec07c9fd991cd6497681fdde3be054e697961f6337c68a90754b8",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_generation_config.py",
+      "size": 10085,
+      "status": "modified"
+    },
+    {
+      "content_hash": "sha256:74ea659a380eb428d78f77d9486c2599324ff158e1460bbc1aafc9fdeca2c1df",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_import_boundaries.py",
+      "size": 1550,
+      "status": "untracked"
+    },
+    {
+      "content_hash": "sha256:96f5d3472504bda53bbfedf431248eaabcca3ba1ba243e08de37a0771682dac0",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_maintainer_review4_download_cache.py",
+      "size": 5887,
+      "status": "untracked"
+    },
+    {
+      "content_hash": "sha256:3ce7ae5338d67ed7507d02960816b676d8f922c2d418fafb8eea34e982289790",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_maintainer_review4_reproductions.py",
+      "size": 5503,
+      "status": "untracked"
+    },
+    {
+      "content_hash": "sha256:d87d703a169b922980c68321482ae76db9de58b5a0a407a69c51023de7c46a58",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_packaging_metadata.py",
+      "size": 1211,
+      "status": "untracked"
+    },
+    {
+      "content_hash": "sha256:1530f80bea6b0ffd773c527e5b9de372128f66c9cb323365e63509c67ff05338",
+      "exists": true,
+      "kind": "file",
+      "path": "tests/test_short_sentence_handler.py",
+      "size": 4150,
+      "status": "modified"
+    }
+  ],
+  "entry_count": 33,
+  "format": "worktree-content:v1",
+  "git_commit": "8755b82767b906a2d0f2493013383084d565ef20",
+  "paths_hash": "sha256:7dd698f2d58ff353ebff0524f305820e9978bdb60e2c2b91b3255c97688b3f5c"
+}

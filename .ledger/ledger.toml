@@ -2,6 +2,7 @@ schema_version = 3
 
 [project]
 uuid = "26fbefd4-a9f0-477b-b901-5b130180007c"
+name = "pykokoro"
 
 [ledgers.releaseledger.mounts.data]
 storage = "project"
@@ -10,7 +11,8 @@ storage = "project"
 storage = "cache"
 
 [ledgers.taskledger.mounts.data]
-storage = "project"
+storage = "external"
+root = "../ledger"
 
 [ledgers.taskledger.mounts.indexes]
 storage = "cache"

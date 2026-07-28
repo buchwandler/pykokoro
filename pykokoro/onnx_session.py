@@ -2,24 +2,117 @@
 
 import logging
 import os
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Final
 
 import onnxruntime as rt
 
+from .config_types import DEFAULT_MODEL_QUALITY, ModelQuality, ProviderType
 from .exceptions import ConfigurationError
 from .provider_config import ProviderConfigManager
 from .utils import get_user_cache_path
 
 logger = logging.getLogger(__name__)
 
-# Provider type
-ProviderType = Literal["auto", "cpu", "cuda", "openvino", "directml", "coreml"]
+PROVIDER_ALIASES: Final[dict[str, str]] = {
+    "cpu": "CPUExecutionProvider",
+    "cuda": "CUDAExecutionProvider",
+    "openvino": "OpenVINOExecutionProvider",
+    "directml": "DmlExecutionProvider",
+    "dml": "DmlExecutionProvider",
+    "coreml": "CoreMLExecutionProvider",
+    "nnapi": "NnapiExecutionProvider",
+    "xnnpack": "XnnpackExecutionProvider",
+}
 
-# Model quality type
-ModelQuality = Literal[
-    "fp32", "fp16", "fp16-gpu", "q8", "q8f16", "q4", "q4f16", "uint8", "uint8f16"
-]
+AUTO_PROVIDER_PRIORITY: Final[tuple[str, ...]] = (
+    "CUDAExecutionProvider",
+    "NnapiExecutionProvider",
+    "OpenVINOExecutionProvider",
+    "CoreMLExecutionProvider",
+    "DmlExecutionProvider",
+    "XnnpackExecutionProvider",
+    "CPUExecutionProvider",
+)
+
+
+def get_available_execution_providers() -> tuple[str, ...]:
+    """Return ONNX Runtime providers in runtime-reported order."""
+    return tuple(str(provider) for provider in rt.get_available_providers())
+
+
+def normalize_execution_provider(
+    requested: str,
+    *,
+    available: Sequence[str] | None = None,
+) -> str:
+    """Resolve an alias or exact provider name to its runtime spelling."""
+    requested_clean = requested.strip()
+    available_providers = tuple(available or get_available_execution_providers())
+    if not requested_clean:
+        raise ConfigurationError(
+            "Execution provider cannot be empty. "
+            f"Requested: {requested!r}; available providers: {available_providers}"
+        )
+
+    requested_key = requested_clean.casefold()
+    candidate = PROVIDER_ALIASES.get(requested_key, requested_clean)
+    for provider in available_providers:
+        if provider.casefold() == candidate.casefold():
+            return provider
+
+    raise ConfigurationError(
+        "Requested execution provider is unavailable. "
+        f"Requested: {requested_clean!r}; available providers: {available_providers}"
+    )
+
+
+def _select_auto_provider(available: Sequence[str]) -> str:
+    available_by_key = {provider.casefold(): provider for provider in available}
+    for preferred in AUTO_PROVIDER_PRIORITY:
+        selected = available_by_key.get(preferred.casefold())
+        if selected is not None:
+            return selected
+    raise ConfigurationError(
+        "ONNX Runtime does not report a supported execution provider for auto "
+        f"selection. Requested: 'auto'; available providers: {tuple(available)}"
+    )
+
+
+def resolve_execution_provider(
+    provider: str | None = None,
+    *,
+    use_gpu: bool = False,
+    available: Sequence[str] | None = None,
+    respect_environment: bool = True,
+) -> str:
+    """Resolve environment override, explicit selection, auto selection, or CPU."""
+    available_providers = tuple(available or get_available_execution_providers())
+    requested = provider
+    environment_override = False
+    if respect_environment:
+        environment_provider = os.getenv("ONNX_PROVIDER")
+        if environment_provider is not None and environment_provider.strip():
+            requested = environment_provider
+            environment_override = True
+
+    if requested is None:
+        requested = "auto" if use_gpu else "cpu"
+
+    if requested.strip().casefold() == "auto":
+        selected = _select_auto_provider(available_providers)
+        logger.info("Auto-selected execution provider: %s", selected)
+        return selected
+    try:
+        selected = normalize_execution_provider(requested, available=available_providers)
+    except ConfigurationError as exc:
+        if environment_override:
+            raise ConfigurationError(f"ONNX_PROVIDER: {exc}") from exc
+        raise
+    if environment_override:
+        logger.info("Using execution provider from ONNX_PROVIDER: %s", selected)
+    return selected
 
 
 class OnnxSessionManager:
@@ -45,7 +138,7 @@ class OnnxSessionManager:
         provider: ProviderType | None = None,
         session_options: rt.SessionOptions | None = None,
         provider_options: dict[str, Any] | None = None,
-        model_quality: ModelQuality = "fp32",
+        model_quality: ModelQuality = DEFAULT_MODEL_QUALITY,
     ):
         """Initialize the session manager."""
         self._use_gpu = use_gpu
@@ -74,8 +167,18 @@ class OnnxSessionManager:
         sess_options = self._create_session_options()
         providers = self._select_providers(self._provider, self._use_gpu)
 
-        # Try to load ONNX model with automatic fallback
+        # Try to load ONNX model with automatic fallback only for auto requests.
         last_error = None
+        environment_provider = os.getenv("ONNX_PROVIDER")
+        environment_request = (
+            environment_provider.strip().casefold() if environment_provider else None
+        )
+        provider_request = self._provider.strip().casefold() if self._provider else None
+        can_fallback = (
+            environment_request == "auto"
+            if environment_request
+            else provider_request == "auto" or (provider_request is None and self._use_gpu)
+        )
 
         provider_lists: list[list[str | tuple[str, dict[str, str]]]] = [
             providers,
@@ -89,7 +192,7 @@ class OnnxSessionManager:
                     break  # User disabled fallback
                 if providers == ["CPUExecutionProvider"]:
                     break  # Already tried CPU
-                if self._provider and self._provider != "auto":
+                if not can_fallback:
                     break  # User explicitly requested a provider, don't fallback
                 # Check if primary provider was already CPU (handle both str and tuple)
                 primary_provider = providers[0]
@@ -119,7 +222,7 @@ class OnnxSessionManager:
 
             except Exception as e:
                 last_error = e
-                if attempt == 0:
+                if attempt == 0 and can_fallback:
                     logger.warning(
                         f"Failed to load with {provider_list}: {e}. Will try CPU fallback..."
                     )
@@ -182,7 +285,7 @@ class OnnxSessionManager:
             RuntimeError: If requested provider is not available
             ValueError: If provider name is invalid
         """
-        available = rt.get_available_providers()
+        available = get_available_execution_providers()
 
         def _provider_key(
             entry: str | tuple[str, dict[str, str]],
@@ -222,87 +325,12 @@ class OnnxSessionManager:
 
             return [prov]
 
-        # Environment variable override (highest priority)
-        env_provider = os.getenv("ONNX_PROVIDER")
-        if env_provider:
-            env_provider_clean = env_provider.strip()
-            normalized_env = None
-            provider_map = {
-                "cpu": "CPUExecutionProvider",
-                "cuda": "CUDAExecutionProvider",
-                "openvino": "OpenVINOExecutionProvider",
-                "directml": "DmlExecutionProvider",
-                "coreml": "CoreMLExecutionProvider",
-            }
-
-            if env_provider_clean.lower() in provider_map:
-                normalized_env = provider_map[env_provider_clean.lower()]
-            else:
-                for available_provider in available:
-                    if available_provider.lower() == env_provider_clean.lower():
-                        normalized_env = available_provider
-                        break
-
-            if normalized_env is None:
-                raise ConfigurationError(
-                    "ONNX_PROVIDER must match an available provider name. "
-                    f"Got '{env_provider_clean}'. Available: {available}"
-                )
-
-            logger.info(f"Using provider from ONNX_PROVIDER env: {normalized_env}")
-            return _dedupe_providers(_make_provider_list(normalized_env))
-
-        # Auto-selection logic
-        if provider == "auto" or (provider is None and use_gpu):
-            # Priority: CUDA > OpenVINO > CoreML > DirectML
-            for prov in [
-                "CUDAExecutionProvider",
-                "OpenVINOExecutionProvider",
-                "CoreMLExecutionProvider",
-                "DmlExecutionProvider",
-            ]:
-                if prov in available:
-                    logger.info(f"Auto-selected provider: {prov}")
-                    return _dedupe_providers(_make_provider_list(prov))
-            logger.info("Auto-selection: No accelerators found, using CPU")
-            return ["CPUExecutionProvider"]
-
-        # Default to CPU if no provider specified and use_gpu=False
-        if provider is None:
-            logger.info("Using CPU provider")
-            return ["CPUExecutionProvider"]
-
-        # Explicit provider selection
-        provider_map = {
-            "cpu": "CPUExecutionProvider",
-            "cuda": "CUDAExecutionProvider",
-            "openvino": "OpenVINOExecutionProvider",
-            "directml": "DmlExecutionProvider",
-            "coreml": "CoreMLExecutionProvider",
-        }
-
-        selected = provider_map.get(provider.lower())
-        if not selected:
-            raise ValueError(
-                f"Unknown provider: {provider}. Valid options: {list(provider_map.keys())}"
-            )
-
-        if selected not in available:
-            # Provide helpful installation message
-            install_hints = {
-                "CUDAExecutionProvider": "pip install pykokoro[gpu]",
-                "OpenVINOExecutionProvider": "pip install pykokoro[openvino]",
-                "DmlExecutionProvider": "pip install pykokoro[directml]",
-                "CoreMLExecutionProvider": "pip install pykokoro[coreml]",
-            }
-            hint = install_hints.get(selected, f"install the required package for {selected}")
-            raise RuntimeError(
-                f"{provider.upper()} provider requested but not available.\n"
-                f"Install with: {hint}\n"
-                f"Available providers: {available}"
-            )
-
-        logger.info(f"Using explicitly selected provider: {selected}")
+        selected = resolve_execution_provider(
+            provider,
+            use_gpu=use_gpu,
+            available=available,
+        )
+        logger.info("Using execution provider: %s", selected)
         return _dedupe_providers(_make_provider_list(selected))
 
     def _get_default_provider_options(self, provider: str) -> dict[str, str]:

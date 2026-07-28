@@ -4,11 +4,18 @@ from __future__ import annotations
 
 import urllib.request
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from typing_extensions import Self
 
 import pykokoro.onnx_backend as backend
+from pykokoro.model_assets import (
+    are_models_downloaded,
+    are_voices_downloaded,
+    get_model_asset_paths,
+    get_voices_archive_path,
+)
 from pykokoro.onnx_backend import _download_from_github
 
 
@@ -166,3 +173,98 @@ def test_hf_v1_download_ignores_old_non_timestamped_cache(tmp_path, monkeypatch)
     assert result.read_bytes() == b"new timestamped model"
     assert old_path.read_bytes() == b"old non timestamped model"
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("source", "variant", "filename"),
+    [
+        ("huggingface", "v1.0", "voices.bin.npz"),
+        ("huggingface", "v1.1-zh", "voices.bin.npz"),
+        ("github", "v1.0", "voices-v1.0.bin"),
+        ("github", "v1.1-zh", "voices-v1.1-zh.bin"),
+        ("github", "v1.1-de", "voices-german-v1.1.bin"),
+    ],
+)
+def test_voice_archive_paths_are_source_and_variant_aware(
+    tmp_path, monkeypatch, source, variant, filename
+):
+    monkeypatch.setattr("pykokoro.model_assets.get_user_cache_path", lambda: tmp_path)
+    assert get_voices_archive_path(source, variant) == (
+        tmp_path / "voices" / source / variant / filename
+    )
+
+
+def test_model_asset_paths_are_source_variant_and_quality_aware(tmp_path, monkeypatch):
+    monkeypatch.setattr("pykokoro.model_assets.get_user_cache_path", lambda: tmp_path)
+    assets = get_model_asset_paths(quality="fp32", source="github", variant="v1.0")
+    assert assets.config == tmp_path / "config" / "v1.0" / "config.json"
+    assert assets.model == tmp_path / "models" / "github" / "v1.0" / "kokoro-v1.0.onnx"
+    assert assets.voices == tmp_path / "voices" / "github" / "v1.0" / "voices-v1.0.bin"
+    assert not (tmp_path / "models" / "github" / "v1.0").exists()
+
+
+def test_model_asset_completeness_requires_three_nonempty_regular_files(tmp_path, monkeypatch):
+    monkeypatch.setattr("pykokoro.model_assets.get_user_cache_path", lambda: tmp_path)
+    assets = get_model_asset_paths(quality="fp32", source="github", variant="v1.0")
+    assert assets.missing == ("config", "model", "voices")
+    assert not assets.complete
+
+    assets.config.parent.mkdir(parents=True)
+    assets.config.write_bytes(b"config")
+    assets.model.parent.mkdir(parents=True)
+    assets.model.write_bytes(b"model")
+    assets.voices.parent.mkdir(parents=True)
+    assets.voices.write_bytes(b"voices")
+    assert assets.missing == ()
+    assert assets.complete
+    assert are_models_downloaded("fp32", "github", "v1.0")
+    assert are_voices_downloaded("github", "v1.0")
+
+    assets.model.write_bytes(b"")
+    assert assets.missing == ("model",)
+    assert not assets.complete
+
+
+def test_model_asset_queries_do_not_leak_between_source_variant_or_quality(tmp_path, monkeypatch):
+    monkeypatch.setattr("pykokoro.model_assets.get_user_cache_path", lambda: tmp_path)
+    github = get_model_asset_paths(quality="fp32", source="github", variant="v1.0")
+    for path in (github.config, github.model, github.voices):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"asset")
+
+    assert are_models_downloaded("fp32", "github", "v1.0")
+    assert not are_models_downloaded("fp32", "huggingface", "v1.0")
+    assert not are_models_downloaded("fp32", "github", "v1.1-zh")
+    assert not are_models_downloaded("q8", "github", "v1.0")
+
+
+def test_kokoro_forwards_model_quality_to_session_manager(tmp_path, monkeypatch):
+    model_path = tmp_path / "model.onnx"
+    voices_path = tmp_path / "voices.bin"
+    kokoro = backend.Kokoro(
+        model_path=model_path,
+        voices_path=voices_path,
+        model_quality="q8",
+        model_source="github",
+        model_variant="v1.0",
+    )
+    kokoro._tokenizer = MagicMock()
+    kokoro._ensure_models = lambda: None
+
+    session_manager = MagicMock()
+    session_manager.create_session.return_value = MagicMock()
+    manager_kwargs = {}
+
+    def make_session_manager(**kwargs):
+        manager_kwargs.update(kwargs)
+        return session_manager
+
+    monkeypatch.setattr(backend, "OnnxSessionManager", make_session_manager)
+    voice_manager = MagicMock()
+    monkeypatch.setattr(backend, "VoiceManager", lambda **kwargs: voice_manager)
+    monkeypatch.setattr(backend, "AudioGenerator", MagicMock())
+
+    kokoro._init_kokoro()
+
+    assert session_manager.create_session.called
+    assert manager_kwargs["model_quality"] == "q8"

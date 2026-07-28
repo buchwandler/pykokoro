@@ -1,0 +1,87 @@
+schema_version = 3
+migration_id = "a5200c8ce91547e2adc01bf68a564f34"
+project_uuid = "26fbefd4-a9f0-477b-b901-5b130180007c"
+phase = "complete"
+mode = "copy"
+verify = "sha256"
+project_root = "/data/data/com.termux/files/home/src/pykokoro"
+requires_staged_validation = false
+requires_activated_validation = false
+requires_finalization = false
+quiescence_completed = true
+staged_validated = []
+activated_validated = []
+finalized = false
+plan_digest = "aa9d5d27c8fa5a38ea1db9d7f1e428494c062b1e5cc71c8ce68362dddac5a6c4"
+created_at = "2026-07-28T19:50:19Z"
+updated_at = "2026-07-28T19:50:20Z"
+
+[lock_identity]
+migration_id = "a5200c8ce91547e2adc01bf68a564f34"
+owner = "ledgercore"
+pid = 27885
+
+[items.0]
+item_index = 0
+component = "mount"
+tool_name = "taskledger"
+mount_name = "data"
+source = "/data/data/com.termux/files/home/src/ledger/task/pykokoro"
+destination = "/data/data/com.termux/files/home/src/ledger/taskledger/26fbefd4-a9f0-477b-b901-5b130180007c/data"
+strategy = "copy"
+destination_policy = "create-only"
+state = "complete"
+expected_before_state = "absent"
+stage_path = "/data/data/com.termux/files/home/src/ledger/taskledger/26fbefd4-a9f0-477b-b901-5b130180007c/.data.migrating-a5200c8ce91547e2adc01bf68a564f34-0"
+backup_path = "/data/data/com.termux/files/home/src/ledger/taskledger/26fbefd4-a9f0-477b-b901-5b130180007c/.data.backup-a5200c8ce91547e2adc01bf68a564f34-0"
+
+[items.0.source_binding]
+schema_version = 1
+layout_version = 3
+project_uuid = "26fbefd4-a9f0-477b-b901-5b130180007c"
+tool = "taskledger"
+mount = "data"
+storage = "project"
+
+[items.0.destination_binding]
+schema_version = 1
+layout_version = 3
+project_uuid = "26fbefd4-a9f0-477b-b901-5b130180007c"
+tool = "taskledger"
+mount = "data"
+storage = "external"
+
+[items.0.staged_fingerprint]
+algorithm = "sha256-tree-v1"
+digest = "8ffc62aad12f08a15de185288bb93e336f3f20d580464c51538ee947e2739c2f"
+file_count = 231
+total_bytes = 773363
+
+[items.0.activated_fingerprint]
+algorithm = "sha256-tree-v1"
+digest = "8ffc62aad12f08a15de185288bb93e336f3f20d580464c51538ee947e2739c2f"
+file_count = 231
+total_bytes = 773363
+
+[config_switches.0]
+kind = "manifest"
+destination = "/data/data/com.termux/files/home/src/pykokoro/.ledger/ledger.toml"
+state = "activated"
+backup_path = "/data/data/com.termux/files/home/src/pykokoro/.ledger/.ledger.toml.backup-a5200c8ce91547e2adc01bf68a564f34"
+intent_written = true
+applied = true
+verified = true
+previous_content = "schema_version = 3\n\n[project]\nuuid = \"26fbefd4-a9f0-477b-b901-5b130180007c\"\n\n[ledgers.releaseledger.mounts.data]\nstorage = \"project\"\n\n[ledgers.releaseledger.mounts.indexes]\nstorage = \"cache\"\n\n[ledgers.taskledger.mounts.data]\nstorage = \"project\"\n\n[ledgers.taskledger.mounts.indexes]\nstorage = \"cache\"\n"
+target_content = "schema_version = 3\n\n[project]\nuuid = \"26fbefd4-a9f0-477b-b901-5b130180007c\"\nname = \"pykokoro\"\n\n[ledgers.releaseledger.mounts.data]\nstorage = \"project\"\n\n[ledgers.releaseledger.mounts.indexes]\nstorage = \"cache\"\n\n[ledgers.taskledger.mounts.data]\nstorage = \"external\"\nroot = \"../ledger\"\n\n[ledgers.taskledger.mounts.indexes]\nstorage = \"cache\"\n"
+
+[config_switches.0.expected_before_fingerprint]
+algorithm = "sha256-file-v1"
+digest = "1b2b67a224fb1054cce573d290b7bd7aea02df8f88a7222ab292b75facbe5f74"
+file_count = 1
+total_bytes = 300
+
+[config_switches.0.target_fingerprint]
+algorithm = "sha256-file-v1"
+digest = "15c68a7c9a0a137aff171cc63401286c7f5bffecde55c225962b88d6df9322ad"
+file_count = 1
+total_bytes = 338
