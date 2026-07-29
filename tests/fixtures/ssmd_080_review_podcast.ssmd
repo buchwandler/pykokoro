@@ -1,0 +1,21 @@
+---
+title: Review podcast
+
+voice_bindings:
+  kokoro:
+    moderator: af_sarah
+    positive: af_bella
+
+pause_defaults:
+  enabled: true
+  sentence: 250ms
+  paragraph: 700ms
+  voice_change: 350ms
+---
+<div voice="moderator">
+Welcome to the review.
+</div>
+
+<div voice="positive">
+The proposed change improves authoring.
+</div>

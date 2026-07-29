@@ -39,3 +39,10 @@ def test_provider_extras_do_not_install_every_runtime_distribution() -> None:
         "onnxruntime-openvino",
         "onnxruntime-directml",
     }
+
+
+def test_ssmd_dependency_targets_08_contract() -> None:
+    dependencies = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+        "dependencies"
+    ]
+    assert "ssmd>=0.8.0,<0.9" in dependencies

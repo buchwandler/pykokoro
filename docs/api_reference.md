@@ -199,6 +199,15 @@ management.
 .. autofunction:: pykokoro.utils.get_user_config_path
 ```
 
+## SSMD 0.8 API
+
+The public renderer configuration is `pykokoro.ssmd_config.SSMDRenderConfig` with
+`SSMDPauseOverrides`. `PipelineConfig(ssmd=...)` sets defaults, and `run(..., ssmd=...)`
+accepts a per-render replacement. `AudioResult.document_metadata` contains copied title,
+binding, and pause metadata; `AudioResult.markers` contains structured marker sample
+offsets. Audio annotations require an explicit resolver and fall back to `alt` text;
+Kokoro extensions are rejected by profile validation.
+
 ## See Also
 
 - {doc}`basic_usage` - Fundamental usage patterns

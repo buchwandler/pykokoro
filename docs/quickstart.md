@@ -226,6 +226,27 @@ Enjoy creating audio content!
 text_to_speech(text, "welcome.wav", voice="af_bella", speed=1.0)
 ```
 
+## Portable SSMD 0.8 headers
+
+Valid first-line YAML front matter is consumed automatically. `title` is metadata only,
+and logical voice roles can be mapped without changing the spoken body. Use
+`SSMDRenderConfig(parse_header=False)` when the leading delimiter is literal text.
+
+```python
+from pykokoro import KokoroPipeline, PipelineConfig
+
+script = """---
+title: Quick review
+voice_bindings:
+  kokoro:
+    narrator: af_sarah
+---
+<div voice="narrator">This text uses a portable role.</div>
+"""
+result = KokoroPipeline(PipelineConfig()).run(script)
+assert result.document_metadata["title"] == "Quick review"
+```
+
 ## Next Steps
 
 Now that you know the basics, explore:

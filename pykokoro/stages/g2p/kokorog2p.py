@@ -141,6 +141,11 @@ class KokoroG2PAdapter(G2PAdapter):
                 )
 
             pause_before, pause_after = self._resolve_pauses(seg_boundaries, generation)
+            if any(
+                boundary.attrs.get("deterministic_pause_boundary") == "true"
+                for boundary in seg_boundaries
+            ):
+                ssmd_metadata["deterministic_pause_boundary"] = "true"
             phoneme_batches = self._split_phoneme_batches(
                 g2p, str(phonemes), list(tokens), model_version, generation
             )
@@ -170,6 +175,10 @@ class KokoroG2PAdapter(G2PAdapter):
                         pause_before=batch_pause_before,
                         pause_after=batch_pause_after,
                         ssmd_metadata=ssmd_metadata or None,
+                        voice_name=ssmd_metadata.get("voice_name"),
+                        voice_language=ssmd_metadata.get("voice_language"),
+                        voice_gender=ssmd_metadata.get("voice_gender"),
+                        voice_variant=ssmd_metadata.get("voice_variant"),
                     )
                 )
 
@@ -315,6 +324,28 @@ class KokoroG2PAdapter(G2PAdapter):
         if "voice_name" in attrs:
             metadata["voice"] = attrs["voice_name"]
             metadata["voice_name"] = attrs["voice_name"]
+        if "voice_reference" in attrs:
+            metadata["voice_reference"] = attrs["voice_reference"]
+        if "voice_source" in attrs:
+            metadata["voice_source"] = attrs["voice_source"]
+        for key in ("voice_language", "voice_gender", "voice_variant"):
+            if key in attrs:
+                metadata[key] = attrs[key]
+        for key in (
+            "emphasis",
+            "audio_src",
+            "audio_alt_text",
+            "audio_clip_begin",
+            "audio_clip_end",
+            "audio_speed",
+            "audio_repeat_dur",
+            "audio_sound_level",
+            "audio_repeat_count",
+        ):
+            if key in attrs:
+                metadata[key] = attrs[key]
+        if "markers" in attrs:
+            metadata["markers"] = attrs["markers"]
         if "prosody_rate" in attrs:
             metadata["prosody_rate"] = attrs["prosody_rate"]
         if "rate" in attrs:
@@ -361,6 +392,7 @@ class KokoroG2PAdapter(G2PAdapter):
         return phoneme_override
 
     def _resolve_pauses(self, boundaries, generation):
+        """Read already-reduced document boundaries without re-deciding semantics."""
         pause_before = 0.0
         pause_after = 0.0
         for boundary in boundaries:
@@ -369,16 +401,13 @@ class KokoroG2PAdapter(G2PAdapter):
             duration = boundary.duration_s
             if duration is None:
                 strength = boundary.attrs.get("strength")
-                if strength == "c":
-                    duration = generation.pause_clause
-                elif strength == "s":
-                    duration = generation.pause_sentence
-                elif strength == "p":
-                    duration = generation.pause_paragraph
-                elif strength == "w":
-                    duration = 0.15
-                elif strength == "n":
-                    duration = 0.0
+                duration = {
+                    "c": generation.pause_clause,
+                    "s": generation.pause_sentence,
+                    "p": generation.pause_paragraph,
+                    "w": 0.15,
+                    "n": 0.0,
+                }.get(strength)
             if duration is None:
                 continue
             if boundary.pos == 0:

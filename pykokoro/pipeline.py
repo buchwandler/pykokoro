@@ -15,6 +15,7 @@ from .generation_config import GenerationConfig
 from .pipeline_config import PipelineConfig
 from .runtime.tracing import trace_timing
 from .spacy_models import SpacyModelSize
+from .ssmd_config import SSMDRenderConfig
 from .stages.audio_generation.onnx import OnnxAudioGenerationAdapter
 from .stages.audio_postprocessing.onnx import OnnxAudioPostprocessingAdapter
 from .stages.doc_parsers.ssmd import SsmdDocumentParser
@@ -46,6 +47,22 @@ def _coerce_generation(base: GenerationConfig, value: Any) -> GenerationConfig:
     raise TypeError(f"generation must be GenerationConfig | Mapping | None, got {type(value)!r}")
 
 
+def _coerce_ssmd(base: SSMDRenderConfig, value: Any) -> SSMDRenderConfig:
+    if value is None:
+        return base
+    if isinstance(value, SSMDRenderConfig):
+        return value
+    if isinstance(value, Mapping):
+        data = dict(value)
+        pause_defaults = data.get("pause_defaults")
+        if isinstance(pause_defaults, Mapping):
+            from .ssmd_config import SSMDPauseOverrides
+
+            data["pause_defaults"] = SSMDPauseOverrides(**dict(pause_defaults))
+        return replace(base, **data)
+    raise TypeError(f"ssmd must be SSMDRenderConfig | Mapping | None, got {type(value)!r}")
+
+
 def _coerce_paths_inplace(data: dict[str, Any]) -> None:
     # Convenience: accept str paths in config dict.
     for key in ("model_path", "voices_path"):
@@ -66,12 +83,15 @@ def _coerce_pipeline_config(
     if isinstance(value, Mapping):
         data = dict(value)
         gen_value = data.pop("generation", None)
+        ssmd_value = data.pop("ssmd", None)
 
         _coerce_paths_inplace(data)
         cfg = PipelineConfig(**data)
 
         if gen_value is not None:
             cfg = replace(cfg, generation=_coerce_generation(cfg.generation, gen_value))
+        if ssmd_value is not None:
+            cfg = replace(cfg, ssmd=_coerce_ssmd(cfg.ssmd, ssmd_value))
 
         return cfg
 
@@ -87,12 +107,15 @@ def _merge_config(
 
     data = dict(overrides)
     gen_value = data.pop("generation", None)
+    ssmd_value = data.pop("ssmd", None)
 
     _coerce_paths_inplace(data)
     cfg = replace(base, **data)
 
     if gen_value is not None:
         cfg = replace(cfg, generation=_coerce_generation(cfg.generation, gen_value))
+    if ssmd_value is not None:
+        cfg = replace(cfg, ssmd=_coerce_ssmd(cfg.ssmd, ssmd_value))
 
     return cfg
 
@@ -408,6 +431,7 @@ class KokoroPipeline:
         overrides = dict(overrides)
         lang = overrides.pop("lang", None)
         has_generation_override = "generation" in overrides
+        ssmd_value = overrides.pop("ssmd", None)
         generation = _coerce_generation(
             self.config.generation,
             overrides.pop("generation", None),
@@ -416,6 +440,8 @@ class KokoroPipeline:
             generation = replace(generation, lang=lang)
         if has_generation_override or lang is not None:
             overrides["generation"] = generation
+        if ssmd_value is not None:
+            overrides["ssmd"] = _coerce_ssmd(self.config.ssmd, ssmd_value)
         return _default_lang_from_voice(replace(self.config, **overrides))
 
     def run(self, text: str, **overrides: Any) -> AudioResult:
@@ -488,10 +514,62 @@ class KokoroPipeline:
             segments=segments,
             phoneme_segments=phoneme_segments,
             trace=trace if cfg.return_trace else None,
+            document_metadata={
+                "title": doc.header.get("title"),
+                "voice_bindings": _copy_metadata_value(doc.header.get("voice_bindings", {})),
+                "pause_defaults": _copy_metadata_value(doc.header.get("pause_defaults", {})),
+            },
+            markers=_collect_marker_offsets(doc.boundary_events, phoneme_segments),
         )
 
     def __call__(self, text: str, **overrides: Any) -> AudioResult:
         return self.run(text, **overrides)
+
+
+def _copy_metadata_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _copy_metadata_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_copy_metadata_value(item) for item in value]
+    if isinstance(value, tuple):
+        return [_copy_metadata_value(item) for item in value]
+    return value
+
+
+def _collect_marker_offsets(
+    boundaries: list[Any], phoneme_segments: list[Any]
+) -> list[dict[str, Any]]:
+    """Map clean-text marker boundaries to deterministic concatenated sample offsets."""
+
+    marker_boundaries = [
+        boundary for boundary in boundaries if getattr(boundary, "kind", None) == "marker"
+    ]
+    if not marker_boundaries:
+        return []
+    offsets: list[dict[str, Any]] = []
+    for boundary in marker_boundaries:
+        sample_offset = 0
+        for segment in phoneme_segments:
+            segment_audio = getattr(segment, "processed_audio", None)
+            segment_samples = len(segment_audio) if segment_audio is not None else 0
+            if boundary.pos <= getattr(segment, "char_start", 0):
+                sample_offset += round(getattr(segment, "pause_before", 0.0) * SAMPLE_RATE)
+                break
+            sample_offset += round(getattr(segment, "pause_before", 0.0) * SAMPLE_RATE)
+            sample_offset += segment_samples
+            if boundary.pos <= getattr(segment, "char_end", 0):
+                break
+            sample_offset += round(getattr(segment, "pause_after", 0.0) * SAMPLE_RATE)
+        marker = boundary.attrs.get("marker")
+        if marker:
+            offsets.append(
+                {
+                    "name": marker,
+                    "char_offset": boundary.pos,
+                    "sample_offset": sample_offset,
+                }
+            )
+    return offsets
 
 
 def _freeze_config_value(value: Any) -> object:

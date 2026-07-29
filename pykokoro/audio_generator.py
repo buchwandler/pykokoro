@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 import numpy as np
 
 from .constants import MAX_PHONEME_LENGTH, SAMPLE_RATE
+from .exceptions import ConfigurationError
 from .prosody import apply_prosody
 from .short_sentence_handler import (
     SHORT_SENTENCE_META_KEY,
@@ -31,6 +32,81 @@ if TYPE_CHECKING:
     from .short_sentence_handler import ShortSentenceConfig
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_audio_annotation(
+    metadata: dict[str, Any],
+    resolver: Any,
+    *,
+    sample_rate: int = SAMPLE_RATE,
+    max_bytes: int = 20_000_000,
+    max_duration_s: float = 120.0,
+) -> np.ndarray:
+    """Resolve and deterministically transform an SSMD audio annotation."""
+
+    source = metadata.get("audio_src")
+    if not isinstance(source, str) or not source:
+        raise ValueError("audio_src must be a non-empty string")
+    callback = getattr(resolver, "resolve", resolver)
+    if not callable(callback):
+        raise TypeError("audio_source_resolver must be callable or expose resolve()")
+    result = callback(source)
+    if not isinstance(result, tuple) or len(result) != 2:
+        raise ValueError("audio resolver must return (numpy_audio, sample_rate)")
+    audio, source_rate = result
+    audio = np.asarray(audio, dtype=np.float32).reshape(-1)
+    source_rate = int(source_rate)
+    if source_rate <= 0 or audio.nbytes > max_bytes:
+        raise ValueError("resolved audio exceeds configured source limits")
+
+    def seconds(value: object) -> float | None:
+        if value in (None, ""):
+            return None
+        match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*(ms|s)\s*", str(value), re.I)
+        if match is None:
+            raise ValueError(f"invalid audio duration {value!r}")
+        number = float(match.group(1))
+        return number / 1000.0 if match.group(2).lower() == "ms" else number
+
+    begin = seconds(metadata.get("audio_clip_begin"))
+    end = seconds(metadata.get("audio_clip_end"))
+    start_index = max(0, int((begin or 0.0) * source_rate))
+    end_index = len(audio) if end is None else min(len(audio), int(end * source_rate))
+    audio = audio[start_index : max(start_index, end_index)]
+
+    speed = metadata.get("audio_speed")
+    if speed:
+        match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)%\s*", str(speed))
+        if match is None or float(match.group(1)) <= 0:
+            raise ValueError(f"invalid audio speed {speed!r}")
+        factor = float(match.group(1)) / 100.0
+        target_length = max(1, round(len(audio) / factor))
+        positions = np.linspace(0, max(0, len(audio) - 1), target_length)
+        audio = np.interp(positions, np.arange(len(audio)), audio).astype(np.float32)
+
+    repeat = metadata.get("audio_repeat_count")
+    if repeat:
+        audio = np.tile(audio, int(repeat))
+    repeat_duration = seconds(metadata.get("audio_repeat_dur"))
+    if repeat_duration is not None and audio.size:
+        target = max(0, round(repeat_duration * source_rate))
+        audio = np.resize(audio, target)
+
+    level = metadata.get("audio_sound_level")
+    if level:
+        match = re.fullmatch(r"\s*([+-]?\d+(?:\.\d+)?)\s*dB\s*", str(level), re.I)
+        if match is None:
+            raise ValueError(f"invalid audio level {level!r}")
+        audio = audio * (10.0 ** (float(match.group(1)) / 20.0))
+
+    if source_rate != sample_rate and audio.size:
+        target_length = max(1, round(len(audio) * sample_rate / source_rate))
+        positions = np.linspace(0, max(0, len(audio) - 1), target_length)
+        audio = np.interp(positions, np.arange(len(audio)), audio).astype(np.float32)
+    if len(audio) > round(max_duration_s * sample_rate):
+        raise ValueError("resolved audio exceeds configured duration limit")
+    return audio.astype(np.float32, copy=False)
+
 
 # Model source type
 ModelSource = Literal["huggingface", "github"]
@@ -316,10 +392,15 @@ class AudioGenerator:
             if voice_name:
                 try:
                     segment_voice_style = voice_resolver(voice_name)
-                except (RuntimeError, OSError, ValueError) as e:
+                except (KeyError, RuntimeError, OSError, ValueError) as exc:
+                    if segment.ssmd_metadata.get("missing_voice_policy") == "error":
+                        raise ConfigurationError(
+                            f"Unable to resolve SSMD voice target '{voice_name}'"
+                        ) from exc
                     logger.warning(
-                        f"Failed to resolve voice '{voice_name}' for segment, "
-                        f"using default voice: {e}"
+                        "Failed to resolve voice '%s' for segment; using default voice: %s",
+                        voice_name,
+                        exc,
                     )
 
         return segment_voice_style
@@ -673,7 +754,10 @@ class AudioGenerator:
                 cut_audio = cut_short_sentence_phrase_audio(audio, short_sentence_metadata)
                 if cut_audio is not None:
                     audio = cut_audio
-            if trim_silence:
+            if (
+                trim_silence
+                or (segment.ssmd_metadata or {}).get("deterministic_pause_boundary") == "true"
+            ):
                 audio, _ = trim_audio(audio)
             segment.processed_audio = self._apply_segment_prosody(audio, segment)
 

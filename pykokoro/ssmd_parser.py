@@ -26,6 +26,15 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from .exceptions import SSMDDocumentError
+from .ssmd_config import (
+    SSMDDiagnostic,
+    SSMDRenderConfig,
+    copy_public_header,
+    resolve_document_voice,
+    resolve_pause_defaults,
+)
+
 if TYPE_CHECKING:
     from ssmd.segment import Segment as SSMDParserSegment
 
@@ -110,12 +119,22 @@ class SSMDMetadata:
     say_as_format: str | None = None
     say_as_detail: str | None = None
     markers: list[str] = field(default_factory=list)
+    markers_before: list[str] = field(default_factory=list)
+    markers_after: list[str] = field(default_factory=list)
     voice_name: str | None = None
+    voice_reference: str | None = None
+    voice_source: str | None = None
     voice_language: str | None = None
     voice_gender: str | None = None
     voice_variant: str | None = None
     audio_src: str | None = None
     audio_alt_text: str | None = None
+    audio_clip_begin: str | None = None
+    audio_clip_end: str | None = None
+    audio_speed: str | None = None
+    audio_repeat_count: int | None = None
+    audio_repeat_dur: str | None = None
+    audio_sound_level: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -131,12 +150,22 @@ class SSMDMetadata:
             "say_as_format": self.say_as_format,
             "say_as_detail": self.say_as_detail,
             "markers": self.markers,
+            "markers_before": self.markers_before,
+            "markers_after": self.markers_after,
             "voice_name": self.voice_name,
+            "voice_reference": self.voice_reference,
+            "voice_source": self.voice_source,
             "voice_language": self.voice_language,
             "voice_gender": self.voice_gender,
             "voice_variant": self.voice_variant,
             "audio_src": self.audio_src,
             "audio_alt_text": self.audio_alt_text,
+            "audio_clip_begin": self.audio_clip_begin,
+            "audio_clip_end": self.audio_clip_end,
+            "audio_speed": self.audio_speed,
+            "audio_repeat_count": self.audio_repeat_count,
+            "audio_repeat_dur": self.audio_repeat_dur,
+            "audio_sound_level": self.audio_sound_level,
         }
 
 
@@ -159,6 +188,18 @@ class SSMDSegment:
     metadata: SSMDMetadata = field(default_factory=SSMDMetadata)
     paragraph: int = 0
     sentence: int = 0
+
+
+@dataclass(frozen=True)
+class ParsedSSMDDocument:
+    """Rich SSMD parse result used by the document stage."""
+
+    body: str
+    header: dict[str, Any]
+    initial_pause: float
+    segments: tuple[SSMDSegment, ...]
+    pause_defaults: Any | None = None
+    diagnostics: tuple[SSMDDiagnostic, ...] = ()
 
 
 def has_ssmd_markup(text: str) -> bool:
@@ -586,6 +627,12 @@ def _map_ssmd_segment_to_metadata(
     if ssmd_seg.audio:
         metadata.audio_src = ssmd_seg.audio.src
         metadata.audio_alt_text = ssmd_seg.audio.alt_text
+        metadata.audio_clip_begin = ssmd_seg.audio.clip_begin
+        metadata.audio_clip_end = ssmd_seg.audio.clip_end
+        metadata.audio_speed = ssmd_seg.audio.speed
+        metadata.audio_repeat_count = ssmd_seg.audio.repeat_count
+        metadata.audio_repeat_dur = ssmd_seg.audio.repeat_dur
+        metadata.audio_sound_level = ssmd_seg.audio.sound_level
         # Use alt_text for phonemization fallback
         text = ssmd_seg.audio.alt_text or ""
     elif ssmd_seg.say_as:
@@ -651,11 +698,13 @@ def _map_ssmd_segment_to_metadata(
         markers.extend(ssmd_seg.marks_after)
     if markers:
         metadata.markers = markers
+        metadata.markers_before = list(ssmd_seg.marks_before or [])
+        metadata.markers_after = list(ssmd_seg.marks_after or [])
 
     return text, metadata
 
 
-def parse_ssmd_to_segments(
+def _parse_ssmd_body_to_segments(
     text: str,
     lang: str = "en-us",
     pause_none: float = DEFAULT_PAUSE_NONE,
@@ -693,7 +742,8 @@ def parse_ssmd_to_segments(
         model_size: Size of spacy model for sentence detection ('sm', 'md', 'lg')
         use_spacy: Force use of spacy for sentence detection
         heading_levels: Custom heading configurations (overrides default)
-        parse_yaml_header: If True, parse YAML front matter and apply config
+        parse_yaml_header: Kept internal for compatibility; rich document parsing
+            always supplies a header-free body.
 
     Returns:
         Tuple of (initial_pause, segments) where segments is a list of SSMDSegment
@@ -789,3 +839,183 @@ def parse_ssmd_to_segments(
             )
 
     return 0.0, pykokoro_segments
+
+
+def _parse_header(
+    text: str,
+    render_config: SSMDRenderConfig,
+) -> tuple[str, dict[str, Any], list[SSMDDiagnostic]]:
+    """Parse and validate a portable header through SSMD's public API."""
+
+    if not render_config.parse_header:
+        return text, {}, []
+    try:
+        from ssmd import parse_front_matter
+        from ssmd.frontmatter import validate_front_matter
+
+        front_matter = parse_front_matter(text)
+    except Exception as exc:
+        if isinstance(exc, SSMDDocumentError):
+            raise
+        code = getattr(exc, "code", "header.yaml_invalid")
+        raise SSMDDocumentError(
+            str(exc),
+            code=code,
+            line=getattr(exc, "line", None),
+            column=getattr(exc, "column", None),
+        ) from exc
+
+    if not front_matter.present:
+        return text, {}, []
+
+    diagnostics: list[SSMDDiagnostic] = []
+    for issue in validate_front_matter(front_matter.data):
+        if issue.severity == "error" or (
+            issue.code == "header.unknown_key" and render_config.unknown_header == "error"
+        ):
+            raise SSMDDocumentError(
+                issue.message,
+                code=issue.code,
+                line=issue.line,
+                column=issue.column,
+            )
+        if issue.code == "header.unknown_key" and render_config.unknown_header == "ignore":
+            continue
+        diagnostics.append(
+            SSMDDiagnostic(
+                code=issue.code,
+                severity="warn",
+                message=issue.message,
+                line=issue.line,
+                column=issue.column,
+            )
+        )
+    return front_matter.body, copy_public_header(front_matter.data), diagnostics
+
+
+def parse_ssmd_document(
+    text: str,
+    *,
+    render_config: SSMDRenderConfig | None = None,
+    lang: str = "en-us",
+    pause_none: float = DEFAULT_PAUSE_NONE,
+    pause_weak: float = DEFAULT_PAUSE_WEAK,
+    pause_clause: float = DEFAULT_PAUSE_CLAUSE,
+    pause_sentence: float = DEFAULT_PAUSE_SENTENCE,
+    pause_paragraph: float = DEFAULT_PAUSE_PARAGRAPH,
+    model_size: str | None = None,
+    use_spacy: bool | None = None,
+    heading_levels: dict | None = None,
+) -> ParsedSSMDDocument:
+    """Parse an SSMD document once, separating metadata from spoken body text."""
+
+    config = render_config or SSMDRenderConfig()
+    body, header, diagnostics = _parse_header(text, config)
+    try:
+        from ssmd.utils import build_config_from_header
+
+        header_config = build_config_from_header(header) if header else {}
+    except Exception as exc:
+        raise SSMDDocumentError(
+            f"Invalid SSMD header configuration: {exc}",
+            code="header.config_invalid",
+        ) from exc
+
+    if header.get("extensions"):
+        if config.validate_profile:
+            raise SSMDDocumentError(
+                "The Kokoro SSMD profile does not support extensions",
+                code="header.extensions_unsupported",
+            )
+        diagnostics.append(
+            SSMDDiagnostic(
+                code="header.extensions_unsupported",
+                severity="warn",
+                message="The Kokoro SSMD profile ignores extensions",
+            )
+        )
+    resolved_pause_defaults = resolve_pause_defaults(
+        header.get("pause_defaults"), config.pause_defaults
+    )
+    header_heading_levels = header_config.get("heading_levels", heading_levels)
+    initial_pause, segments = _parse_ssmd_body_to_segments(
+        body,
+        lang=lang,
+        pause_none=pause_none,
+        pause_weak=pause_weak,
+        pause_clause=pause_clause,
+        pause_sentence=pause_sentence,
+        pause_paragraph=pause_paragraph,
+        model_size=model_size,
+        use_spacy=use_spacy,
+        heading_levels=header_heading_levels,
+        parse_yaml_header=False,
+    )
+
+    header_bindings = header.get("voice_bindings", {})
+    for segment in segments:
+        reference = segment.metadata.voice_name
+        if not reference:
+            continue
+        resolution = resolve_document_voice(
+            reference,
+            provider=config.provider,
+            api_bindings=config.voice_bindings,
+            header_bindings=header_bindings,
+        )
+        segment.metadata.voice_reference = reference
+        segment.metadata.voice_name = resolution.target
+        segment.metadata.voice_source = resolution.source
+        if resolution.source == "api":
+            document_target = header_bindings.get(config.provider, {}).get(reference)
+            if document_target is not None and document_target != resolution.target:
+                diagnostics.append(
+                    SSMDDiagnostic(
+                        code="ssmd.voice_binding_override",
+                        severity="warn",
+                        message=(
+                            f"{config.provider}.{reference} changed from document target "
+                            f"{document_target} to API target {resolution.target}"
+                        ),
+                    )
+                )
+
+    return ParsedSSMDDocument(
+        body=body,
+        header=header,
+        initial_pause=initial_pause,
+        segments=tuple(segments),
+        pause_defaults=resolved_pause_defaults,
+        diagnostics=tuple(diagnostics),
+    )
+
+
+def parse_ssmd_to_segments(
+    text: str,
+    lang: str = "en-us",
+    pause_none: float = DEFAULT_PAUSE_NONE,
+    pause_weak: float = DEFAULT_PAUSE_WEAK,
+    pause_clause: float = DEFAULT_PAUSE_CLAUSE,
+    pause_sentence: float = DEFAULT_PAUSE_SENTENCE,
+    pause_paragraph: float = DEFAULT_PAUSE_PARAGRAPH,
+    model_size: str | None = None,
+    use_spacy: bool | None = None,
+    heading_levels: dict | None = None,
+    parse_yaml_header: bool = True,
+) -> tuple[float, list[SSMDSegment]]:
+    """Compatibility wrapper returning the historical tuple parse result."""
+
+    parsed = parse_ssmd_document(
+        text,
+        render_config=SSMDRenderConfig(parse_header=parse_yaml_header),
+        lang=lang,
+        pause_none=pause_none,
+        pause_weak=pause_weak,
+        pause_clause=pause_clause,
+        pause_sentence=pause_sentence,
+        pause_paragraph=pause_paragraph,
+        model_size=model_size,
+        use_spacy=use_spacy,
+        heading_levels=heading_levels,
+    )
+    return parsed.initial_pause, list(parsed.segments)

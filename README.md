@@ -1051,6 +1051,48 @@ res = pipe.run(phonemes)
 samples = res.audio
 ```
 
+## SSMD 0.8 portable documents
+
+PyKokoro consumes SSMD 0.8 portable front matter by default. Header metadata is never
+spoken: `title` is returned in `AudioResult.document_metadata`, `voice_bindings.kokoro`
+maps portable role names to concrete Kokoro voices, and `pause_defaults` controls
+implicit sentence, paragraph, and concrete voice-change boundaries. Explicit SSMD breaks
+always win over document defaults, and simultaneous defaults use the longest duration.
+
+```python
+from dataclasses import replace
+from pykokoro import KokoroPipeline, PipelineConfig, SSMDRenderConfig
+
+script = """---
+title: Portable review
+voice_bindings:
+  kokoro:
+    host: af_sarah
+    guest: af_bella
+pause_defaults:
+  enabled: true
+  sentence: 250ms
+  paragraph: 700ms
+  voice_change: 350ms
+---
+<div voice="host">Welcome to the review.</div>
+
+<div voice="guest">The roles remain portable across renderers.</div>
+"""
+cfg = PipelineConfig(ssmd=SSMDRenderConfig())
+result = KokoroPipeline(cfg).run(
+    script,
+    ssmd=replace(cfg.ssmd, voice_bindings={"kokoro": {"guest": "bf_emma"}}),
+)
+assert result.document_metadata["title"] == "Portable review"
+```
+
+Use `SSMDRenderConfig(parse_header=False)` only when a literal leading `---` block must
+remain text. PyKokoro does not read SSMD's user configuration files implicitly. Voice
+language, gender, and variant hints are preserved as metadata but do not select voices;
+audio annotations require an application-supplied resolver, and unsupported extensions
+are rejected for the Kokoro profile.
+
 ## License
 
 This library is licensed under the Apache License 2.0.

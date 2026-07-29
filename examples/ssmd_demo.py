@@ -2,7 +2,7 @@
 """
 SSMD (Speech Synthesis Markdown) Demo for pykokoro.
 
-This example demonstrates the comprehensive SSMD markup features supported
+This example demonstrates core SSMD 0.8 markup features supported
 by pykokoro, including breaks, emphasis, language switching, phonetic
 pronunciation using SSMD IPA annotations, substitution, and markers.
 
@@ -22,6 +22,7 @@ Features demonstrated:
     - Phonetic pronunciation: [creak]{ipa="kɹiːk"}
     - Substitution: [H2O]{sub="water"}
     - Markers: @location @moment
+    - Portable role bindings: see ssmd_080_portable_podcast.py
 """
 
 import soundfile as sf
@@ -29,7 +30,7 @@ import soundfile as sf
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
 
-# Story with comprehensive SSMD markup
+# Story with core SSMD 0.8 markup
 # Native SSMD phoneme annotations use {ipa="..."} or {sampa="..."}.
 story = """
 Chapter 3: The Discovery

@@ -205,6 +205,13 @@ for filename, text in scripts.items():
     sf.write(output_path, result.audio, result.sample_rate)
 ```
 
+## Portable SSMD 0.8 podcast
+
+Prefer stable logical roles in portable documents. See
+`examples/ssmd_080_portable_podcast.py` for a runnable example using `host`, `cohost`,
+and `guest` bindings, document pause defaults, and an API override. The body remains
+portable while a renderer selects concrete Kokoro voice IDs.
+
 ## See Also
 
 - {doc}`basic_usage` - Fundamental usage patterns

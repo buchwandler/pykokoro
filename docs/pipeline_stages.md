@@ -152,9 +152,10 @@ result = pipeline.run("Quick test", model_quality="q8")
 
 ### SSMD document parser
 
-`SsmdDocumentParser` uses `parse_ssmd_to_segments` to turn SSMD markup into clean text
-plus metadata spans, pause boundaries, and sentence/paragraph segments. It honors
-`generation.pause_*` values when converting break strengths into durations.
+`SsmdDocumentParser` uses the SSMD 0.8 public front-matter parser and body-only
+segmentation to turn SSMD markup into clean text plus metadata spans, pause boundaries,
+and sentence/paragraph segments. Explicit break durations retain their processor
+mapping; implicit document defaults are reduced before G2P.
 
 Supported SSMD features include:
 
@@ -250,6 +251,16 @@ pipeline = KokoroPipeline(
     audio_postprocessing=OnnxAudioPostprocessingAdapter(kokoro),
 )
 ```
+
+### SSMD 0.8 document controls
+
+`PipelineConfig.ssmd` controls header parsing, provider-scoped API binding overrides,
+unknown-header strictness, missing-voice behavior, pause-default overrides, emphasis
+policy, and the explicit audio source resolver. Header bindings override direct logical
+references, while API bindings override header bindings. Document pause defaults are
+reduced before G2P; explicit breaks take precedence and simultaneous implicit defaults
+use the maximum duration. `DocumentResult.header`/`body` and
+`AudioResult.document_metadata` expose copied metadata.
 
 ## Local model files and providers
 

@@ -140,6 +140,8 @@ class AudioResult:
     segments: list[Segment] = field(default_factory=list)
     phoneme_segments: list[PhonemeSegment] = field(default_factory=list)
     trace: Trace | None = None
+    document_metadata: dict[str, Any] = field(default_factory=dict)
+    markers: list[dict[str, Any]] = field(default_factory=list)
 
     def save_wav(self, path: str) -> None:
         import soundfile as sf

@@ -14,6 +14,7 @@ from .config_types import (
 )
 from .generation_config import GenerationConfig
 from .short_sentence_handler import ShortSentenceConfig
+from .ssmd_config import SSMDRenderConfig
 from .tokenizer import EspeakConfig, TokenizerConfig
 from .voice_manager import VoiceBlend
 
@@ -24,6 +25,7 @@ class PipelineConfig:
 
     voice: str | VoiceBlend = "af"
     generation: GenerationConfig = field(default_factory=GenerationConfig)
+    ssmd: SSMDRenderConfig = field(default_factory=SSMDRenderConfig)
 
     # Model + provider configuration
     model_quality: ModelQuality | None = None

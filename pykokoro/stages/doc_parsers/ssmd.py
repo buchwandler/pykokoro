@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any, Literal, cast
 
 from ...pipeline_config import PipelineConfig
+from ...ssmd_config import PauseCandidate, ResolvedPauseDefaults
 from ...ssmd_parser import (
     DEFAULT_PAUSE_NONE,
     DEFAULT_PAUSE_WEAK,
     SSMDMetadata,
     SSMDSegment,
-    parse_ssmd_to_segments,
+    parse_ssmd_document,
 )
 from ...types import AnnotationSpan, BoundaryEvent, Segment, Trace
 from ..protocols import DocumentResult
@@ -17,8 +19,9 @@ from ..protocols import DocumentResult
 class SsmdDocumentParser:
     def parse(self, text: str, cfg: PipelineConfig, trace: Trace) -> DocumentResult:
         generation = cfg.generation
-        initial_pause, segments = parse_ssmd_to_segments(
+        parsed = parse_ssmd_document(
             text,
+            render_config=cfg.ssmd,
             lang=generation.lang,
             pause_none=DEFAULT_PAUSE_NONE,
             pause_weak=DEFAULT_PAUSE_WEAK,
@@ -26,16 +29,24 @@ class SsmdDocumentParser:
             pause_sentence=generation.pause_sentence,
             pause_paragraph=generation.pause_paragraph,
         )
-        clean_text, spans, boundaries, doc_segments = self._build_document(
-            segments, initial_pause, trace
+        for diagnostic in parsed.diagnostics:
+            self._warn_once(trace, f"{diagnostic.code}: {diagnostic.message}")
+        initial_pause = parsed.initial_pause
+        segments = list(parsed.segments)
+        clean_text, spans, raw_boundaries, doc_segments = self._build_document(
+            segments, initial_pause, trace, parsed.pause_defaults, cfg
         )
-        if generation.pause_mode == "auto":
-            boundaries.extend(self._sentence_boundaries(doc_segments, boundaries))
+        candidates = [item for item in raw_boundaries if isinstance(item, PauseCandidate)]
+        markers = [item for item in raw_boundaries if isinstance(item, BoundaryEvent)]
+        boundaries = self._reduce_pause_candidates(candidates) + markers
         return DocumentResult(
             clean_text=clean_text,
             annotation_spans=spans,
             boundary_events=boundaries,
             segments=doc_segments,
+            header=parsed.header,
+            body=parsed.body,
+            diagnostics=list(parsed.diagnostics),
         )
 
     def _build_document(
@@ -43,10 +54,13 @@ class SsmdDocumentParser:
         segments: Sequence[SSMDSegment],
         initial_pause: float,
         trace: Trace,
-    ) -> tuple[str, list[AnnotationSpan], list[BoundaryEvent], list[Segment]]:
+        pause_defaults: ResolvedPauseDefaults | None = None,
+        cfg: PipelineConfig | None = None,
+    ) -> tuple[str, list[AnnotationSpan], list[Any], list[Segment]]:
+        cfg = cfg or PipelineConfig()
         clean_parts: list[str] = []
         spans: list[AnnotationSpan] = []
-        boundaries: list[BoundaryEvent] = []
+        boundaries: list[Any] = []
         doc_segments: list[Segment] = []
         cursor = 0
         current_paragraph = None
@@ -55,9 +69,7 @@ class SsmdDocumentParser:
         seg_idx = 0
 
         if initial_pause > 0:
-            boundaries.append(
-                BoundaryEvent(pos=0, kind="pause", duration_s=initial_pause, attrs={})
-            )
+            boundaries.append(PauseCandidate(0, initial_pause, "explicit", "break", 400))
 
         for segment in segments:
             if (
@@ -68,14 +80,19 @@ class SsmdDocumentParser:
             ):
                 boundary_pos = self._paragraph_boundary_pos(previous_start, previous_end)
                 if boundary_pos is not None:
-                    boundaries.append(
-                        BoundaryEvent(
-                            pos=boundary_pos,
-                            kind="pause",
-                            duration_s=None,
-                            attrs={"strength": "p"},
+                    header_duration = pause_defaults.paragraph if pause_defaults else None
+                    duration = header_duration or cfg.generation.pause_paragraph
+                    if duration is not None:
+                        boundaries.append(
+                            self._default_candidate(
+                                boundary_pos,
+                                duration,
+                                "paragraph",
+                                "header_default"
+                                if header_duration is not None
+                                else "pipeline_default",
+                            )
                         )
-                    )
                 clean_parts.append("\n\n")
                 cursor += 2
             if segment.metadata.audio_src:
@@ -93,26 +110,32 @@ class SsmdDocumentParser:
             attrs = self._metadata_to_attrs(segment.metadata)
             if attrs and end > start:
                 spans.append(AnnotationSpan(char_start=start, char_end=end, attrs=attrs))
-            if segment.pause_before > 0:
+            for marker in segment.metadata.markers_before:
                 boundaries.append(
                     BoundaryEvent(
                         pos=start,
-                        kind="pause",
-                        duration_s=segment.pause_before,
-                        attrs={},
+                        kind="marker",
+                        attrs={"marker": marker},
                     )
+                )
+            for marker in segment.metadata.markers_after:
+                boundaries.append(
+                    BoundaryEvent(
+                        pos=max(start, end - 1),
+                        kind="marker",
+                        attrs={"marker": marker},
+                    )
+                )
+            if segment.pause_before > 0:
+                boundaries.append(
+                    PauseCandidate(start, segment.pause_before, "explicit", "break", 400)
                 )
             if segment.pause_after > 0:
                 boundary_pos = self._pause_boundary_pos(start, end)
                 if boundary_pos is None:
                     boundary_pos = end
                 boundaries.append(
-                    BoundaryEvent(
-                        pos=boundary_pos,
-                        kind="pause",
-                        duration_s=segment.pause_after,
-                        attrs={},
-                    )
+                    PauseCandidate(boundary_pos, segment.pause_after, "explicit", "break", 400)
                 )
             current_paragraph = segment.paragraph
             previous_start = start
@@ -125,6 +148,7 @@ class SsmdDocumentParser:
                         text=segment.text,
                         char_start=start,
                         char_end=end,
+                        meta=attrs,
                         paragraph_idx=segment.paragraph,
                         sentence_idx=segment.sentence,
                         clause_idx=0,
@@ -132,8 +156,135 @@ class SsmdDocumentParser:
                 )
                 seg_idx += 1
 
+            if (
+                previous_start is not None
+                and previous_end is not None
+                and doc_segments
+                and len(doc_segments) >= 2
+            ):
+                previous = doc_segments[-2]
+                current = doc_segments[-1]
+                previous_voice = self._effective_voice(previous, cfg)
+                current_voice = self._effective_voice(current, cfg)
+                if previous_voice != current_voice:
+                    boundary_pos = self._pause_boundary_pos(previous.char_start, previous.char_end)
+                    if boundary_pos is not None:
+                        boundaries.append(
+                            self._default_candidate(
+                                boundary_pos,
+                                (pause_defaults.voice_change if pause_defaults else None) or 0.0,
+                                "voice_change",
+                                "header_default",
+                            )
+                        )
+
         clean_text = "".join(clean_parts)
+        boundaries.extend(
+            self._sentence_candidates(doc_segments, pause_defaults, cfg.generation.pause_mode)
+        )
         return clean_text, spans, boundaries, doc_segments
+
+    @staticmethod
+    def _default_candidate(
+        position: int,
+        duration_s: float,
+        kind: str,
+        source: str,
+    ) -> PauseCandidate:
+        return PauseCandidate(
+            position=position,
+            duration_s=duration_s,
+            source=cast(
+                Literal["explicit", "api_default", "header_default", "pipeline_default"],
+                source,
+            ),
+            kind=cast(Literal["break", "sentence", "paragraph", "voice_change"], kind),
+            priority=200 if source == "header_default" else 100,
+        )
+
+    @staticmethod
+    def _effective_voice(segment: Segment, cfg: PipelineConfig) -> object:
+        voice = segment.meta.get("voice_name")
+        if voice is not None:
+            return voice
+        return cfg.voice
+
+    def _sentence_candidates(
+        self,
+        segments: list[Segment],
+        pause_defaults: ResolvedPauseDefaults | None,
+        pause_mode: str,
+    ) -> list[PauseCandidate]:
+        if not segments:
+            return []
+        out: list[PauseCandidate] = []
+        last_sentence = None
+        last_paragraph = None
+        last_end = None
+        for segment in segments:
+            sentence = segment.sentence_idx
+            paragraph = segment.paragraph_idx
+            if sentence is None:
+                continue
+            if (
+                last_sentence is not None
+                and (sentence != last_sentence or paragraph != last_paragraph)
+                and last_end is not None
+                and last_paragraph == paragraph
+                and last_end > 0
+            ):
+                header_duration = pause_defaults.sentence if pause_defaults else None
+                if header_duration is not None or pause_mode == "auto":
+                    duration = header_duration or 0.6
+                    out.append(
+                        self._default_candidate(
+                            max(0, last_end - 1),
+                            duration,
+                            "sentence",
+                            "header_default" if header_duration is not None else "pipeline_default",
+                        )
+                    )
+            last_sentence = sentence
+            last_paragraph = paragraph
+            last_end = max(last_end or 0, segment.char_end)
+        return out
+
+    @staticmethod
+    def _reduce_pause_candidates(candidates: list[PauseCandidate]) -> list[BoundaryEvent]:
+        grouped: dict[int, list[PauseCandidate]] = {}
+        for candidate in candidates:
+            if candidate.duration_s <= 0:
+                continue
+            grouped.setdefault(candidate.position, []).append(candidate)
+        reduced: list[BoundaryEvent] = []
+        for position in sorted(grouped):
+            values = grouped[position]
+            explicit = [candidate for candidate in values if candidate.source == "explicit"]
+            selected = explicit or values
+            duration = (
+                sum(item.duration_s for item in selected)
+                if explicit
+                else max(item.duration_s for item in selected)
+            )
+            winner = max(selected, key=lambda item: (item.priority, item.duration_s))
+            reduced.append(
+                BoundaryEvent(
+                    pos=position,
+                    kind="pause",
+                    duration_s=duration,
+                    attrs={
+                        "source": winner.source,
+                        "kind": winner.kind,
+                        "deterministic_pause_boundary": "true",
+                        **(
+                            {"strength": {"sentence": "s", "paragraph": "p"}[winner.kind]}
+                            if winner.kind in {"sentence", "paragraph"}
+                            else {}
+                        ),
+                    },
+                )
+            )
+        return reduced
 
     @staticmethod
     def _sentence_boundaries(
@@ -215,6 +366,10 @@ class SsmdDocumentParser:
             attrs["ph"] = metadata.phonemes
         if metadata.voice_name:
             attrs["voice_name"] = metadata.voice_name
+        if metadata.voice_reference:
+            attrs["voice_reference"] = metadata.voice_reference
+        if metadata.voice_source:
+            attrs["voice_source"] = metadata.voice_source
         if metadata.voice_language:
             attrs["voice_language"] = metadata.voice_language
         if metadata.voice_gender:
@@ -239,8 +394,21 @@ class SsmdDocumentParser:
             attrs["substitution"] = metadata.substitution
         if metadata.markers:
             attrs["markers"] = ",".join(metadata.markers)
+        if metadata.emphasis:
+            attrs["emphasis"] = metadata.emphasis
         if metadata.audio_src:
             attrs["audio_src"] = metadata.audio_src
         if metadata.audio_alt_text:
             attrs["audio_alt_text"] = metadata.audio_alt_text
+        for key, value in (
+            ("audio_clip_begin", metadata.audio_clip_begin),
+            ("audio_clip_end", metadata.audio_clip_end),
+            ("audio_speed", metadata.audio_speed),
+            ("audio_repeat_dur", metadata.audio_repeat_dur),
+            ("audio_sound_level", metadata.audio_sound_level),
+        ):
+            if value is not None:
+                attrs[key] = str(value)
+        if metadata.audio_repeat_count is not None:
+            attrs["audio_repeat_count"] = str(metadata.audio_repeat_count)
         return attrs

@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .generation_config import GenerationConfig
+from .ssmd_config import SSMDPauseOverrides, SSMDRenderConfig
 
 try:
     from ._version import __version__, __version_tuple__
@@ -38,6 +39,8 @@ def __getattr__(name: str) -> Any:
 
 __all__ = [
     "GenerationConfig",
+    "SSMDPauseOverrides",
+    "SSMDRenderConfig",
     "KokoroPipeline",
     "PipelineConfig",
     "__version__",

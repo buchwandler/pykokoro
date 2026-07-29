@@ -334,6 +334,32 @@ for text, filename in texts:
     sf.write(filename, result.audio, result.sample_rate)
 ```
 
+## SSMD 0.8 portable metadata
+
+SSMD front matter is parsed by default and removed before sentence parsing. Use logical
+roles in the body and bind them in the document header. API bindings override document
+bindings, explicit breaks override implicit defaults, and `parse_header=False` preserves
+literal leading delimiters. PyKokoro does not load SSMD user configuration files; audio
+annotations require an explicit resolver.
+
+```python
+from pykokoro import KokoroPipeline, PipelineConfig, SSMDRenderConfig
+
+script = """---
+title: Portable podcast
+voice_bindings:
+  kokoro:
+    host: af_sarah
+pause_defaults:
+  enabled: true
+  paragraph: 700ms
+---
+<div voice="host">Welcome to the portable podcast.</div>
+"""
+result = KokoroPipeline(PipelineConfig(ssmd=SSMDRenderConfig())).run(script)
+print(result.document_metadata["title"])
+```
+
 ## Next Steps
 
 - {doc}`advanced_features` - Voice blending, phoneme control, and more

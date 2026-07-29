@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Podcast-style multi-voice conversation using SSMD voice annotations.
+Podcast-style multi-voice conversation using SSMD 0.8 voice annotations.
 
 This example demonstrates creating a podcast with multiple speakers using
 SSMD voice directives. The entire podcast is written as a single text string
 with one ``<div voice="name">`` block per speaker turn.
 
 Features demonstrated:
+- Portable logical roles are shown in ``ssmd_080_portable_podcast.py``.
 - Block-level voice switching with SSMD directives
 - Automatic pause insertion between speakers
 - Clean, readable podcast script format
@@ -24,7 +25,8 @@ import soundfile as sf
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
 
-# Podcast script using SSMD block voice directives.
+# Podcast script using SSMD block voice directives. For a portable header-first version,
+# see examples/ssmd_080_portable_podcast.py.
 # Inline voice changes can use: [short phrase]{voice="af_sarah"}
 # fmt: off
 PODCAST_SCRIPT = """

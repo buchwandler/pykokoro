@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ...exceptions import ConfigurationError
 from ...onnx_backend import Kokoro
 from ...types import PhonemeSegment, Trace
 
@@ -26,7 +27,25 @@ class OnnxAudioGenerationAdapter:
         cfg: PipelineConfig,
         trace: Trace,
     ) -> list[PhonemeSegment]:
-        _ = trace
+        for segment in phoneme_segments:
+            metadata = segment.ssmd_metadata or {}
+            voice_name = metadata.get("voice_name")
+            if not isinstance(voice_name, str) or not voice_name:
+                continue
+            try:
+                self._kokoro.get_voice_style(voice_name)
+            except (KeyError, RuntimeError, OSError, ValueError) as exc:
+                if cfg.ssmd.missing_voice == "error":
+                    reference = metadata.get("voice_reference", voice_name)
+                    raise ConfigurationError(
+                        f"Unable to resolve SSMD voice reference '{reference}' to "
+                        f"'{voice_name}' for provider '{cfg.ssmd.provider}'"
+                    ) from exc
+                metadata.pop("voice_name", None)
+                metadata.pop("voice", None)
+                trace.warnings.append(
+                    f"ssmd.missing_voice: using default voice for unavailable target '{voice_name}'"
+                )
         voice_style = self._kokoro.resolve_voice_style(cfg.voice)
 
         def voice_resolver(voice_name: str) -> np.ndarray:

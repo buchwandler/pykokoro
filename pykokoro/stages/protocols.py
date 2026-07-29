@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 
+from ..ssmd_config import SSMDDiagnostic
 from ..types import AnnotationSpan, BoundaryEvent, PhonemeSegment, Segment, Trace
 
 if TYPE_CHECKING:
@@ -18,6 +19,9 @@ class DocumentResult:
     boundary_events: list[BoundaryEvent] = field(default_factory=list)
     segments: list[Segment] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    header: dict[str, object] = field(default_factory=dict)
+    body: str | None = None
+    diagnostics: list[SSMDDiagnostic] = field(default_factory=list)
 
 
 class DocumentParser(Protocol):
