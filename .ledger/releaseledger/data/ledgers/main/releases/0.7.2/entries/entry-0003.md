@@ -7,7 +7,8 @@ versioning:
 entry_id: entry-0003
 release_version: 0.7.2
 kind: changed
-summary: Raised the SSMD dependency window to >=0.8.0,<0.9 and documented literal-header
+summary:
+  Raised the SSMD dependency window to >=0.8.0,<0.9 and documented literal-header
   migration
 status: accepted
 audience: null
@@ -17,7 +18,7 @@ paths: []
 issues: []
 prs: []
 sources:
-- git:ab0156b
+  - git:ab0156b
 contributors: []
 breaking: false
 internal: false

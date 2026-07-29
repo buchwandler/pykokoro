@@ -7,8 +7,9 @@ versioning:
 entry_id: entry-0002
 release_version: 0.7.2
 kind: added
-summary: Added portable provider voice bindings, deterministic pause-default precedence,
-  marker offsets, resolver-based audio annotations, and explicit capability diagnostics
+summary:
+  Added portable provider voice bindings, deterministic pause-default precedence, marker
+  offsets, resolver-based audio annotations, and explicit capability diagnostics
 status: accepted
 audience: null
 scopes: []
@@ -17,7 +18,7 @@ paths: []
 issues: []
 prs: []
 sources:
-- git:ab0156b
+  - git:ab0156b
 contributors: []
 breaking: false
 internal: false
