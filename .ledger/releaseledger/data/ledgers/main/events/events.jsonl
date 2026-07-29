@@ -186,3 +186,10 @@
 {"data":{"released_at":"2026-07-28"},"event":"release.finalized","event_id":"event-0186","record_revisions":{"release:0.7.1":7},"release_version":"0.7.1","schema_version":2}
 {"data":{"fields":["source_refs"]},"entry_id":"entry-0001","event":"entry.updated","event_id":"event-0187","record_revisions":{"entry:0.7.1/entry-0001":2},"release_version":"0.7.1","schema_version":2}
 {"data":{"kind":"internal","status":"accepted"},"entry_id":"entry-0005","event":"entry.added","event_id":"event-0188","record_revisions":{"entry:0.7.1/entry-0005":1,"release:0.7.1":8},"release_version":"0.7.1","schema_version":2}
+{"data":{"status":"planned"},"event":"release.created","event_id":"event-0189","record_revisions":{"release:0.7.2":1},"release_version":"0.7.2","schema_version":2}
+{"data":{"fields":["git_base_ref","git_base_sha","git_commit_count","git_head_ref","git_head_sha","git_range"]},"event":"release.updated","event_id":"event-0190","record_revisions":{"release:0.7.2":2},"release_version":"0.7.2","schema_version":2}
+{"data":{"kind":"added","status":"accepted"},"entry_id":"entry-0001","event":"entry.added","event_id":"event-0191","record_revisions":{"entry:0.7.2/entry-0001":1,"release:0.7.2":3},"release_version":"0.7.2","schema_version":2}
+{"data":{"kind":"added","status":"accepted"},"entry_id":"entry-0002","event":"entry.added","event_id":"event-0192","record_revisions":{"entry:0.7.2/entry-0002":1,"release:0.7.2":4},"release_version":"0.7.2","schema_version":2}
+{"data":{"kind":"changed","status":"accepted"},"entry_id":"entry-0003","event":"entry.added","event_id":"event-0193","record_revisions":{"entry:0.7.2/entry-0003":1,"release:0.7.2":5},"release_version":"0.7.2","schema_version":2}
+{"data":{"fields":["source_refs"]},"entry_id":"entry-0001","event":"entry.updated","event_id":"event-0194","record_revisions":{"entry:0.7.2/entry-0001":2},"release_version":"0.7.2","schema_version":2}
+{"data":{"released_at":"2026-07-29"},"event":"release.finalized","event_id":"event-0195","record_revisions":{"release:0.7.2":6},"release_version":"0.7.2","schema_version":2}
