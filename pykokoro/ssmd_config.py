@@ -89,7 +89,7 @@ class SSMDRenderConfig:
     unknown_header: Literal["warn", "error", "ignore"] = "warn"
     missing_voice: Literal["error", "use-default"] = "error"
     validate_profile: bool = True
-    emphasis_mode: Literal["approximate", "warn", "error"] = "approximate"
+    emphasis_mode: Literal["plain", "approximate", "warn", "error"] = "plain"
     audio_source_resolver: Any | None = None
     audio_max_bytes: int = 20_000_000
     audio_max_duration_s: float = 120.0
@@ -103,8 +103,8 @@ class SSMDRenderConfig:
             raise ValueError("unknown_header must be 'warn', 'error', or 'ignore'")
         if self.missing_voice not in {"error", "use-default"}:
             raise ValueError("missing_voice must be 'error' or 'use-default'")
-        if self.emphasis_mode not in {"approximate", "warn", "error"}:
-            raise ValueError("emphasis_mode must be 'approximate', 'warn', or 'error'")
+        if self.emphasis_mode not in {"plain", "approximate", "warn", "error"}:
+            raise ValueError("emphasis_mode must be 'plain', 'approximate', 'warn', or 'error'")
         if isinstance(self.audio_max_bytes, bool) or self.audio_max_bytes <= 0:
             raise ValueError("audio_max_bytes must be a positive integer")
         if self.audio_max_duration_s < 0:

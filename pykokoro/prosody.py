@@ -14,25 +14,42 @@ Supports both absolute values (e.g., 'loud', 'fast', 'high') and relative values
 
 import logging
 import re
+from typing import Any
 
 import numpy as np
 
 from .constants import PITCH_ABSOLUTE_MAP, RATE_ABSOLUTE_MAP, VOLUME_ABSOLUTE_MAP
 
-# Try importing audio processing libraries
+# Try importing audio processing libraries.  Availability means the concrete
+# operations used by this module can be loaded, not merely that the top-level
+# package exists.
 try:
     from audiomentations import PitchShift, TimeStretch
 
     AUDIOMENTATIONS_AVAILABLE = True
-except ImportError:
+    AUDIOMENTATIONS_IMPORT_ERROR: Exception | None = None
+except (ImportError, AttributeError, RuntimeError, OSError) as exc:
+    PitchShift = None  # type: ignore[assignment]
+    TimeStretch = None  # type: ignore[assignment]
     AUDIOMENTATIONS_AVAILABLE = False
+    AUDIOMENTATIONS_IMPORT_ERROR = exc
 
-try:
-    import librosa
 
-    LIBROSA_AVAILABLE = True
-except ImportError:
-    LIBROSA_AVAILABLE = False
+def _load_librosa_backend() -> tuple[Any | None, Exception | None]:
+    try:
+        import librosa as module
+
+        # Access lazy attributes now so partially installed librosa packages are
+        # rejected during capability detection instead of failing mid-conversion.
+        for attribute in ("stft", "istft", "phase_vocoder", "resample"):
+            getattr(module, attribute)
+        return module, None
+    except (ImportError, AttributeError, RuntimeError, OSError) as exc:
+        return None, exc
+
+
+librosa, LIBROSA_IMPORT_ERROR = _load_librosa_backend()
+LIBROSA_AVAILABLE = librosa is not None
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +201,43 @@ def apply_volume(audio: np.ndarray, volume: str) -> np.ndarray:
         return audio
 
 
+def _fix_audio_length(audio: np.ndarray, target_length: int) -> np.ndarray:
+    """Crop or zero-pad audio on the final axis to an exact length."""
+    current_length = audio.shape[-1]
+    if current_length == target_length:
+        return audio
+    if current_length > target_length:
+        return audio[..., :target_length]
+    pad_width = [(0, 0)] * audio.ndim
+    pad_width[-1] = (0, target_length - current_length)
+    return np.pad(audio, pad_width)
+
+
+def _librosa_time_stretch(audio: np.ndarray, rate: float) -> np.ndarray:
+    """Time-stretch with librosa primitives that do not import sklearn."""
+    if librosa is None:
+        raise RuntimeError("librosa backend is unavailable")
+    spectrum = librosa.stft(audio)
+    stretched_spectrum = librosa.phase_vocoder(spectrum, rate=rate)
+    target_length = max(1, int(round(audio.shape[-1] / rate)))
+    return librosa.istft(stretched_spectrum, length=target_length)
+
+
+def _librosa_pitch_shift(audio: np.ndarray, sample_rate: int, semitones: float) -> np.ndarray:
+    """Pitch-shift with time stretch plus resampling, preserving duration."""
+    if librosa is None:
+        raise RuntimeError("librosa backend is unavailable")
+    rate = 2.0 ** (-semitones / 12.0)
+    stretched = _librosa_time_stretch(audio, rate)
+    shifted = librosa.resample(
+        stretched,
+        orig_sr=float(sample_rate) / rate,
+        target_sr=sample_rate,
+        res_type="scipy",
+    )
+    return _fix_audio_length(shifted, audio.shape[-1])
+
+
 def apply_pitch(audio: np.ndarray, pitch: str, sample_rate: int) -> np.ndarray:
     """Apply pitch shift to audio using audiomentations or librosa.
 
@@ -223,7 +277,7 @@ def apply_pitch(audio: np.ndarray, pitch: str, sample_rate: int) -> np.ndarray:
 
         # Fall back to librosa
         if LIBROSA_AVAILABLE:
-            shifted = librosa.effects.pitch_shift(audio, sr=sample_rate, n_steps=semitones)
+            shifted = _librosa_pitch_shift(audio, sample_rate, semitones)
             return shifted.astype(audio.dtype)
 
         return audio
@@ -231,7 +285,7 @@ def apply_pitch(audio: np.ndarray, pitch: str, sample_rate: int) -> np.ndarray:
     except ValueError as e:
         logger.warning(f"Failed to apply pitch '{pitch}': {e}")
         return audio
-    except (RuntimeError, OSError) as e:
+    except (ImportError, AttributeError, RuntimeError, OSError) as e:
         logger.warning(f"Pitch shift failed for '{pitch}': {e}")
         return audio
 
@@ -275,12 +329,21 @@ def apply_rate(audio: np.ndarray, rate: str, sample_rate: int = 24000) -> np.nda
                 )
                 stretched = augmenter(samples=audio, sample_rate=sample_rate)
                 return stretched.astype(audio.dtype)
-            except (RuntimeError, OSError, ValueError) as e:
-                logger.debug(f"Audiomentations TimeStretch failed, falling back to librosa: {e}")
+            except (
+                ImportError,
+                AttributeError,
+                RuntimeError,
+                OSError,
+                ValueError,
+            ) as e:
+                logger.debug(
+                    "Audiomentations TimeStretch failed, falling back to librosa: %s",
+                    e,
+                )
 
         # Fall back to librosa
         if LIBROSA_AVAILABLE:
-            stretched = librosa.effects.time_stretch(audio, rate=speed_multiplier)
+            stretched = _librosa_time_stretch(audio, speed_multiplier)
             return stretched.astype(audio.dtype)
 
         return audio
@@ -288,7 +351,7 @@ def apply_rate(audio: np.ndarray, rate: str, sample_rate: int = 24000) -> np.nda
     except ValueError as e:
         logger.warning(f"Failed to apply rate '{rate}': {e}")
         return audio
-    except (RuntimeError, OSError) as e:
+    except (ImportError, AttributeError, RuntimeError, OSError) as e:
         logger.warning(f"Rate adjustment failed for '{rate}': {e}")
         return audio
 

@@ -31,6 +31,8 @@ class OnnxAudioPostprocessingAdapter:
         for segment in phoneme_segments:
             metadata = segment.ssmd_metadata or {}
             emphasis = metadata.get("emphasis")
+            if emphasis and cfg.ssmd.emphasis_mode == "plain":
+                continue
             if emphasis and cfg.ssmd.emphasis_mode == "error":
                 raise CapabilityError("SSMD emphasis is disabled by emphasis_mode='error'")
             if emphasis and cfg.ssmd.emphasis_mode == "warn":
