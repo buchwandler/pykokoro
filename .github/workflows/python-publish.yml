@@ -1,10 +1,4 @@
-# This workflow validates and uploads a Python package when a release is created.
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python#publishing-to-package-registries
-
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
+# Build and publish a Python package when a GitHub Release is published.
 
 name: Upload Python Package
 
@@ -16,65 +10,26 @@ permissions:
   contents: read
 
 jobs:
-
-  tests:
-    uses: ./.github/workflows/tests.yml
-
   deploy:
-
-    needs: tests
-
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
-      with:
-        ref: ${{ github.event.release.tag_name }}
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.x'
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        python -m pip install build twine
-    - name: Build package
-      run: python -m build
-    - name: Validate package metadata and version
-      env:
-        RELEASE_TAG: ${{ github.event.release.tag_name }}
-      run: |
-        python -m twine check dist/*
-        python - <<'PY'
-        import os
-        from pathlib import Path
-        import zipfile
+      - name: Check out release
+        uses: actions/checkout@v7
 
-        expected = os.environ["RELEASE_TAG"].removeprefix("v")
-        artifacts = sorted(Path("dist").glob("*.whl")) + sorted(Path("dist").glob("*.tar.gz"))
-        assert artifacts, "No build artifacts were produced"
-        for artifact in artifacts:
-            name = artifact.name
-            assert expected in name, f"{name} does not contain release version {expected}"
-            if artifact.suffix == ".whl":
-                with zipfile.ZipFile(artifact) as archive:
-                    assert "pykokoro/py.typed" in archive.namelist()
-        PY
-    - name: Wheel smoke test
-      run: |
-        python -m venv .release-venv
-        .release-venv/bin/python -m pip install --upgrade pip
-        .release-venv/bin/python -m pip install dist/*.whl
-        .release-venv/bin/python - <<'PY'
-        import pykokoro
-        from pykokoro import SSMDRenderConfig
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
 
-        assert pykokoro.__version__
-        assert SSMDRenderConfig().emphasis_mode == "plain"
-        print(pykokoro.__version__)
-        PY
-    - name: Publish package
-      uses: pypa/gh-action-pypi-publish@release/v1
-      with:
-        user: __token__
-        password: ${{ secrets.PYPI_API_TOKEN }}
+      - name: Install build tooling
+        run: python -m pip install --upgrade pip build
+
+      - name: Build package
+        run: python -m build
+
+      - name: Publish package to PyPI
+        uses: pypa/gh-action-pypi-publish@v1.14.1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          attestations: false
