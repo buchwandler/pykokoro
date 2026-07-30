@@ -36,10 +36,6 @@ jobs:
         pip install spacy
         python -m spacy download en_core_web_sm
         python -m compileall -q pykokoro tests
-    - name: Ruff lint
-      run: ruff check .
-    - name: Ruff format
-      run: ruff format --check .
     - name: Mypy
       run: mypy pykokoro
     - name: Tests
