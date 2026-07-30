@@ -79,7 +79,16 @@ class PauseCandidate:
 
 @dataclass(frozen=True)
 class SSMDRenderConfig:
-    """Renderer-owned controls for consuming SSMD portable metadata."""
+    """Renderer-owned controls for consuming SSMD portable metadata.
+
+    ``emphasis_mode`` defaults to ``"plain"``: emphasis metadata is preserved,
+    but speech remains unmodified. ``"approximate"`` applies deterministic
+    volume-only changes for strong, moderate, and reduced emphasis. ``"warn"``
+    preserves unmodified speech and emits one diagnostic per logical source
+    segment, while ``"error"`` rejects effectful emphasis before inference.
+    SSMD ``emphasis="none"`` is ordinary speech and is accepted silently in
+    every mode.
+    """
 
     parse_header: bool = True
     provider: str = "kokoro"

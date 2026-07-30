@@ -16,6 +16,7 @@ include = [
   "**/*.tsv",
   "**/*.yaml",
   "**/*.yml",
+  "**/*.ssmd",
   "LICENSE",
 ]
 split_max_chars = 0

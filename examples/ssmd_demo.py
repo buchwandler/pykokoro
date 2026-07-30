@@ -27,7 +27,7 @@ Features demonstrated:
 
 import soundfile as sf
 
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import KokoroPipeline, PipelineConfig, SSMDRenderConfig
 from pykokoro.generation_config import GenerationConfig
 
 # Story with core SSMD 0.8 markup
@@ -88,7 +88,11 @@ def main():
     print("=" * 70)
 
     pipe = KokoroPipeline(
-        PipelineConfig(voice=VOICE, generation=GenerationConfig(lang=LANG, speed=1.0))
+        PipelineConfig(
+            voice=VOICE,
+            generation=GenerationConfig(lang=LANG, speed=1.0),
+            ssmd=SSMDRenderConfig(emphasis_mode="approximate"),
+        )
     )
 
     # Demo 1: English story with SSMD markup
@@ -164,7 +168,7 @@ The formula [H2O]{sub="water"} is essential for life.
     print("Emphasis examples:")
     print(emphasis_text)
 
-    print("\nGenerating audio with emphasis...")
+    print("\nGenerating audio with opt-in approximate emphasis...")
     samples_emphasis = pipe.run(emphasis_text).audio
 
     output_file_emphasis = "ssmd_emphasis_demo.wav"

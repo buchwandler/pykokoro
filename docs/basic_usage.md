@@ -342,6 +342,15 @@ bindings, explicit breaks override implicit defaults, and `parse_header=False` p
 literal leading delimiters. PyKokoro does not load SSMD user configuration files; audio
 annotations require an explicit resolver.
 
+### Emphasis behavior
+
+The default `SSMDRenderConfig(emphasis_mode="plain")` preserves emphasis metadata but
+leaves speech unmodified. Use `emphasis_mode="approximate"` to opt into the core
+volume-only mapping `strong` `+6dB`, `moderate` `+3dB`, and `reduced` `-3dB`. `warn`
+keeps ordinary speech and reports one trace warning per logical source segment; `error`
+rejects effectful emphasis before inference. `emphasis="none"` is silently accepted in
+every mode, and explicit prosody values take precedence.
+
 ```python
 from pykokoro import KokoroPipeline, PipelineConfig, SSMDRenderConfig
 

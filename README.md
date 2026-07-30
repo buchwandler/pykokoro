@@ -399,7 +399,7 @@ uses `sm`.
 
 **Combining Both Approaches:**
 
-Use SSMD markers for special emphasis and automatic pauses for natural rhythm:
+Use SSMD markers for emphasis metadata and automatic pauses for natural rhythm:
 
 ```python
 text = "Welcome! ...p Let's discuss AI, machine learning, and deep learning."
@@ -415,6 +415,33 @@ audio = res.audio
 
 See `examples/pauses_demo.py`, `examples/pauses_with_splitting.py`, and
 `examples/automatic_pauses_demo.py` for complete examples.
+
+### SSMD emphasis policy
+
+SSMD emphasis is preserved in segment metadata, but PyKokoro defaults to
+`SSMDRenderConfig(emphasis_mode="plain")` so ordinary synthesis is not changed
+surprisingly. The policy modes are:
+
+- `plain`: preserve emphasis metadata and synthesize unmodified speech silently
+- `approximate`: apply deterministic volume-only changes: `strong` `+6dB`, `moderate`
+  `+3dB`, and `reduced` `-3dB`
+- `warn`: synthesize unmodified speech and emit one `ssmd.emphasis_unsupported` trace
+  warning per logical source segment
+- `error`: reject effectful emphasis before model inference
+
+`emphasis="none"` means ordinary speech and is accepted silently in every mode. Explicit
+`volume`, `rate`, or `pitch` metadata takes precedence over approximation. Approximation
+uses the core NumPy volume path and does not require the optional `prosody` audio
+backends.
+
+To request audible approximation explicitly:
+
+```python
+from pykokoro import KokoroPipeline, PipelineConfig, SSMDRenderConfig
+
+config = PipelineConfig(ssmd=SSMDRenderConfig(emphasis_mode="approximate"))
+result = KokoroPipeline(config).run("This is *moderate emphasis*.")
+```
 
 ### Voice Switching (SSMD)
 
@@ -548,7 +575,7 @@ text = '[100]{as="cardinal" volume="loud"} dollars!'
 # With pauses
 text = '[First]{as="ordinal"} ...c [second]{as="ordinal"} ...c [third]{as="ordinal"}!'
 
-# With emphasis
+# With emphasis metadata (audible approximation is opt-in)
 text = 'The winner is [1]{as="ordinal" emphasis="moderate"}!'
 ```
 

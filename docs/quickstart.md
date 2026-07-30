@@ -232,6 +232,13 @@ Valid first-line YAML front matter is consumed automatically. `title` is metadat
 and logical voice roles can be mapped without changing the spoken body. Use
 `SSMDRenderConfig(parse_header=False)` when the leading delimiter is literal text.
 
+SSMD emphasis is metadata-only by default: `emphasis_mode="plain"` preserves the
+annotation without changing speech. For audible, deterministic volume-only emphasis, opt
+in with `SSMDRenderConfig(emphasis_mode="approximate")`; this maps strong to `+6dB`,
+moderate to `+3dB`, and reduced to `-3dB`. The `none` level is always a silent no-op.
+`warn` emits one diagnostic per logical source segment, and `error` rejects effectful
+emphasis before inference.
+
 ```python
 from pykokoro import KokoroPipeline, PipelineConfig
 

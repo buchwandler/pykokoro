@@ -208,6 +208,14 @@ binding, and pause metadata; `AudioResult.markers` contains structured marker sa
 offsets. Audio annotations require an explicit resolver and fall back to `alt` text;
 Kokoro extensions are rejected by profile validation.
 
+`SSMDRenderConfig.emphasis_mode` defaults to `"plain"`, preserving emphasis metadata
+without changing generated audio. `"approximate"` applies core volume-only mappings
+(`strong` `+6dB`, `moderate` `+3dB`, `reduced` `-3dB`); explicit prosody values win.
+`"warn"` preserves audio and adds one `ssmd.emphasis_unsupported` warning per logical
+source segment, while `"error"` rejects effectful emphasis before inference. The `none`
+level is always a silent no-op. Approximation does not require the optional `prosody`
+extra.
+
 ## See Also
 
 - {doc}`basic_usage` - Fundamental usage patterns

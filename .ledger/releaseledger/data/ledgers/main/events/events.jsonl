@@ -193,3 +193,9 @@
 {"data":{"kind":"changed","status":"accepted"},"entry_id":"entry-0003","event":"entry.added","event_id":"event-0193","record_revisions":{"entry:0.7.2/entry-0003":1,"release:0.7.2":5},"release_version":"0.7.2","schema_version":2}
 {"data":{"fields":["source_refs"]},"entry_id":"entry-0001","event":"entry.updated","event_id":"event-0194","record_revisions":{"entry:0.7.2/entry-0001":2},"release_version":"0.7.2","schema_version":2}
 {"data":{"released_at":"2026-07-29"},"event":"release.finalized","event_id":"event-0195","record_revisions":{"release:0.7.2":6},"release_version":"0.7.2","schema_version":2}
+{"data":{"status":"candidate"},"event":"release.created","event_id":"event-0196","record_revisions":{"release:0.7.3":1},"release_version":"0.7.3","schema_version":2}
+{"data":{"kind":"changed","status":"accepted"},"entry_id":"entry-0001","event":"entry.added","event_id":"event-0197","record_revisions":{"entry:0.7.3/entry-0001":1,"release:0.7.3":2},"release_version":"0.7.3","schema_version":2}
+{"data":{"kind":"fixed","status":"accepted"},"entry_id":"entry-0002","event":"entry.added","event_id":"event-0198","record_revisions":{"entry:0.7.3/entry-0002":1,"release:0.7.3":3},"release_version":"0.7.3","schema_version":2}
+{"data":{"kind":"docs","status":"accepted"},"entry_id":"entry-0003","event":"entry.added","event_id":"event-0199","record_revisions":{"entry:0.7.3/entry-0003":1,"release:0.7.3":4},"release_version":"0.7.3","schema_version":2}
+{"data":{"fields":["summary"]},"entry_id":"entry-0001","event":"entry.updated","event_id":"event-0200","record_revisions":{"entry:0.7.3/entry-0001":2},"release_version":"0.7.3","schema_version":2}
+{"data":{"fields":["summary"]},"entry_id":"entry-0002","event":"entry.updated","event_id":"event-0201","record_revisions":{"entry:0.7.3/entry-0002":2},"release_version":"0.7.3","schema_version":2}

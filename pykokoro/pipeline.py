@@ -11,6 +11,7 @@ from typing_extensions import Self
 
 from .config_types import LANG_CODE_TO_ONNX
 from .constants import SAMPLE_RATE
+from .emphasis import apply_emphasis_policy
 from .generation_config import GenerationConfig
 from .pipeline_config import PipelineConfig
 from .runtime.tracing import trace_timing
@@ -499,6 +500,8 @@ class KokoroPipeline:
         with trace_timing(trace, "phoneme_processing", "preprocess"):
             logger.debug("Preprocessing %d phoneme segments", len(phoneme_segments))
             phoneme_segments = phoneme_processor.process(phoneme_segments, cfg, trace)
+
+        apply_emphasis_policy(phoneme_segments, cfg, trace)
 
         with trace_timing(trace, "audio_generation", "generate"):
             logger.debug("Generating audio for %d phoneme segments", len(phoneme_segments))

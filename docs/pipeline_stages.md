@@ -262,6 +262,13 @@ reduced before G2P; explicit breaks take precedence and simultaneous implicit de
 use the maximum duration. `DocumentResult.header`/`body` and
 `AudioResult.document_metadata` expose copied metadata.
 
+Emphasis capability policy is evaluated after phoneme processing and before
+`audio_generation`. `plain` preserves metadata without modifying audio, `warn` emits one
+diagnostic per logical source segment, `error` rejects before inference, and
+`approximate` adds deterministic volume metadata (`strong` `+6dB`, `moderate` `+3dB`,
+`reduced` `-3dB`). `none` is ordinary speech in every mode. Explicit prosody metadata is
+retained with precedence over approximation.
+
 ## Local model files and providers
 
 To load local ONNX artifacts, set `model_path` and `voices_path`. You can also select a

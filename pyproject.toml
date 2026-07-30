@@ -8,6 +8,9 @@ include = [
     "pykokoro*",
 ]
 
+[tool.setuptools.package-data]
+pykokoro = ["py.typed"]
+
 [project]
 name = "pykokoro"
 description = "A python library for Kokoro TTS"
@@ -83,7 +86,7 @@ all = [
 
 [tool.setuptools_scm]
 write_to = "pykokoro/_version.py"
-fallback_version = "0.6.5"
+fallback_version = "0.7.3"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -29,8 +29,8 @@ try:
     AUDIOMENTATIONS_AVAILABLE = True
     AUDIOMENTATIONS_IMPORT_ERROR: Exception | None = None
 except (ImportError, AttributeError, RuntimeError, OSError) as exc:
-    PitchShift = None  # type: ignore[assignment]
-    TimeStretch = None  # type: ignore[assignment]
+    PitchShift = None
+    TimeStretch = None
     AUDIOMENTATIONS_AVAILABLE = False
     AUDIOMENTATIONS_IMPORT_ERROR = exc
 
