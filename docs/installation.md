@@ -148,6 +148,7 @@ Test your installation:
 
 ```python
 import pykokoro
+
 print(pykokoro.__version__)
 
 # Quick test
@@ -207,21 +208,21 @@ kokoro = Kokoro(model_quality="fp16")  # Auto-downloads from HuggingFace
 # HuggingFace v1.1-zh (103 voices, 8 quality options)
 kokoro = Kokoro(
     model_variant="v1.1-zh",
-    model_quality="q8"  # Auto-downloads from HuggingFace
+    model_quality="q8",  # Auto-downloads from HuggingFace
 )
 
 # GitHub v1.0 (54 voices, 4 quality options)
 kokoro = Kokoro(
     model_source="github",
     model_variant="v1.0",
-    model_quality="fp16-gpu"  # Auto-downloads from GitHub
+    model_quality="fp16-gpu",  # Auto-downloads from GitHub
 )
 
 # GitHub v1.1-zh (103 voices, fp32 only)
 kokoro = Kokoro(
     model_source="github",
     model_variant="v1.1-zh",
-    model_quality="fp32"  # Auto-downloads from GitHub
+    model_quality="fp32",  # Auto-downloads from GitHub
 )
 ```
 

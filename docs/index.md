@@ -53,6 +53,7 @@ result = pipe.run("Hello, world! This is a test.")
 
 # Save to file
 import soundfile as sf
+
 sf.write("output.wav", result.audio, result.sample_rate)
 ```
 

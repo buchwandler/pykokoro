@@ -22,10 +22,7 @@ with Kokoro() as kokoro:
     # Blend two voices equally
     blend = VoiceBlend.parse("af_bella + af_sarah")
 
-    audio, sr = kokoro.create(
-        "This is a blended voice",
-        voice=blend
-    )
+    audio, sr = kokoro.create("This is a blended voice", voice=blend)
 ```
 
 ### Weighted Blending
@@ -39,10 +36,7 @@ with Kokoro() as kokoro:
     # 70% bella, 30% sarah
     blend = VoiceBlend.parse("af_bella*0.7 + af_sarah*0.3")
 
-    audio, sr = kokoro.create(
-        "Weighted blend",
-        voice=blend
-    )
+    audio, sr = kokoro.create("Weighted blend", voice=blend)
 
     # Percentage notation (normalized automatically)
     blend2 = VoiceBlend.parse("af_bella*70% + af_sarah*30%")
@@ -57,14 +51,9 @@ from pykokoro import Kokoro, VoiceBlend
 
 with Kokoro() as kokoro:
     # Three-way blend
-    blend = VoiceBlend.parse(
-        "af_bella*0.5 + af_sarah*0.3 + af_nicole*0.2"
-    )
+    blend = VoiceBlend.parse("af_bella*0.5 + af_sarah*0.3 + af_nicole*0.2")
 
-    audio, sr = kokoro.create(
-        "Complex blend",
-        voice=blend
-    )
+    audio, sr = kokoro.create("Complex blend", voice=blend)
 ```
 
 ### Creating Blended Voice Programmatically
@@ -73,16 +62,10 @@ with Kokoro() as kokoro:
 from pykokoro import Kokoro, VoiceBlend
 
 # Create blend object directly
-blend = VoiceBlend(
-    voices=["af_bella", "af_sarah", "am_adam"],
-    weights=[0.4, 0.4, 0.2]
-)
+blend = VoiceBlend(voices=["af_bella", "af_sarah", "am_adam"], weights=[0.4, 0.4, 0.2])
 
 with Kokoro() as kokoro:
-    audio, sr = kokoro.create(
-        "Custom blend",
-        voice=blend
-    )
+    audio, sr = kokoro.create("Custom blend", voice=blend)
 ```
 
 ## Phoneme-Based Generation
@@ -99,11 +82,7 @@ with Kokoro() as kokoro:
     phonemes = kokoro.tokenizer.phonemize("Hello, world!")
 
     # Generate from phonemes
-    audio, sr = kokoro.create_from_phonemes(
-        phonemes,
-        voice="af_bella",
-        speed=1.0
-    )
+    audio, sr = kokoro.create_from_phonemes(phonemes, voice="af_bella", speed=1.0)
 ```
 
 ### Text to Phonemes
@@ -115,18 +94,11 @@ from pykokoro import Kokoro
 
 with Kokoro() as kokoro:
     # Get phonemes
-    phonemes = kokoro.tokenizer.phonemize(
-        "Hello, world!",
-        lang="en-us"
-    )
+    phonemes = kokoro.tokenizer.phonemize("Hello, world!", lang="en-us")
     print(f"Phonemes: {phonemes}")
 
     # Get detailed phoneme info
-    result = kokoro.tokenizer.text_to_phonemes(
-        "Hello",
-        lang="en-us",
-        with_words=True
-    )
+    result = kokoro.tokenizer.text_to_phonemes("Hello", lang="en-us", with_words=True)
     print(result)
 ```
 
@@ -185,7 +157,7 @@ segments = split_and_phonemize_text(
     tokenizer,
     lang="en-us",
     split_mode="sentence",  # Will cascade to clause/word if needed
-    max_phoneme_length=510  # Kokoro's maximum
+    max_phoneme_length=510,  # Kokoro's maximum
 )
 
 for segment in segments:
@@ -203,7 +175,7 @@ for segment in segments:
 segments = split_and_phonemize_text(
     text,
     tokenizer,
-    split_mode="paragraph"  # Splits on double newlines
+    split_mode="paragraph",  # Splits on double newlines
 )
 ```
 
@@ -215,7 +187,7 @@ Requires spaCy for sentence boundary detection:
 segments = split_and_phonemize_text(
     text,
     tokenizer,
-    split_mode="sentence"  # Splits on sentence boundaries
+    split_mode="sentence",  # Splits on sentence boundaries
 )
 ```
 
@@ -227,7 +199,7 @@ Splits on both sentences and commas for finer control:
 segments = split_and_phonemize_text(
     text,
     tokenizer,
-    split_mode="clause"  # Splits on sentences and commas
+    split_mode="clause",  # Splits on sentences and commas
 )
 ```
 
@@ -240,33 +212,30 @@ from pykokoro import Kokoro
 
 with Kokoro() as kokoro:
     # Default: TTS controls pauses naturally
-    audio, sr = kokoro.create(
-        long_text,
-        voice="af_sarah"
-    )
+    audio, sr = kokoro.create(long_text, voice="af_sarah")
 
     # Auto mode: PyKokoro inserts boundary pauses
     audio, sr = kokoro.create(
         long_text,
         voice="af_sarah",
         pause_mode="auto",
-        pause_clause=0.25,           # Clause boundaries
-        pause_sentence=0.5,          # Sentence boundaries
-        pause_paragraph=1.0,         # Paragraph boundaries
-        pause_variance=0.05,         # Natural variance (Gaussian)
-        random_seed=42               # For reproducible results
+        pause_clause=0.25,  # Clause boundaries
+        pause_sentence=0.5,  # Sentence boundaries
+        pause_paragraph=1.0,  # Paragraph boundaries
+        pause_variance=0.05,  # Natural variance (Gaussian)
+        random_seed=42,  # For reproducible results
     )
 
     # Manual mode: PyKokoro trims and preserves explicit pauses
     audio, sr = kokoro.create(
         long_text,
         voice="af_sarah",
-        pause_mode="manual",         # Preserve explicit pauses
-        pause_clause=0.25,           # Clause boundaries
-        pause_sentence=0.5,          # Sentence boundaries
-        pause_paragraph=1.0,         # Paragraph boundaries
-        pause_variance=0.05,         # Natural variance (Gaussian)
-        random_seed=42               # For reproducible results
+        pause_mode="manual",  # Preserve explicit pauses
+        pause_clause=0.25,  # Clause boundaries
+        pause_sentence=0.5,  # Sentence boundaries
+        pause_paragraph=1.0,  # Paragraph boundaries
+        pause_variance=0.05,  # Natural variance (Gaussian)
+        random_seed=42,  # For reproducible results
     )
 ```
 
@@ -288,20 +257,16 @@ Use `random_seed` for consistent output across runs:
 
 ```python
 # Same output every time
-audio1, sr = kokoro.create(text, voice="af_sarah",
-                           pause_mode="auto",
-                           random_seed=42)
+audio1, sr = kokoro.create(text, voice="af_sarah", pause_mode="auto", random_seed=42)
 
-audio2, sr = kokoro.create(text, voice="af_sarah",
-                           pause_mode="auto",
-                           random_seed=42)
+audio2, sr = kokoro.create(text, voice="af_sarah", pause_mode="auto", random_seed=42)
 
 # audio1 and audio2 are identical
 
 # Different output each time
-audio3, sr = kokoro.create(text, voice="af_sarah",
-                           pause_mode="auto",
-                           random_seed=None)  # or omit parameter
+audio3, sr = kokoro.create(
+    text, voice="af_sarah", pause_mode="auto", random_seed=None
+)  # or omit parameter
 ```
 
 ### Custom Warning Callbacks
@@ -311,15 +276,13 @@ Handle warnings during phoneme generation:
 ```python
 from pykokoro import split_and_phonemize_text, create_tokenizer
 
+
 def my_warning_handler(message):
     print(f"WARNING: {message}")
 
+
 tokenizer = create_tokenizer()
-segments = split_and_phonemize_text(
-    very_long_text,
-    tokenizer,
-    warn_callback=my_warning_handler
-)
+segments = split_and_phonemize_text(very_long_text, tokenizer, warn_callback=my_warning_handler)
 ```
 
 ## GPU Acceleration
@@ -394,14 +357,14 @@ kokoro = Kokoro(model_quality="q8")  # Recommended default
 # Supports all quantization levels: fp32, fp16, q8, q8f16, q4, q4f16, uint8, uint8f16
 kokoro = Kokoro(
     model_variant="v1.1-zh",
-    model_quality="q8"  # All qualities available
+    model_quality="q8",  # All qualities available
 )
 
 # Use English voices
 audio, sr = kokoro.create(
     "Hello world!",
     voice="af_maple",  # v1.1-zh English voice
-    lang="en-us"
+    lang="en-us",
 )
 ```
 
@@ -412,7 +375,7 @@ audio, sr = kokoro.create(
 kokoro = Kokoro(
     model_source="github",
     model_variant="v1.0",
-    model_quality="fp16-gpu"  # Options: fp32, fp16, fp16-gpu, q8
+    model_quality="fp16-gpu",  # Options: fp32, fp16, fp16-gpu, q8
 )
 ```
 
@@ -423,14 +386,14 @@ kokoro = Kokoro(
 kokoro = Kokoro(
     model_source="github",
     model_variant="v1.1-zh",
-    model_quality="fp32"  # Only fp32 available
+    model_quality="fp32",  # Only fp32 available
 )
 
 # Use English voices
 audio, sr = kokoro.create(
     "Hello world!",
     voice="af_maple",  # v1.1-zh English voice
-    lang="en-us"
+    lang="en-us",
 )
 ```
 
@@ -442,10 +405,7 @@ v1.1-zh with English text for now.
 ```python
 from pykokoro import Kokoro
 
-kokoro = Kokoro(
-    model_path="/path/to/custom/model.onnx",
-    voices_path="/path/to/voices.bin"
-)
+kokoro = Kokoro(model_path="/path/to/custom/model.onnx", voices_path="/path/to/voices.bin")
 ```
 
 ### Download Models Manually
@@ -471,7 +431,7 @@ download_all_models(variant="v1.0")
 from pykokoro.onnx_backend import (
     download_model_github,
     download_voices_github,
-    download_all_models_github
+    download_all_models_github,
 )
 
 # Download GitHub v1.0 model
@@ -482,28 +442,23 @@ download_voices_github(variant="v1.0")
 
 # Download all GitHub v1.1-zh files
 download_all_models_github(
-    variant="v1.1-zh",
-    quality="fp32",
-    progress_callback=lambda msg: print(msg)
+    variant="v1.1-zh", quality="fp32", progress_callback=lambda msg: print(msg)
 )
 ```
 
 **HuggingFace v1.1-zh Models:**
 
 ```python
-from pykokoro import (
-    download_model,
-    download_all_voices,
-    download_all_models,
-    download_config
-)
+from pykokoro import download_model, download_all_voices, download_all_models, download_config
 
 # Download HuggingFace v1.1-zh model (with quantization)
 download_model(variant="v1.1-zh", quality="q8")
 
+
 # Download all 103 voices for v1.1-zh
 def progress(voice_name, current, total):
     print(f"Downloading {current}/{total}: {voice_name}")
+
 
 download_all_voices(variant="v1.1-zh", progress_callback=progress)
 
@@ -511,11 +466,7 @@ download_all_voices(variant="v1.1-zh", progress_callback=progress)
 download_config(variant="v1.1-zh")
 
 # Download everything (model + config + all voices)
-download_all_models(
-    variant="v1.1-zh",
-    quality="q8",
-    progress_callback=lambda msg: print(msg)
-)
+download_all_models(variant="v1.1-zh", quality="q8", progress_callback=lambda msg: print(msg))
 ```
 
 **Available Quality Options by Source:**
@@ -552,10 +503,7 @@ print(f"Voices: {voice_path}")
 from pykokoro import create_tokenizer, TokenizerConfig
 
 # Custom tokenizer config
-tokenizer_config = TokenizerConfig(
-    vocab_path="/path/to/vocab.txt",
-    espeak_config=espeak_config
-)
+tokenizer_config = TokenizerConfig(vocab_path="/path/to/vocab.txt", espeak_config=espeak_config)
 
 tokenizer = create_tokenizer(config=tokenizer_config)
 ```
@@ -571,7 +519,7 @@ config = TokenizerConfig(
     enable_mixed_language=True,
     primary_language="en-us",
     allowed_languages=["en-us", "es", "fr"],
-    language_confidence_threshold=0.7
+    language_confidence_threshold=0.7,
 )
 
 tokenizer = create_tokenizer(config=config)
@@ -633,11 +581,7 @@ For phrase-based short-sentence handling, prefer these voices in order: `am_sant
 from pykokoro import save_config, load_config
 
 # Save configuration
-config = {
-    "default_voice": "af_bella",
-    "default_speed": 1.0,
-    "model_quality": "q8"
-}
+config = {"default_voice": "af_bella", "default_speed": 1.0, "model_quality": "q8"}
 save_config(config, "my_config.json")
 
 # Load configuration
@@ -740,12 +684,10 @@ from pykokoro.audio_generator import AudioGenerator
 session_manager = OnnxSessionManager(
     device="cuda",
     providers=["CUDAExecutionProvider"],
-    user_session_options={"intra_op_num_threads": 4}
+    user_session_options={"intra_op_num_threads": 4},
 )
 
-session = session_manager.create_session(
-    model_path="/path/to/model.onnx"
-)
+session = session_manager.create_session(model_path="/path/to/model.onnx")
 
 # Load voices with custom blend
 voice_manager = VoiceManager(model_source="huggingface")
@@ -753,16 +695,10 @@ voice_manager.load_voices("/path/to/voices.bin")
 voice_data = voice_manager.get_blended_voice("af_bella*0.7 + af_sarah*0.3")
 
 # Generate audio
-audio_gen = AudioGenerator(
-    session=session,
-    sample_rate=24000,
-    lang="en-us"
-)
+audio_gen = AudioGenerator(session=session, sample_rate=24000, lang="en-us")
 
 audio = audio_gen.generate_audio_from_phonemes(
-    phonemes="həˈloʊ wɝld",
-    voice_data=voice_data,
-    speed=1.0
+    phonemes="həˈloʊ wɝld", voice_data=voice_data, speed=1.0
 )
 ```
 
@@ -788,6 +724,7 @@ loaded_dict = PhonemeDictionary.load("custom_pronunciations.json")
 
 # Apply to tokenizer
 from pykokoro import create_tokenizer
+
 tokenizer = create_tokenizer()
 tokenizer.phoneme_dictionary = loaded_dict
 

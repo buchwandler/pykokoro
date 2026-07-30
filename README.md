@@ -129,6 +129,7 @@ New:
 
 ```python
 from pykokoro import KokoroPipeline, PipelineConfig
+
 pipe = KokoroPipeline(PipelineConfig(voice="af"))
 res = pipe.run("Hello")
 audio = res.audio
@@ -165,13 +166,13 @@ res = pipe.run("Hello")
 # Force specific provider
 from pykokoro import KokoroPipeline, PipelineConfig
 
-pipe = KokoroPipeline(PipelineConfig(provider="cuda", voice="af_sarah"))      # NVIDIA CUDA
-pipe = KokoroPipeline(PipelineConfig(provider="nnapi", voice="af_sarah"))     # Android NNAPI
-pipe = KokoroPipeline(PipelineConfig(provider="xnnpack", voice="af_sarah"))   # XNNPACK
+pipe = KokoroPipeline(PipelineConfig(provider="cuda", voice="af_sarah"))  # NVIDIA CUDA
+pipe = KokoroPipeline(PipelineConfig(provider="nnapi", voice="af_sarah"))  # Android NNAPI
+pipe = KokoroPipeline(PipelineConfig(provider="xnnpack", voice="af_sarah"))  # XNNPACK
 pipe = KokoroPipeline(PipelineConfig(provider="openvino", voice="af_sarah"))  # Intel OpenVINO
 pipe = KokoroPipeline(PipelineConfig(provider="directml", voice="af_sarah"))  # Windows DirectML
-pipe = KokoroPipeline(PipelineConfig(provider="coreml", voice="af_sarah"))    # Apple CoreML
-pipe = KokoroPipeline(PipelineConfig(provider="cpu", voice="af_sarah"))       # CPU only
+pipe = KokoroPipeline(PipelineConfig(provider="coreml", voice="af_sarah"))  # Apple CoreML
+pipe = KokoroPipeline(PipelineConfig(provider="cpu", voice="af_sarah"))  # CPU only
 ```
 
 ### Check Available Providers
@@ -320,9 +321,9 @@ config = PipelineConfig(
     voice="am_michael",
     generation=GenerationConfig(
         pause_mode="manual",
-        pause_clause=0.2,      # ...c = 200ms
-        pause_sentence=0.5,    # ...s = 500ms
-        pause_paragraph=1.5,   # ...p = 1500ms
+        pause_clause=0.2,  # ...c = 200ms
+        pause_sentence=0.5,  # ...s = 500ms
+        pause_paragraph=1.5,  # ...p = 1500ms
     ),
 )
 pipe = KokoroPipeline(config)
@@ -353,11 +354,11 @@ config = PipelineConfig(
     voice="af_sarah",
     generation=GenerationConfig(
         pause_mode="auto",
-        pause_clause=0.25,        # Pause after clauses (commas)
-        pause_sentence=0.5,       # Pause after sentences
-        pause_paragraph=1.0,      # Pause after paragraphs
-        pause_variance=0.05,      # Add natural variance (default)
-        random_seed=42,           # For reproducible results (optional)
+        pause_clause=0.25,  # Pause after clauses (commas)
+        pause_sentence=0.5,  # Pause after sentences
+        pause_paragraph=1.0,  # Pause after paragraphs
+        pause_variance=0.05,  # Add natural variance (default)
+        random_seed=42,  # For reproducible results (optional)
     ),
 )
 pipe = KokoroPipeline(config)
@@ -451,11 +452,11 @@ You can switch voices per segment using SSMD directives. Block directives use
 ```python
 text = (
     '<div voice="af_sarah">\n'
-    'Hello there.\n'
-    '</div>\n\n'
+    "Hello there.\n"
+    "</div>\n\n"
     '<div voice="am_michael">\n'
-    'General Kenobi.\n'
-    '</div>'
+    "General Kenobi.\n"
+    "</div>"
 )
 
 pipe = KokoroPipeline(PipelineConfig(voice="af"))
@@ -549,17 +550,13 @@ from pykokoro.generation_config import GenerationConfig
 
 # French cardinal
 text = '[123]{as="cardinal"}'
-pipe = KokoroPipeline(
-    PipelineConfig(voice="ff_siwis", generation=GenerationConfig(lang="fr-fr"))
-)
+pipe = KokoroPipeline(PipelineConfig(voice="ff_siwis", generation=GenerationConfig(lang="fr-fr")))
 res = pipe.run(text)
 # TTS says: "cent vingt-trois"
 
 # German ordinal
 text = '[3]{as="ordinal"}'
-pipe = KokoroPipeline(
-    PipelineConfig(voice="gf_maria", generation=GenerationConfig(lang="de-de"))
-)
+pipe = KokoroPipeline(PipelineConfig(voice="gf_maria", generation=GenerationConfig(lang="de-de")))
 res = pipe.run(text)
 # TTS says: "dritte"
 ```
@@ -621,9 +618,7 @@ short_sentence_config = ShortSentenceConfig(
     min_phoneme_length=40,  # Treat segments <40 phoneme tokens as short
 )
 
-pipe = KokoroPipeline(
-    PipelineConfig(voice="af_sarah", short_sentence_config=short_sentence_config)
-)
+pipe = KokoroPipeline(PipelineConfig(voice="af_sarah", short_sentence_config=short_sentence_config))
 res = pipe.run("Why?")
 ```
 
@@ -653,11 +648,9 @@ short_sentence_config = ShortSentenceConfig(
             phrase_selection="end",  # "auto", "neutral", or "end"
         ),
         "randomized-phrase": RandomizedPhraseResolveMode(
-            phrase_selection="neutral", # "auto", "neutral", or "end"
+            phrase_selection="neutral",  # "auto", "neutral", or "end"
         ),
-        "wrap": WrapResolveMode(
-            phoneme_pretext="…"
-        )
+        "wrap": WrapResolveMode(phoneme_pretext="…"),
     },
     resolve_mode="phrase",
     phrase_fallback_tries=10,
@@ -679,9 +672,7 @@ from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.short_sentence_handler import ShortSentenceConfig
 
 short_sentence_config = ShortSentenceConfig(enabled=False)
-pipe = KokoroPipeline(
-    PipelineConfig(voice="af_sarah", short_sentence_config=short_sentence_config)
-)
+pipe = KokoroPipeline(PipelineConfig(voice="af_sarah", short_sentence_config=short_sentence_config))
 res = pipe.run("Why?")
 ```
 
@@ -709,24 +700,22 @@ short_sentence_config = ShortSentenceConfig(
     resolve_modes={
         "phrase": PhraseResolveMode(
             phrase_selection="end",  # "auto", "neutral", or "end"
-            neutral_phrase="The word, {segment}, appears here.", # Changing this to anything not in the default neutral_phrases list is not recommended
-            end_phrase="The word is hello. The word is '{segment}'", # Changing this to anything not in the default end_phrases list is not recommended
+            neutral_phrase="The word, {segment}, appears here.",  # Changing this to anything not in the default neutral_phrases list is not recommended
+            end_phrase="The word is hello. The word is '{segment}'",  # Changing this to anything not in the default end_phrases list is not recommended
         ),
         "randomized-phrase": RandomizedPhraseResolveMode(
-            phrase_selection="neutral", # "auto", "neutral", or "end"
-            neutral_phrases=[ # Adding new untested phrases is not recommended without rigurous testing
+            phrase_selection="neutral",  # "auto", "neutral", or "end"
+            neutral_phrases=[  # Adding new untested phrases is not recommended without rigurous testing
                 "First {segment} is the word.",
                 "Second {segment} is the word.",
                 "Third {segment} is the word.",
                 "Fourth {segment} is the word.",
             ],
-            end_phrases=[ # Adding new untested phrases is not recommended without rigurous testing
+            end_phrases=[  # Adding new untested phrases is not recommended without rigurous testing
                 "First {segment}."
-            ]
+            ],
         ),
-        "wrap": WrapResolveMode(
-            phoneme_pretext="…"
-        )
+        "wrap": WrapResolveMode(phoneme_pretext="…"),
     },
     resolve_mode="phrase",
 )
@@ -943,13 +932,9 @@ from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.tokenizer import TokenizerConfig
 
 # Create config with custom phoneme dictionary
-tokenizer_config = TokenizerConfig(
-    phoneme_dictionary_path="my_pronunciations.json"
-)
+tokenizer_config = TokenizerConfig(phoneme_dictionary_path="my_pronunciations.json")
 
-pipe = KokoroPipeline(
-    PipelineConfig(voice="af_sarah", tokenizer_config=tokenizer_config)
-)
+pipe = KokoroPipeline(PipelineConfig(voice="af_sarah", tokenizer_config=tokenizer_config))
 res = pipe.run("Hello")
 ```
 
@@ -962,12 +947,10 @@ from pykokoro.tokenizer import TokenizerConfig
 tokenizer_config = TokenizerConfig(
     use_mixed_language=True,
     mixed_language_primary="en-us",
-    mixed_language_allowed=["en-us", "de", "fr"]
+    mixed_language_allowed=["en-us", "de", "fr"],
 )
 
-pipe = KokoroPipeline(
-    PipelineConfig(voice="af_sarah", tokenizer_config=tokenizer_config)
-)
+pipe = KokoroPipeline(PipelineConfig(voice="af_sarah", tokenizer_config=tokenizer_config))
 res = pipe.run("Ich gehe zum Meeting")
 ```
 
@@ -1003,9 +986,7 @@ from pykokoro.tokenizer import TokenizerConfig
 tokenizer_config = TokenizerConfig(
     spacy_model="fr_core_news_sm",  # explicit package
 )
-pipe = KokoroPipeline(
-    PipelineConfig(voice="af_sarah", tokenizer_config=tokenizer_config)
-)
+pipe = KokoroPipeline(PipelineConfig(voice="af_sarah", tokenizer_config=tokenizer_config))
 ```
 
 ### Backend Configuration
@@ -1018,10 +999,7 @@ from pykokoro.tokenizer import TokenizerConfig
 
 # Default: Full dictionaries with espeak fallback (best quality)
 tokenizer_config = TokenizerConfig(
-    backend="espeak",
-    load_gold=True,
-    load_silver=True,
-    use_espeak_fallback=True
+    backend="espeak", load_gold=True, load_silver=True, use_espeak_fallback=True
 )
 
 # Memory-optimized: Gold dictionary only
@@ -1029,25 +1007,18 @@ tokenizer_config = TokenizerConfig(
     backend="espeak",
     load_gold=True,
     load_silver=False,  # Saves ~22-31 MB
-    use_espeak_fallback=True
+    use_espeak_fallback=True,
 )
 
 # Fastest initialization: Pure espeak
 tokenizer_config = TokenizerConfig(
-    backend="espeak",
-    load_gold=False,
-    load_silver=False,
-    use_espeak_fallback=True
+    backend="espeak", load_gold=False, load_silver=False, use_espeak_fallback=True
 )
 
 # Alternative backend (requires pygoruut)
-tokenizer_config = TokenizerConfig(
-    backend="goruut"
-)
+tokenizer_config = TokenizerConfig(backend="goruut")
 
-pipe = KokoroPipeline(
-    PipelineConfig(voice="af_sarah", tokenizer_config=tokenizer_config)
-)
+pipe = KokoroPipeline(PipelineConfig(voice="af_sarah", tokenizer_config=tokenizer_config))
 res = pipe.run("Hello")
 ```
 

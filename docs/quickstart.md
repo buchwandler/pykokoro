@@ -86,21 +86,15 @@ Control how fast or slow the speech is:
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 # Normal speed (default)
-pipe = KokoroPipeline(
-    PipelineConfig(voice="af_bella", generation=GenerationConfig(speed=1.0))
-)
+pipe = KokoroPipeline(PipelineConfig(voice="af_bella", generation=GenerationConfig(speed=1.0)))
 audio1 = pipe.run("Normal speed").audio
 
 # Slower (0.5x)
-pipe = KokoroPipeline(
-    PipelineConfig(voice="af_bella", generation=GenerationConfig(speed=0.5))
-)
+pipe = KokoroPipeline(PipelineConfig(voice="af_bella", generation=GenerationConfig(speed=0.5)))
 audio2 = pipe.run("Slower speech").audio
 
 # Faster (1.5x)
-pipe = KokoroPipeline(
-    PipelineConfig(voice="af_bella", generation=GenerationConfig(speed=1.5))
-)
+pipe = KokoroPipeline(PipelineConfig(voice="af_bella", generation=GenerationConfig(speed=1.5)))
 audio3 = pipe.run("Faster speech").audio
 ```
 
@@ -122,6 +116,7 @@ pipe = KokoroPipeline(PipelineConfig(voice="af_bella"))
 result = pipe.run(text)
 
 import soundfile as sf
+
 sf.write("with_pauses.wav", result.audio, result.sample_rate)
 ```
 
@@ -191,6 +186,7 @@ auto_pipe = KokoroPipeline(
 auto_result = auto_pipe.run(long_text)
 
 import soundfile as sf
+
 sf.write("long_text.wav", auto_result.audio, auto_result.sample_rate)
 ```
 
@@ -202,6 +198,7 @@ Here's a complete example putting it all together:
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 import soundfile as sf
 
+
 def text_to_speech(text, output_file, voice="af_bella", speed=1.0):
     """Convert text to speech and save to file."""
     config = PipelineConfig(
@@ -212,6 +209,7 @@ def text_to_speech(text, output_file, voice="af_bella", speed=1.0):
     result = pipe.run(text)
     sf.write(output_file, result.audio, result.sample_rate)
     print(f"Saved audio to {output_file}")
+
 
 # Example usage
 text = """
