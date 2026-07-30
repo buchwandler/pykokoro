@@ -224,9 +224,7 @@ from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.tokenizer import TokenizerConfig
 
 tokenizer_config = TokenizerConfig(spacy_model="fr_core_news_sm")
-pipe = KokoroPipeline(
-    PipelineConfig(voice="af_bella", tokenizer_config=tokenizer_config)
-)
+pipe = KokoroPipeline(PipelineConfig(voice="af_bella", tokenizer_config=tokenizer_config))
 ```
 
 ## Speech Speed Control
