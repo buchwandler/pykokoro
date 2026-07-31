@@ -46,3 +46,51 @@ def test_ssmd_dependency_targets_08_contract() -> None:
         "dependencies"
     ]
     assert "ssmd>=0.8.0,<0.9" in dependencies
+
+
+def test_audiosig_is_the_only_declared_dsp_backend() -> None:
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    dependencies = pyproject["project"]["dependencies"]
+    optional = pyproject["project"]["optional-dependencies"]
+
+    assert "audiosig>=0.1.0,<0.2" in dependencies
+    assert "prosody" not in optional
+
+    requirements = [requirement.lower() for requirement in dependencies]
+    requirements.extend(
+        requirement.lower()
+        for values in optional.values()
+        for requirement in values
+    )
+    forbidden = (
+        "librosa",
+        "scipy",
+        "audiomentations",
+        "signalsmith",
+        "python-stretch",
+        "resampy",
+        "soxr",
+        "torchaudio",
+    )
+    assert not any(name in requirement for requirement in requirements for name in forbidden)
+
+
+def test_production_source_has_no_forbidden_dsp_imports() -> None:
+    forbidden = (
+        "import librosa",
+        "from librosa",
+        "import scipy",
+        "from scipy",
+        "import audiomentations",
+        "from audiomentations",
+        "import signalsmith_stretch",
+        "import python_stretch",
+        "import resampy",
+        "import soxr",
+        "import torchaudio",
+    )
+    source_files = [path for path in (ROOT / "pykokoro").rglob("*.py") if "__pycache__" not in path.parts]
+    matches = [str(path.relative_to(ROOT)) for path in source_files if any(
+        token in path.read_text(encoding="utf-8") for token in forbidden
+    )]
+    assert matches == []

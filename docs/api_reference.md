@@ -225,8 +225,8 @@ without changing generated audio. `"approximate"` applies core volume-only mappi
 (`strong` `+6dB`, `moderate` `+3dB`, `reduced` `-3dB`); explicit prosody values win.
 `"warn"` preserves audio and adds one `ssmd.emphasis_unsupported` warning per logical
 source segment, while `"error"` rejects effectful emphasis before inference. The `none`
-level is always a silent no-op. Approximation does not require the optional `prosody`
-extra.
+level is always a silent no-op. Approximation is processed by the core AudioSig
+dependency; no prosody extra is required.
 
 ## See Also
 

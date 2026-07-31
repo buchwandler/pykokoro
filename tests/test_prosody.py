@@ -4,8 +4,6 @@ import numpy as np
 import pytest
 
 from pykokoro.prosody import (
-    AUDIOMENTATIONS_AVAILABLE,
-    LIBROSA_AVAILABLE,
     apply_pitch,
     apply_prosody,
     apply_rate,
@@ -198,12 +196,8 @@ class TestVolumeApplication:
         np.testing.assert_array_equal(result, audio)
 
 
-@pytest.mark.skipif(
-    not AUDIOMENTATIONS_AVAILABLE and not LIBROSA_AVAILABLE,
-    reason="audiomentations or librosa not available",
-)
 class TestPitchApplication:
-    """Tests for pitch application (requires audiomentations or librosa)."""
+    """Tests for the required AudioSig pitch operation."""
 
     def test_apply_pitch_zero_no_change(self):
         """Test that zero pitch shift doesn't change audio significantly."""
@@ -219,8 +213,7 @@ class TestPitchApplication:
         audio = np.random.randn(1000).astype(np.float32)
         result = apply_pitch(audio, "+2st", 24000)
 
-        # Length should be preserved (or very close)
-        assert abs(len(result) - len(audio)) < 10
+        assert len(result) == len(audio)
 
     def test_apply_pitch_invalid_returns_original(self):
         """Test that invalid pitch returns original audio."""
@@ -229,36 +222,29 @@ class TestPitchApplication:
         np.testing.assert_array_equal(result, audio)
 
 
-@pytest.mark.skipif(
-    not AUDIOMENTATIONS_AVAILABLE and not LIBROSA_AVAILABLE,
-    reason="audiomentations or librosa not available",
-)
 class TestRateApplication:
-    """Tests for rate application (requires audiomentations or librosa)."""
+    """Tests for the required AudioSig time-stretch operation."""
 
     def test_apply_rate_faster_shortens(self):
         """Test that faster rate shortens audio."""
         audio = np.random.randn(1000).astype(np.float32)
         result = apply_rate(audio, "fast")  # 1.25x speed
 
-        # Should be shorter than original (allow reasonable tolerance)
-        assert len(result) < len(audio) * 0.95
+        assert len(result) == round(len(audio) / 1.25)
 
     def test_apply_rate_slower_lengthens(self):
         """Test that slower rate lengthens audio."""
         audio = np.random.randn(1000).astype(np.float32)
         result = apply_rate(audio, "slow")  # 0.75x speed
 
-        # Should be longer than original (allow reasonable tolerance)
-        assert len(result) > len(audio) * 1.05
+        assert len(result) == round(len(audio) / 0.75)
 
     def test_apply_rate_medium_no_change(self):
         """Test that medium rate doesn't change length significantly."""
         audio = np.random.randn(1000).astype(np.float32)
         result = apply_rate(audio, "medium")
 
-        # Length should be very close
-        assert abs(len(result) - len(audio)) < 10
+        assert result is audio
 
     def test_apply_rate_invalid_returns_original(self):
         """Test that invalid rate returns original audio."""
@@ -267,10 +253,6 @@ class TestRateApplication:
         np.testing.assert_array_equal(result, audio)
 
 
-@pytest.mark.skipif(
-    not AUDIOMENTATIONS_AVAILABLE and not LIBROSA_AVAILABLE,
-    reason="audiomentations or librosa not available",
-)
 class TestProsodyApplication:
     """Tests for combined prosody application."""
 
@@ -315,11 +297,11 @@ class TestProsodyApplication:
         assert len(result) < len(audio) * 0.95
 
 
-class TestProsodyWithoutLibrosa:
-    """Tests for prosody when librosa is not available."""
+class TestProsodyAudioSigBoundary:
+    """Tests for AudioSig-backed policy boundaries."""
 
-    def test_volume_works_without_librosa(self):
-        """Test that volume modification works without librosa."""
+    def test_volume_works_with_core_dependency(self):
+        """Volume is available without an optional prosody extra."""
         audio = np.ones(100, dtype=np.float32)
         result = apply_volume(audio, "loud")
 
@@ -327,26 +309,10 @@ class TestProsodyWithoutLibrosa:
         expected_multiplier = 10 ** (6 / 20)
         assert pytest.approx(result[0], abs=0.01) == expected_multiplier
 
-    @pytest.mark.skipif(
-        AUDIOMENTATIONS_AVAILABLE or LIBROSA_AVAILABLE,
-        reason="audiomentations or librosa is available",
-    )
-    def test_pitch_returns_original_without_librosa(self):
-        """Test pitch shift returns original when libraries unavailable."""
+    def test_pitch_preserves_dtype_and_input(self):
         audio = np.random.randn(100).astype(np.float32)
+        original = audio.copy()
         result = apply_pitch(audio, "+2st", 24000)
-
-        # Should return original audio
-        np.testing.assert_array_equal(result, audio)
-
-    @pytest.mark.skipif(
-        AUDIOMENTATIONS_AVAILABLE or LIBROSA_AVAILABLE,
-        reason="audiomentations or librosa is available",
-    )
-    def test_rate_returns_original_without_librosa(self):
-        """Test rate change returns original when libraries unavailable."""
-        audio = np.random.randn(100).astype(np.float32)
-        result = apply_rate(audio, "fast")
-
-        # Should return original audio
-        np.testing.assert_array_equal(result, audio)
+        assert result.dtype == audio.dtype
+        assert len(result) == len(audio)
+        np.testing.assert_array_equal(audio, original)

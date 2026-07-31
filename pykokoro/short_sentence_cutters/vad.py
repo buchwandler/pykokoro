@@ -5,9 +5,9 @@ from __future__ import annotations
 from typing import Any, cast
 
 import numpy as np
+from audiosig import activity_to_intervals, normalized_energy_vad
 
 from pykokoro.constants import SAMPLE_RATE
-from pykokoro.trim import energy_based_vad
 
 from .shared import BoundaryWindows, boundary_windows_from_metadata
 
@@ -38,26 +38,30 @@ def _quiet_runs(
     energy_threshold: float,
     min_silence_seconds: float,
 ) -> list[tuple[int, int]]:
-    speech_frames = energy_based_vad(
+    speech_frames = normalized_energy_vad(
         audio,
         SAMPLE_RATE,
         frame_duration_ms=frame_duration_ms,
         energy_threshold=energy_threshold,
     )
-    quiet_frames = ~speech_frames
     samples_per_frame = max(1, int(SAMPLE_RATE * frame_duration_ms / 1000))
     min_frames = max(1, int(min_silence_seconds * 1000 / frame_duration_ms))
-    runs: list[tuple[int, int]] = []
-    start: int | None = None
-    for index, is_quiet in enumerate(quiet_frames):
-        if is_quiet and start is None:
-            start = index
-        elif not is_quiet and start is not None:
-            if index - start >= min_frames:
-                runs.append((start * samples_per_frame, index * samples_per_frame))
-            start = None
-    if start is not None and len(quiet_frames) - start >= min_frames:
-        runs.append((start * samples_per_frame, len(audio)))
+    intervals = activity_to_intervals(
+        ~speech_frames,
+        hop_length=samples_per_frame,
+        sample_count=len(audio),
+        min_frames=min_frames,
+    )
+    runs = [(int(start), int(end)) for start, end in intervals]
+
+    represented_samples = len(speech_frames) * samples_per_frame
+    if (
+        runs
+        and speech_frames.size
+        and not speech_frames[-1]
+        and runs[-1][1] == represented_samples
+    ):
+        runs[-1] = (runs[-1][0], len(audio))
     return runs
 
 

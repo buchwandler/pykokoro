@@ -146,19 +146,6 @@ result = pipe.run("Hello!")
 sf.write("output.wav", result.audio, result.sample_rate)
 ```
 
-Using scipy:
-
-```python
-from scipy.io import wavfile
-
-from pykokoro import KokoroPipeline, PipelineConfig
-
-pipe = KokoroPipeline(PipelineConfig(voice="af_bella"))
-result = pipe.run("Hello!")
-audio_int16 = (result.audio * 32767).astype("int16")
-wavfile.write("output.wav", result.sample_rate, audio_int16)
-```
-
 ## Voice Selection
 
 Voice names follow the pattern: `{accent}_{gender}_{name}`

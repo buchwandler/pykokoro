@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 import numpy as np
+from audiosig import frame_rms
 
 from pykokoro.constants import SAMPLE_RATE
 
@@ -73,17 +74,15 @@ def find_energy_valley_cut_bounds(
 
 
 def _normalized_frame_energy(audio: np.ndarray, frame_length: int) -> np.ndarray:
-    if audio.size == 0:
-        return np.array([], dtype=np.float32)
-    frame_count = max(1, int(np.ceil(len(audio) / frame_length)))
-    padded = np.zeros(frame_count * frame_length, dtype=np.float32)
-    padded[: len(audio)] = audio.astype(np.float32)
-    frames = padded.reshape(frame_count, frame_length)
-    energy = np.sqrt(np.mean(frames**2, axis=1))
-    span = float(energy.max() - energy.min())
-    if span <= 1e-8:
-        return np.zeros_like(energy)
-    return (energy - energy.min()) / span
+    return frame_rms(
+        audio.astype(np.float32, copy=False),
+        frame_length=frame_length,
+        hop_length=frame_length,
+        center=False,
+        pad_end=True,
+        normalize=True,
+        dtype=np.float32,
+    )
 
 
 def _valley_cut(

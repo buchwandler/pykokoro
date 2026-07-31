@@ -7,7 +7,7 @@ carries the resulting rate, pitch, and volume metadata through the pipeline and
 applies it during audio post-processing.
 
 Requirements:
-    pip install pykokoro[prosody]
+    pip install "pykokoro[cpu]"
 
 Usage:
     python examples/prosody_demo.py

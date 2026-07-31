@@ -1,55 +1,21 @@
-"""Prosody audio processing for PyKokoro.
+"""Prosody audio processing for PyKokoro through AudioSig.
 
 This module provides functions to apply volume, pitch, and rate modifications
 to audio based on SSMD prosody metadata.
-
-Audio Processing Libraries:
-    - audiomentations: Preferred for pitch/rate (highest quality)
-    - librosa: Fallback for pitch/rate
-    - numpy: Volume control (no external dependency)
 
 Supports both absolute values (e.g., 'loud', 'fast', 'high') and relative values
 (e.g., '+6dB', '+20%', '+2st').
 """
 
+from __future__ import annotations
+
 import logging
 import re
-from typing import Any
 
 import numpy as np
+from audiosig import AudioSignalError, apply_gain_db, pitch_shift, time_stretch
 
 from .constants import PITCH_ABSOLUTE_MAP, RATE_ABSOLUTE_MAP, VOLUME_ABSOLUTE_MAP
-
-# Try importing audio processing libraries.  Availability means the concrete
-# operations used by this module can be loaded, not merely that the top-level
-# package exists.
-try:
-    from audiomentations import PitchShift, TimeStretch
-
-    AUDIOMENTATIONS_AVAILABLE = True
-    AUDIOMENTATIONS_IMPORT_ERROR: Exception | None = None
-except (ImportError, AttributeError, RuntimeError, OSError) as exc:
-    PitchShift = None
-    TimeStretch = None
-    AUDIOMENTATIONS_AVAILABLE = False
-    AUDIOMENTATIONS_IMPORT_ERROR = exc
-
-
-def _load_librosa_backend() -> tuple[Any | None, Exception | None]:
-    try:
-        import librosa as module
-
-        # Access lazy attributes now so partially installed librosa packages are
-        # rejected during capability detection instead of failing mid-conversion.
-        for attribute in ("stft", "istft", "phase_vocoder", "resample"):
-            getattr(module, attribute)
-        return module, None
-    except (ImportError, AttributeError, RuntimeError, OSError) as exc:
-        return None, exc
-
-
-librosa, LIBROSA_IMPORT_ERROR = _load_librosa_backend()
-LIBROSA_AVAILABLE = librosa is not None
 
 logger = logging.getLogger(__name__)
 
@@ -175,184 +141,43 @@ def parse_pitch(pitch_str: str) -> float:
 
 
 def apply_volume(audio: np.ndarray, volume: str) -> np.ndarray:
-    """Apply volume change to audio.
-
-    Args:
-        audio: Input audio array
-        volume: Volume specification (see parse_volume for formats)
-
-    Returns:
-        Audio with volume adjustment applied
-    """
+    """Apply an SSMD volume value through AudioSig."""
     try:
         db_change = parse_volume(volume)
-
-        # Handle silent case
-        if db_change == -float("inf"):
-            return np.zeros_like(audio)
-
-        # Convert dB to amplitude multiplier: 10^(dB/20)
-        amplitude_multiplier = 10 ** (db_change / 20.0)
-
-        return audio * amplitude_multiplier
-
-    except ValueError as e:
-        logger.warning(f"Failed to apply volume '{volume}': {e}")
+        if db_change == 0.0:
+            return audio
+        return apply_gain_db(audio, db_change)
+    except (ValueError, AudioSignalError) as exc:
+        logger.warning("Failed to apply volume '%s': %s", volume, exc)
         return audio
-
-
-def _fix_audio_length(audio: np.ndarray, target_length: int) -> np.ndarray:
-    """Crop or zero-pad audio on the final axis to an exact length."""
-    current_length = audio.shape[-1]
-    if current_length == target_length:
-        return audio
-    if current_length > target_length:
-        return audio[..., :target_length]
-    pad_width = [(0, 0)] * audio.ndim
-    pad_width[-1] = (0, target_length - current_length)
-    return np.pad(audio, pad_width)
-
-
-def _librosa_time_stretch(audio: np.ndarray, rate: float) -> np.ndarray:
-    """Time-stretch with librosa primitives that do not import sklearn."""
-    if librosa is None:
-        raise RuntimeError("librosa backend is unavailable")
-    spectrum = librosa.stft(audio)
-    stretched_spectrum = librosa.phase_vocoder(spectrum, rate=rate)
-    target_length = max(1, int(round(audio.shape[-1] / rate)))
-    return librosa.istft(stretched_spectrum, length=target_length)
-
-
-def _librosa_pitch_shift(audio: np.ndarray, sample_rate: int, semitones: float) -> np.ndarray:
-    """Pitch-shift with time stretch plus resampling, preserving duration."""
-    if librosa is None:
-        raise RuntimeError("librosa backend is unavailable")
-    rate = 2.0 ** (-semitones / 12.0)
-    stretched = _librosa_time_stretch(audio, rate)
-    shifted = librosa.resample(
-        stretched,
-        orig_sr=float(sample_rate) / rate,
-        target_sr=sample_rate,
-        res_type="scipy",
-    )
-    return _fix_audio_length(shifted, audio.shape[-1])
 
 
 def apply_pitch(audio: np.ndarray, pitch: str, sample_rate: int) -> np.ndarray:
-    """Apply pitch shift to audio using audiomentations or librosa.
-
-    Prefers audiomentations for higher quality, falls back to librosa.
-
-    Args:
-        audio: Input audio array
-        pitch: Pitch specification (see parse_pitch for formats)
-        sample_rate: Audio sample rate in Hz
-
-    Returns:
-        Audio with pitch shift applied
-    """
-    if not AUDIOMENTATIONS_AVAILABLE and not LIBROSA_AVAILABLE:
-        logger.warning(
-            "audiomentations/librosa not available, pitch shifting disabled. "
-            "Install with: pip install pykokoro[prosody]"
-        )
-        return audio
-
+    """Apply an SSMD pitch value through AudioSig."""
     try:
         semitones = parse_pitch(pitch)
-
-        # No change needed
         if abs(semitones) < 0.01:
             return audio
-
-        # Use audiomentations if available (higher quality)
-        if AUDIOMENTATIONS_AVAILABLE:
-            augmenter = PitchShift(
-                min_semitones=semitones,
-                max_semitones=semitones,
-                p=1.0,
-            )
-            shifted = augmenter(samples=audio, sample_rate=sample_rate)
-            return shifted.astype(audio.dtype)
-
-        # Fall back to librosa
-        if LIBROSA_AVAILABLE:
-            shifted = _librosa_pitch_shift(audio, sample_rate, semitones)
-            return shifted.astype(audio.dtype)
-
-        return audio
-
-    except ValueError as e:
-        logger.warning(f"Failed to apply pitch '{pitch}': {e}")
-        return audio
-    except (ImportError, AttributeError, RuntimeError, OSError) as e:
-        logger.warning(f"Pitch shift failed for '{pitch}': {e}")
+        return pitch_shift(
+            audio,
+            sample_rate=sample_rate,
+            semitones=semitones,
+        )
+    except (ValueError, AudioSignalError) as exc:
+        logger.warning("Failed to apply pitch '%s': %s", pitch, exc)
         return audio
 
 
 def apply_rate(audio: np.ndarray, rate: str, sample_rate: int = 24000) -> np.ndarray:
-    """Apply speed/rate change to audio using audiomentations or librosa.
-
-    Prefers audiomentations with signalsmith_stretch for highest quality,
-    falls back to librosa.
-
-    Args:
-        audio: Input audio array
-        rate: Rate specification (see parse_rate for formats)
-        sample_rate: Audio sample rate in Hz (default: 24000)
-
-    Returns:
-        Audio with speed adjustment applied (length will change)
-    """
-    if not AUDIOMENTATIONS_AVAILABLE and not LIBROSA_AVAILABLE:
-        logger.warning(
-            "audiomentations/librosa not available, rate adjustment disabled. "
-            "Install with: pip install pykokoro[prosody]"
-        )
-        return audio
-
+    """Apply a pitch-preserving SSMD rate value through AudioSig."""
+    del sample_rate  # Kept for public API compatibility.
     try:
         speed_multiplier = parse_rate(rate)
-
-        # No change needed
         if abs(speed_multiplier - 1.0) < 0.01:
             return audio
-
-        # Use audiomentations with signalsmith_stretch (highest quality)
-        if AUDIOMENTATIONS_AVAILABLE:
-            try:
-                augmenter = TimeStretch(
-                    min_rate=speed_multiplier,
-                    max_rate=speed_multiplier,
-                    leave_length_unchanged=False,
-                    p=1.0,
-                )
-                stretched = augmenter(samples=audio, sample_rate=sample_rate)
-                return stretched.astype(audio.dtype)
-            except (
-                ImportError,
-                AttributeError,
-                RuntimeError,
-                OSError,
-                ValueError,
-            ) as e:
-                logger.debug(
-                    "Audiomentations TimeStretch failed, falling back to librosa: %s",
-                    e,
-                )
-
-        # Fall back to librosa
-        if LIBROSA_AVAILABLE:
-            stretched = _librosa_time_stretch(audio, speed_multiplier)
-            return stretched.astype(audio.dtype)
-
-        return audio
-
-    except ValueError as e:
-        logger.warning(f"Failed to apply rate '{rate}': {e}")
-        return audio
-    except (ImportError, AttributeError, RuntimeError, OSError) as e:
-        logger.warning(f"Rate adjustment failed for '{rate}': {e}")
+        return time_stretch(audio, speed_multiplier)
+    except (ValueError, AudioSignalError) as exc:
+        logger.warning("Failed to apply rate '%s': %s", rate, exc)
         return audio
 
 

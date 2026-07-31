@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from audiosig import AudioSignalError
+
 from ...audio_generator import resolve_audio_annotation
 from ...onnx_backend import Kokoro
 from ...types import PhonemeSegment, Trace
@@ -49,6 +51,6 @@ class OnnxAudioPostprocessingAdapter:
                     max_bytes=cfg.ssmd.audio_max_bytes,
                     max_duration_s=cfg.ssmd.audio_max_duration_s,
                 )
-            except (OSError, TypeError, ValueError) as exc:
+            except (OSError, TypeError, ValueError, AudioSignalError) as exc:
                 trace.warnings.append(f"ssmd.audio_fallback: {exc}")
         return self._kokoro.concatenate_audio_segments(processed)

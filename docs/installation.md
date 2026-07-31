@@ -70,20 +70,21 @@ pip install onnxruntime-gpu==1.19.2  # or your preferred version
 
 Core dependencies (automatically installed):
 
-- `numpy` - Array operations
-- `onnxruntime` - Model inference
-- `espeak-ng` - Phoneme generation (via `piper-phonemize`)
-- `piper-phonemize` - Text-to-phoneme conversion
-- `requests` - Model downloading
-- `tqdm` - Progress bars
-- `kokorog2p` - Enhanced phoneme dictionary
+- `kokorog2p` - Text-to-phoneme conversion
 - `phrasplit` - Intelligent text splitting
+- `numpy` - Model tensors, voice vectors, and array operations
+- `audiosig` - Audio signal processing for trim, VAD, resampling, gain, pitch, and rate
+- `soundfile` - Audio file I/O
+- `platformdirs`, `chardet`, `charset-normalizer`, `huggingface-hub`, `ssmd`, `num2words`,
+  `babel`, and `typing_extensions` - runtime support
 
 Optional dependencies:
 
-- `soundfile` - For saving audio to WAV files (recommended)
 - `onnxruntime-gpu` - For GPU acceleration
 - `spacy` - For sentence/clause splitting and spaCy-aware G2P tokenization
+
+SSMD volume, pitch, and rate processing is provided by core AudioSig. No librosa,
+SciPy, audiomentations, signalsmith-stretch, or Python-stretch package is required.
 
 ### Installing espeak-ng
 

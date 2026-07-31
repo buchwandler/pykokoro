@@ -10,6 +10,8 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
+from audiosig import apply_gain_db, resample, resample_speed
+from audiosig import trim as trim_audio
 
 from .constants import MAX_PHONEME_LENGTH, SAMPLE_RATE
 from .exceptions import ConfigurationError
@@ -21,7 +23,6 @@ from .short_sentence_handler import (
     cut_short_sentence_phrase_audio,
 )
 from .tokenizer import Tokenizer
-from .trim import trim as trim_audio
 from .types import PhonemeSegment
 from .utils import generate_silence
 from .voice_manager import normalize_voice_style
@@ -80,9 +81,7 @@ def resolve_audio_annotation(
         if match is None or float(match.group(1)) <= 0:
             raise ValueError(f"invalid audio speed {speed!r}")
         factor = float(match.group(1)) / 100.0
-        target_length = max(1, round(len(audio) / factor))
-        positions = np.linspace(0, max(0, len(audio) - 1), target_length)
-        audio = np.interp(positions, np.arange(len(audio)), audio).astype(np.float32)
+        audio = resample_speed(audio, factor)
 
     repeat = metadata.get("audio_repeat_count")
     if repeat:
@@ -97,12 +96,14 @@ def resolve_audio_annotation(
         match = re.fullmatch(r"\s*([+-]?\d+(?:\.\d+)?)\s*dB\s*", str(level), re.I)
         if match is None:
             raise ValueError(f"invalid audio level {level!r}")
-        audio = audio * (10.0 ** (float(match.group(1)) / 20.0))
+        audio = apply_gain_db(audio, float(match.group(1)))
 
     if source_rate != sample_rate and audio.size:
-        target_length = max(1, round(len(audio) * sample_rate / source_rate))
-        positions = np.linspace(0, max(0, len(audio) - 1), target_length)
-        audio = np.interp(positions, np.arange(len(audio)), audio).astype(np.float32)
+        audio = resample(
+            audio,
+            source_rate=source_rate,
+            target_rate=sample_rate,
+        )
     if len(audio) > round(max_duration_s * sample_rate):
         raise ValueError("resolved audio exceeds configured duration limit")
     return audio.astype(np.float32, copy=False)

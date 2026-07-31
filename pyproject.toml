@@ -25,6 +25,7 @@ dependencies = [
     "kokorog2p[espeak,en]>=0.6.6",
     "phrasplit>=0.3.1",
     "numpy",
+    "audiosig>=0.1.0,<0.2",
     "platformdirs",
     "chardet",
     "charset-normalizer",
@@ -68,10 +69,6 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.0.0",
 ]
-prosody = [
-    "audiomentations>=0.36.0",  # Primary, highest quality
-    "librosa>=0.10.0",          # Fallback
-]
 cpu = ["onnxruntime>=1.17.0"]
 gpu = ["onnxruntime-gpu>=1.17.0"]
 openvino = ["onnxruntime-openvino>=1.17.0"]
@@ -79,8 +76,6 @@ directml = ["onnxruntime-directml>=1.17.0"]
 coreml = ["onnxruntime>=1.17.0", "coremltools>=7.0"]
 sounddevice = ["sounddevice"]
 all = [
-    "audiomentations>=0.36.0",
-    "librosa>=0.10.0",
     "sounddevice",
 ]
 

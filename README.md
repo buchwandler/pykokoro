@@ -36,8 +36,8 @@ pip install "pykokoro[cpu]"
 
 The ONNX Runtime distributions are alternatives. Install exactly one provider extra for
 inference: `cpu`, `gpu`, `openvino`, or `directml`. The `coreml` extra uses the macOS
-CPU distribution plus CoreML tooling. The `all` extra only adds optional audio features
-and never installs multiple ONNX Runtime wheels.
+CPU distribution plus CoreML tooling. The `all` extra adds optional playback support
+(`sounddevice`) and never installs multiple ONNX Runtime wheels.
 
 ### GPU and Accelerator Support
 
@@ -463,8 +463,10 @@ surprisingly. The policy modes are:
 
 `emphasis="none"` means ordinary speech and is accepted silently in every mode. Explicit
 `volume`, `rate`, or `pitch` metadata takes precedence over approximation. Approximation
-uses the core NumPy volume path and does not require the optional `prosody` audio
-backends.
+uses the core AudioSig dependency for gain, pitch, and rate processing; no optional
+prosody extra is required. SSMD volume, pitch, and rate processing is available in the
+core package through AudioSig. No librosa, SciPy, audiomentations, signalsmith-stretch,
+or Python-stretch installation is required.
 
 To request audible approximation explicitly:
 
