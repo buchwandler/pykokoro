@@ -2218,10 +2218,16 @@ class Kokoro:
         )
 
     def close(self) -> None:
-        """Clean up resources."""
-        if self._voice_db is not None:
-            self._voice_db.close()
-            self._voice_db = None
+        """Release database, tokenizer, voice, generator, and ONNX resources."""
+        voice_db, self._voice_db = getattr(self, "_voice_db", None), None
+
+        self._audio_generator = None
+        self._tokenizer = None
+        self._voice_manager = None
+        self._session = None
+
+        if voice_db is not None:
+            voice_db.close()
 
 
 def is_chinese_language(lang: str) -> bool:

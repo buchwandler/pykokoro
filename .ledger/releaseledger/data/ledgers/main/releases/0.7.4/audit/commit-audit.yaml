@@ -1,0 +1,208 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: 0.7.4
+git_base_ref: v0.7.2
+git_base_sha: 1fb940367d131b95644fdd8b35e24cf9f6118953
+git_head_ref: v0.7.4
+git_head_sha: 5eb1869636371065c626ef9194722c9aa896e24d
+git_range: 1fb940367d131b95644fdd8b35e24cf9f6118953..5eb1869636371065c626ef9194722c9aa896e24d
+commit_count: 8
+rows:
+- sha: 83ea8018377aac3e282aa5a3285e80403fd97794
+  source_ref: git:83ea8018377aac3e282aa5a3285e80403fd97794
+  short_sha: 83ea801
+  changed_paths:
+  - .ledger/releaseledger/data/ledgers/main/releases/0.7.2/entries/entry-0001.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.7.2/entries/entry-0002.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.7.2/entries/entry-0003.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.7.2/release.md
+  - docs/changelog.md
+  stats:
+    files_changed: 0
+    insertions: 11
+    deletions: 17
+  inspected: true
+  inspected_paths:
+  - .ledger/releaseledger/data/ledgers/main/releases/0.7.2/release.md
+  - docs/changelog.md
+  observed_behavior: Releaseledger metadata and generated changelog formatting were
+    normalized without changing product behavior.
+  public_impact: internal
+  decision: internal
+  evidence_subject: 'doc: remove stale section'
+  target_entry_id: entry-0001
+- sha: 618fbbf78ca53557882c8c84e431550dc9ad11b5
+  source_ref: git:618fbbf78ca53557882c8c84e431550dc9ad11b5
+  short_sha: 618fbbf
+  changed_paths:
+  - pykokoro/prosody.py
+  - pykokoro/ssmd_config.py
+  - pykokoro/stages/audio_postprocessing/onnx.py
+  - tests/test_emphasis_plain_and_prosody_probe.py
+  stats:
+    files_changed: 0
+    insertions: 215
+    deletions: 16
+  inspected: true
+  inspected_paths:
+  - pykokoro/ssmd_config.py
+  - pykokoro/prosody.py
+  - pykokoro/stages/audio_postprocessing/onnx.py
+  - tests/test_emphasis_plain_and_prosody_probe.py
+  observed_behavior: SSMD emphasis now defaults to metadata-preserving plain speech,
+    while optional approximate volume/pitch/rate processing remains available with
+    more robust optional-backend detection and audio-length handling.
+  public_impact: public
+  decision: accepted
+  evidence_subject: 'feat: use plain ssmd emphasis as default'
+  target_entry_id: entry-0002
+- sha: a12ff7a445851791d9895b4667eef9891a14bb2d
+  source_ref: git:a12ff7a445851791d9895b4667eef9891a14bb2d
+  short_sha: a12ff7a
+  changed_paths:
+  - .codecrate.toml
+  - .github/workflows/python-publish.yml
+  - .github/workflows/tests.yml
+  - .ledger/releaseledger/data/ledgers/main/events/events.jsonl
+  - .ledger/releaseledger/data/ledgers/main/releases/0.7.3/entries/entry-0001.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.7.3/entries/entry-0002.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.7.3/entries/entry-0003.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.7.3/release.md
+  - README.md
+  - docs/api_reference.md
+  - docs/basic_usage.md
+  - docs/changelog.md
+  - docs/pipeline_stages.md
+  - docs/quickstart.md
+  - examples/ssmd_demo.py
+  - pykokoro/constants.py
+  - pykokoro/emphasis.py
+  - pykokoro/pipeline.py
+  - pykokoro/prosody.py
+  - pykokoro/py.typed
+  - pykokoro/ssmd_config.py
+  - pykokoro/stages/audio_postprocessing/onnx.py
+  - pyproject.toml
+  - tests/test_emphasis_plain_and_prosody_probe.py
+  - tests/test_emphasis_policy.py
+  - tests/test_prosody_backends.py
+  stats:
+    files_changed: 0
+    insertions: 641
+    deletions: 129
+  inspected: true
+  inspected_paths:
+  - pykokoro/emphasis.py
+  - pykokoro/ssmd_config.py
+  - pykokoro/stages/audio_postprocessing/onnx.py
+  - README.md
+  - docs/api_reference.md
+  - tests/test_emphasis_policy.py
+  observed_behavior: SSMD emphasis policy, diagnostics, and documentation were expanded
+    so unsupported effectful emphasis can be preserved, warned, approximated, or rejected
+    explicitly before inference.
+  public_impact: public
+  decision: accepted
+  evidence_subject: 'feat: prepare release and better emphasis settings'
+  target_entry_id: entry-0003
+- sha: 1df79e5cda7bb7fa38e51b7f47ea021f798f967a
+  source_ref: git:1df79e5cda7bb7fa38e51b7f47ea021f798f967a
+  short_sha: 1df79e5
+  changed_paths:
+  - docs/basic_usage.md
+  stats:
+    files_changed: 0
+    insertions: 1
+    deletions: 3
+  inspected: true
+  inspected_paths:
+  - docs/basic_usage.md
+  observed_behavior: The basic usage documentation was corrected to show the supported
+    tokenizer configuration example.
+  public_impact: docs
+  decision: accepted
+  evidence_subject: 'fix: docs'
+  target_entry_id: entry-0004
+- sha: aced9bc04a6c9682a59231a73ded47190d6ffb28
+  source_ref: git:aced9bc04a6c9682a59231a73ded47190d6ffb28
+  short_sha: aced9bc
+  changed_paths:
+  - README.md
+  - docs/advanced_features.md
+  - docs/index.md
+  - docs/installation.md
+  - docs/quickstart.md
+  stats:
+    files_changed: 0
+    insertions: 106
+    deletions: 198
+  inspected: true
+  inspected_paths:
+  - README.md
+  - docs/advanced_features.md
+  - docs/index.md
+  - docs/installation.md
+  - docs/quickstart.md
+  observed_behavior: Documentation examples and formatting were updated across the
+    user guides without changing the library API or runtime behavior.
+  public_impact: docs
+  decision: accepted
+  evidence_subject: 'fix: pytest'
+  target_entry_id: entry-0005
+- sha: c8f58adc41cabd9504311bc8341b6a7ed222add2
+  source_ref: git:c8f58adc41cabd9504311bc8341b6a7ed222add2
+  short_sha: c8f58ad
+  changed_paths:
+  - .github/workflows/tests.yml
+  stats:
+    files_changed: 0
+    insertions: 0
+    deletions: 4
+  inspected: true
+  inspected_paths:
+  - .github/workflows/tests.yml
+  observed_behavior: CI workflow checks were adjusted by removing duplicate lint and
+    format jobs from the matrix workflow.
+  public_impact: internal
+  decision: internal
+  evidence_subject: 'chore: fix ci'
+  target_entry_id: entry-0006
+- sha: 578ea30580a7da6df0fafdb690344399038f54a5
+  source_ref: git:578ea30580a7da6df0fafdb690344399038f54a5
+  short_sha: 578ea30
+  changed_paths:
+  - .github/workflows/tests.yml
+  stats:
+    files_changed: 0
+    insertions: 0
+    deletions: 2
+  inspected: true
+  inspected_paths:
+  - .github/workflows/tests.yml
+  observed_behavior: CI workflow checks were adjusted by removing a duplicate typing
+    job from the matrix workflow.
+  public_impact: internal
+  decision: internal
+  evidence_subject: 'chore: fix mypy'
+  target_entry_id: entry-0007
+- sha: 5eb1869636371065c626ef9194722c9aa896e24d
+  source_ref: git:5eb1869636371065c626ef9194722c9aa896e24d
+  short_sha: 5eb1869
+  changed_paths:
+  - .github/workflows/python-publish.yml
+  stats:
+    files_changed: 0
+    insertions: 18
+    deletions: 63
+  inspected: true
+  inspected_paths:
+  - .github/workflows/python-publish.yml
+  observed_behavior: The package publication workflow was simplified to build and
+    publish from a GitHub Release using the repository's current action versions.
+  public_impact: internal
+  decision: internal
+  evidence_subject: 'fix: ci'
+  target_entry_id: entry-0008

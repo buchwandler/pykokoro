@@ -62,6 +62,18 @@ print(result.sample_rate)
    :show-inheritance:
 ```
 
+`AudioResult` owns references to its final waveform and any raw or processed per-segment
+waveforms. `AudioResult.release_segment_audio()` destructively and idempotently releases
+only segment arrays, while `AudioResult.release_audio()` also replaces the final
+waveform with an empty array of the same dtype. Metadata, markers, trace data, segments,
+and sample rate remain available. Callers should copy or retain `result.audio`
+separately before releasing it if they need that array afterward.
+
+Set `PipelineConfig(retain_segment_audio=False)` for compact results when segment
+waveforms are not needed. This reduces retained memory after generation, but
+whole-result concatenation still occurs and peak memory remains dependent on input
+duration. A future streaming API is required for bounded peak memory.
+
 ### Segment
 
 ```{eval-rst}

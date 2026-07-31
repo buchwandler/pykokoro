@@ -96,6 +96,37 @@ res = pipe.run("Hello")
 audio = res.audio
 ```
 
+### Managing Result Memory
+
+By default, `AudioResult` retains the raw and processed waveform for each phoneme
+segment for diagnostics and callers that inspect segment audio. For long documents,
+enable compact result retention when only the final waveform and metadata are needed:
+
+```python
+from pykokoro import PipelineConfig, build_pipeline
+
+pipeline = build_pipeline(
+    config=PipelineConfig(
+        voice="af_heart",
+        retain_segment_audio=False,
+    )
+)
+
+result = pipeline.run("Long text")
+result.save_wav("chapter.wav")
+result.release_audio()
+pipeline.close()
+```
+
+Compact mode reduces memory retained by the completed result after generation; it does
+not make peak memory independent of input duration because the pipeline still builds the
+whole-result concatenated waveform. Use `result.release_segment_audio()` to retain the
+final waveform while dropping per-segment arrays, or `result.release_audio()` to drop
+both. These methods only release references owned by the result, so arrays held
+separately by callers remain valid. Callers that need raw or processed segment waveforms
+should keep `retain_segment_audio=True`. Bounded peak memory requires a future streaming
+API.
+
 ## Pipeline Stages
 
 The pipeline is built from composable stages so you can swap behavior without rewriting

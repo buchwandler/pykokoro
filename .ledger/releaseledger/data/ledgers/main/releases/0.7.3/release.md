@@ -3,14 +3,14 @@ schema_version: 2
 object_type: release
 versioning:
   schema_version: 1
-  revision: 4
+  revision: 5
 version: 0.7.3
-status: candidate
+status: canceled
 title: Release 0.7.3
 released_at: null
 previous_version: 0.7.2
-cancel_reason: null
-superseded_by: null
+cancel_reason: Never shipped because of a build issue; superseded by shipped v0.7.4.
+superseded_by: 0.7.4
 changelog_file: null
 boundary_ref: null
 source_refs:

@@ -47,6 +47,7 @@ class PipelineConfig:
 
     # Behavior toggles
     return_trace: bool = False
+    retain_segment_audio: bool = True
     enable_deprecation_warnings: bool = False
 
     # Caching

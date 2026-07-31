@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from pykokoro.generation_config import GenerationConfig
+from pykokoro.onnx_backend import Kokoro
 from pykokoro.pipeline import KokoroPipeline
 from pykokoro.pipeline_config import PipelineConfig
 from pykokoro.stages.audio_generation.onnx import OnnxAudioGenerationAdapter
@@ -151,3 +152,43 @@ def test_phoneme_processor_passes_random_seed_to_short_sentence_preprocess():
     pipeline.run("Hello")
 
     assert shared.random_seed == 42
+
+
+def test_kokoro_close_clears_all_resources_and_closes_database_once():
+    class FakeDatabase:
+        def __init__(self) -> None:
+            self.close_calls = 0
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+    database = FakeDatabase()
+    kokoro = object.__new__(Kokoro)
+    kokoro._voice_db = database
+    kokoro._audio_generator = object()
+    kokoro._tokenizer = object()
+    kokoro._voice_manager = object()
+    kokoro._session = object()
+
+    kokoro.close()
+    kokoro.close()
+
+    assert database.close_calls == 1
+    assert kokoro._voice_db is None
+    assert kokoro._audio_generator is None
+    assert kokoro._tokenizer is None
+    assert kokoro._voice_manager is None
+    assert kokoro._session is None
+
+
+def test_kokoro_close_is_safe_after_partial_initialization():
+    kokoro = object.__new__(Kokoro)
+    kokoro._session = object()
+
+    kokoro.close()
+
+    assert kokoro._voice_db is None
+    assert kokoro._audio_generator is None
+    assert kokoro._tokenizer is None
+    assert kokoro._voice_manager is None
+    assert kokoro._session is None

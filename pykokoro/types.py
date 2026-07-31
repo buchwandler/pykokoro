@@ -135,6 +135,15 @@ class Trace:
 
 @dataclass
 class AudioResult:
+    """Generated audio and its diagnostic metadata.
+
+    The result owns references to its final waveform and per-segment audio arrays.
+    Callers may retain or copy ``audio`` before using :meth:`release_audio`, which is
+    destructive for this result object. Segment audio may be absent when compact
+    retention is enabled; callers that need raw or processed segment waveforms must
+    keep ``PipelineConfig.retain_segment_audio=True``.
+    """
+
     audio: np.ndarray
     sample_rate: int
     segments: list[Segment] = field(default_factory=list)
@@ -142,6 +151,27 @@ class AudioResult:
     trace: Trace | None = None
     document_metadata: dict[str, Any] = field(default_factory=dict)
     markers: list[dict[str, Any]] = field(default_factory=list)
+
+    def release_segment_audio(self) -> None:
+        """Release per-segment raw and processed audio arrays.
+
+        This operation is destructive and idempotent. Segment structure, phonemes,
+        tokens, metadata, trace data, and markers remain available.
+        """
+        for segment in self.phoneme_segments:
+            segment.raw_audio = None
+            segment.processed_audio = None
+
+    def release_audio(self) -> None:
+        """Release the final waveform and all per-segment audio arrays.
+
+        This operation is destructive and idempotent. After it returns, ``save_wav``
+        and ``play`` have no waveform to consume. Independently held array references
+        remain valid because only references owned by this result are replaced.
+        """
+        dtype = self.audio.dtype if isinstance(self.audio, np.ndarray) else np.dtype(np.float32)
+        self.audio = np.empty(0, dtype=dtype)
+        self.release_segment_audio()
 
     def save_wav(self, path: str) -> None:
         import soundfile as sf

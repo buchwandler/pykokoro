@@ -511,7 +511,8 @@ class KokoroPipeline:
             logger.debug("Postprocessing %d phoneme segments", len(phoneme_segments))
             audio = audio_postprocessor.postprocess(phoneme_segments, cfg, trace)
 
-        return AudioResult(
+        markers = _collect_marker_offsets(doc.boundary_events, phoneme_segments)
+        result = AudioResult(
             audio=audio,
             sample_rate=SAMPLE_RATE,
             segments=segments,
@@ -522,8 +523,11 @@ class KokoroPipeline:
                 "voice_bindings": _copy_metadata_value(doc.header.get("voice_bindings", {})),
                 "pause_defaults": _copy_metadata_value(doc.header.get("pause_defaults", {})),
             },
-            markers=_collect_marker_offsets(doc.boundary_events, phoneme_segments),
+            markers=markers,
         )
+        if not cfg.retain_segment_audio:
+            result.release_segment_audio()
+        return result
 
     def __call__(self, text: str, **overrides: Any) -> AudioResult:
         return self.run(text, **overrides)
