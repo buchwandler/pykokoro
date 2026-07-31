@@ -30,6 +30,7 @@ from .voice_manager import normalize_voice_style
 if TYPE_CHECKING:
     import onnxruntime as rt
 
+    from .prosody_config import ProsodyConfig
     from .short_sentence_handler import ShortSentenceConfig
 
 logger = logging.getLogger(__name__)
@@ -736,7 +737,10 @@ class AudioGenerator:
         return None
 
     def _postprocess_audio_segments(
-        self, segments: list[PhonemeSegment], trim_silence: bool
+        self,
+        segments: list[PhonemeSegment],
+        trim_silence: bool,
+        prosody_config: ProsodyConfig | None = None,
     ) -> list[PhonemeSegment]:
         for segment in segments:
             if segment.raw_audio is None:
@@ -760,7 +764,7 @@ class AudioGenerator:
                 or (segment.ssmd_metadata or {}).get("deterministic_pause_boundary") == "true"
             ):
                 audio, _ = trim_audio(audio)
-            segment.processed_audio = self._apply_segment_prosody(audio, segment)
+            segment.processed_audio = self._apply_segment_prosody(audio, segment, prosody_config)
 
         return segments
 
@@ -786,6 +790,7 @@ class AudioGenerator:
         voice_resolver: Callable[[str], np.ndarray] | None = None,
         enable_short_sentence_override: bool | None = None,
         random_seed: int | None = None,
+        prosody_config: ProsodyConfig | None = None,
     ) -> np.ndarray:
         """Generate audio from list of PhonemeSegment instances.
 
@@ -821,10 +826,15 @@ class AudioGenerator:
         generated = self._generate_raw_audio_segments(
             preprocessed, voice_style, speed, voice_resolver
         )
-        processed = self._postprocess_audio_segments(generated, trim_silence)
+        processed = self._postprocess_audio_segments(generated, trim_silence, prosody_config)
         return self._concatenate_audio_segments(processed)
 
-    def _apply_segment_prosody(self, audio: np.ndarray, segment: PhonemeSegment) -> np.ndarray:
+    def _apply_segment_prosody(
+        self,
+        audio: np.ndarray,
+        segment: PhonemeSegment,
+        prosody_config: ProsodyConfig | None = None,
+    ) -> np.ndarray:
         """Apply prosody modifications from segment metadata to audio.
 
         Args:
@@ -843,7 +853,14 @@ class AudioGenerator:
 
         # Apply prosody if any prosody metadata is present
         if volume or pitch or rate:
-            audio = apply_prosody(audio, SAMPLE_RATE, volume=volume, pitch=pitch, rate=rate)
+            audio = apply_prosody(
+                audio,
+                SAMPLE_RATE,
+                volume=volume,
+                pitch=pitch,
+                rate=rate,
+                config=prosody_config,
+            )
 
         return audio
 

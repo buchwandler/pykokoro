@@ -66,8 +66,8 @@ class DummyKokoro:
         _ = voice_resolver
         return phoneme_segments
 
-    def postprocess_audio_segments(self, phoneme_segments, trim_silence):
-        _ = trim_silence
+    def postprocess_audio_segments(self, phoneme_segments, trim_silence, prosody_config=None):
+        _ = trim_silence, prosody_config
         return phoneme_segments
 
     def concatenate_audio_segments(self, processed):

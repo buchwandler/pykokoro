@@ -468,6 +468,50 @@ prosody extra is required. SSMD volume, pitch, and rate processing is available 
 core package through AudioSig. No librosa, SciPy, audiomentations, signalsmith-stretch,
 or Python-stretch installation is required.
 
+### Prosody backend selection
+
+Combined SSMD pitch, rate, and volume effects use one AudioSig speech-effects compositor
+pass. PyKokoro defaults to the speech-oriented WSOLA backend:
+
+```python
+from pykokoro import PipelineConfig, ProsodyConfig
+
+config = PipelineConfig(
+    prosody=ProsodyConfig(method="wsola"),
+)
+```
+
+ESOLA and TD-PSOLA are experimental alternatives, while `phase_vocoder` remains
+available as a compatibility and diagnostic reference. The `psola` spelling is accepted
+as an alias for `td_psola`:
+
+```python
+config = PipelineConfig(
+    prosody=ProsodyConfig(method="td_psola"),
+)
+```
+
+For an apples-to-apples comparison, disable fallback so unsupported methods cannot be
+silently relabeled:
+
+```python
+config = PipelineConfig(
+    prosody=ProsodyConfig(
+        method="esola",
+        fallback_methods=(),
+        strict=True,
+    ),
+)
+```
+
+WSOLA is the production default. ESOLA validates its computed backend rate in
+`0.5..2.0`, and current TD-PSOLA limits are rate `0.75..1.5` and pitch `-6..+6 st`;
+non-strict mode can fall back to configured backends after a failure. No backend
+guarantees formant preservation, and quality depends on the voice and utterance. Run
+`examples/compare_prosody_algorithms.py` before changing a default. Prosody is applied
+to isolated rendered segments, so it cannot restore sentence-level coarticulation,
+intonation, or spectral continuity lost during separate synthesis.
+
 To request audible approximation explicitly:
 
 ```python

@@ -10,8 +10,8 @@ from pykokoro.types import PhonemeSegment, Trace
 
 
 class _FakeKokoro:
-    def postprocess_audio_segments(self, segments, trim_silence):
-        _ = trim_silence
+    def postprocess_audio_segments(self, segments, trim_silence, prosody_config=None):
+        _ = trim_silence, prosody_config
         return segments
 
     def concatenate_audio_segments(self, segments):

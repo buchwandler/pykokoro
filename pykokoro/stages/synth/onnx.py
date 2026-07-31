@@ -38,6 +38,7 @@ class OnnxSynthesizerAdapter:
                 generation.speed,
                 trim_silence,
                 generation.enable_short_sentence,
+                prosody_config=cfg.prosody,
             )
 
         return kokoro._generate_from_segments(
@@ -47,4 +48,5 @@ class OnnxSynthesizerAdapter:
             trim_silence,
             generation.enable_short_sentence,
             random_seed=generation.random_seed,
+            prosody_config=cfg.prosody,
         )

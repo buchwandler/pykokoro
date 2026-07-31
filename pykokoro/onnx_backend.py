@@ -71,6 +71,7 @@ from .utils import get_user_cache_path
 from .voice_manager import VoiceBlend, VoiceManager, normalize_voice_style
 
 if TYPE_CHECKING:
+    from .prosody_config import ProsodyConfig
     from .short_sentence_handler import ShortSentenceConfig
     from .types import PhonemeSegment
 
@@ -2052,12 +2053,19 @@ class Kokoro:
         )
 
     def postprocess_audio_segments(
-        self, segments: list["PhonemeSegment"], trim_silence: bool
+        self,
+        segments: list["PhonemeSegment"],
+        trim_silence: bool,
+        prosody_config: ProsodyConfig | None = None,
     ) -> list["PhonemeSegment"]:
         """Trim/prosody-process raw audio segments."""
         self._init_kokoro()
         assert self._audio_generator is not None
-        return self._audio_generator._postprocess_audio_segments(segments, trim_silence)
+        return self._audio_generator._postprocess_audio_segments(
+            segments,
+            trim_silence,
+            prosody_config,
+        )
 
     def concatenate_audio_segments(self, segments: list["PhonemeSegment"]) -> np.ndarray:
         """Concatenate processed segments into a single waveform."""
@@ -2189,6 +2197,7 @@ class Kokoro:
         trim_silence: bool,
         enable_short_sentence_override: bool | None = None,
         random_seed: int | None = None,
+        prosody_config: ProsodyConfig | None = None,
     ) -> np.ndarray:
         """Delegate to AudioGenerator with voice resolution support.
 
@@ -2215,6 +2224,7 @@ class Kokoro:
             voice_resolver=voice_resolver,
             enable_short_sentence_override=enable_short_sentence_override,
             random_seed=random_seed,
+            prosody_config=prosody_config,
         )
 
     def close(self) -> None:

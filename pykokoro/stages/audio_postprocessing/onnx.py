@@ -33,7 +33,11 @@ class OnnxAudioPostprocessingAdapter:
             (segment.ssmd_metadata or {}).get("deterministic_pause_boundary") == "true"
             for segment in phoneme_segments
         )
-        processed = self._kokoro.postprocess_audio_segments(phoneme_segments, trim_silence)
+        processed = self._kokoro.postprocess_audio_segments(
+            phoneme_segments,
+            trim_silence,
+            getattr(cfg, "prosody", None),
+        )
         resolver = cfg.ssmd.audio_source_resolver
         for segment in processed:
             metadata = segment.ssmd_metadata or {}

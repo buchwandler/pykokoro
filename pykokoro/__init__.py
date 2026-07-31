@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .generation_config import GenerationConfig
+from .prosody_config import ProsodyConfig, ProsodyMethod
 from .ssmd_config import SSMDPauseOverrides, SSMDRenderConfig
 
 try:
@@ -39,6 +40,8 @@ def __getattr__(name: str) -> Any:
 
 __all__ = [
     "GenerationConfig",
+    "ProsodyConfig",
+    "ProsodyMethod",
     "SSMDPauseOverrides",
     "SSMDRenderConfig",
     "KokoroPipeline",

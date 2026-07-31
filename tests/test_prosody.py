@@ -3,6 +3,7 @@
 import numpy as np
 import pytest
 
+from pykokoro import ProsodyConfig, prosody
 from pykokoro.prosody import (
     apply_pitch,
     apply_prosody,
@@ -282,19 +283,58 @@ class TestProsodyApplication:
         # Should be identical
         np.testing.assert_array_equal(result, audio)
 
-    def test_apply_prosody_order_of_operations(self):
-        """Test that prosody operations are applied in correct order.
+    def test_combined_prosody_uses_one_speech_effects_call(self, monkeypatch):
+        calls = []
 
-        Order should be: pitch -> rate -> volume
-        """
-        audio = np.ones(1000, dtype=np.float32)
+        def fake(audio, **kwargs):
+            calls.append(kwargs)
+            return np.array(audio, copy=True)
 
-        # Apply prosody with all parameters
-        result = apply_prosody(audio, sample_rate=24000, volume="loud", pitch="+2st", rate="fast")
+        monkeypatch.setattr(prosody, "apply_speech_effects", fake)
 
-        # Length should be affected by rate (faster = shorter)
-        # but not by volume or pitch (allow reasonable tolerance)
-        assert len(result) < len(audio) * 0.95
+        source = np.ones(2400, dtype=np.float32)
+        apply_prosody(
+            source,
+            24000,
+            rate="87%",
+            pitch="+1.2st",
+            volume="+2dB",
+            config=ProsodyConfig(method="td_psola", strict=True),
+        )
+
+        assert len(calls) == 1
+        assert calls[0]["method"] == "td_psola"
+        assert calls[0]["rate"] == pytest.approx(0.87)
+        assert calls[0]["semitones"] == pytest.approx(1.2)
+        assert calls[0]["gain_db"] == pytest.approx(2.0)
+
+    def test_combined_prosody_preserves_dtype_and_input(self):
+        audio = np.linspace(-0.2, 0.2, 2400, dtype=np.float32)
+        original = audio.copy()
+
+        result = apply_prosody(
+            audio,
+            sample_rate=24000,
+            volume="+2dB",
+            pitch="+1.2st",
+            rate="87%",
+        )
+
+        assert result.dtype == audio.dtype
+        assert np.isfinite(result).all()
+        np.testing.assert_array_equal(audio, original)
+
+    def test_volume_only_skips_speech_effects(self, monkeypatch):
+        def fail(*args, **kwargs):
+            raise AssertionError("speech effects should not be used for gain only")
+
+        monkeypatch.setattr(prosody, "apply_speech_effects", fail)
+        source = np.ones(100, dtype=np.float32)
+
+        result = apply_prosody(source, 24000, volume="+6dB")
+
+        assert result.dtype == source.dtype
+        assert result[0] > source[0]
 
 
 class TestProsodyAudioSigBoundary:

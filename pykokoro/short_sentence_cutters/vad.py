@@ -55,12 +55,7 @@ def _quiet_runs(
     runs = [(int(start), int(end)) for start, end in intervals]
 
     represented_samples = len(speech_frames) * samples_per_frame
-    if (
-        runs
-        and speech_frames.size
-        and not speech_frames[-1]
-        and runs[-1][1] == represented_samples
-    ):
+    if runs and speech_frames.size and not speech_frames[-1] and runs[-1][1] == represented_samples:
         runs[-1] = (runs[-1][0], len(audio))
     return runs
 

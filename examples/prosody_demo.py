@@ -19,7 +19,7 @@ from pathlib import Path
 
 import soundfile as sf
 
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import KokoroPipeline, PipelineConfig, ProsodyConfig
 from pykokoro.generation_config import GenerationConfig
 
 VOICE = "af_sarah"
@@ -78,10 +78,12 @@ def main() -> None:
     print("SSMD Prosody Control Demo")
     print("=" * 70)
     print('Syntax: [text]{volume="loud" rate="fast" pitch="high"}')
+    print("Backend: WSOLA (use compare_prosody_algorithms.py for strict comparisons)")
 
     pipe = KokoroPipeline(
         PipelineConfig(
             voice=VOICE,
+            prosody=ProsodyConfig(method="wsola"),
             generation=GenerationConfig(
                 lang=LANG,
                 pause_mode="manual",

@@ -13,9 +13,15 @@ import logging
 import re
 
 import numpy as np
-from audiosig import AudioSignalError, apply_gain_db, pitch_shift, time_stretch
+from audiosig import AudioSignalError, apply_gain_db, apply_speech_effects
 
 from .constants import PITCH_ABSOLUTE_MAP, RATE_ABSOLUTE_MAP, VOLUME_ABSOLUTE_MAP
+from .prosody_config import (
+    AudioSigProsodyMethod,
+    ProsodyConfig,
+    ProsodyMethod,
+    canonical_prosody_method,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -152,31 +158,140 @@ def apply_volume(audio: np.ndarray, volume: str) -> np.ndarray:
         return audio
 
 
-def apply_pitch(audio: np.ndarray, pitch: str, sample_rate: int) -> np.ndarray:
-    """Apply an SSMD pitch value through AudioSig."""
+def _restore_audio_contract(audio: np.ndarray, result: np.ndarray) -> np.ndarray:
+    """Preserve the source dtype while avoiding mutation of the source array."""
+
+    return np.asarray(result).astype(audio.dtype, copy=False)
+
+
+def _apply_numeric_prosody(
+    audio: np.ndarray,
+    *,
+    sample_rate: int,
+    rate: float,
+    semitones: float,
+    gain_db: float,
+    config: ProsodyConfig,
+) -> np.ndarray:
+    """Apply numeric prosody with the configured backend and fallbacks."""
+
+    methods: list[ProsodyMethod] = [config.method]
+    if not config.strict:
+        methods.extend(config.fallback_methods)
+
+    attempted: set[AudioSigProsodyMethod] = set()
+    errors: list[tuple[AudioSigProsodyMethod, Exception]] = []
+    selected_method = canonical_prosody_method(config.method)
+
+    for configured_method in methods:
+        method = canonical_prosody_method(configured_method)
+        if method in attempted:
+            continue
+        attempted.add(method)
+
+        try:
+            result = apply_speech_effects(
+                np.array(audio, copy=True),
+                sample_rate=sample_rate,
+                rate=rate,
+                semitones=semitones,
+                gain_db=gain_db,
+                clip=config.clip,
+                method=method,
+                n_fft=config.n_fft,
+                hop_length=config.hop_length,
+                filter_width=config.filter_width,
+                rolloff=config.rolloff,
+            )
+            if method != selected_method:
+                logger.info(
+                    "AudioSig prosody fallback succeeded: '%s' -> '%s'",
+                    selected_method,
+                    method,
+                )
+            return _restore_audio_contract(audio, result)
+        except AudioSignalError as exc:
+            errors.append((method, exc))
+            if config.strict:
+                raise
+            logger.warning(
+                "AudioSig prosody method '%s' failed: %s",
+                method,
+                exc,
+            )
+
+    if errors:
+        logger.warning(
+            "All AudioSig prosody methods failed; using unmodified audio. Attempted: %s",
+            ", ".join(method for method, _ in errors),
+        )
+    return audio
+
+
+def apply_pitch(
+    audio: np.ndarray,
+    pitch: str,
+    sample_rate: int,
+    *,
+    config: ProsodyConfig | None = None,
+) -> np.ndarray:
+    """Apply an SSMD pitch value through the speech-effects compositor."""
+
+    resolved = config or ProsodyConfig()
     try:
         semitones = parse_pitch(pitch)
         if abs(semitones) < 0.01:
             return audio
-        return pitch_shift(
+        return _apply_numeric_prosody(
             audio,
             sample_rate=sample_rate,
+            rate=1.0,
             semitones=semitones,
+            gain_db=0.0,
+            config=resolved,
         )
-    except (ValueError, AudioSignalError) as exc:
+    except ValueError as exc:
+        if resolved.strict:
+            raise
+        logger.warning("Failed to apply pitch '%s': %s", pitch, exc)
+        return audio
+    except AudioSignalError as exc:
+        if resolved.strict:
+            raise
         logger.warning("Failed to apply pitch '%s': %s", pitch, exc)
         return audio
 
 
-def apply_rate(audio: np.ndarray, rate: str, sample_rate: int = 24000) -> np.ndarray:
-    """Apply a pitch-preserving SSMD rate value through AudioSig."""
-    del sample_rate  # Kept for public API compatibility.
+def apply_rate(
+    audio: np.ndarray,
+    rate: str,
+    sample_rate: int = 24000,
+    *,
+    config: ProsodyConfig | None = None,
+) -> np.ndarray:
+    """Apply a pitch-preserving SSMD rate value through the compositor."""
+
+    resolved = config or ProsodyConfig()
     try:
         speed_multiplier = parse_rate(rate)
         if abs(speed_multiplier - 1.0) < 0.01:
             return audio
-        return time_stretch(audio, speed_multiplier)
-    except (ValueError, AudioSignalError) as exc:
+        return _apply_numeric_prosody(
+            audio,
+            sample_rate=sample_rate,
+            rate=speed_multiplier,
+            semitones=0.0,
+            gain_db=0.0,
+            config=resolved,
+        )
+    except ValueError as exc:
+        if resolved.strict:
+            raise
+        logger.warning("Failed to apply rate '%s': %s", rate, exc)
+        return audio
+    except AudioSignalError as exc:
+        if resolved.strict:
+            raise
         logger.warning("Failed to apply rate '%s': %s", rate, exc)
         return audio
 
@@ -187,36 +302,48 @@ def apply_prosody(
     volume: str | None = None,
     pitch: str | None = None,
     rate: str | None = None,
+    *,
+    config: ProsodyConfig | None = None,
 ) -> np.ndarray:
-    """Apply all prosody modifications to audio.
+    """Apply SSMD volume, pitch, and rate metadata in one compositor pass.
 
-    Order of operations:
-    1. Pitch shift (preserves duration)
-    2. Rate change (changes duration)
-    3. Volume adjustment
-
-    Args:
-        audio: Input audio array
-        sample_rate: Audio sample rate in Hz
-        volume: Optional volume specification
-        pitch: Optional pitch specification
-        rate: Optional rate specification
-
-    Returns:
-        Audio with all prosody modifications applied
+    Metadata is parsed first. When pitch or rate changes are present, AudioSig
+    jointly plans them and applies gain in the same speech-effects compositor.
+    A volume-only change uses AudioSig's direct gain operation.
     """
-    result = audio
 
-    # Apply pitch shift first (preserves duration)
-    if pitch:
-        result = apply_pitch(result, pitch, sample_rate)
+    resolved = config or ProsodyConfig()
 
-    # Apply rate change (changes duration)
-    if rate:
-        result = apply_rate(result, rate, sample_rate)
+    try:
+        gain_db = parse_volume(volume) if volume else 0.0
+        semitones = parse_pitch(pitch) if pitch else 0.0
+        speed = parse_rate(rate) if rate else 1.0
+    except ValueError as exc:
+        if resolved.strict:
+            raise
+        logger.warning("Failed to parse prosody metadata: %s", exc)
+        return audio
 
-    # Apply volume last (doesn't affect duration)
-    if volume:
-        result = apply_volume(result, volume)
+    if abs(speed - 1.0) < 0.01 and abs(semitones) < 0.01 and gain_db == 0.0:
+        return audio
 
-    return result
+    if abs(speed - 1.0) < 0.01 and abs(semitones) < 0.01:
+        try:
+            return _restore_audio_contract(
+                audio,
+                apply_gain_db(np.array(audio, copy=True), gain_db, clip=resolved.clip),
+            )
+        except AudioSignalError as exc:
+            if resolved.strict:
+                raise
+            logger.warning("Failed to apply volume '%s': %s", volume, exc)
+            return audio
+
+    return _apply_numeric_prosody(
+        audio,
+        sample_rate=sample_rate,
+        rate=speed,
+        semitones=semitones,
+        gain_db=gain_db,
+        config=resolved,
+    )

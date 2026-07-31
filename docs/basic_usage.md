@@ -228,6 +228,41 @@ result = pipe.run("Fast speech")
 
 Recommended range: 0.5 to 2.0
 
+## Prosody Backend Selection
+
+SSMD rate, pitch, and volume metadata is composed in one AudioSig speech-effects pass.
+The default backend is WSOLA:
+
+```python
+from pykokoro import PipelineConfig, ProsodyConfig
+
+config = PipelineConfig(
+    voice="af_bella",
+    prosody=ProsodyConfig(method="wsola"),
+)
+```
+
+Use `td_psola` (or its `psola` alias) and `esola` only as experimental choices. Current
+TD-PSOLA limits are rate `0.75..1.5` and pitch `-6..+6 st`; ESOLA requires its computed
+backend rate to remain in `0.5..2.0`. `phase_vocoder` remains available as a reference
+path. Strict comparison mode disables fallback:
+
+```python
+config = PipelineConfig(
+    prosody=ProsodyConfig(
+        method="esola",
+        fallback_methods=(),
+        strict=True,
+    ),
+)
+```
+
+No backend guarantees formant preservation. Results vary by voice and utterance, and
+segment-level processing cannot restore sentence-level coarticulation. Use
+`examples/compare_prosody_algorithms.py` to compare identical source audio before
+changing the default; its objective metrics are diagnostic rather than naturalness
+scores.
+
 ## Pause Control
 
 ### Manual Pause Markers

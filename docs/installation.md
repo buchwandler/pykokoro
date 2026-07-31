@@ -73,18 +73,24 @@ Core dependencies (automatically installed):
 - `kokorog2p` - Text-to-phoneme conversion
 - `phrasplit` - Intelligent text splitting
 - `numpy` - Model tensors, voice vectors, and array operations
-- `audiosig` - Audio signal processing for trim, VAD, resampling, gain, pitch, and rate
+- `audiosig` - Audio signal processing for trim, VAD, resampling, gain, and speech
+  prosody
 - `soundfile` - Audio file I/O
-- `platformdirs`, `chardet`, `charset-normalizer`, `huggingface-hub`, `ssmd`, `num2words`,
-  `babel`, and `typing_extensions` - runtime support
+- `platformdirs`, `chardet`, `charset-normalizer`, `huggingface-hub`, `ssmd`,
+  `num2words`, `babel`, and `typing_extensions` - runtime support
 
 Optional dependencies:
 
 - `onnxruntime-gpu` - For GPU acceleration
 - `spacy` - For sentence/clause splitting and spaCy-aware G2P tokenization
 
-SSMD volume, pitch, and rate processing is provided by core AudioSig. No librosa,
-SciPy, audiomentations, signalsmith-stretch, or Python-stretch package is required.
+SSMD volume, pitch, and rate processing is provided by core AudioSig. No librosa, SciPy,
+audiomentations, signalsmith-stretch, or Python-stretch package is required. PyKokoro
+uses WSOLA as its default speech prosody backend and exposes experimental ESOLA and
+TD-PSOLA choices through `ProsodyConfig`. Before publishing a version that uses
+`apply_speech_effects`, verify the installed AudioSig minimum is the first published
+release containing that API and the `wsola`, `esola`, and `td_psola` methods; do not use
+an unverified development build or guessed release number in package metadata.
 
 ### Installing espeak-ng
 

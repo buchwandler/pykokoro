@@ -110,16 +110,21 @@ def test_audio_signal_error_uses_ssmd_fallback(monkeypatch):
     )
 
     class FakeKokoro:
-        def postprocess_audio_segments(self, segments, trim_silence):
+        def postprocess_audio_segments(self, segments, trim_silence, prosody_config=None):
+            _ = trim_silence, prosody_config
             return segments
 
         def concatenate_audio_segments(self, segments):
             return np.zeros(1, dtype=np.float32)
 
-    cfg = type("Config", (), {
-        "generation": type("Generation", (), {"pause_mode": "none"})(),
-        "ssmd": SSMDRenderConfig(audio_source_resolver=lambda _source: None),
-    })()
+    cfg = type(
+        "Config",
+        (),
+        {
+            "generation": type("Generation", (), {"pause_mode": "none"})(),
+            "ssmd": SSMDRenderConfig(audio_source_resolver=lambda _source: None),
+        },
+    )()
     trace = Trace()
 
     OnnxAudioPostprocessingAdapter(FakeKokoro()).postprocess([segment], cfg, trace)

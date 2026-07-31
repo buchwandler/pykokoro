@@ -13,6 +13,7 @@ from .config_types import (
     ProviderType,
 )
 from .generation_config import GenerationConfig
+from .prosody_config import ProsodyConfig
 from .short_sentence_handler import ShortSentenceConfig
 from .ssmd_config import SSMDRenderConfig
 from .tokenizer import EspeakConfig, TokenizerConfig
@@ -26,6 +27,7 @@ class PipelineConfig:
     voice: str | VoiceBlend = "af"
     generation: GenerationConfig = field(default_factory=GenerationConfig)
     ssmd: SSMDRenderConfig = field(default_factory=SSMDRenderConfig)
+    prosody: ProsodyConfig = field(default_factory=ProsodyConfig)
 
     # Model + provider configuration
     model_quality: ModelQuality | None = None

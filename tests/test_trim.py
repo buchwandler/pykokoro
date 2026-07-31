@@ -95,12 +95,15 @@ def test_energy_valley_rms_matches_audiosig_contract(length):
 
 
 def test_quiet_runs_handles_empty_and_trailing_partial_frames():
-    assert _quiet_runs(
-        np.array([], dtype=np.float32),
-        frame_duration_ms=5,
-        energy_threshold=0.05,
-        min_silence_seconds=0.005,
-    ) == []
+    assert (
+        _quiet_runs(
+            np.array([], dtype=np.float32),
+            frame_duration_ms=5,
+            energy_threshold=0.05,
+            min_silence_seconds=0.005,
+        )
+        == []
+    )
     assert _quiet_runs(
         np.zeros(1, dtype=np.float32),
         frame_duration_ms=5,
@@ -119,9 +122,12 @@ def test_quiet_runs_filters_short_middle_run():
     audio = np.concatenate(
         [np.ones(5, dtype=np.float32), np.zeros(5, dtype=np.float32), np.ones(5, dtype=np.float32)]
     )
-    assert _quiet_runs(
-        audio,
-        frame_duration_ms=5,
-        energy_threshold=0.05,
-        min_silence_seconds=0.01,
-    ) == []
+    assert (
+        _quiet_runs(
+            audio,
+            frame_duration_ms=5,
+            energy_threshold=0.05,
+            min_silence_seconds=0.01,
+        )
+        == []
+    )

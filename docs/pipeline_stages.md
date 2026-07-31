@@ -66,6 +66,8 @@ pipeline = KokoroPipeline(faster_cfg)
   overrides the voice per segment.
 - `generation`: `GenerationConfig` instance with speed, language, pause handling, and
   phoneme controls.
+- `prosody`: `ProsodyConfig` selecting the AudioSig speech-effects backend. WSOLA is the
+  default; `esola` and `td_psola` are experimental, and `psola` aliases `td_psola`.
 
 #### Model and provider
 
@@ -215,8 +217,15 @@ segments, and apply short-sentence handling.
 
 - `generation.pause_mode"` set to `"manual"` or `"auto"` enables silence trimming before
   inserting explicit pauses.
-- SSMD prosody metadata (rate/pitch/volume) is applied to each segment.
+- SSMD prosody metadata (rate/pitch/volume) is applied to each segment through one
+  AudioSig compositor pass. Configured fallbacks are used only in non-strict mode.
 - `pause_before`/`pause_after` values from G2P are inserted between segments.
+
+WSOLA is the production default. ESOLA's computed backend rate must be `0.5..2.0`, and
+current TD-PSOLA limits are rate `0.75..1.5` and pitch `-6..+6 st`. No backend
+guarantees formant preservation; quality depends on the voice and utterance. Because
+segments are processed independently, this stage cannot restore sentence-level
+coarticulation or pitch continuity.
 
 ## Customizing the pipeline
 

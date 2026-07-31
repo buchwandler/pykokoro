@@ -58,9 +58,7 @@ def test_audiosig_is_the_only_declared_dsp_backend() -> None:
 
     requirements = [requirement.lower() for requirement in dependencies]
     requirements.extend(
-        requirement.lower()
-        for values in optional.values()
-        for requirement in values
+        requirement.lower() for values in optional.values() for requirement in values
     )
     forbidden = (
         "librosa",
@@ -89,8 +87,12 @@ def test_production_source_has_no_forbidden_dsp_imports() -> None:
         "import soxr",
         "import torchaudio",
     )
-    source_files = [path for path in (ROOT / "pykokoro").rglob("*.py") if "__pycache__" not in path.parts]
-    matches = [str(path.relative_to(ROOT)) for path in source_files if any(
-        token in path.read_text(encoding="utf-8") for token in forbidden
-    )]
+    source_files = [
+        path for path in (ROOT / "pykokoro").rglob("*.py") if "__pycache__" not in path.parts
+    ]
+    matches = [
+        str(path.relative_to(ROOT))
+        for path in source_files
+        if any(token in path.read_text(encoding="utf-8") for token in forbidden)
+    ]
     assert matches == []

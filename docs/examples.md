@@ -177,6 +177,25 @@ result = pipe.run(long_text)
 sf.write("long_text.wav", result.audio, result.sample_rate)
 ```
 
+## Prosody Backend Comparison
+
+Use `examples/prosody_algorithm_selection.py` to render the same SSMD annotation with
+WSOLA, ESOLA, TD-PSOLA, and phase vocoder in strict mode. For a reproducible blind set,
+run:
+
+```bash
+python examples/compare_prosody_algorithms.py \
+  --input-wav input.wav \
+  --output-dir build/prosody-comparison
+```
+
+The script renders rate-only, pitch-only, emphasis, and combined presets from identical
+source audio, then writes WAV files, CSV/JSON diagnostic metrics, randomized blind
+copies, a private key, and a manifest. Objective metrics do not measure naturalness.
+WSOLA is the production default; ESOLA and TD-PSOLA remain experimental. No backend
+guarantees formant preservation, and isolated segment processing cannot restore
+sentence-level coarticulation.
+
 ## Batch Processing
 
 ### Process Multiple Files

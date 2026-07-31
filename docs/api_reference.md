@@ -41,6 +41,20 @@ print(result.sample_rate)
    :show-inheritance:
 ```
 
+### ProsodyConfig
+
+```{eval-rst}
+.. autoclass:: pykokoro.ProsodyConfig
+   :members:
+   :undoc-members:
+   :show-inheritance:
+```
+
+`ProsodyConfig(method="wsola")` selects the production speech-oriented default. The
+supported methods are `wsola`, experimental `esola` and `td_psola`, compatibility
+`phase_vocoder`, and the `psola` alias for `td_psola`. Strict mode prevents fallback;
+non-strict mode follows `fallback_methods`. No method guarantees formant preservation.
+
 ## Pipeline Helpers
 
 ```{eval-rst}

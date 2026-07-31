@@ -72,8 +72,8 @@ class CountingKokoro:
             segment.raw_audio = np.full(2 + index, index + 1, dtype=np.float32)
         return phoneme_segments
 
-    def postprocess_audio_segments(self, phoneme_segments, trim_silence):
-        _ = trim_silence
+    def postprocess_audio_segments(self, phoneme_segments, trim_silence, prosody_config=None):
+        _ = trim_silence, prosody_config
         for segment in phoneme_segments:
             assert segment.raw_audio is not None
             segment.processed_audio = segment.raw_audio + 0.5
