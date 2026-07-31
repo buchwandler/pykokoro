@@ -12,13 +12,13 @@ status: accepted
 audience: null
 scopes: []
 source_refs:
-- git:1df79e5cda7bb7fa38e51b7f47ea021f798f967a
+  - git:1df79e5cda7bb7fa38e51b7f47ea021f798f967a
 paths:
-- docs/basic_usage.md
+  - docs/basic_usage.md
 issues: []
 prs: []
 sources:
-- git:1df79e5cda7bb7fa38e51b7f47ea021f798f967a
+  - git:1df79e5cda7bb7fa38e51b7f47ea021f798f967a
 contributors: []
 breaking: false
 internal: false

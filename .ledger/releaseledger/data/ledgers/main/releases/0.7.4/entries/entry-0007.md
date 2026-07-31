@@ -12,13 +12,13 @@ status: accepted
 audience: null
 scopes: []
 source_refs:
-- git:578ea30580a7da6df0fafdb690344399038f54a5
+  - git:578ea30580a7da6df0fafdb690344399038f54a5
 paths:
-- .github/workflows/tests.yml
+  - .github/workflows/tests.yml
 issues: []
 prs: []
 sources:
-- git:578ea30580a7da6df0fafdb690344399038f54a5
+  - git:578ea30580a7da6df0fafdb690344399038f54a5
 contributors: []
 breaking: false
 internal: true

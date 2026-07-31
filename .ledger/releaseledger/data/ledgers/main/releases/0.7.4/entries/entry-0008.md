@@ -12,13 +12,13 @@ status: accepted
 audience: null
 scopes: []
 source_refs:
-- git:5eb1869636371065c626ef9194722c9aa896e24d
+  - git:5eb1869636371065c626ef9194722c9aa896e24d
 paths:
-- .github/workflows/python-publish.yml
+  - .github/workflows/python-publish.yml
 issues: []
 prs: []
 sources:
-- git:5eb1869636371065c626ef9194722c9aa896e24d
+  - git:5eb1869636371065c626ef9194722c9aa896e24d
 contributors: []
 breaking: false
 internal: true

@@ -12,17 +12,17 @@ status: accepted
 audience: null
 scopes: []
 source_refs:
-- git:83ea8018377aac3e282aa5a3285e80403fd97794
+  - git:83ea8018377aac3e282aa5a3285e80403fd97794
 paths:
-- .ledger/releaseledger/data/ledgers/main/releases/0.7.2/entries/entry-0001.md
-- .ledger/releaseledger/data/ledgers/main/releases/0.7.2/entries/entry-0002.md
-- .ledger/releaseledger/data/ledgers/main/releases/0.7.2/entries/entry-0003.md
-- .ledger/releaseledger/data/ledgers/main/releases/0.7.2/release.md
-- docs/changelog.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.7.2/entries/entry-0001.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.7.2/entries/entry-0002.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.7.2/entries/entry-0003.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.7.2/release.md
+  - docs/changelog.md
 issues: []
 prs: []
 sources:
-- git:83ea8018377aac3e282aa5a3285e80403fd97794
+  - git:83ea8018377aac3e282aa5a3285e80403fd97794
 contributors: []
 breaking: false
 internal: true

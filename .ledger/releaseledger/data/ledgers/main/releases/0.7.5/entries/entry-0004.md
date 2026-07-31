@@ -7,19 +7,20 @@ versioning:
 entry_id: entry-0004
 release_version: 0.7.5
 kind: docs
-summary: Documented compact result memory behavior, ownership, release semantics,
-  and the limits of non-streaming generation
+summary:
+  Documented compact result memory behavior, ownership, release semantics, and the
+  limits of non-streaming generation
 status: accepted
 audience: null
 scopes: []
 source_refs: []
 paths:
-- README.md
-- docs/api_reference.md
+  - README.md
+  - docs/api_reference.md
 issues: []
 prs: []
 sources:
-- tl:task-0008
+  - tl:task-0008
 contributors: []
 breaking: false
 internal: false

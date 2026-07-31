@@ -18,9 +18,7 @@ class RetentionDocumentParser:
         return DocumentResult(
             clean_text=text,
             segments=segments,
-            boundary_events=[
-                BoundaryEvent(pos=3, kind="marker", attrs={"marker": "middle"})
-            ],
+            boundary_events=[BoundaryEvent(pos=3, kind="marker", attrs={"marker": "middle"})],
             header={
                 "title": "Retention test",
                 "voice_bindings": {"default": "af"},
