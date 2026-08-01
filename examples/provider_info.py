@@ -15,13 +15,78 @@ Output:
     provider_auto_demo.wav - Generated audio using auto-selected provider
 """
 
-import onnxruntime as rt
-import soundfile as sf
+from __future__ import annotations
 
-import pykokoro
+import onnxruntime as ort
+
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
+from pykokoro.onnx_session import (
+    get_available_execution_providers,
+    resolve_execution_provider,
+)
 
 # Test sentence
-TEST_TEXT = "PyKokoro supports multiple hardware acceleration providers for optimal performance."
+TEST_TEXT = (
+    "PyKokoro supports multiple hardware acceleration providers for optimal performance."
+)
+
+
+PROVIDER_INFO = {
+    "CPUExecutionProvider": {
+        "name": "CPU",
+        "description": "Standard CPU execution (always available)",
+        "install": "Built-in",
+        "performance": "Baseline",
+    },
+    "CUDAExecutionProvider": {
+        "name": "NVIDIA CUDA",
+        "description": "NVIDIA GPU acceleration",
+        "install": "pip install pykokoro[gpu]",
+        "performance": "Excellent for NVIDIA GPUs",
+    },
+    "OpenVINOExecutionProvider": {
+        "name": "Intel OpenVINO",
+        "description": "Intel CPU/GPU/VPU optimization",
+        "install": "pip install pykokoro[openvino]",
+        "performance": "Excellent for Intel hardware",
+    },
+    "DmlExecutionProvider": {
+        "name": "DirectML",
+        "description": "Windows DirectML (AMD/Intel/NVIDIA)",
+        "install": "pip install pykokoro[directml]",
+        "performance": "Good for Windows GPUs",
+    },
+    "CoreMLExecutionProvider": {
+        "name": "Apple CoreML",
+        "description": "Apple Silicon/GPU acceleration",
+        "install": "pip install pykokoro[coreml]",
+        "performance": "Excellent for Apple Silicon",
+    },
+    "TensorrtExecutionProvider": {
+        "name": "NVIDIA TensorRT",
+        "description": "NVIDIA TensorRT optimization",
+        "install": "pip install onnxruntime-gpu",
+        "performance": "Excellent for NVIDIA GPUs",
+    },
+    "ROCMExecutionProvider": {
+        "name": "AMD ROCm",
+        "description": "AMD GPU acceleration",
+        "install": "pip install onnxruntime-rocm",
+        "performance": "Excellent for AMD GPUs",
+    },
+    "NnapiExecutionProvider": {
+        "name": "Android NNAPI",
+        "description": "Android Neural Networks API acceleration",
+        "install": "Use an ONNX Runtime build with NNAPI support",
+        "performance": "Depends on Android hardware",
+    },
+    "XnnpackExecutionProvider": {
+        "name": "XNNPACK",
+        "description": "Optimized CPU kernels for supported platforms",
+        "install": "Use an ONNX Runtime build with XNNPACK support",
+        "performance": "Good on supported CPUs",
+    },
+}
 
 
 def print_provider_info():
@@ -30,75 +95,33 @@ def print_provider_info():
     print("ONNX RUNTIME EXECUTION PROVIDERS")
     print("=" * 70)
 
-    available_providers = rt.get_available_providers()
+    available_providers = get_available_execution_providers()
 
-    print(f"\nFound {len(available_providers)} provider(s) on your system:\n")
-
-    # Provider descriptions
-    provider_info = {
-        "CPUExecutionProvider": {
-            "name": "CPU",
-            "description": "Standard CPU execution (always available)",
-            "install": "Built-in",
-            "performance": "Baseline",
-        },
-        "CUDAExecutionProvider": {
-            "name": "NVIDIA CUDA",
-            "description": "NVIDIA GPU acceleration",
-            "install": "pip install pykokoro[gpu]",
-            "performance": "Excellent for NVIDIA GPUs",
-        },
-        "OpenVINOExecutionProvider": {
-            "name": "Intel OpenVINO",
-            "description": "Intel CPU/GPU/VPU optimization",
-            "install": "pip install pykokoro[openvino]",
-            "performance": "Excellent for Intel hardware",
-        },
-        "DmlExecutionProvider": {
-            "name": "DirectML",
-            "description": "Windows DirectML (AMD/Intel/NVIDIA)",
-            "install": "pip install pykokoro[directml]",
-            "performance": "Good for Windows GPUs",
-        },
-        "CoreMLExecutionProvider": {
-            "name": "Apple CoreML",
-            "description": "Apple Silicon/GPU acceleration",
-            "install": "pip install pykokoro[coreml]",
-            "performance": "Excellent for Apple Silicon",
-        },
-        "TensorrtExecutionProvider": {
-            "name": "NVIDIA TensorRT",
-            "description": "NVIDIA TensorRT optimization",
-            "install": "pip install onnxruntime-gpu",
-            "performance": "Excellent for NVIDIA GPUs",
-        },
-        "ROCMExecutionProvider": {
-            "name": "AMD ROCm",
-            "description": "AMD GPU acceleration",
-            "install": "pip install onnxruntime-rocm",
-            "performance": "Excellent for AMD GPUs",
-        },
-    }
+    print(f"\nONNX Runtime {ort.__version__}")
+    print(f"Found {len(available_providers)} provider(s) on your system:\n")
 
     # Print available providers
     print("✓ AVAILABLE PROVIDERS:")
     print("-" * 70)
     for provider in available_providers:
-        info = provider_info.get(provider, {"name": provider, "description": "Unknown"})
+        info = PROVIDER_INFO.get(
+            provider,
+            {"name": provider, "description": "Unknown provider"},
+        )
         print(f"  • {info['name']:<20} - {info['description']}")
         if "performance" in info:
             print(f"    Performance: {info['performance']}")
     print()
 
     # Print unavailable providers with installation instructions
-    all_known_providers = set(provider_info.keys())
+    all_known_providers = set(PROVIDER_INFO)
     unavailable = all_known_providers - set(available_providers)
 
     if unavailable:
         print("✗ UNAVAILABLE PROVIDERS (install for better performance):")
         print("-" * 70)
         for provider in sorted(unavailable):
-            info = provider_info[provider]
+            info = PROVIDER_INFO[provider]
             print(f"  • {info['name']:<20} - {info['description']}")
             print(f"    Install: {info['install']}")
             print(f"    Performance: {info['performance']}")
@@ -111,31 +134,33 @@ def test_auto_provider():
     print("TESTING AUTO PROVIDER SELECTION")
     print("=" * 70)
 
+    available_providers = get_available_execution_providers()
+    selected_provider = resolve_execution_provider(
+        "auto",
+        available=available_providers,
+    )
+
     print("\nInitializing Kokoro with provider='auto'...")
-    kokoro = pykokoro.Kokoro(provider="auto")
+    print(f"Resolved provider: {selected_provider}")
 
     print("\nGenerating speech...")
     print(f'Text: "{TEST_TEXT}"')
     print("Voice: af_bella")
 
-    samples, sample_rate = kokoro.create(TEST_TEXT, voice="af_bella", speed=1.0)
-
-    # Get actual providers being used (after initialization)
-    actual_providers = kokoro._session.get_providers()
-    print(f"\nAuto-selected provider: {actual_providers[0]}")
-    fallback = actual_providers[1] if len(actual_providers) > 1 else "None"
-    print(f"Fallback provider: {fallback}")
-
-    # Save output
+    config = PipelineConfig(
+        voice="af_bella",
+        generation=GenerationConfig(lang="en-us", speed=1.0),
+        provider="auto",
+    )
     output_file = "provider_auto_demo.wav"
-    sf.write(output_file, samples, sample_rate)
+    with KokoroPipeline(config) as pipeline:
+        result = pipeline.run(TEST_TEXT)
+        result.save_wav(output_file)
 
-    duration = len(samples) / sample_rate
+    duration = len(result.audio) / result.sample_rate
     print("\n✓ Success!")
     print(f"  Generated {duration:.2f}s of audio")
     print(f"  Saved to: {output_file}")
-
-    kokoro.close()
 
 
 def print_recommendations():
@@ -145,7 +170,7 @@ def print_recommendations():
     print("RECOMMENDATIONS")
     print("=" * 70)
 
-    available = rt.get_available_providers()
+    available = get_available_execution_providers()
 
     if len(available) == 1 and available[0] == "CPUExecutionProvider":
         print("\n⚠ Only CPU provider is available.")
@@ -167,11 +192,11 @@ def print_recommendations():
 
     print("\nUsage in your code:")
     print("  # Automatic selection (recommended)")
-    print("  kokoro = pykokoro.Kokoro(provider='auto')")
+    print("  pipe = KokoroPipeline(PipelineConfig(provider='auto'))")
     print()
     print("  # Or explicit selection")
-    print("  kokoro = pykokoro.Kokoro(provider='cuda')  # Force CUDA")
-    print("  kokoro = pykokoro.Kokoro(provider='cpu')   # Force CPU")
+    print("  pipe = KokoroPipeline(PipelineConfig(provider='cuda'))  # Force CUDA")
+    print("  pipe = KokoroPipeline(PipelineConfig(provider='cpu'))   # Force CPU")
 
 
 def main():
