@@ -131,6 +131,7 @@ class Trace:
 
     warnings: list[str] = field(default_factory=list)
     events: list[TraceEvent] = field(default_factory=list)
+    prosody: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass

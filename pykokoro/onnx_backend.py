@@ -73,7 +73,7 @@ from .voice_manager import VoiceBlend, VoiceManager, normalize_voice_style
 if TYPE_CHECKING:
     from .prosody_config import ProsodyConfig
     from .short_sentence_handler import ShortSentenceConfig
-    from .types import PhonemeSegment
+    from .types import PhonemeSegment, Trace
 
 # Logger for debugging
 logger = logging.getLogger(__name__)
@@ -2056,7 +2056,8 @@ class Kokoro:
         self,
         segments: list["PhonemeSegment"],
         trim_silence: bool,
-        prosody_config: ProsodyConfig | None = None,
+        prosody_config: "ProsodyConfig | None" = None,
+        trace: "Trace | None" = None,
     ) -> list["PhonemeSegment"]:
         """Trim/prosody-process raw audio segments."""
         self._init_kokoro()
@@ -2065,13 +2066,23 @@ class Kokoro:
             segments,
             trim_silence,
             prosody_config,
+            trace,
         )
 
-    def concatenate_audio_segments(self, segments: list["PhonemeSegment"]) -> np.ndarray:
+    def concatenate_audio_segments(
+        self,
+        segments: list["PhonemeSegment"],
+        prosody_config: "ProsodyConfig | None" = None,
+        trace: "Trace | None" = None,
+    ) -> np.ndarray:
         """Concatenate processed segments into a single waveform."""
         self._init_kokoro()
         assert self._audio_generator is not None
-        return self._audio_generator._concatenate_audio_segments(segments)
+        return self._audio_generator._concatenate_audio_segments(
+            segments,
+            prosody_config,
+            trace,
+        )
 
     # Voice Database Integration (from kokovoicelab)
 

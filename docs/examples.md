@@ -179,9 +179,24 @@ sf.write("long_text.wav", result.audio, result.sample_rate)
 
 ## Prosody Backend Comparison
 
-Use `examples/prosody_algorithm_selection.py` to render the same SSMD annotation with
-WSOLA, ESOLA, TD-PSOLA, and phase vocoder in strict mode. For a reproducible blind set,
-run:
+Use `examples/prosody_algorithm_selection.py` for a small, validated diagnostic comparison.
+It synthesizes once, or accepts a known-good WAV, and applies WSOLA, ESOLA, TD-PSOLA, and
+phase vocoder to the exact same reference. On Termux/Android, use the input-WAV path so
+source synthesis is isolated from the AudioSig comparison:
+
+```bash
+python examples/prosody_algorithm_selection.py \
+  --input-wav reference.wav \
+  --output-dir build/prosody-selection
+```
+
+The tool writes a neutral `reference.wav`, explicit mono `PCM_16` outputs, and
+`metrics.json`. It validates shape, finite values, peaks, RMS, adjacent-sample jumps,
+WAV headers, and decoded frame counts. Positive gain is not part of the default
+comparison because it can exceed full scale and cause common PCM clipping; over-range
+audio is rejected instead of being silently clipped.
+
+For a reproducible blind set, run the full comparison harness:
 
 ```bash
 python examples/compare_prosody_algorithms.py \
@@ -189,11 +204,11 @@ python examples/compare_prosody_algorithms.py \
   --output-dir build/prosody-comparison
 ```
 
-The script renders rate-only, pitch-only, emphasis, and combined presets from identical
-source audio, then writes WAV files, CSV/JSON diagnostic metrics, randomized blind
-copies, a private key, and a manifest. Objective metrics do not measure naturalness.
-WSOLA is the production default; ESOLA and TD-PSOLA remain experimental. No backend
-guarantees formant preservation, and isolated segment processing cannot restore
+The full comparison script renders rate-only, pitch-only, emphasis, and combined presets
+from identical source audio, then writes WAV files, CSV/JSON diagnostic metrics,
+randomized blind copies, a private key, and a manifest. Objective metrics do not measure
+naturalness. WSOLA is the production default; ESOLA and TD-PSOLA remain experimental. No
+backend guarantees formant preservation, and isolated segment processing cannot restore
 sentence-level coarticulation.
 
 ## Batch Processing

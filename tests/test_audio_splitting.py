@@ -14,13 +14,14 @@ from pykokoro.audio_generator import (
     populate_short_sentence_boundary_metadata,
 )
 from pykokoro.constants import MAX_PHONEME_LENGTH
+from pykokoro.prosody_config import ProsodyConfig
 from pykokoro.short_sentence_handler import (
     SHORT_SENTENCE_META_KEY,
     PhraseResolveMode,
     RandomizedPhraseResolveMode,
     ShortSentenceConfig,
 )
-from pykokoro.types import PhonemeSegment
+from pykokoro.types import PhonemeSegment, Trace
 
 
 class DummyTokenizer:
@@ -719,6 +720,81 @@ def test_postprocess_phrase_mode_leaves_audio_when_timestamps_are_missing():
 
     assert processed[0].processed_audio is not None
     assert len(processed[0].processed_audio) == len(audio)
+
+
+def test_prosody_boundary_conditioning_preserves_length_and_reduces_jump():
+    generator = AudioGenerator.__new__(AudioGenerator)
+    left = PhonemeSegment(
+        id="left",
+        segment_id="left",
+        phoneme_id=0,
+        text="left",
+        phonemes="left",
+        tokens=[1],
+        ssmd_metadata={"prosody_rate": "87%"},
+        processed_audio=np.ones(100, dtype=np.float32),
+    )
+    right = PhonemeSegment(
+        id="right",
+        segment_id="right",
+        phoneme_id=0,
+        text="right",
+        phonemes="right",
+        tokens=[1],
+        ssmd_metadata={"prosody_pitch": "+1st"},
+        processed_audio=-np.ones(100, dtype=np.float32),
+    )
+    trace = Trace()
+
+    rendered = generator._concatenate_audio_segments(
+        [left, right],
+        ProsodyConfig(boundary_blend_ms=5.0),
+        trace,
+    )
+
+    assert rendered.shape == (200,)
+    assert abs(float(rendered[99]) - float(rendered[100])) < 0.02
+    assert trace.prosody[-1]["kind"] == "boundary"
+    assert trace.prosody[-1]["boundary_jump_before"] == 2.0
+    assert trace.prosody[-1]["boundary_jump_after"] < 0.02
+    assert trace.prosody[-1]["conditioned_samples"] == 100
+
+
+def test_prosody_boundary_conditioning_respects_explicit_pauses():
+    generator = AudioGenerator.__new__(AudioGenerator)
+    left = PhonemeSegment(
+        id="left",
+        segment_id="left",
+        phoneme_id=0,
+        text="left",
+        phonemes="left",
+        tokens=[1],
+        ssmd_metadata={"prosody_rate": "87%"},
+        processed_audio=np.ones(100, dtype=np.float32),
+    )
+    right = PhonemeSegment(
+        id="right",
+        segment_id="right",
+        phoneme_id=0,
+        text="right",
+        phonemes="right",
+        tokens=[1],
+        ssmd_metadata={"prosody_pitch": "+1st"},
+        pause_before=0.01,
+        processed_audio=-np.ones(100, dtype=np.float32),
+    )
+    trace = Trace()
+
+    rendered = generator._concatenate_audio_segments(
+        [left, right],
+        ProsodyConfig(boundary_blend_ms=5.0),
+        trace,
+    )
+
+    assert rendered.shape == (100 + 240 + 100,)
+    assert trace.prosody == []
+    np.testing.assert_array_equal(rendered[:100], np.ones(100, dtype=np.float32))
+    np.testing.assert_array_equal(rendered[-100:], -np.ones(100, dtype=np.float32))
 
 
 def test_phrase_modes_fall_back_to_wrap_once_without_timestamp_output(monkeypatch, capsys):

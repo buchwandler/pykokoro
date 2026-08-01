@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from typing import TYPE_CHECKING
 
 from audiosig import AudioSignalError
@@ -33,11 +34,11 @@ class OnnxAudioPostprocessingAdapter:
             (segment.ssmd_metadata or {}).get("deterministic_pause_boundary") == "true"
             for segment in phoneme_segments
         )
-        processed = self._kokoro.postprocess_audio_segments(
-            phoneme_segments,
-            trim_silence,
-            getattr(cfg, "prosody", None),
-        )
+        postprocess = self._kokoro.postprocess_audio_segments
+        arguments = [phoneme_segments, trim_silence, getattr(cfg, "prosody", None)]
+        if "trace" in inspect.signature(postprocess).parameters:
+            arguments.append(trace)
+        processed = postprocess(*arguments)
         resolver = cfg.ssmd.audio_source_resolver
         for segment in processed:
             metadata = segment.ssmd_metadata or {}
@@ -57,4 +58,14 @@ class OnnxAudioPostprocessingAdapter:
                 )
             except (OSError, TypeError, ValueError, AudioSignalError) as exc:
                 trace.warnings.append(f"ssmd.audio_fallback: {exc}")
-        return self._kokoro.concatenate_audio_segments(processed)
+        concatenate = self._kokoro.concatenate_audio_segments
+        parameters = inspect.signature(concatenate).parameters
+        supports_config = "prosody_config" in parameters
+        supports_trace = "trace" in parameters
+        if supports_config and supports_trace:
+            return concatenate(processed, getattr(cfg, "prosody", None), trace)
+        if supports_config:
+            return concatenate(processed, getattr(cfg, "prosody", None))
+        if supports_trace:
+            return concatenate(processed, trace=trace)
+        return concatenate(processed)

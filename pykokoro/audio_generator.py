@@ -6,6 +6,7 @@ import dataclasses
 import logging
 import random
 import re
+import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -15,7 +16,7 @@ from audiosig import trim as trim_audio
 
 from .constants import MAX_PHONEME_LENGTH, SAMPLE_RATE
 from .exceptions import ConfigurationError
-from .prosody import apply_prosody
+from .prosody import apply_prosody, parse_pitch, parse_rate, parse_volume
 from .short_sentence_handler import (
     SHORT_SENTENCE_META_KEY,
     apply_short_sentence_mode,
@@ -32,8 +33,103 @@ if TYPE_CHECKING:
 
     from .prosody_config import ProsodyConfig
     from .short_sentence_handler import ShortSentenceConfig
+    from .types import Trace
 
 logger = logging.getLogger(__name__)
+
+
+def _waveform_metrics(audio: np.ndarray) -> dict[str, float | int | bool]:
+    """Return compact, JSON-friendly metrics for a segment waveform."""
+
+    values = np.asarray(audio, dtype=np.float64).reshape(-1)
+    differences = np.diff(values)
+    return {
+        "samples": int(values.size),
+        "finite": bool(np.isfinite(values).all()),
+        "peak": float(np.max(np.abs(values))) if values.size else 0.0,
+        "rms": float(np.sqrt(np.mean(np.square(values)))) if values.size else 0.0,
+        "max_adjacent_jump": (
+            float(np.max(np.abs(differences))) if differences.size else 0.0
+        ),
+    }
+
+
+def _has_prosody_metadata(segment: PhonemeSegment) -> bool:
+    metadata = segment.ssmd_metadata or {}
+    return bool(
+        metadata.get("prosody_volume")
+        or metadata.get("prosody_pitch")
+        or metadata.get("prosody_rate")
+    )
+
+
+def _should_condition_boundary(
+    left: PhonemeSegment,
+    right: PhonemeSegment,
+    config: ProsodyConfig | None,
+) -> bool:
+    return bool(
+        config is not None
+        and config.boundary_blend_ms > 0.0
+        and (_has_prosody_metadata(left) or _has_prosody_metadata(right))
+    )
+
+
+def _boundary_jump(left: np.ndarray, right: np.ndarray) -> float:
+    if left.size == 0 or right.size == 0:
+        return 0.0
+    return abs(float(left[-1]) - float(right[0]))
+
+
+def _condition_boundary(
+    left: np.ndarray,
+    right: np.ndarray,
+    *,
+    sample_rate: int,
+    blend_ms: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Smooth a small boundary window without changing either segment length."""
+
+    window = min(
+        round(sample_rate * blend_ms / 1000.0),
+        left.size,
+        right.size,
+    )
+    if window < 2:
+        return left, right
+
+    positions = np.linspace(0.0, window - 1.0, 2 * window)
+    source_positions = np.arange(window, dtype=np.float64)
+    left_curve = np.interp(positions, source_positions, left[-window:])
+    right_curve = np.interp(positions, source_positions, right[:window])
+    mix = np.linspace(0.0, 1.0, 2 * window)
+    transition = left_curve * (1.0 - mix) + right_curve * mix
+
+    conditioned_left = np.array(left, copy=True)
+    conditioned_right = np.array(right, copy=True)
+    conditioned_left[-window:] = transition[:window]
+    conditioned_right[:window] = transition[window:]
+    return conditioned_left, conditioned_right
+
+
+def _record_boundary_diagnostic(
+    trace: Trace | None,
+    segment: PhonemeSegment,
+    before: float,
+    after: float,
+    conditioned_samples: int,
+) -> None:
+    if trace is None:
+        return
+    trace.prosody.append(
+        {
+            "kind": "boundary",
+            "segment_id": segment.id,
+            "boundary_jump_before": before,
+            "boundary_jump_after": after,
+            "conditioned_samples": conditioned_samples,
+        }
+    )
 
 
 def resolve_audio_annotation(
@@ -741,6 +837,7 @@ class AudioGenerator:
         segments: list[PhonemeSegment],
         trim_silence: bool,
         prosody_config: ProsodyConfig | None = None,
+        trace: Trace | None = None,
     ) -> list[PhonemeSegment]:
         for segment in segments:
             if segment.raw_audio is None:
@@ -764,20 +861,70 @@ class AudioGenerator:
                 or (segment.ssmd_metadata or {}).get("deterministic_pause_boundary") == "true"
             ):
                 audio, _ = trim_audio(audio)
-            segment.processed_audio = self._apply_segment_prosody(audio, segment, prosody_config)
+            segment.processed_audio = self._apply_segment_prosody(
+                audio,
+                segment,
+                prosody_config,
+                trace,
+            )
 
         return segments
 
-    def _concatenate_audio_segments(self, segments: list[PhonemeSegment]) -> np.ndarray:
+    def _concatenate_audio_segments(
+        self,
+        segments: list[PhonemeSegment],
+        prosody_config: ProsodyConfig | None = None,
+        trace: Trace | None = None,
+    ) -> np.ndarray:
         audio_parts: list[np.ndarray] = []
+        previous_index: int | None = None
+        previous_segment: PhonemeSegment | None = None
 
         for segment in segments:
             if segment.pause_before > 0:
                 audio_parts.append(generate_silence(segment.pause_before, SAMPLE_RATE))
+                previous_index = None
+                previous_segment = None
+
             if segment.processed_audio is not None:
-                audio_parts.append(segment.processed_audio)
+                current = np.asarray(segment.processed_audio)
+                if (
+                    previous_index is not None
+                    and previous_segment is not None
+                    and _should_condition_boundary(previous_segment, segment, prosody_config)
+                ):
+                    left = audio_parts[previous_index]
+                    boundary_before = _boundary_jump(left, current)
+                    conditioned_left, conditioned_right = _condition_boundary(
+                        left,
+                        current,
+                        sample_rate=SAMPLE_RATE,
+                        blend_ms=(
+                            prosody_config.boundary_blend_ms
+                            if prosody_config is not None
+                            else 0.0
+                        ),
+                    )
+                    audio_parts[previous_index] = conditioned_left
+                    current = conditioned_right
+                    _record_boundary_diagnostic(
+                        trace,
+                        segment,
+                        boundary_before,
+                        _boundary_jump(conditioned_left, conditioned_right),
+                        min(len(left), len(current)),
+                    )
+                audio_parts.append(current)
+                previous_index = len(audio_parts) - 1
+                previous_segment = segment
+            else:
+                previous_index = None
+                previous_segment = None
+
             if segment.pause_after > 0:
                 audio_parts.append(generate_silence(segment.pause_after, SAMPLE_RATE))
+                previous_index = None
+                previous_segment = None
 
         return np.concatenate(audio_parts) if audio_parts else np.array([], dtype=np.float32)
 
@@ -827,13 +974,14 @@ class AudioGenerator:
             preprocessed, voice_style, speed, voice_resolver
         )
         processed = self._postprocess_audio_segments(generated, trim_silence, prosody_config)
-        return self._concatenate_audio_segments(processed)
+        return self._concatenate_audio_segments(processed, prosody_config)
 
     def _apply_segment_prosody(
         self,
         audio: np.ndarray,
         segment: PhonemeSegment,
         prosody_config: ProsodyConfig | None = None,
+        trace: Trace | None = None,
     ) -> np.ndarray:
         """Apply prosody modifications from segment metadata to audio.
 
@@ -853,14 +1001,56 @@ class AudioGenerator:
 
         # Apply prosody if any prosody metadata is present
         if volume or pitch or rate:
+            source_metrics = _waveform_metrics(audio)
+            resolved_config = prosody_config or ProsodyConfig()
+            parsed: dict[str, float | None] = {}
+            for name, value, parser in (
+                ("volume_db", volume, parse_volume),
+                ("pitch_semitones", pitch, parse_pitch),
+                ("rate_multiplier", rate, parse_rate),
+            ):
+                if value is None:
+                    parsed[name] = None
+                    continue
+                try:
+                    parsed[name] = float(parser(value))
+                except (TypeError, ValueError):
+                    parsed[name] = None
+
+            started = time.perf_counter()
             audio = apply_prosody(
                 audio,
                 SAMPLE_RATE,
                 volume=volume,
                 pitch=pitch,
                 rate=rate,
-                config=prosody_config,
+                config=resolved_config,
             )
+            if trace is not None:
+                output_metrics = _waveform_metrics(audio)
+                short_sentence = (segment.ssmd_metadata or {}).get(SHORT_SENTENCE_META_KEY)
+                trace.prosody.append(
+                    {
+                        "segment_id": segment.id,
+                        "text": segment.text,
+                        "method": resolved_config.method,
+                        "strict": resolved_config.strict,
+                        "rate": rate,
+                        "pitch": pitch,
+                        "volume": volume,
+                        "rate_multiplier": parsed["rate_multiplier"],
+                        "pitch_semitones": parsed["pitch_semitones"],
+                        "volume_db": parsed["volume_db"],
+                        "short_sentence": dict(short_sentence)
+                        if isinstance(short_sentence, dict)
+                        else None,
+                        "runtime_ms": (time.perf_counter() - started) * 1000.0,
+                        "source": source_metrics,
+                        "output": output_metrics,
+                        "edge_jump_before": source_metrics["max_adjacent_jump"],
+                        "edge_jump_after": output_metrics["max_adjacent_jump"],
+                    }
+                )
 
         return audio
 

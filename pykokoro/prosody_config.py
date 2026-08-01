@@ -35,6 +35,7 @@ class ProsodyConfig:
     hop_length: int | None = None
     filter_width: int = 32
     rolloff: float = 0.945
+    boundary_blend_ms: float = 5.0
 
     def __post_init__(self) -> None:
         allowed = {
@@ -59,6 +60,8 @@ class ProsodyConfig:
             raise ValueError("filter_width must be positive")
         if not 0.0 < self.rolloff <= 1.0:
             raise ValueError("rolloff must be in the interval (0, 1]")
+        if self.boundary_blend_ms < 0.0:
+            raise ValueError("boundary_blend_ms must be non-negative")
 
 
 def canonical_prosody_method(method: ProsodyMethod) -> AudioSigProsodyMethod:
