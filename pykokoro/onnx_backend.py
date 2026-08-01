@@ -2208,7 +2208,7 @@ class Kokoro:
         trim_silence: bool,
         enable_short_sentence_override: bool | None = None,
         random_seed: int | None = None,
-        prosody_config: ProsodyConfig | None = None,
+        prosody_config: "ProsodyConfig | None" = None,
     ) -> np.ndarray:
         """Delegate to AudioGenerator with voice resolution support.
 

@@ -12,11 +12,11 @@ status: accepted
 audience: null
 scopes: []
 source_refs:
-- tl:task-0008
+  - tl:task-0008
 paths:
-- pykokoro/pipeline_config.py
-- pykokoro/types.py
-- tests/test_audio_result_memory.py
+  - pykokoro/pipeline_config.py
+  - pykokoro/types.py
+  - tests/test_audio_result_memory.py
 issues: []
 prs: []
 sources: []

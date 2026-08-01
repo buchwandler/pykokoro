@@ -53,7 +53,7 @@ def test_audiosig_is_the_only_declared_dsp_backend() -> None:
     dependencies = pyproject["project"]["dependencies"]
     optional = pyproject["project"]["optional-dependencies"]
 
-    assert "audiosig>=0.1.0,<0.2" in dependencies
+    assert "audiosig>=0.1.1,<0.2" in dependencies
     assert "prosody" not in optional
 
     requirements = [requirement.lower() for requirement in dependencies]

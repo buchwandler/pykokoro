@@ -7,7 +7,7 @@ versioning:
 version: 0.8.0
 status: released
 title: Release 0.8.0
-released_at: '2026-08-01'
+released_at: "2026-08-01"
 previous_version: 0.7.4
 cancel_reason: null
 superseded_by: null
