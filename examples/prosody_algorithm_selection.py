@@ -43,8 +43,7 @@ def _mono_float32(audio: np.ndarray) -> np.ndarray:
 
     if values.ndim != 1:
         raise ValueError(
-            "expected mono or frames-by-channels audio, "
-            f"received shape {values.shape}"
+            f"expected mono or frames-by-channels audio, received shape {values.shape}"
         )
 
     values = values.astype(np.float32, copy=False)
@@ -86,9 +85,7 @@ def _stats(
         "rms": rms,
         "dc_offset": float(np.mean(values)),
         "samples_at_or_above_full_scale": int(np.count_nonzero(np.abs(values) >= 1.0)),
-        "max_adjacent_jump": (
-            float(np.max(np.abs(differences))) if differences.size else 0.0
-        ),
+        "max_adjacent_jump": (float(np.max(np.abs(differences))) if differences.size else 0.0),
         "rms_adjacent_jump": (
             float(np.sqrt(np.mean(np.square(differences)))) if differences.size else 0.0
         ),
@@ -102,9 +99,7 @@ def _stats(
     if runtime_seconds is not None:
         duration = float(values.size / sample_rate)
         result["runtime_seconds"] = float(runtime_seconds)
-        result["real_time_factor"] = (
-            float(runtime_seconds / duration) if duration > 0.0 else 0.0
-        )
+        result["real_time_factor"] = float(runtime_seconds / duration) if duration > 0.0 else 0.0
 
     return result
 
@@ -201,8 +196,12 @@ def _environment() -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     source = parser.add_mutually_exclusive_group()
-    source.add_argument("--input-wav", type=Path, help="use a known-good WAV and bypass ONNX synthesis")
-    source.add_argument("--text", default=DEFAULT_TEXT, help="text synthesized once when --input-wav is omitted")
+    source.add_argument(
+        "--input-wav", type=Path, help="use a known-good WAV and bypass ONNX synthesis"
+    )
+    source.add_argument(
+        "--text", default=DEFAULT_TEXT, help="text synthesized once when --input-wav is omitted"
+    )
     parser.add_argument("--voice", default="af_bella")
     parser.add_argument("--output-dir", type=Path, default=Path("prosody_algorithm_outputs"))
     parser.add_argument("--rate", default="87%")

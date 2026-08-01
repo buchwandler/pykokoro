@@ -179,10 +179,10 @@ sf.write("long_text.wav", result.audio, result.sample_rate)
 
 ## Prosody Backend Comparison
 
-Use `examples/prosody_algorithm_selection.py` for a small, validated diagnostic comparison.
-It synthesizes once, or accepts a known-good WAV, and applies WSOLA, ESOLA, TD-PSOLA, and
-phase vocoder to the exact same reference. On Termux/Android, use the input-WAV path so
-source synthesis is isolated from the AudioSig comparison:
+Use `examples/prosody_algorithm_selection.py` for a small, validated diagnostic
+comparison. It synthesizes once, or accepts a known-good WAV, and applies WSOLA, ESOLA,
+TD-PSOLA, and phase vocoder to the exact same reference. On Termux/Android, use the
+input-WAV path so source synthesis is isolated from the AudioSig comparison:
 
 ```bash
 python examples/prosody_algorithm_selection.py \

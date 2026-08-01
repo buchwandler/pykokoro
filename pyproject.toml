@@ -25,7 +25,7 @@ dependencies = [
     "kokorog2p[espeak,en]>=0.6.6",
     "phrasplit>=0.3.1",
     "numpy",
-    "audiosig>=0.1.0,<0.2",
+    "audiosig>=0.1.1,<0.2",
     "platformdirs",
     "chardet",
     "charset-normalizer",

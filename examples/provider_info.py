@@ -26,9 +26,7 @@ from pykokoro.onnx_session import (
 )
 
 # Test sentence
-TEST_TEXT = (
-    "PyKokoro supports multiple hardware acceleration providers for optimal performance."
-)
+TEST_TEXT = "PyKokoro supports multiple hardware acceleration providers for optimal performance."
 
 
 PROVIDER_INFO = {

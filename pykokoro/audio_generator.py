@@ -48,9 +48,7 @@ def _waveform_metrics(audio: np.ndarray) -> dict[str, float | int | bool]:
         "finite": bool(np.isfinite(values).all()),
         "peak": float(np.max(np.abs(values))) if values.size else 0.0,
         "rms": float(np.sqrt(np.mean(np.square(values)))) if values.size else 0.0,
-        "max_adjacent_jump": (
-            float(np.max(np.abs(differences))) if differences.size else 0.0
-        ),
+        "max_adjacent_jump": (float(np.max(np.abs(differences))) if differences.size else 0.0),
     }
 
 
@@ -900,9 +898,7 @@ class AudioGenerator:
                         current,
                         sample_rate=SAMPLE_RATE,
                         blend_ms=(
-                            prosody_config.boundary_blend_ms
-                            if prosody_config is not None
-                            else 0.0
+                            prosody_config.boundary_blend_ms if prosody_config is not None else 0.0
                         ),
                     )
                     audio_parts[previous_index] = conditioned_left
