@@ -189,5 +189,53 @@ class AudioResult:
         sd.wait()
 
 
+AudioUnitKind = Literal["paragraph"]
+
+
+@dataclass(frozen=True, slots=True)
+class AudioUnitDescriptor:
+    """Stable, lightweight identity and text metadata for one prepared unit."""
+
+    index: int
+    paragraph_idx: int
+    char_start: int
+    char_end: int
+    text: str
+    text_hash: str
+    segment_ids: tuple[str, ...]
+    phoneme_segment_ids: tuple[str, ...]
+    marker_names: tuple[str, ...] = ()
+
+
+@dataclass(slots=True)
+class AudioUnitResult:
+    """Audio and metadata owned by one prepared render unit.
+
+    ``release_audio`` and ``release_segment_audio`` only clear references owned by
+    this result. Arrays retained independently by a caller remain valid.
+    """
+
+    descriptor: AudioUnitDescriptor
+    audio: np.ndarray
+    sample_rate: int
+    segments: list[Segment] = field(default_factory=list)
+    phoneme_segments: list[PhonemeSegment] = field(default_factory=list)
+    markers: list[dict[str, Any]] = field(default_factory=list)
+    trace: Trace | None = None
+    document_metadata: dict[str, Any] = field(default_factory=dict)
+
+    def release_segment_audio(self) -> None:
+        """Destructively release raw and processed arrays for this unit."""
+        for segment in self.phoneme_segments:
+            segment.raw_audio = None
+            segment.processed_audio = None
+
+    def release_audio(self) -> None:
+        """Destructively release final and per-segment audio, idempotently."""
+        dtype = self.audio.dtype if isinstance(self.audio, np.ndarray) else np.dtype(np.float32)
+        self.audio = np.empty(0, dtype=dtype)
+        self.release_segment_audio()
+
+
 # Backward compatibility aliases
 Annotation = AnnotationSpan

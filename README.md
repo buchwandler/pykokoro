@@ -124,8 +124,31 @@ whole-result concatenated waveform. Use `result.release_segment_audio()` to reta
 final waveform while dropping per-segment arrays, or `result.release_audio()` to drop
 both. These methods only release references owned by the result, so arrays held
 separately by callers remain valid. Callers that need raw or processed segment waveforms
-should keep `retain_segment_audio=True`. Bounded peak memory requires a future streaming
-API.
+should keep `retain_segment_audio=True`. Use the paragraph streaming API below for
+bounded unit rendering.
+
+### Paragraph-Unit Streaming
+
+Use `prepare_units()` when a document should be prepared once but rendered and stored
+one paragraph at a time. Preparation resolves SSMD directives, pauses, markers, voices,
+and preprocessing globally; `skip_indices` can omit units already completed by a caller.
+
+```python
+from pykokoro import KokoroPipeline, PipelineConfig
+
+pipeline = KokoroPipeline(PipelineConfig(voice="af_sarah"))
+with pipeline.prepare_units("First paragraph.\n\nSecond paragraph.") as prepared:
+    for unit in prepared.render(skip_indices={0}):
+        try:
+            save_waveform(unit.audio, unit.sample_rate)
+        finally:
+            unit.release_audio()
+```
+
+`AudioUnitResult.release_audio()` is destructive and idempotent. The iterator also
+releases the previous unit before yielding the next one, so consumers should copy or
+persist audio inside the loop. Closing the prepared object releases prepared segment
+audio but does not close the reusable pipeline backend.
 
 ## Pipeline Stages
 

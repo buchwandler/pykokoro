@@ -20,9 +20,19 @@ def __getattr__(name: str) -> Any:
         from .pipeline_config import PipelineConfig
 
         return PipelineConfig
-    if name in {"KokoroPipeline", "build_pipeline", "with_spacy_model_size"}:
+    if name in {
+        "KokoroPipeline",
+        "PreparedAudioUnits",
+        "build_pipeline",
+        "with_spacy_model_size",
+    }:
         try:
-            from .pipeline import KokoroPipeline, build_pipeline, with_spacy_model_size
+            from .pipeline import (
+                KokoroPipeline,
+                PreparedAudioUnits,
+                build_pipeline,
+                with_spacy_model_size,
+            )
         except ModuleNotFoundError as exc:
             if exc.name == "onnxruntime":
                 raise RuntimeError(
@@ -32,8 +42,17 @@ def __getattr__(name: str) -> Any:
             raise
         return {
             "KokoroPipeline": KokoroPipeline,
+            "PreparedAudioUnits": PreparedAudioUnits,
             "build_pipeline": build_pipeline,
             "with_spacy_model_size": with_spacy_model_size,
+        }[name]
+    if name in {"AudioUnitDescriptor", "AudioUnitKind", "AudioUnitResult"}:
+        from .types import AudioUnitDescriptor, AudioUnitKind, AudioUnitResult
+
+        return {
+            "AudioUnitDescriptor": AudioUnitDescriptor,
+            "AudioUnitKind": AudioUnitKind,
+            "AudioUnitResult": AudioUnitResult,
         }[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -45,6 +64,10 @@ __all__ = [
     "SSMDPauseOverrides",
     "SSMDRenderConfig",
     "KokoroPipeline",
+    "AudioUnitDescriptor",
+    "AudioUnitKind",
+    "AudioUnitResult",
+    "PreparedAudioUnits",
     "PipelineConfig",
     "__version__",
     "__version_tuple__",

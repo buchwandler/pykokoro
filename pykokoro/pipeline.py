@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
-from collections.abc import Mapping
-from dataclasses import fields, is_dataclass, replace
+from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
+from copy import copy, deepcopy
+from dataclasses import dataclass, fields, is_dataclass, replace
 from pathlib import Path
-from types import TracebackType
-from typing import TYPE_CHECKING, Any
+from types import MappingProxyType, TracebackType
+from typing import TYPE_CHECKING, Any, Literal
 
+import numpy as np
 from typing_extensions import Self
 
 from .config_types import LANG_CODE_TO_ONNX
@@ -29,13 +33,163 @@ from .stages.protocols import (
     G2PAdapter,
     PhonemeProcessor,
 )
-from .types import AudioResult, Segment, Trace
+from .types import (
+    AudioResult,
+    AudioUnitDescriptor,
+    AudioUnitResult,
+    PhonemeSegment,
+    Segment,
+    Trace,
+    TraceEvent,
+)
 
 if TYPE_CHECKING:
     from .onnx_backend import Kokoro
     from .tokenizer import TokenizerConfig
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class _PreparedUnitGroup:
+    descriptor: AudioUnitDescriptor
+    phoneme_start: int
+    phoneme_end: int
+    marker_events: tuple[Any, ...]
+
+
+@dataclass(slots=True)
+class _PreparedDocument:
+    cfg: PipelineConfig
+    trace: Trace
+    doc: Any
+    segments: list[Segment]
+    phoneme_segments: list[PhonemeSegment]
+    groups: tuple[_PreparedUnitGroup, ...]
+    phoneme_processor: PhonemeProcessor
+    audio_generator: AudioGeneratorStage
+    audio_postprocessor: AudioPostprocessor
+
+
+class PreparedAudioUnits:
+    """A globally prepared document that can render paragraph units sequentially."""
+
+    def __init__(self, pipeline: KokoroPipeline, prepared: _PreparedDocument) -> None:
+        self._pipeline = pipeline
+        self._prepared: _PreparedDocument | None = prepared
+        self._units = tuple(group.descriptor for group in prepared.groups)
+        self._document_metadata = {
+            "title": _copy_metadata_value(prepared.doc.header.get("title")),
+            "voice_bindings": _copy_metadata_value(prepared.doc.header.get("voice_bindings", {})),
+            "pause_defaults": _copy_metadata_value(prepared.doc.header.get("pause_defaults", {})),
+        }
+        self._diagnostics = tuple(prepared.doc.diagnostics)
+        self._closed = False
+        self._render_started = False
+        self._render_active = False
+        self._active_result: AudioUnitResult | None = None
+
+    @property
+    def units(self) -> tuple[AudioUnitDescriptor, ...]:
+        return self._units
+
+    @property
+    def document_metadata(self) -> Mapping[str, Any]:
+        return MappingProxyType(_copy_metadata_value(self._document_metadata))
+
+    @property
+    def diagnostics(self) -> Sequence[Any]:
+        return self._diagnostics
+
+    def render(
+        self,
+        *,
+        indices: Iterable[int] | None = None,
+        skip_indices: Collection[int] = (),
+    ) -> Iterator[AudioUnitResult]:
+        """Render selected units in order, allowing only one render pass."""
+        if self._closed:
+            raise RuntimeError("PreparedAudioUnits is closed")
+        if self._render_started:
+            raise RuntimeError("PreparedAudioUnits supports one render pass only")
+
+        selected = self._normalize_indices(indices, "indices")
+        skipped = self._normalize_indices(skip_indices, "skip_indices")
+        selected_set = set(range(len(self._units))) if selected is None else set(selected)
+        selected_set.difference_update(skipped or ())
+        ordered = tuple(index for index in range(len(self._units)) if index in selected_set)
+        self._render_started = True
+        self._render_active = True
+        return self._iterate(ordered)
+
+    def _normalize_indices(self, values: Iterable[int] | None, name: str) -> tuple[int, ...] | None:
+        if values is None:
+            return None
+        normalized = tuple(values)
+        if len(set(normalized)) != len(normalized):
+            raise ValueError(f"{name} contains duplicate unit indices")
+        invalid: list[object] = []
+        for value in normalized:
+            if (
+                not isinstance(value, int)
+                or isinstance(value, bool)
+                or value < 0
+                or value >= len(self._units)
+            ):
+                invalid.append(value)
+        if invalid:
+            raise IndexError(f"{name} contains out-of-range unit index {invalid[0]!r}")
+        return tuple(sorted(normalized))
+
+    def _iterate(self, ordered: tuple[int, ...]) -> Iterator[AudioUnitResult]:
+        previous: AudioUnitResult | None = None
+        try:
+            for index in ordered:
+                if previous is not None:
+                    previous.release_audio()
+                    self._active_result = None
+                prepared = self._prepared
+                if prepared is None or self._closed:
+                    raise RuntimeError("PreparedAudioUnits is closed")
+                result = self._pipeline._render_prepared_unit(prepared, index)
+                previous = result
+                self._active_result = result
+                yield result
+        finally:
+            if previous is not None:
+                previous.release_audio()
+            self._active_result = None
+            self._render_active = False
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if self._active_result is not None:
+            self._active_result.release_audio()
+            self._active_result = None
+        prepared = self._prepared
+        if prepared is not None:
+            for segment in prepared.phoneme_segments:
+                segment.raw_audio = None
+                segment.processed_audio = None
+            prepared.segments.clear()
+            prepared.phoneme_segments.clear()
+            prepared.groups = ()
+        self._prepared = None
+        self._render_active = False
+        self._pipeline._unregister_prepared(self)
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        self.close()
 
 
 def _coerce_generation(base: GenerationConfig, value: Any) -> GenerationConfig:
@@ -340,6 +494,7 @@ class KokoroPipeline:
         self._owns_phoneme_processing = False
         self._owns_audio_generation = False
         self._owns_audio_postprocessing = False
+        self._prepared_objects: list[PreparedAudioUnits] = []
 
     def __enter__(self) -> Self:
         return self
@@ -353,6 +508,8 @@ class KokoroPipeline:
         self.close()
 
     def close(self) -> None:
+        for prepared in tuple(self._prepared_objects):
+            prepared.close()
         if self._owns_phoneme_processing:
             self._close_stage(self.phoneme_processing)
             self.phoneme_processing = None
@@ -369,6 +526,10 @@ class KokoroPipeline:
             self._kokoro.close()
         self._kokoro = None
         self._kokoro_config_key = None
+
+    def _unregister_prepared(self, prepared: PreparedAudioUnits) -> None:
+        if prepared in self._prepared_objects:
+            self._prepared_objects.remove(prepared)
 
     def _kokoro_key(self, cfg: PipelineConfig) -> tuple[object, ...]:
         model_path = str(cfg.model_path) if cfg.model_path else None
@@ -445,8 +606,35 @@ class KokoroPipeline:
             overrides["ssmd"] = _coerce_ssmd(self.config.ssmd, ssmd_value)
         return _default_lang_from_voice(replace(self.config, **overrides))
 
-    def run(self, text: str, **overrides: Any) -> AudioResult:
-        cfg = self._resolve_run_config(overrides)
+    def prepare_units(
+        self,
+        text: str,
+        *,
+        unit: Literal["paragraph"] = "paragraph",
+        **overrides: Any,
+    ) -> PreparedAudioUnits:
+        """Prepare a document globally for sequential paragraph rendering."""
+        if unit != "paragraph":
+            raise ValueError(f"Unsupported audio unit kind: {unit!r}")
+        cfg = deepcopy(self._resolve_run_config(overrides))
+        prepared = self._prepare_document(text, cfg)
+        result = PreparedAudioUnits(self, prepared)
+        self._prepared_objects.append(result)
+        return result
+
+    def iter_units(
+        self,
+        text: str,
+        *,
+        unit: Literal["paragraph"] = "paragraph",
+        skip_indices: Collection[int] = (),
+        **overrides: Any,
+    ) -> Iterator[AudioUnitResult]:
+        """Yield paragraph results while owning the prepared document lifecycle."""
+        with self.prepare_units(text, unit=unit, **overrides) as prepared:
+            yield from prepared.render(skip_indices=skip_indices)
+
+    def _prepare_document(self, text: str, cfg: PipelineConfig) -> _PreparedDocument:
         trace = Trace()
 
         with trace_timing(trace, "doc", "parse"):
@@ -471,6 +659,30 @@ class KokoroPipeline:
             logger.debug("Phonemizing %d segments", len(segments))
             phoneme_segments = self.g2p.phonemize(segments, doc, cfg, trace)
 
+        phoneme_processor, audio_generator, audio_postprocessor = self._resolve_stages(cfg)
+
+        with trace_timing(trace, "phoneme_processing", "preprocess"):
+            logger.debug("Preprocessing %d phoneme segments", len(phoneme_segments))
+            phoneme_segments = phoneme_processor.process(phoneme_segments, cfg, trace)
+
+        apply_emphasis_policy(phoneme_segments, cfg, trace)
+
+        groups = self._build_unit_groups(doc, segments, phoneme_segments, cfg)
+        return _PreparedDocument(
+            cfg=cfg,
+            trace=trace,
+            doc=doc,
+            segments=segments,
+            phoneme_segments=phoneme_segments,
+            groups=groups,
+            phoneme_processor=phoneme_processor,
+            audio_generator=audio_generator,
+            audio_postprocessor=audio_postprocessor,
+        )
+
+    def _resolve_stages(
+        self, cfg: PipelineConfig
+    ) -> tuple[PhonemeProcessor, AudioGeneratorStage, AudioPostprocessor]:
         phoneme_processor = self.phoneme_processing
         audio_generator = self.audio_generation
         audio_postprocessor = self.audio_postprocessing
@@ -496,38 +708,229 @@ class KokoroPipeline:
         assert phoneme_processor is not None
         assert audio_generator is not None
         assert audio_postprocessor is not None
+        return phoneme_processor, audio_generator, audio_postprocessor
 
-        with trace_timing(trace, "phoneme_processing", "preprocess"):
-            logger.debug("Preprocessing %d phoneme segments", len(phoneme_segments))
-            phoneme_segments = phoneme_processor.process(phoneme_segments, cfg, trace)
+    def _build_unit_groups(
+        self,
+        doc: Any,
+        segments: list[Segment],
+        phoneme_segments: list[PhonemeSegment],
+        cfg: PipelineConfig,
+    ) -> tuple[_PreparedUnitGroup, ...]:
+        if not phoneme_segments:
+            return ()
 
-        apply_emphasis_policy(phoneme_segments, cfg, trace)
+        groups_data: list[tuple[int, int, int]] = []
+        closed_paragraphs: set[int] = set()
+        current_paragraph: int | None = None
+        for phoneme_index, segment in enumerate(phoneme_segments):
+            paragraph = segment.paragraph_idx
+            if paragraph is None:
+                paragraph = current_paragraph if current_paragraph is not None else 0
+            if current_paragraph != paragraph:
+                if paragraph in closed_paragraphs:
+                    raise RuntimeError(
+                        f"Prepared paragraph {paragraph} is disjoint in phoneme segment order"
+                    )
+                if current_paragraph is not None:
+                    closed_paragraphs.add(current_paragraph)
+                groups_data.append((paragraph, phoneme_index, phoneme_index + 1))
+                current_paragraph = paragraph
+            else:
+                paragraph_idx, start, _ = groups_data[-1]
+                groups_data[-1] = (paragraph_idx, start, phoneme_index + 1)
 
-        with trace_timing(trace, "audio_generation", "generate"):
-            logger.debug("Generating audio for %d phoneme segments", len(phoneme_segments))
-            phoneme_segments = audio_generator.generate(phoneme_segments, cfg, trace)
+        segment_by_id = {segment.id: segment for segment in segments}
+        groups: list[_PreparedUnitGroup] = []
+        for index, (paragraph, start, end) in enumerate(groups_data):
+            group_phonemes = phoneme_segments[start:end]
+            segment_ids = tuple(dict.fromkeys(segment.segment_id for segment in group_phonemes))
+            group_segments = [
+                segment_by_id[segment_id]
+                for segment_id in segment_ids
+                if segment_id in segment_by_id
+            ]
+            if not group_segments:
+                char_start = min(segment.char_start for segment in group_phonemes)
+                char_end = max(segment.char_end for segment in group_phonemes)
+                spoken_text = " ".join(
+                    segment.text.strip() for segment in group_phonemes if segment.text.strip()
+                )
+            else:
+                char_start = min(segment.char_start for segment in group_segments)
+                char_end = max(segment.char_end for segment in group_segments)
+                spoken_text = " ".join(
+                    segment.text.strip() for segment in group_segments if segment.text.strip()
+                )
+            descriptor = AudioUnitDescriptor(
+                index=index,
+                paragraph_idx=paragraph,
+                char_start=char_start,
+                char_end=char_end,
+                text=spoken_text,
+                text_hash=_unit_text_hash(
+                    paragraph,
+                    char_start,
+                    char_end,
+                    spoken_text,
+                    group_phonemes,
+                    cfg,
+                    (),
+                ),
+                segment_ids=segment_ids,
+                phoneme_segment_ids=tuple(segment.id for segment in group_phonemes),
+            )
+            groups.append(_PreparedUnitGroup(descriptor, start, end, ()))
 
-        with trace_timing(trace, "audio_postprocessing", "postprocess"):
-            logger.debug("Postprocessing %d phoneme segments", len(phoneme_segments))
-            audio = audio_postprocessor.postprocess(phoneme_segments, cfg, trace)
+        marker_groups: list[list[Any]] = [[] for _ in groups]
+        for boundary in doc.boundary_events:
+            if getattr(boundary, "kind", None) != "marker":
+                continue
+            owner = _owner_for_boundary(boundary.pos, groups, phoneme_segments, len(doc.clean_text))
+            if owner is not None:
+                marker_groups[owner].append(boundary)
 
-        markers = _collect_marker_offsets(doc.boundary_events, phoneme_segments)
-        result = AudioResult(
+        finalized: list[_PreparedUnitGroup] = []
+        for group, marker_events in zip(groups, marker_groups, strict=True):
+            marker_names = tuple(
+                str(event.attrs["marker"]) for event in marker_events if event.attrs.get("marker")
+            )
+            descriptor = replace(
+                group.descriptor,
+                marker_names=marker_names,
+                text_hash=_unit_text_hash(
+                    group.descriptor.paragraph_idx,
+                    group.descriptor.char_start,
+                    group.descriptor.char_end,
+                    group.descriptor.text,
+                    phoneme_segments[group.phoneme_start : group.phoneme_end],
+                    cfg,
+                    marker_events,
+                ),
+            )
+            finalized.append(
+                _PreparedUnitGroup(
+                    descriptor,
+                    group.phoneme_start,
+                    group.phoneme_end,
+                    tuple(marker_events),
+                )
+            )
+        return tuple(finalized)
+
+    def _render_prepared_unit(self, prepared: _PreparedDocument, index: int) -> AudioUnitResult:
+        group = prepared.groups[index]
+        source = prepared.phoneme_segments[group.phoneme_start : group.phoneme_end]
+        generated: list[PhonemeSegment] = source
+        try:
+            with trace_timing(prepared.trace, "audio_generation", "generate"):
+                logger.debug(
+                    "Generating audio for unit %d (%d phoneme segments)",
+                    index,
+                    len(source),
+                )
+                generated = prepared.audio_generator.generate(source, prepared.cfg, prepared.trace)
+            with trace_timing(prepared.trace, "audio_postprocessing", "postprocess"):
+                audio = prepared.audio_postprocessor.postprocess(
+                    generated, prepared.cfg, prepared.trace
+                )
+            markers = _collect_marker_offsets(
+                list(group.marker_events),
+                generated,
+                base_sample_offset=0,
+                descriptor=group.descriptor,
+            )
+            segment_by_id = {segment.id: segment for segment in prepared.segments}
+            unit_segments = [
+                segment_by_id[segment_id]
+                for segment_id in group.descriptor.segment_ids
+                if segment_id in segment_by_id
+            ]
+            prepared.trace.events.append(
+                TraceEvent(
+                    stage="unit",
+                    name="render",
+                    ms=0.0,
+                    details={
+                        "unit_index": index,
+                        "paragraph_idx": group.descriptor.paragraph_idx,
+                        "phoneme_segment_count": len(generated),
+                        "character_count": len(group.descriptor.text),
+                    },
+                )
+            )
+            result = AudioUnitResult(
+                descriptor=group.descriptor,
+                audio=audio,
+                sample_rate=SAMPLE_RATE,
+                segments=unit_segments,
+                phoneme_segments=generated,
+                markers=markers,
+                trace=prepared.trace if prepared.cfg.return_trace else None,
+                document_metadata=_copy_metadata_value(
+                    {
+                        "title": prepared.doc.header.get("title"),
+                        "voice_bindings": prepared.doc.header.get("voice_bindings", {}),
+                        "pause_defaults": prepared.doc.header.get("pause_defaults", {}),
+                    }
+                ),
+            )
+            if not prepared.cfg.retain_segment_audio:
+                result.release_segment_audio()
+            return result
+        except Exception:
+            seen: set[int] = set()
+            for segment in source + (generated if generated is not source else []):
+                if id(segment) in seen:
+                    continue
+                seen.add(id(segment))
+                segment.raw_audio = None
+                segment.processed_audio = None
+            raise
+
+    def run(self, text: str, **overrides: Any) -> AudioResult:
+        with self.prepare_units(text, unit="paragraph", **overrides) as prepared:
+            cfg = prepared._prepared.cfg if prepared._prepared is not None else self.config
+            final_audio: list[Any] = []
+            markers: list[dict[str, Any]] = []
+            retained_phonemes: list[PhonemeSegment] = []
+            base_offset = 0
+            for unit_result in prepared.render():
+                final_audio.append(unit_result.audio)
+                markers.extend(
+                    {
+                        "name": marker["name"],
+                        "char_offset": marker["char_offset"],
+                        "sample_offset": marker["sample_offset"] + base_offset,
+                    }
+                    for marker in unit_result.markers
+                )
+                if cfg.retain_segment_audio:
+                    retained_phonemes.extend(
+                        _copy_phoneme_segment(segment) for segment in unit_result.phoneme_segments
+                    )
+                base_offset += len(unit_result.audio)
+
+            source_segments = list(prepared._prepared.segments) if prepared._prepared else []
+            source_phonemes = (
+                retained_phonemes
+                if cfg.retain_segment_audio
+                else list(prepared._prepared.phoneme_segments)
+                if prepared._prepared
+                else []
+            )
+            audio = np.concatenate(final_audio) if final_audio else np.array([], dtype=np.float32)
+            trace = prepared._prepared.trace if prepared._prepared is not None else None
+            metadata = dict(prepared.document_metadata)
+        return AudioResult(
             audio=audio,
             sample_rate=SAMPLE_RATE,
-            segments=segments,
-            phoneme_segments=phoneme_segments,
+            segments=source_segments,
+            phoneme_segments=source_phonemes,
             trace=trace if cfg.return_trace else None,
-            document_metadata={
-                "title": doc.header.get("title"),
-                "voice_bindings": _copy_metadata_value(doc.header.get("voice_bindings", {})),
-                "pause_defaults": _copy_metadata_value(doc.header.get("pause_defaults", {})),
-            },
+            document_metadata=metadata,
             markers=markers,
         )
-        if not cfg.retain_segment_audio:
-            result.release_segment_audio()
-        return result
 
     def __call__(self, text: str, **overrides: Any) -> AudioResult:
         return self.run(text, **overrides)
@@ -544,9 +947,13 @@ def _copy_metadata_value(value: Any) -> Any:
 
 
 def _collect_marker_offsets(
-    boundaries: list[Any], phoneme_segments: list[Any]
+    boundaries: list[Any],
+    phoneme_segments: list[Any],
+    *,
+    base_sample_offset: int = 0,
+    descriptor: AudioUnitDescriptor | None = None,
 ) -> list[dict[str, Any]]:
-    """Map clean-text marker boundaries to deterministic concatenated sample offsets."""
+    """Map marker boundaries to deterministic local or aggregate sample offsets."""
 
     marker_boundaries = [
         boundary for boundary in boundaries if getattr(boundary, "kind", None) == "marker"
@@ -573,10 +980,87 @@ def _collect_marker_offsets(
                 {
                     "name": marker,
                     "char_offset": boundary.pos,
-                    "sample_offset": sample_offset,
+                    "sample_offset": base_sample_offset + sample_offset,
+                    **(
+                        {
+                            "paragraph_idx": descriptor.paragraph_idx,
+                            "unit_index": descriptor.index,
+                        }
+                        if descriptor is not None
+                        else {}
+                    ),
                 }
             )
     return offsets
+
+
+def _owner_for_boundary(
+    position: int,
+    groups: list[_PreparedUnitGroup],
+    phoneme_segments: list[PhonemeSegment],
+    doc_end: int,
+) -> int | None:
+    """Assign a marker to one group using clean-text positions and group order."""
+    if not groups:
+        return None
+    for index, group in enumerate(groups):
+        values = phoneme_segments[group.phoneme_start : group.phoneme_end]
+        start = min(segment.char_start for segment in values)
+        end = max(segment.char_end for segment in values)
+        if start <= position < end:
+            return index
+        if position < start:
+            return index
+    return len(groups) - 1 if position <= doc_end else None
+
+
+def _unit_text_hash(
+    paragraph_idx: int,
+    char_start: int,
+    char_end: int,
+    text: str,
+    phoneme_segments: Sequence[PhonemeSegment],
+    cfg: PipelineConfig,
+    marker_events: Sequence[Any],
+) -> str:
+    """Create a stable identity hash from prepared semantic content, not audio."""
+    payload = {
+        "schema": "pykokoro-audio-unit-v1",
+        "paragraph_idx": paragraph_idx,
+        "char_start": char_start,
+        "char_end": char_end,
+        "text": text,
+        "segments": [
+            {
+                "id": segment.id,
+                "text": segment.text,
+                "phonemes": segment.phonemes,
+                "lang": segment.lang,
+                "voice": (
+                    segment.voice_name,
+                    segment.voice_language,
+                    segment.voice_gender,
+                    segment.voice_variant,
+                ),
+                "prosody": _freeze_config_value(segment.ssmd_metadata),
+                "pause_before": segment.pause_before,
+                "pause_after": segment.pause_after,
+            }
+            for segment in phoneme_segments
+        ],
+        "markers": [
+            (event.pos, event.attrs.get("marker"), _freeze_config_value(event.attrs))
+            for event in marker_events
+        ],
+        "config": _freeze_config_value(cfg),
+    }
+    encoded = json.dumps(payload, sort_keys=True, default=repr, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _copy_phoneme_segment(segment: PhonemeSegment) -> PhonemeSegment:
+    """Copy structural segment state while retaining independent array references."""
+    return copy(segment)
 
 
 def _freeze_config_value(value: Any) -> object:

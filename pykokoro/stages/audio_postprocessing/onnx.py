@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import inspect
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from audiosig import AudioSignalError
 
@@ -34,8 +34,8 @@ class OnnxAudioPostprocessingAdapter:
             (segment.ssmd_metadata or {}).get("deterministic_pause_boundary") == "true"
             for segment in phoneme_segments
         )
-        postprocess = self._kokoro.postprocess_audio_segments
-        arguments = [phoneme_segments, trim_silence, getattr(cfg, "prosody", None)]
+        postprocess = cast(Any, self._kokoro.postprocess_audio_segments)
+        arguments: list[Any] = [phoneme_segments, trim_silence, getattr(cfg, "prosody", None)]
         if "trace" in inspect.signature(postprocess).parameters:
             arguments.append(trace)
         processed = postprocess(*arguments)

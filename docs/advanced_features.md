@@ -2,6 +2,39 @@
 
 This guide covers advanced features of PyKokoro for power users.
 
+## Paragraph-wise rendering
+
+For long documents, `KokoroPipeline.prepare_units()` separates global semantic
+preparation from local paragraph rendering. The parser and phoneme stages run once, so
+SSMD scope, random short-sentence choices, pauses, and marker ownership remain
+consistent with `run()`. The prepared object supports one ordered render pass and can
+skip completed indices:
+
+```python
+from pathlib import Path
+
+import soundfile as sf
+
+from pykokoro import KokoroPipeline, PipelineConfig
+
+with KokoroPipeline(PipelineConfig(voice="af_sarah")).prepare_units(script) as prepared:
+    for result in prepared.render(skip_indices={0, 1}):
+        try:
+            sf.write(
+                Path(f"paragraph-{result.descriptor.index:04d}.wav"),
+                result.audio,
+                result.sample_rate,
+            )
+        finally:
+            result.release_audio()
+```
+
+Descriptors are lightweight and do not generate audio. Unit audio and per-segment arrays
+are owned by `AudioUnitResult`; `release_audio()` is destructive and safe to call
+repeatedly. The prepared object borrows the pipeline backend, which remains reusable
+after the prepared object closes. PyKokoro exposes only generic paragraph units; chapter
+boundaries belong to a higher-level application.
+
 ```{eval-rst}
 .. note::
 

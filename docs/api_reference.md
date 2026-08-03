@@ -23,6 +23,40 @@ result = pipe.run("Hello, world!")
 print(result.sample_rate)
 ```
 
+### Paragraph unit streaming
+
+```{eval-rst}
+.. autoclass:: pykokoro.PreparedAudioUnits
+   :members:
+   :undoc-members:
+```
+
+```{eval-rst}
+.. autoclass:: pykokoro.AudioUnitDescriptor
+   :members:
+   :undoc-members:
+```
+
+```{eval-rst}
+.. autoclass:: pykokoro.AudioUnitResult
+   :members:
+   :undoc-members:
+```
+
+`KokoroPipeline.prepare_units(text, unit="paragraph")` parses, phonemizes, and
+preprocesses the complete document once, then exposes deterministic paragraph
+descriptors before any audio is generated. Rendered results own one final unit waveform
+and should be released after consumption:
+
+```python
+with pipe.prepare_units(script) as prepared:
+    for result in prepared.render(skip_indices=completed_indices):
+        try:
+            consume(result.audio, result.sample_rate)
+        finally:
+            result.release_audio()
+```
+
 ### PipelineConfig
 
 ```{eval-rst}
