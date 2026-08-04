@@ -37,8 +37,8 @@ class TestTokenizerConfig:
         config = TokenizerConfig()
         assert config.use_espeak_fallback is True
         assert config.use_spacy is True
-        assert config.spacy_model == "auto"
-        assert config.spacy_model_size == "md"
+        assert config.spacy_model is None
+        assert config.spacy_model_size is None
         assert config.use_dictionary is True
 
     def test_custom_values(self):
@@ -174,7 +174,8 @@ class TestTokenizer:
         )
         tokenizer._get_g2p("de")
 
-        assert captured["spacy_model"] == "de_core_news_lg"
+        assert captured["spacy_model"] is None
+        assert captured["spacy_model_size"] == "lg"
 
     def test_normalize_text(self, tokenizer):
         """Test text normalization."""
@@ -376,8 +377,8 @@ class TestCreateTokenizer:
         tokenizer = create_tokenizer()
         assert tokenizer.config.use_espeak_fallback is True
         assert tokenizer.config.use_spacy is True
-        assert tokenizer.config.spacy_model == "auto"
-        assert tokenizer.config.spacy_model_size == "md"
+        assert tokenizer.config.spacy_model is None
+        assert tokenizer.config.spacy_model_size is None
 
     def test_create_custom(self):
         """Test creating tokenizer with custom settings."""

@@ -96,6 +96,10 @@ non-strict mode follows `fallback_methods`. No method guarantees formant preserv
 ```
 
 ```{eval-rst}
+.. autofunction:: pykokoro.with_spacy_model
+```
+
+```{eval-rst}
 .. autofunction:: pykokoro.with_spacy_model_size
 ```
 

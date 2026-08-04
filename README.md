@@ -447,10 +447,20 @@ python -m spacy download en_core_web_sm
 python -m spacy download en_core_web_md
 ```
 
-PyKokoro resolves spaCy model names automatically when
-`TokenizerConfig.spacy_model="auto"` (default). The G2P pipeline uses `md` by default
-(`en_core_web_md`, `de_core_news_md`, etc.), while sentence splitting via `phrasplit`
-uses `sm`.
+If both `TokenizerConfig.spacy_model` and `spacy_model_size` are unset (the default),
+PyKokoro asks each spaCy-using backend to select the highest installed compatible model
+for the effective language (`trf > lg > md > sm`). No spaCy model is downloaded
+automatically. `"auto"` remains accepted as a compatibility alias for unset.
+
+Use `with_spacy_model(size="lg")` or an explicit package when a strict choice is needed.
+`lg` and `trf` can improve linguistic quality but require substantially more memory and
+startup time than `sm`/`md`. The selected concrete sentence and G2P packages are
+available in `AudioResult.document_metadata["spacy_models"]`.
+
+For TTSForge integrations, use the PyKokoro version that provides these
+`TokenizerConfig` fields, read concrete sentence and G2P selections from that metadata
+path, and rely on the guarantee that plain and SSMD parsing share the same request while
+G2P delegates resolution to kokorog2p.
 
 **Combining Both Approaches:**
 
@@ -1056,25 +1066,29 @@ res = pipe.run("Ich gehe zum Meeting")
 
 ### Language-Aware spaCy Model Selection
 
-Use the helper to set auto spaCy model resolution with a consistent size:
+Use the helper to request highest-available selection, an exact tier, or an exact
+package. The transform applies the same request to sentence segmentation and G2P:
 
 ```python
 from pykokoro import (
     GenerationConfig,
     KokoroPipeline,
     PipelineConfig,
-    with_spacy_model_size,
+    with_spacy_model,
 )
 
 base = PipelineConfig(
     voice="af_sarah",
     generation=GenerationConfig(lang="de"),
 )
-config = with_spacy_model_size(base, size="md")
+config = with_spacy_model(size="lg")(base)
 
-# For lang="de", this resolves to de_core_news_md
+# For lang="de", this asks both lower libraries for de_core_news_lg
 pipe = KokoroPipeline(config)
 res = pipe.run("Guten Tag")
+
+# Or select one exact package:
+config = with_spacy_model("de_core_news_sm")(base)
 ```
 
 You can still force an explicit model package name:

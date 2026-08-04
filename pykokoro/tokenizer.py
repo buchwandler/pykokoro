@@ -18,7 +18,7 @@ from kokorog2p.base import G2PBase
 from .constants import MAX_PHONEME_LENGTH
 from .mixed_language_handler import MixedLanguageHandler
 from .phoneme_dictionary import PhonemeDictionary
-from .spacy_models import SpacyModelSize, resolve_configured_spacy_model
+from .spacy_models import SpacyModelSize, make_spacy_model_request
 
 N_TOKENS = _kokorog2p.N_TOKENS
 BackendType: TypeAlias = str
@@ -45,10 +45,10 @@ class TokenizerConfig:
             Requires pygoruut to be installed. Only applies when backend='goruut'
         use_spacy: Whether to use spaCy for POS tagging (default: True).
             Only applies to English.
-        spacy_model: spaCy model package or "auto" (default: "auto").
-            In auto mode, model name is derived from language and spacy_model_size.
-        spacy_model_size: spaCy package size used when spacy_model="auto".
-            One of: "sm", "md", "lg", "trf" (default: "md").
+        spacy_model: Explicit spaCy model package, or None for automatic selection.
+            ``"auto"`` remains accepted as a compatibility alias for None.
+        spacy_model_size: Exact spaCy package tier, or None to select the highest
+            installed compatible model. One of: "sm", "md", "lg", "trf".
         use_dictionary: DEPRECATED. Use load_gold and load_silver instead.
         use_mixed_language: Enable automatic language detection for mixed-language
             text (default: False). Requires mixed_language_allowed to be set.
@@ -75,8 +75,8 @@ class TokenizerConfig:
     use_espeak_fallback: bool = True
     use_goruut_fallback: bool = False
     use_spacy: bool = True
-    spacy_model: str = "auto"
-    spacy_model_size: SpacyModelSize = "md"
+    spacy_model: str | None = None
+    spacy_model_size: SpacyModelSize | None = None
     use_dictionary: bool = True
     use_mixed_language: bool = False
     mixed_language_primary: str | None = None
@@ -89,6 +89,14 @@ class TokenizerConfig:
     backend: BackendType = "kokorog2p"
     load_gold: bool = True
     load_silver: bool = True
+
+    def __post_init__(self) -> None:
+        request = make_spacy_model_request(
+            model=self.spacy_model,
+            size=self.spacy_model_size,
+        )
+        self.spacy_model = request.model
+        self.spacy_model_size = request.size
 
 
 # Backward compatibility alias
@@ -260,17 +268,13 @@ class Tokenizer:
 
             # All languages are now fully supported by kokorog2p
             # kokorog2p uses dictionary + espeak fallback for all languages
-            spacy_model = resolve_configured_spacy_model(
-                spacy_model=self.config.spacy_model,
-                lang=kokorog2p_lang,
-                size=self.config.spacy_model_size,
-            )
             self._g2p_cache[lang] = get_g2p(
                 language=kokorog2p_lang,
                 use_goruut_fallback=self.config.use_goruut_fallback,
                 use_espeak_fallback=self.config.use_espeak_fallback,
                 use_spacy=self.config.use_spacy,
-                spacy_model=spacy_model,
+                spacy_model=self.config.spacy_model,
+                spacy_model_size=self.config.spacy_model_size,
                 backend=self.config.backend,
                 load_gold=self.config.load_gold,
                 load_silver=self.config.load_silver,
@@ -530,8 +534,8 @@ def create_tokenizer(
     use_espeak_fallback: bool = True,
     use_goruut_fallback: bool = False,
     use_spacy: bool = True,
-    spacy_model: str = "auto",
-    spacy_model_size: SpacyModelSize = "md",
+    spacy_model: str | None = None,
+    spacy_model_size: SpacyModelSize | None = None,
 ) -> Tokenizer:
     """Create a tokenizer with the specified configuration.
 
@@ -539,8 +543,9 @@ def create_tokenizer(
         use_espeak_fallback: Whether to use espeak for OOV words
         use_goruut_fallback: Whether to use goruut for OOV words
         use_spacy: Whether to use spaCy for POS tagging
-        spacy_model: spaCy model package or "auto"
-        spacy_model_size: spaCy package size used in auto mode
+        spacy_model: Explicit spaCy model package, or None for highest available
+        model selection.
+        spacy_model_size: Exact spaCy package tier, or None for highest available.
 
     Returns:
         Configured Tokenizer instance

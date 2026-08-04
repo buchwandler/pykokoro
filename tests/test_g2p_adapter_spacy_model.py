@@ -52,4 +52,5 @@ def test_kokorog2p_adapter_resolves_auto_spacy_model(monkeypatch):
     adapter._get_g2p_instance("fr-fr", cfg)
 
     assert captured["language"] == "fr-fr"
-    assert captured["spacy_model"] == "fr_core_news_sm"
+    assert captured["spacy_model"] is None
+    assert captured["spacy_model_size"] == "sm"

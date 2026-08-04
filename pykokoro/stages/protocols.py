@@ -22,6 +22,7 @@ class DocumentResult:
     header: dict[str, object] = field(default_factory=dict)
     body: str | None = None
     diagnostics: list[SSMDDiagnostic] = field(default_factory=list)
+    metadata: dict[str, object] = field(default_factory=dict)
 
 
 class DocumentParser(Protocol):

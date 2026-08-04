@@ -45,7 +45,7 @@ def test_ssmd_dependency_targets_08_contract() -> None:
     dependencies = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
         "dependencies"
     ]
-    assert "ssmd>=0.8.0,<0.9" in dependencies
+    assert "ssmd>=0.8.1,<0.9" in dependencies
 
 
 def test_audiosig_is_the_only_declared_dsp_backend() -> None:

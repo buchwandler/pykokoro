@@ -7,7 +7,12 @@ import re
 from bisect import bisect_left
 from typing import TYPE_CHECKING, Any
 
-from ...spacy_models import resolve_spacy_model
+from ...spacy_models import (
+    make_spacy_model_request,
+    normalize_spacy_language,
+    spacy_selection_metadata,
+)
+from ...tokenizer import TokenizerConfig
 from ...types import AnnotationSpan, BoundaryEvent, Segment, Trace
 from ..protocols import DocumentResult
 
@@ -103,7 +108,12 @@ class PhrasplitSentenceSplitter:
         self, doc: DocumentResult, cfg: PipelineConfig, trace: Trace
     ) -> list[Segment]:
         text = doc.clean_text
-        language_model = self._language_model_from_lang(cfg.generation.lang)
+        tokenizer_config = cfg.tokenizer_config or TokenizerConfig()
+        request = make_spacy_model_request(
+            model=tokenizer_config.spacy_model,
+            size=tokenizer_config.spacy_model_size,
+        )
+        language = normalize_spacy_language(cfg.generation.lang)
         try:
             phrasplit = importlib.import_module("phrasplit")
         except ImportError:
@@ -120,6 +130,30 @@ class PhrasplitSentenceSplitter:
                     clause_idx=0,
                 )
             ]
+
+        sentence_model: str | None = None
+        sentence_size: str | None = None
+        resolver = getattr(phrasplit, "resolve_spacy_model", None)
+        if tokenizer_config.use_spacy and resolver is not None:
+            try:
+                resolution = resolver(
+                    language=language,
+                    model=request.model,
+                    size=request.size,
+                    require=False,
+                )
+                sentence_model = getattr(resolution, "selected_model", None)
+                sentence_size = getattr(resolution, "model_size", None)
+            except Exception:
+                # The splitter remains the source of truth for runtime errors;
+                # diagnostics must not turn a successful fallback into a warning.
+                pass
+        doc.metadata.setdefault("spacy_models", {})["sentence"] = spacy_selection_metadata(
+            language=language,
+            request=request,
+            selected_model=sentence_model,
+            selected_size=sentence_size,
+        )
 
         override_ranges = self._override_ranges(doc.annotation_spans)
         ranges = self._hard_ranges(text, doc.boundary_events, override_ranges)
@@ -142,7 +176,21 @@ class PhrasplitSentenceSplitter:
             if (start, end) in override_ranges:
                 split_items = [(chunk, 0, len(chunk), None, None, None)]
             else:
-                split_items = self._split_with_offsets(phrasplit, chunk, language_model)
+                try:
+                    split_items = self._split_with_offsets(
+                        phrasplit,
+                        chunk,
+                        request.model,
+                        use_spacy=tokenizer_config.use_spacy,
+                        language=language,
+                        model_size=request.size,
+                    )
+                except TypeError as exc:
+                    # Keep third-party/custom splitter subclasses that implement
+                    # the historical three-argument hook working.
+                    if "unexpected keyword argument" not in str(exc):
+                        raise
+                    split_items = self._split_with_offsets(phrasplit, chunk, request.model)
                 if not split_items:
                     split_items = [(chunk, 0, len(chunk), None, None, None)]
 
@@ -316,14 +364,23 @@ class PhrasplitSentenceSplitter:
         return ranges
 
     def _split_with_offsets(
-        self, phrasplit_module: Any, text: str, language_model: str
+        self,
+        phrasplit_module: Any,
+        text: str,
+        language_model: str | None,
+        *,
+        use_spacy: bool = True,
+        language: str = "en",
+        model_size: str | None = None,
     ) -> list[SplitItem]:
         kwargs: dict[str, object] = {
             "mode": "sentence",
             "language_model": language_model,
+            "language": language,
+            "model_size": model_size,
+            "use_spacy": use_spacy,
+            "apply_corrections": True,
         }
-        for key in ("apply_corrections", "split_on_colon"):
-            kwargs[key] = True
 
         if hasattr(phrasplit_module, "split_with_offsets"):
             try:
@@ -334,6 +391,9 @@ class PhrasplitSentenceSplitter:
                         text,
                         mode="sentence",
                         language_model=language_model,
+                        language=language,
+                        model_size=model_size,
+                        use_spacy=use_spacy,
                     )
                 except OSError:
                     return []
@@ -347,6 +407,9 @@ class PhrasplitSentenceSplitter:
                             text,
                             mode="sentence",
                             language_model=language_model,
+                            language=language,
+                            model_size=model_size,
+                            use_spacy=use_spacy,
                         )
                     )
                 except OSError:
@@ -378,9 +441,6 @@ class PhrasplitSentenceSplitter:
                 continue
             out.append((seg_text, start, end, para, sent, clause))
         return out
-
-    def _language_model_from_lang(self, lang: str | None) -> str:
-        return resolve_spacy_model(lang, size="sm")
 
 
 def _first_mismatch(left: str, right: str) -> int:

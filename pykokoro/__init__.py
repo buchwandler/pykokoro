@@ -24,6 +24,7 @@ def __getattr__(name: str) -> Any:
         "KokoroPipeline",
         "PreparedAudioUnits",
         "build_pipeline",
+        "with_spacy_model",
         "with_spacy_model_size",
     }:
         try:
@@ -31,6 +32,7 @@ def __getattr__(name: str) -> Any:
                 KokoroPipeline,
                 PreparedAudioUnits,
                 build_pipeline,
+                with_spacy_model,
                 with_spacy_model_size,
             )
         except ModuleNotFoundError as exc:
@@ -44,6 +46,7 @@ def __getattr__(name: str) -> Any:
             "KokoroPipeline": KokoroPipeline,
             "PreparedAudioUnits": PreparedAudioUnits,
             "build_pipeline": build_pipeline,
+            "with_spacy_model": with_spacy_model,
             "with_spacy_model_size": with_spacy_model_size,
         }[name]
     if name in {"AudioUnitDescriptor", "AudioUnitKind", "AudioUnitResult"}:
@@ -72,5 +75,6 @@ __all__ = [
     "__version__",
     "__version_tuple__",
     "build_pipeline",
+    "with_spacy_model",
     "with_spacy_model_size",
 ]

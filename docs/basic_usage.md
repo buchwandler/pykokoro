@@ -180,26 +180,29 @@ Supported languages: `en-us`, `en-gb`, `es`, `fr`, `de`, `it`, `pt`, `hi`, `ja`,
 
 ## Language-Aware spaCy Models
 
-PyKokoro resolves spaCy model package names automatically by language when
-`TokenizerConfig.spacy_model="auto"` (default).
+When both spaCy settings are unset (the default), PyKokoro asks each backend to select
+the highest installed compatible model for the effective language
+(`trf > lg > md > sm`). No model is downloaded automatically; `"auto"` remains an
+accepted alias for unset.
 
-Use `with_spacy_model_size` to set the auto-resolved model tier explicitly:
+Use `with_spacy_model` to request an exact tier or package consistently across sentence
+segmentation and G2P:
 
 ```python
 from pykokoro import (
     GenerationConfig,
     KokoroPipeline,
     PipelineConfig,
-    with_spacy_model_size,
+    with_spacy_model,
 )
 
 base = PipelineConfig(
     voice="af_bella",
     generation=GenerationConfig(lang="de"),
 )
-cfg = with_spacy_model_size(base, size="md")
+cfg = with_spacy_model(size="lg")(base)
 
-# For lang="de", G2P uses de_core_news_md
+# For lang="de", both components request de_core_news_lg
 pipe = KokoroPipeline(cfg)
 result = pipe.run("Guten Tag")
 ```
@@ -213,6 +216,10 @@ from pykokoro.tokenizer import TokenizerConfig
 tokenizer_config = TokenizerConfig(spacy_model="fr_core_news_sm")
 pipe = KokoroPipeline(PipelineConfig(voice="af_bella", tokenizer_config=tokenizer_config))
 ```
+
+`result.document_metadata["spacy_models"]` reports the concrete sentence and G2P
+packages selected. `lg` and `trf` generally improve linguistic quality but use more
+memory and take longer to initialize than `sm` and `md`.
 
 ## Speech Speed Control
 

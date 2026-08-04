@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from ...constants import MAX_PHONEME_LENGTH, SUPPORTED_LANGUAGES
 from ...runtime.cache import cache_from_dir, make_g2p_key
 from ...runtime.spans import slice_boundaries, slice_spans
-from ...spacy_models import resolve_configured_spacy_model, resolve_spacy_model
+from ...spacy_models import make_spacy_model_request, spacy_selection_metadata
 from ...types import PhonemeSegment
 from ..protocols import DocumentResult, G2PAdapter
 
@@ -116,6 +116,7 @@ class KokoroG2PAdapter(G2PAdapter):
                     tokens = g2p.phonemes_to_ids(phonemes, model=model_version)
                 else:
                     g2p_instance = self._get_g2p_instance(lang, cfg)
+                    self._record_selection(doc, lang, cfg, g2p_instance)
                     result = g2p.phonemize(
                         segment.text,
                         language=lang,
@@ -202,32 +203,29 @@ class KokoroG2PAdapter(G2PAdapter):
         return phonemes, tokens, warnings
 
     def _get_g2p_instance(self, lang: str, cfg: PipelineConfig) -> G2PBase:
-        tokenizer_config = cfg.tokenizer_config
+        from ...tokenizer import TokenizerConfig
+
+        tokenizer_config = cfg.tokenizer_config or TokenizerConfig()
         kokorog2p_lang = SUPPORTED_LANGUAGES.get(lang, lang)
         version = self._get_model_version(cfg)
+        request = make_spacy_model_request(
+            model=tokenizer_config.spacy_model,
+            size=tokenizer_config.spacy_model_size,
+        )
 
         kwargs: dict[str, Any] = {
             "language": kokorog2p_lang,
             "version": version,
             "phoneme_quotes": "curly",
-            "spacy_model": resolve_spacy_model(kokorog2p_lang, size="md"),
+            "use_goruut_fallback": tokenizer_config.use_goruut_fallback,
+            "use_espeak_fallback": tokenizer_config.use_espeak_fallback,
+            "use_spacy": tokenizer_config.use_spacy,
+            "spacy_model": request.model,
+            "spacy_model_size": request.size,
+            "backend": tokenizer_config.backend,
+            "load_gold": tokenizer_config.load_gold,
+            "load_silver": tokenizer_config.load_silver,
         }
-        if tokenizer_config is not None:
-            kwargs.update(
-                {
-                    "use_goruut_fallback": tokenizer_config.use_goruut_fallback,
-                    "use_espeak_fallback": tokenizer_config.use_espeak_fallback,
-                    "use_spacy": tokenizer_config.use_spacy,
-                    "spacy_model": resolve_configured_spacy_model(
-                        spacy_model=tokenizer_config.spacy_model,
-                        lang=kokorog2p_lang,
-                        size=tokenizer_config.spacy_model_size,
-                    ),
-                    "backend": tokenizer_config.backend,
-                    "load_gold": tokenizer_config.load_gold,
-                    "load_silver": tokenizer_config.load_silver,
-                }
-            )
 
         cache_key = tuple(sorted(kwargs.items()))
         if cache_key in self._g2p_instances:
@@ -237,6 +235,37 @@ class KokoroG2PAdapter(G2PAdapter):
         g2p_instance = g2p_module.get_g2p(**kwargs)
         self._g2p_instances[cache_key] = g2p_instance
         return g2p_instance
+
+    def _record_selection(
+        self, doc: DocumentResult, lang: str, cfg: PipelineConfig, g2p_instance: G2PBase
+    ) -> None:
+        from ...tokenizer import TokenizerConfig
+
+        tokenizer_config = cfg.tokenizer_config or TokenizerConfig()
+        request = make_spacy_model_request(
+            model=tokenizer_config.spacy_model,
+            size=tokenizer_config.spacy_model_size,
+        )
+        selected_model = getattr(g2p_instance, "spacy_model", None)
+        selected_size = None
+        if isinstance(selected_model, str):
+            suffix = selected_model.rsplit("_", 1)[-1]
+            if suffix in {"sm", "md", "lg", "trf"}:
+                selected_size = suffix
+        models = doc.metadata.setdefault("spacy_models", {})
+        if not isinstance(models, dict):
+            models = {}
+            doc.metadata["spacy_models"] = models
+        g2p_models = models.setdefault("g2p", {})
+        if not isinstance(g2p_models, dict):
+            g2p_models = {}
+            models["g2p"] = g2p_models
+        g2p_models[lang] = spacy_selection_metadata(
+            language=lang,
+            request=request,
+            selected_model=selected_model,
+            selected_size=selected_size,
+        )
 
     @staticmethod
     def _get_model_version(cfg: PipelineConfig) -> str:

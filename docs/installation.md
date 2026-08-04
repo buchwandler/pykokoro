@@ -132,9 +132,10 @@ python -m spacy download en_core_web_md
 ```{eval-rst}
 .. note::
 
-   ``TokenizerConfig.spacy_model`` defaults to ``"auto"`` and resolves package
-   names from language + size (default size: ``md``). For example:
-   ``en-us -> en_core_web_md`` and ``de -> de_core_news_md``.
+   ``TokenizerConfig.spacy_model`` and ``spacy_model_size`` are unset by default.
+   Each backend then selects the highest installed compatible model for the
+   effective language (``trf > lg > md > sm``); no spaCy model is downloaded
+   automatically. ``"auto"`` remains a compatibility alias for unset.
 ```
 
 ## Development Installation

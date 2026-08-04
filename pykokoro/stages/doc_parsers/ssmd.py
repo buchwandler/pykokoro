@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from typing import Any, Literal, cast
 
 from ...pipeline_config import PipelineConfig
+from ...spacy_models import make_spacy_model_request, spacy_selection_metadata
 from ...ssmd_config import PauseCandidate, ResolvedPauseDefaults
 from ...ssmd_parser import (
     DEFAULT_PAUSE_NONE,
@@ -12,6 +13,7 @@ from ...ssmd_parser import (
     SSMDSegment,
     parse_ssmd_document,
 )
+from ...tokenizer import TokenizerConfig
 from ...types import AnnotationSpan, BoundaryEvent, Segment, Trace
 from ..protocols import DocumentResult
 
@@ -19,6 +21,7 @@ from ..protocols import DocumentResult
 class SsmdDocumentParser:
     def parse(self, text: str, cfg: PipelineConfig, trace: Trace) -> DocumentResult:
         generation = cfg.generation
+        tokenizer_config = cfg.tokenizer_config or TokenizerConfig()
         parsed = parse_ssmd_document(
             text,
             render_config=cfg.ssmd,
@@ -28,9 +31,29 @@ class SsmdDocumentParser:
             pause_clause=generation.pause_clause,
             pause_sentence=generation.pause_sentence,
             pause_paragraph=generation.pause_paragraph,
+            spacy_model=tokenizer_config.spacy_model,
+            model_size=tokenizer_config.spacy_model_size,
+            use_spacy=tokenizer_config.use_spacy,
         )
         for diagnostic in parsed.diagnostics:
             self._warn_once(trace, f"{diagnostic.code}: {diagnostic.message}")
+        request = make_spacy_model_request(
+            model=tokenizer_config.spacy_model,
+            size=tokenizer_config.spacy_model_size,
+        )
+        sentence_diagnostics = parsed.sentence_diagnostics
+        selected_model = getattr(sentence_diagnostics, "selected_model", None)
+        selected_size = getattr(sentence_diagnostics, "selected_model_size", None)
+        doc_metadata = {
+            "spacy_models": {
+                "sentence": spacy_selection_metadata(
+                    language=generation.lang,
+                    request=request,
+                    selected_model=selected_model,
+                    selected_size=selected_size,
+                )
+            }
+        }
         initial_pause = parsed.initial_pause
         segments = list(parsed.segments)
         clean_text, spans, raw_boundaries, doc_segments = self._build_document(
@@ -47,6 +70,7 @@ class SsmdDocumentParser:
             header=parsed.header,
             body=parsed.body,
             diagnostics=list(parsed.diagnostics),
+            metadata=doc_metadata,
         )
 
     def _build_document(

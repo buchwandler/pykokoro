@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from copy import copy, deepcopy
 from dataclasses import dataclass, fields, is_dataclass, replace
 from pathlib import Path
@@ -83,6 +83,7 @@ class PreparedAudioUnits:
             "voice_bindings": _copy_metadata_value(prepared.doc.header.get("voice_bindings", {})),
             "pause_defaults": _copy_metadata_value(prepared.doc.header.get("pause_defaults", {})),
         }
+        self._document_metadata.update(_copy_metadata_value(prepared.doc.metadata))
         self._diagnostics = tuple(prepared.doc.diagnostics)
         self._closed = False
         self._render_started = False
@@ -218,6 +219,21 @@ def _coerce_ssmd(base: SSMDRenderConfig, value: Any) -> SSMDRenderConfig:
     raise TypeError(f"ssmd must be SSMDRenderConfig | Mapping | None, got {type(value)!r}")
 
 
+def _coerce_tokenizer(base: TokenizerConfig | None, value: Any) -> TokenizerConfig:
+    from .tokenizer import TokenizerConfig
+
+    current = base or TokenizerConfig()
+    if value is None:
+        return current
+    if isinstance(value, TokenizerConfig):
+        return value
+    if isinstance(value, Mapping):
+        return replace(current, **dict(value))
+    raise TypeError(
+        f"tokenizer_config must be TokenizerConfig | Mapping | None, got {type(value)!r}"
+    )
+
+
 def _coerce_paths_inplace(data: dict[str, Any]) -> None:
     # Convenience: accept str paths in config dict.
     for key in ("model_path", "voices_path"):
@@ -239,6 +255,7 @@ def _coerce_pipeline_config(
         data = dict(value)
         gen_value = data.pop("generation", None)
         ssmd_value = data.pop("ssmd", None)
+        tokenizer_value = data.pop("tokenizer_config", None)
 
         _coerce_paths_inplace(data)
         cfg = PipelineConfig(**data)
@@ -247,6 +264,11 @@ def _coerce_pipeline_config(
             cfg = replace(cfg, generation=_coerce_generation(cfg.generation, gen_value))
         if ssmd_value is not None:
             cfg = replace(cfg, ssmd=_coerce_ssmd(cfg.ssmd, ssmd_value))
+        if tokenizer_value is not None:
+            cfg = replace(
+                cfg,
+                tokenizer_config=_coerce_tokenizer(cfg.tokenizer_config, tokenizer_value),
+            )
 
         return cfg
 
@@ -263,6 +285,7 @@ def _merge_config(
     data = dict(overrides)
     gen_value = data.pop("generation", None)
     ssmd_value = data.pop("ssmd", None)
+    tokenizer_value = data.pop("tokenizer_config", None)
 
     _coerce_paths_inplace(data)
     cfg = replace(base, **data)
@@ -271,32 +294,82 @@ def _merge_config(
         cfg = replace(cfg, generation=_coerce_generation(cfg.generation, gen_value))
     if ssmd_value is not None:
         cfg = replace(cfg, ssmd=_coerce_ssmd(cfg.ssmd, ssmd_value))
+    if tokenizer_value is not None:
+        cfg = replace(
+            cfg,
+            tokenizer_config=_coerce_tokenizer(cfg.tokenizer_config, tokenizer_value),
+        )
 
     return cfg
 
 
-def with_spacy_model_size(
-    config: PipelineConfig | Mapping[str, Any] | None = None,
+PipelineConfigTransform = Callable[[PipelineConfig], PipelineConfig]
+
+
+def _apply_spacy_model_settings(
+    cfg: PipelineConfig,
     *,
-    size: SpacyModelSize = "md",
-    model: str = "auto",
+    model: str | None,
+    size: SpacyModelSize | None,
+    use_spacy: bool,
 ) -> PipelineConfig:
-    """Return PipelineConfig with tokenizer spaCy model settings.
-
-    This helper is useful when you want language-based model resolution in G2P:
-    keep ``model="auto"`` and pick the package tier via ``size``.
-    """
-    cfg = _coerce_pipeline_config(config)
-
     from .tokenizer import TokenizerConfig
 
     tokenizer_config: TokenizerConfig = cfg.tokenizer_config or TokenizerConfig()
     tokenizer_config = replace(
         tokenizer_config,
+        use_spacy=use_spacy,
         spacy_model=model,
         spacy_model_size=size,
     )
     return replace(cfg, tokenizer_config=tokenizer_config)
+
+
+def with_spacy_model(
+    model: str | PipelineConfig | Mapping[str, Any] | None = None,
+    *,
+    size: SpacyModelSize | None = None,
+    use_spacy: bool = True,
+) -> PipelineConfigTransform | PipelineConfig:
+    """Create a pipeline transform for one spaCy model selection request."""
+
+    if isinstance(model, (PipelineConfig, Mapping)):
+        return _apply_spacy_model_settings(
+            _coerce_pipeline_config(model),
+            model=None,
+            size=size,
+            use_spacy=use_spacy,
+        )
+
+    def transform(config: PipelineConfig) -> PipelineConfig:
+        return _apply_spacy_model_settings(
+            _coerce_pipeline_config(config),
+            model=model,
+            size=size,
+            use_spacy=use_spacy,
+        )
+
+    return transform
+
+
+def with_spacy_model_size(
+    config: PipelineConfig | Mapping[str, Any] | None = None,
+    *,
+    size: SpacyModelSize | None = None,
+    model: str | None = None,
+) -> PipelineConfig:
+    """Return a config with an intentional exact tier or explicit model.
+
+    Omitting both settings leaves the request unset and never introduces a
+    medium default.
+    """
+
+    return _apply_spacy_model_settings(
+        _coerce_pipeline_config(config),
+        model=model,
+        size=size,
+        use_spacy=True,
+    )
 
 
 def build_pipeline(
@@ -872,6 +945,7 @@ class KokoroPipeline:
                         "title": prepared.doc.header.get("title"),
                         "voice_bindings": prepared.doc.header.get("voice_bindings", {}),
                         "pause_defaults": prepared.doc.header.get("pause_defaults", {}),
+                        **prepared.doc.metadata,
                     }
                 ),
             )

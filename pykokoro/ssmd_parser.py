@@ -200,6 +200,7 @@ class ParsedSSMDDocument:
     segments: tuple[SSMDSegment, ...]
     pause_defaults: Any | None = None
     diagnostics: tuple[SSMDDiagnostic, ...] = ()
+    sentence_diagnostics: Any | None = None
 
 
 def has_ssmd_markup(text: str) -> bool:
@@ -712,10 +713,12 @@ def _parse_ssmd_body_to_segments(
     pause_clause: float = DEFAULT_PAUSE_CLAUSE,
     pause_sentence: float = DEFAULT_PAUSE_SENTENCE,
     pause_paragraph: float = DEFAULT_PAUSE_PARAGRAPH,
+    spacy_model: str | None = None,
     model_size: str | None = None,
     use_spacy: bool | None = None,
     heading_levels: dict | None = None,
     parse_yaml_header: bool = False,
+    sentence_diagnostics: list[Any] | None = None,
 ) -> tuple[float, list[SSMDSegment]]:
     """Parse SSMD markup and convert to segments with metadata.
 
@@ -790,6 +793,7 @@ def _parse_ssmd_body_to_segments(
                 sentence_detection=True,
                 language=lang,
                 capabilities=caps,
+                spacy_model=spacy_model,
                 model_size=model_size,
                 use_spacy=use_spacy_override,
                 heading_levels=heading_levels,
@@ -797,6 +801,8 @@ def _parse_ssmd_body_to_segments(
             )
 
     paragraphs = parse_with_spacy(use_spacy)
+    if sentence_diagnostics is not None:
+        sentence_diagnostics.append(getattr(paragraphs, "diagnostics", None))
     if not paragraphs:
         return 0.0, []
 
@@ -815,6 +821,8 @@ def _parse_ssmd_body_to_segments(
         if not _breaks_satisfied(expected_nonzero, actual_durations):
             if use_spacy is not False:
                 fallback_paragraphs = parse_with_spacy(False)
+                if sentence_diagnostics is not None:
+                    sentence_diagnostics.append(getattr(fallback_paragraphs, "diagnostics", None))
                 if fallback_paragraphs:
                     fallback_segments = _build_segments_from_paragraphs(
                         fallback_paragraphs,
@@ -903,6 +911,7 @@ def parse_ssmd_document(
     pause_clause: float = DEFAULT_PAUSE_CLAUSE,
     pause_sentence: float = DEFAULT_PAUSE_SENTENCE,
     pause_paragraph: float = DEFAULT_PAUSE_PARAGRAPH,
+    spacy_model: str | None = None,
     model_size: str | None = None,
     use_spacy: bool | None = None,
     heading_levels: dict | None = None,
@@ -938,6 +947,7 @@ def parse_ssmd_document(
         header.get("pause_defaults"), config.pause_defaults
     )
     header_heading_levels = header_config.get("heading_levels", heading_levels)
+    sentence_diagnostics: list[Any] = []
     initial_pause, segments = _parse_ssmd_body_to_segments(
         body,
         lang=lang,
@@ -946,10 +956,12 @@ def parse_ssmd_document(
         pause_clause=pause_clause,
         pause_sentence=pause_sentence,
         pause_paragraph=pause_paragraph,
+        spacy_model=spacy_model,
         model_size=model_size,
         use_spacy=use_spacy,
         heading_levels=header_heading_levels,
         parse_yaml_header=False,
+        sentence_diagnostics=sentence_diagnostics,
     )
 
     header_bindings = header.get("voice_bindings", {})
@@ -987,6 +999,7 @@ def parse_ssmd_document(
         segments=tuple(segments),
         pause_defaults=resolved_pause_defaults,
         diagnostics=tuple(diagnostics),
+        sentence_diagnostics=sentence_diagnostics[-1] if sentence_diagnostics else None,
     )
 
 
@@ -998,6 +1011,7 @@ def parse_ssmd_to_segments(
     pause_clause: float = DEFAULT_PAUSE_CLAUSE,
     pause_sentence: float = DEFAULT_PAUSE_SENTENCE,
     pause_paragraph: float = DEFAULT_PAUSE_PARAGRAPH,
+    spacy_model: str | None = None,
     model_size: str | None = None,
     use_spacy: bool | None = None,
     heading_levels: dict | None = None,
@@ -1014,6 +1028,7 @@ def parse_ssmd_to_segments(
         pause_clause=pause_clause,
         pause_sentence=pause_sentence,
         pause_paragraph=pause_paragraph,
+        spacy_model=spacy_model,
         model_size=model_size,
         use_spacy=use_spacy,
         heading_levels=heading_levels,

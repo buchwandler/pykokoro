@@ -6,10 +6,7 @@ import pytest
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline_config import PipelineConfig as PipelineConfigType
-from pykokoro.stages.doc_parsers.plain import (
-    PhrasplitSentenceSplitter,
-    PlainTextDocumentParser,
-)
+from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
 from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
 from pykokoro.stages.protocols import DocumentResult
 from pykokoro.types import PhonemeSegment, Segment, Trace
@@ -103,12 +100,12 @@ def test_phrasplit_offsets_match_slices():
         assert segment.text == doc.clean_text[segment.char_start : segment.char_end]
 
 
-def test_phrasplit_language_model_from_lang():
-    splitter = PhrasplitSentenceSplitter()
-    assert splitter._language_model_from_lang("en") == "en_core_web_sm"
-    assert splitter._language_model_from_lang("en-us") == "en_core_web_sm"
-    assert splitter._language_model_from_lang("de") == "de_core_news_sm"
-    assert splitter._language_model_from_lang("zh-cn") == "zh_core_web_sm"
+def test_phrasplit_policy_does_not_preconstruct_a_model():
+    from pykokoro.spacy_models import make_spacy_model_request
+
+    request = make_spacy_model_request()
+    assert request.model is None
+    assert request.size is None
 
 
 def test_pipeline_run_overrides_lang():

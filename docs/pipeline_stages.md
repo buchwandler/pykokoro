@@ -85,21 +85,23 @@ pipeline = KokoroPipeline(faster_cfg)
 #### Tokenizer and phoneme handling
 
 - `tokenizer_config`: `TokenizerConfig` used by SSMD parsing and `kokorog2p`.
-- `tokenizer_config.spacy_model`: spaCy package name or `"auto"`.
-- `tokenizer_config.spacy_model_size`: package tier for auto mode (`"sm"`, `"md"`,
-  `"lg"`, `"trf"`). Default: `"md"`.
+- `tokenizer_config.spacy_model`: explicit spaCy package name, or unset. `"auto"` is
+  accepted as a compatibility alias for unset.
+- `tokenizer_config.spacy_model_size`: exact package tier (`"sm"`, `"md"`, `"lg"`,
+  `"trf"`), or unset. With both values unset, each backend selects its highest installed
+  compatible model (`trf > lg > md > sm`) without downloading.
 - `espeak_config`: Deprecated espeak configuration. Prefer `TokenizerConfig`.
 - `short_sentence_config`: `ShortSentenceConfig` for short-sentence handling.
 - `overlap_mode`: `"snap"` clips overlapping SSMD spans to segment bounds, `"strict"`
   drops partial spans and emits trace warnings.
 
-Helper for auto spaCy model tier:
+Helper for an exact spaCy model request:
 
 ```python
-from pykokoro import PipelineConfig, with_spacy_model_size
+from pykokoro import PipelineConfig, with_spacy_model
 
 cfg = PipelineConfig(voice="af_bella")
-cfg = with_spacy_model_size(cfg, size="md")
+cfg = with_spacy_model(size="lg")(cfg)
 ```
 
 #### Other
@@ -191,7 +193,8 @@ segment offsets.
 - `generation.is_phonemes` treats input as phonemes and skips text G2P.
 - SSMD `ph`/`phonemes` spans override phonemes for that segment.
 - `tokenizer_config` is forwarded to `kokorog2p.get_g2p`.
-- `spacy_model="auto"` resolves per language (default size `md`).
+- Unset `spacy_model` and `spacy_model_size` resolve independently per effective
+  language; the selected concrete packages are exposed in result metadata.
 - `cache_dir` enables on-disk caching of phonemes/tokens.
 - Long phoneme token sequences are split into batches of `MAX_PHONEME_LENGTH`.
 

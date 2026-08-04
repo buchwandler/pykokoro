@@ -139,25 +139,29 @@ for sentence in ["Hello", "How are you?", "Goodbye!"]:
 
 ### Choosing spaCy Model Size (Auto)
 
-If you use spaCy-based tokenization/splitting, you can keep language-aware auto
-selection and choose only the model size:
+If you use spaCy-based tokenization/splitting, unset settings select the highest
+installed compatible model per language. You can request an exact tier:
 
 ```python
 from pykokoro import (
     GenerationConfig,
     KokoroPipeline,
     PipelineConfig,
-    with_spacy_model_size,
+    with_spacy_model,
 )
 
 base = PipelineConfig(
     voice="af_bella",
     generation=GenerationConfig(lang="fr-fr"),
 )
-cfg = with_spacy_model_size(base, size="md")
+cfg = with_spacy_model(size="lg")(base)
 pipe = KokoroPipeline(cfg)
 result = pipe.run("Bonjour")
 ```
+
+No spaCy model is downloaded automatically. The concrete sentence and G2P selections are
+available in `result.document_metadata["spacy_models"]`. Larger `lg`/`trf` models can
+improve linguistic quality at higher memory and startup cost.
 
 ### Processing Long Text
 
