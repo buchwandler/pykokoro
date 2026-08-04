@@ -12,9 +12,12 @@ from pykokoro.spacy_models import (
     SpacyModelRequest,
     make_spacy_model_request,
 )
+from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
+from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
 from pykokoro.stages.doc_parsers.plain import PhrasplitSentenceSplitter
 from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
 from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
+from pykokoro.stages.phoneme_processing.noop import NoopPhonemeProcessorAdapter
 from pykokoro.stages.protocols import DocumentResult
 from pykokoro.tokenizer import TokenizerConfig
 from pykokoro.types import Segment, Trace
@@ -251,6 +254,9 @@ def test_pipeline_result_retains_document_selection_metadata():
         PipelineConfig(generation=GenerationConfig(lang="en-us")),
         doc_parser=Parser(),
         g2p=G2P(),
+        phoneme_processing=NoopPhonemeProcessorAdapter(),
+        audio_generation=NoopAudioGenerationAdapter(),
+        audio_postprocessing=NoopAudioPostprocessingAdapter(),
     )
 
     result = pipeline.run("Hello.")
