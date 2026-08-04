@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ...onnx_backend import Kokoro
 from ...types import PhonemeSegment, Trace
 
 if TYPE_CHECKING:
+    from ...onnx_backend import Kokoro
     from ...pipeline_config import PipelineConfig
 
 

@@ -12,8 +12,6 @@ list is still useful for selecting a PyKokoro execution provider.
 
 from __future__ import annotations
 
-import onnxruntime as ort
-
 from pykokoro.exceptions import ConfigurationError
 from pykokoro.onnx_session import (
     get_available_execution_providers,
@@ -23,6 +21,8 @@ from pykokoro.onnx_session import (
 
 def main() -> None:
     """Print runtime providers and PyKokoro's provider resolutions."""
+    import onnxruntime as ort
+
     runtime_providers = tuple(ort.get_available_providers())
     print("ONNX Runtime:", getattr(ort, "version", ort.__version__))
     print("Providers:", list(runtime_providers))

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 
@@ -10,6 +12,7 @@ from pykokoro import (
     PipelineConfig,
     PreparedAudioUnits,
 )
+from pykokoro.pipeline import _unit_text_hash
 from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
 from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
 from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
@@ -278,6 +281,45 @@ def test_effective_configuration_is_snapshot() -> None:
     with pipeline.prepare_units("One.", generation=generation) as prepared:
         generation["lang"] = "de"
         assert prepared.units[0].text_hash
+
+
+def test_unit_hash_ignores_non_audio_runtime_options() -> None:
+    segment = PhonemeSegment(
+        id="s0-ph0",
+        segment_id="s0",
+        phoneme_id=0,
+        text="One.",
+        phonemes="a",
+        tokens=[],
+    )
+    base = PipelineConfig()
+
+    def identity(cfg: PipelineConfig) -> str:
+        return _unit_text_hash(0, 0, 4, "One.", [segment], cfg, ())
+
+    assert identity(base) == identity(replace(base, return_trace=True))
+    assert identity(base) == identity(replace(base, retain_segment_audio=False))
+    assert identity(base) == identity(replace(base, cache_dir="/machine/cache"))
+    assert identity(base) == identity(replace(base, enable_deprecation_warnings=True))
+
+
+def test_unit_hash_changes_for_audio_semantic_options() -> None:
+    segment = PhonemeSegment(
+        id="s0-ph0",
+        segment_id="s0",
+        phoneme_id=0,
+        text="One.",
+        phonemes="a",
+        tokens=[],
+    )
+    base = PipelineConfig()
+
+    def identity(cfg: PipelineConfig) -> str:
+        return _unit_text_hash(0, 0, 4, "One.", [segment], cfg, ())
+
+    assert identity(base) != identity(replace(base, voice="af_sarah"))
+    assert identity(base) != identity(replace(base, generation=replace(base.generation, speed=1.1)))
+    assert identity(base) != identity(replace(base, model_identity="model-v2"))
 
 
 def test_empty_input_has_no_units_and_fallback_document_is_renderable() -> None:

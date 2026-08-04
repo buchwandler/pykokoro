@@ -54,3 +54,21 @@ def test_kokorog2p_adapter_resolves_auto_spacy_model(monkeypatch):
     assert captured["language"] == "fr-fr"
     assert captured["spacy_model"] is None
     assert captured["spacy_model_size"] == "sm"
+
+
+def test_kokorog2p_adapter_forwards_unset_spacy_as_auto(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeG2PModule:
+        @staticmethod
+        def get_g2p(**kwargs):
+            captured.update(kwargs)
+            return object()
+
+    adapter = KokoroG2PAdapter()
+    monkeypatch.setattr(adapter, "_load", lambda: FakeG2PModule())
+    adapter._get_g2p_instance("en-us", PipelineConfig())
+
+    assert captured["use_spacy"] is None
+    assert captured["spacy_model"] is None
+    assert captured["spacy_model_size"] is None

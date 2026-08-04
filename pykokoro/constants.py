@@ -19,9 +19,9 @@ DEFAULT_CONFIG = {
 MAX_PHONEME_LENGTH = 510
 SAMPLE_RATE = 24000
 
-# Supported languages for phonemization
-# Format: language code -> kokorog2p language code
-# All languages now fully supported by kokorog2p with dictionary + espeak fallback
+# Native languages for the default ``kokorog2p`` backend.
+# Format: language code -> kokorog2p language code. Languages that are only
+# available through an explicitly selected fallback backend are kept separate.
 SUPPORTED_LANGUAGES = {
     "en-us": "en-us",
     "en-gb": "en-gb",
@@ -32,13 +32,19 @@ SUPPORTED_LANGUAGES = {
     "de": "de",
     "it": "it",
     "pt": "pt",
-    "pl": "pl",
-    "tr": "tr",
-    "ru": "ru",
     "ko": "ko",
     "ja": "ja",
     "zh": "zh",  # Mandarin Chinese
     "cmn": "cmn",  # Accept both zh and cmn
+}
+
+# These languages require an explicit ``backend="espeak"`` or ``"goruut"``
+# choice. Keeping them out of SUPPORTED_LANGUAGES prevents the native adapter
+# from advertising a factory route that kokorog2p does not provide.
+ESPEAK_ONLY_LANGUAGES = {
+    "pl": "pl",
+    "tr": "tr",
+    "ru": "ru",
 }
 
 # SSML-based default mappings for absolute values

@@ -240,27 +240,24 @@ script demonstrates multiple wiring styles:
 Example with explicit stage wiring:
 
 ```python
-from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
-from pykokoro.onnx_backend import Kokoro
-from pykokoro.stages.audio_generation.onnx import OnnxAudioGenerationAdapter
-from pykokoro.stages.audio_postprocessing.onnx import OnnxAudioPostprocessingAdapter
+from pykokoro import GenerationConfig, PipelineConfig, build_pipeline
+from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
+from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
 from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
 from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
-from pykokoro.stages.phoneme_processing.onnx import OnnxPhonemeProcessorAdapter
+from pykokoro.stages.phoneme_processing.noop import NoopPhonemeProcessorAdapter
 
 cfg = PipelineConfig(
     voice="af_heart",
     generation=GenerationConfig(lang="en-us"),
 )
-kokoro = Kokoro(model_quality=cfg.model_quality)
-
-pipeline = KokoroPipeline(
-    cfg,
+pipeline = build_pipeline(
+    config=cfg,
     doc_parser=SsmdDocumentParser(),
     g2p=KokoroG2PAdapter(),
-    phoneme_processing=OnnxPhonemeProcessorAdapter(kokoro),
-    audio_generation=OnnxAudioGenerationAdapter(kokoro),
-    audio_postprocessing=OnnxAudioPostprocessingAdapter(kokoro),
+    phoneme_processing=NoopPhonemeProcessorAdapter(),
+    audio_generation=NoopAudioGenerationAdapter(),
+    audio_postprocessing=NoopAudioPostprocessingAdapter(),
 )
 ```
 

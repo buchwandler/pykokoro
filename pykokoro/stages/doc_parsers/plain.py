@@ -134,17 +134,20 @@ class PhrasplitSentenceSplitter:
         sentence_model: str | None = None
         sentence_size: str | None = None
         resolver = getattr(phrasplit, "resolve_spacy_model", None)
-        if tokenizer_config.use_spacy and resolver is not None:
+        strict_request = tokenizer_config.use_spacy is True or request.mode != "highest_available"
+        if tokenizer_config.use_spacy is not False and resolver is not None:
             try:
                 resolution = resolver(
                     language=language,
                     model=request.model,
                     size=request.size,
-                    require=False,
+                    require=strict_request,
                 )
                 sentence_model = getattr(resolution, "selected_model", None)
                 sentence_size = getattr(resolution, "model_size", None)
             except Exception:
+                if strict_request:
+                    raise
                 # The splitter remains the source of truth for runtime errors;
                 # diagnostics must not turn a successful fallback into a warning.
                 pass

@@ -124,7 +124,13 @@ separately before releasing it if they need that array afterward.
 Set `PipelineConfig(retain_segment_audio=False)` for compact results when segment
 waveforms are not needed. This reduces retained memory after generation, but
 whole-result concatenation still occurs and peak memory remains dependent on input
-duration. A future streaming API is required for bounded peak memory.
+duration. `run()` retains whole-result concatenation semantics; use `prepare_units()` or
+`iter_units()` when peak waveform memory should remain bounded to one paragraph.
+
+Prepared unit descriptor hashes use the `pykokoro-audio-unit-v1` schema. Store the
+schema alongside each hash for resumable exporters. Indices are zero-based source order,
+hashes include audio-semantic configuration, and advancing a render iterator releases
+the previous result's waveform unless the caller copied or persisted it first.
 
 ### Segment
 

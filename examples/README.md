@@ -1,38 +1,47 @@
 # PyKokoro examples
 
-Run examples from the repository root after installing `pykokoro[cpu]`.
+Run maintained examples from the repository root after installing `pykokoro[cpu]`. The
+scripts below use the current pipeline-first API.
 
-- `prosody_demo.py` renders SSMD volume, pitch, rate, and combined metadata.
-- `prosody_algorithm_selection.py` is a small diagnostic harness: it writes one neutral
-  reference and one output per AudioSig prosody backend from the same waveform.
-- `compare_prosody_algorithms.py` creates rate, pitch, and combined renders, diagnostic
-  CSV/JSON metrics, and a randomized blind listening set.
+## Basic pipeline
 
-## Comparing prosody algorithms
+- `german.py` — short German synthesis example; requires ONNX Runtime and model assets.
+- `split_and_phonemize_demo.py` — custom document/G2P stage inspection; import-only
+  until a backend is selected.
+- `termux_android_onnx.py` — Android/Termux provider configuration; requires a
+  compatible ONNX Runtime build and model assets.
 
-Use a known-good WAV when testing on Termux/Android:
+The maintained analysis and language demos are also import-safe and indexed here:
+`abbreviations.py`, `automatic_pauses_demo.py`, `backend_comparison.py`,
+`boundary_detection_analysis.py`, `chinese.py`, `compare_prosody_algorithms.py`,
+`contractions.py`, `contractions_advanced.py`, `cpu_benchmark.py`, `dash_variations.py`,
+`english.py`, `french.py`, `headings_demo.py`, `hindi.py`, `homographs.py`,
+`italian.py`, `japanese.py`, `korean.py`, `mixed_language.py`,
+`optimal_phoneme_length_demo.py`, `paragraph_streaming.py`, `pauses_demo.py`,
+`phoneme_print_demo.py`, `pipeline_g2p_onnx_minimal.py`, `podcast.py`, `portuguese.py`,
+`prosody_algorithm_selection.py`, `prosody_demo.py`, `provider_info.py`,
+`punctuation.py`, `punctuation_variations.py`, `repro_dup_words.py`, `say_as_demo.py`,
+`short_sentence_demo.py`, `short_sentence_randomized_demo.py`,
+`short_sentence_voices_demo.py`, `spanish.py`, `split_and_phonemize_demo.py`,
+`ssmd_080_portable_podcast.py`, `ssmd_demo.py`, and `termux_android_onnx.py`.
 
-```bash
-python examples/prosody_algorithm_selection.py \
-  --input-wav reference.wav
-```
+## Paragraph and long-form rendering
 
-The diagnostic tool writes `reference.wav`, one output per backend, and `metrics.json`.
-Listen to the reference first. The standard ONNX Runtime package reports Android as
-unsupported, so source synthesis and AudioSig processing should be diagnosed separately.
+- `paragraph_wave_export.py` — one WAV per paragraph with an atomic resumable manifest;
+  requires ONNX Runtime, model assets, and `soundfile`.
+- `paragraph_ssmd_voices.py` — SSMD 0.8 YAML voice bindings, pause defaults, and
+  markers; requires ONNX Runtime and model assets.
+- `paragraph_stream_to_chapter.py` — append units directly to one chapter WAV with a
+  marker sidecar; requires ONNX Runtime and model assets.
 
-The default diagnostic comparison modifies rate and pitch only. Positive gain is
-excluded because it can push a full-scale TTS waveform above the PCM WAV range and make
-every backend sound clipped. The writer rejects over-range samples instead of silently
-clipping.
+Preparation is global: parsing, G2P, and phoneme preprocessing happen once, while
+generation and postprocessing are bounded to one selected paragraph waveform. Persist or
+copy a result before advancing the iterator because advancing releases the previous
+waveform. Descriptor hashes use the `pykokoro-audio-unit-v1` schema.
 
-The comparison script accepts an existing WAV to avoid model synthesis:
+## Archived examples
 
-```bash
-python examples/compare_prosody_algorithms.py \
-  --input-wav input.wav \
-  --output-dir build/prosody-comparison
-```
-
-Objective metrics in the comparison output are diagnostic only; they do not measure
-perceived naturalness.
+The `legacy/` directory contains historical scripts that targeted the removed `Kokoro()`
+/ `.create()` API. They are retained for migration reference only and are not part of
+the maintained example surface. New examples must use `KokoroPipeline`,
+`PipelineConfig`, and `GenerationConfig`.

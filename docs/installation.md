@@ -1,146 +1,102 @@
 # Installation Guide
 
-PyKokoro can be installed using pip and requires Python 3.10 or higher.
-
-## Basic Installation
-
-Install the latest stable version from PyPI:
+PyKokoro requires Python 3.10 or newer. Install the CPU provider extra for the standard
+ONNX Runtime setup:
 
 ```bash
 pip install "pykokoro[cpu]"
 ```
 
 The `cpu`, `gpu`, `openvino`, and `directml` extras are alternative ONNX Runtime
-distributions. Install exactly one provider extra per environment.
+distributions; install exactly one provider extra per environment. Importing the
+pipeline and using fully custom stages does not require ONNX Runtime, but the default
+audio stages do.
 
-### Android/Termux Providers
+## Android/Termux providers
 
-PyKokoro accepts any provider spelling reported by the installed ONNX Runtime. For the
-Android/Termux runtime, both aliases and runtime names are valid:
+Use a provider name exposed by the installed ONNX Runtime build:
 
 ```python
-from pykokoro import Kokoro
+from pykokoro import KokoroPipeline, PipelineConfig
 
-kokoro = Kokoro(provider="nnapi")
-kokoro = Kokoro(provider="xnnpack")
+with KokoroPipeline(PipelineConfig(provider="nnapi")) as pipeline:
+    result = pipeline.run("Hello from Android.")
 ```
 
-Use `provider="auto"` to select the highest-priority available provider by capability.
-PyKokoro does not infer availability from platform names and does not suppress ONNX
-Runtime warnings.
+`provider="auto"` selects the highest-priority available provider. PyKokoro does not
+infer provider availability from platform names.
 
-## GPU Support
-
-For GPU acceleration, install with the GPU extras:
-
-### NVIDIA CUDA
+## Other providers
 
 ```bash
-pip install "pykokoro[gpu]"
+pip install "pykokoro[gpu]"       # NVIDIA CUDA
+pip install "pykokoro[openvino]"  # OpenVINO Runtime
+pip install "pykokoro[directml]"  # DirectML
 ```
 
-This installs `onnxruntime-gpu` for NVIDIA CUDA support.
-
-### AMD ROCm
-
-For AMD GPUs with ROCm:
-
-```bash
-pip install "pykokoro[cpu]"
-pip install onnxruntime-rocm
-```
-
-### Custom ONNX Runtime
-
-You can also install a specific ONNX Runtime version separately:
+For a custom ONNX Runtime distribution, install the base package and the provider
+package separately:
 
 ```bash
 pip install pykokoro
-pip install onnxruntime-gpu==1.19.2  # or your preferred version
+pip install onnxruntime-gpu==1.19.2
 ```
 
-## System Requirements
+## Dependencies and optional spaCy
 
-### Python Version
+The package installs kokorog2p, phrasplit, SSMD, NumPy, AudioSig, soundfile, and the
+other runtime support libraries it needs. `spacy` itself and language models are
+optional. The default tokenizer policy is safe on a clean install:
 
-- Python 3.10 or higher
-- Tested on Python 3.10, 3.11, 3.12, and 3.13
+- `use_spacy=False` disables spaCy;
+- `use_spacy=None` selects the best compatible installed local model and falls back
+  without downloading when none is available;
+- `use_spacy=True`, an explicit model, or an exact model size is strict and remains
+  offline.
 
-### Dependencies
-
-Core dependencies (automatically installed):
-
-- `kokorog2p` - Text-to-phoneme conversion
-- `phrasplit` - Intelligent text splitting
-- `numpy` - Model tensors, voice vectors, and array operations
-- `audiosig` - Audio signal processing for trim, VAD, resampling, gain, and speech
-  prosody
-- `soundfile` - Audio file I/O
-- `platformdirs`, `chardet`, `charset-normalizer`, `huggingface-hub`, `ssmd`,
-  `num2words`, `babel`, and `typing_extensions` - runtime support
-
-Optional dependencies:
-
-- `onnxruntime-gpu` - For GPU acceleration
-- `spacy` - For sentence/clause splitting and spaCy-aware G2P tokenization
-
-SSMD volume, pitch, and rate processing is provided by core AudioSig. No librosa, SciPy,
-audiomentations, signalsmith-stretch, or Python-stretch package is required. PyKokoro
-uses WSOLA as its default speech prosody backend and exposes experimental ESOLA and
-TD-PSOLA choices through `ProsodyConfig`. Before publishing a version that uses
-`apply_speech_effects`, verify the installed AudioSig minimum is the first published
-release containing that API and the `wsola`, `esola`, and `td_psola` methods; do not use
-an unverified development build or guessed release number in package metadata.
-
-### Installing espeak-ng
-
-PyKokoro requires `espeak-ng` to be installed on your system.
-
-**Ubuntu/Debian:**
-
-```bash
-sudo apt-get install espeak-ng
-```
-
-**macOS (Homebrew):**
-
-```bash
-brew install espeak-ng
-```
-
-**Windows:**
-
-Download and install from: <https://github.com/espeak-ng/espeak-ng/releases>
-
-Or use Chocolatey:
-
-```bash
-choco install espeak-ng
-```
-
-### Installing spaCy (Optional)
-
-For advanced text splitting with `pause_mode="auto"` and language-aware spaCy
-tokenization in G2P:
+Install a model only when you want spaCy-aware splitting or G2P:
 
 ```bash
 pip install spacy
 python -m spacy download en_core_web_sm
-python -m spacy download en_core_web_md
 ```
 
-```{eval-rst}
-.. note::
+No spaCy model is downloaded automatically. The native kokorog2p backend supports the
+languages declared by `pykokoro.constants.SUPPORTED_LANGUAGES`; languages in
+`ESPEAK_ONLY_LANGUAGES` require an explicit fallback backend.
 
-   ``TokenizerConfig.spacy_model`` and ``spacy_model_size`` are unset by default.
-   Each backend then selects the highest installed compatible model for the
-   effective language (``trf > lg > md > sm``); no spaCy model is downloaded
-   automatically. ``"auto"`` remains a compatibility alias for unset.
+## System requirements
+
+Install `espeak-ng` when using the espeak fallback or backend.
+
+**Ubuntu/Debian:** `sudo apt-get install espeak-ng`
+
+**macOS:** `brew install espeak-ng`
+
+**Windows:** install a release from <https://github.com/espeak-ng/espeak-ng/releases> or
+use `choco install espeak-ng`.
+
+## Verify installation
+
+The public API is pipeline-first:
+
+```python
+import pykokoro
+
+from pykokoro import KokoroPipeline, PipelineConfig
+
+print(pykokoro.__version__)
+with KokoroPipeline(PipelineConfig(voice="af_bella")) as pipeline:
+    result = pipeline.run("Hello, world!")
+    print(f"Generated {len(result.audio)} samples at {result.sample_rate} Hz")
+    result.release_audio()
 ```
 
-## Development Installation
+For long-form output, use `prepare_units()` or `iter_units()` so only one paragraph
+waveform is rendered at a time. Preparation still parses and phonemizes the complete
+document globally. See `examples/paragraph_wave_export.py` for a resumable manifest.
 
-To install from source for development:
+## Development installation
 
 ```bash
 git clone https://github.com/remixer-dec/pykokoro.git
@@ -148,112 +104,18 @@ cd pykokoro
 pip install -e ".[dev]"
 ```
 
-This installs PyKokoro in editable mode with development dependencies.
-
-## Verifying Installation
-
-Test your installation:
-
-```python
-import pykokoro
-
-print(pykokoro.__version__)
-
-# Quick test
-kokoro = pykokoro.Kokoro()
-audio, sr = kokoro.create("Hello, world!", voice="af_bella")
-print(f"Generated {len(audio)} audio samples at {sr} Hz")
-kokoro.close()
-```
-
 ## Troubleshooting
 
-### Import Errors
+If the default pipeline reports that ONNX Runtime is missing, install one provider
+extra, for example `pip install "pykokoro[cpu]"`. If model loading fails, verify that
+the provider is available and that the model/voice assets can be downloaded or supplied
+through `PipelineConfig(model_path=..., voices_path=...)`.
 
-If you get import errors, ensure all dependencies are installed:
-
-```bash
-pip install --upgrade pykokoro
-```
-
-### espeak-ng Not Found
-
-If you get errors about espeak-ng not being found:
-
-1. Verify espeak-ng is installed: `espeak-ng --version`
-2. Ensure it's in your system PATH
-3. On Windows, you may need to restart your terminal after installation
-
-### GPU Not Detected
-
-If GPU acceleration isn't working:
-
-1. Verify CUDA/ROCm is installed: `nvidia-smi` (NVIDIA) or `rocm-smi` (AMD)
-2. Check ONNX Runtime GPU:
-   `python -c "import onnxruntime; print(onnxruntime.get_available_providers())"`
-3. Ensure you have the correct ONNX Runtime version for your CUDA version
-
-### Model Download Issues
-
-If model downloads fail:
-
-1. Check your internet connection
-2. Verify you have write permissions to the cache directory
-3. Try downloading manually and placing in `~/.cache/pykokoro/`
-4. For GitHub models, ensure the release URLs are accessible
-
-**Manual Model Download:**
-
-PyKokoro automatically downloads models on first use, but you can trigger downloads
-manually:
-
-```python
-from pykokoro import Kokoro
-
-# HuggingFace v1.0 (default - 54 voices, 8 quality options)
-kokoro = Kokoro(model_quality="fp16")  # Auto-downloads from HuggingFace
-
-# HuggingFace v1.1-zh (103 voices, 8 quality options)
-kokoro = Kokoro(
-    model_variant="v1.1-zh",
-    model_quality="q8",  # Auto-downloads from HuggingFace
-)
-
-# GitHub v1.0 (54 voices, 4 quality options)
-kokoro = Kokoro(
-    model_source="github",
-    model_variant="v1.0",
-    model_quality="fp16-gpu",  # Auto-downloads from GitHub
-)
-
-# GitHub v1.1-zh (103 voices, fp32 only)
-kokoro = Kokoro(
-    model_source="github",
-    model_variant="v1.1-zh",
-    model_quality="fp32",  # Auto-downloads from GitHub
-)
-```
-
-Models are cached in:
-
-- **HuggingFace v1.0**: `~/.cache/pykokoro/models/huggingface/v1.0/` and
-  `~/.cache/pykokoro/voices/huggingface/v1.0/`
-- **HuggingFace v1.1-zh**: `~/.cache/pykokoro/models/huggingface/v1.1-zh/` and
-  `~/.cache/pykokoro/voices/huggingface/v1.1-zh/`
-- **GitHub v1.0**: `~/.cache/pykokoro/models/github/v1.0/` and
-  `~/.cache/pykokoro/voices/github/v1.0/`
-- **GitHub v1.1-zh**: `~/.cache/pykokoro/models/github/v1.1-zh/` and
-  `~/.cache/pykokoro/voices/github/v1.1-zh/`
-
-The config is stored under `~/.cache/pykokoro/config/{variant}/config.json`. A
-source/variant/quality asset set is complete only when its config, model, and exact
-voice archive are all nonempty regular files. Downstream integrations can inspect the
-same paths without importing ONNX Runtime:
+For dependency-light diagnostics:
 
 ```python
 from pykokoro.model_assets import get_model_asset_paths
 
-assets = get_model_asset_paths(source="github", variant="v1.0", quality="fp32")
-if not assets.complete:
-    print("Missing:", assets.missing)
+assets = get_model_asset_paths(source="huggingface", variant="v1.0", quality="fp32")
+print(assets.missing if not assets.complete else "model assets are ready")
 ```

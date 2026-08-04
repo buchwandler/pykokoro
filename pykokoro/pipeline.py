@@ -21,11 +21,8 @@ from .pipeline_config import PipelineConfig
 from .runtime.tracing import trace_timing
 from .spacy_models import SpacyModelSize
 from .ssmd_config import SSMDRenderConfig
-from .stages.audio_generation.onnx import OnnxAudioGenerationAdapter
-from .stages.audio_postprocessing.onnx import OnnxAudioPostprocessingAdapter
 from .stages.doc_parsers.ssmd import SsmdDocumentParser
 from .stages.g2p.kokorog2p import KokoroG2PAdapter
-from .stages.phoneme_processing.onnx import OnnxPhonemeProcessorAdapter
 from .stages.protocols import (
     AudioGeneratorStage,
     AudioPostprocessor,
@@ -48,6 +45,26 @@ if TYPE_CHECKING:
     from .tokenizer import TokenizerConfig
 
 logger = logging.getLogger(__name__)
+
+
+def _load_default_onnx_adapters() -> tuple[type[Any], type[Any], type[Any]]:
+    """Load ONNX stage classes only when a default stage is actually needed."""
+    try:
+        from .stages.audio_generation.onnx import OnnxAudioGenerationAdapter
+        from .stages.audio_postprocessing.onnx import OnnxAudioPostprocessingAdapter
+        from .stages.phoneme_processing.onnx import OnnxPhonemeProcessorAdapter
+    except ModuleNotFoundError as exc:
+        if exc.name == "onnxruntime":
+            raise RuntimeError(
+                "ONNX-backed pipeline stages require ONNX Runtime; install "
+                "pykokoro[cpu] or a platform provider extra."
+            ) from exc
+        raise
+    return (
+        OnnxPhonemeProcessorAdapter,
+        OnnxAudioGenerationAdapter,
+        OnnxAudioPostprocessingAdapter,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -311,7 +328,7 @@ def _apply_spacy_model_settings(
     *,
     model: str | None,
     size: SpacyModelSize | None,
-    use_spacy: bool,
+    use_spacy: bool | None,
 ) -> PipelineConfig:
     from .tokenizer import TokenizerConfig
 
@@ -329,7 +346,7 @@ def with_spacy_model(
     model: str | PipelineConfig | Mapping[str, Any] | None = None,
     *,
     size: SpacyModelSize | None = None,
-    use_spacy: bool = True,
+    use_spacy: bool | None = None,
 ) -> PipelineConfigTransform | PipelineConfig:
     """Create a pipeline transform for one spaCy model selection request."""
 
@@ -499,28 +516,38 @@ def build_pipeline(
     # If backend injected: bind default stages to it
     # (unless user already provided stages)
     if backend is not None:
+        (
+            onnx_phoneme_processor,
+            onnx_audio_generation,
+            onnx_audio_postprocessing,
+        ) = _load_default_onnx_adapters()
         if pipeline.phoneme_processing is None:
-            pipeline.phoneme_processing = OnnxPhonemeProcessorAdapter(backend)
+            pipeline.phoneme_processing = onnx_phoneme_processor(backend)
         if pipeline.audio_generation is None:
-            pipeline.audio_generation = OnnxAudioGenerationAdapter(backend)
+            pipeline.audio_generation = onnx_audio_generation(backend)
         if pipeline.audio_postprocessing is None:
-            pipeline.audio_postprocessing = OnnxAudioPostprocessingAdapter(backend)
+            pipeline.audio_postprocessing = onnx_audio_postprocessing(backend)
         return pipeline
 
     # Eager warmup: create backend now + bind stages + own/close them
     if eager:
         kokoro, _ = pipeline._ensure_kokoro(cfg)
+        (
+            onnx_phoneme_processor,
+            onnx_audio_generation,
+            onnx_audio_postprocessing,
+        ) = _load_default_onnx_adapters()
 
         if pipeline.phoneme_processing is None:
-            pipeline.phoneme_processing = OnnxPhonemeProcessorAdapter(kokoro)
+            pipeline.phoneme_processing = onnx_phoneme_processor(kokoro)
             pipeline._owns_phoneme_processing = True
 
         if pipeline.audio_generation is None:
-            pipeline.audio_generation = OnnxAudioGenerationAdapter(kokoro)
+            pipeline.audio_generation = onnx_audio_generation(kokoro)
             pipeline._owns_audio_generation = True
 
         if pipeline.audio_postprocessing is None:
-            pipeline.audio_postprocessing = OnnxAudioPostprocessingAdapter(kokoro)
+            pipeline.audio_postprocessing = onnx_audio_postprocessing(kokoro)
             pipeline._owns_audio_postprocessing = True
 
     return pipeline
@@ -633,7 +660,15 @@ class KokoroPipeline:
         kokoro_key = self._kokoro_key(cfg)
         if self._kokoro is not None and self._kokoro_config_key == kokoro_key:
             return self._kokoro, False
-        from .onnx_backend import Kokoro
+        try:
+            from .onnx_backend import Kokoro
+        except ModuleNotFoundError as exc:
+            if exc.name == "onnxruntime":
+                raise RuntimeError(
+                    "The default pipeline backend requires ONNX Runtime; install "
+                    "pykokoro[cpu] or a platform provider extra."
+                ) from exc
+            raise
 
         previous_kokoro = self._kokoro
         previous_owned = self._owns_kokoro
@@ -762,18 +797,23 @@ class KokoroPipeline:
 
         if phoneme_processor is None or audio_generator is None or audio_postprocessor is None:
             kokoro, kokoro_changed = self._ensure_kokoro(cfg)
+            (
+                onnx_phoneme_processor,
+                onnx_audio_generation,
+                onnx_audio_postprocessing,
+            ) = _load_default_onnx_adapters()
             if phoneme_processor is None or (kokoro_changed and self._owns_phoneme_processing):
-                phoneme_processor = OnnxPhonemeProcessorAdapter(kokoro)
+                phoneme_processor = onnx_phoneme_processor(kokoro)
                 if self.phoneme_processing is None or self._owns_phoneme_processing:
                     self.phoneme_processing = phoneme_processor
                     self._owns_phoneme_processing = True
             if audio_generator is None or (kokoro_changed and self._owns_audio_generation):
-                audio_generator = OnnxAudioGenerationAdapter(kokoro)
+                audio_generator = onnx_audio_generation(kokoro)
                 if self.audio_generation is None or self._owns_audio_generation:
                     self.audio_generation = audio_generator
                     self._owns_audio_generation = True
             if audio_postprocessor is None or (kokoro_changed and self._owns_audio_postprocessing):
-                audio_postprocessor = OnnxAudioPostprocessingAdapter(kokoro)
+                audio_postprocessor = onnx_audio_postprocessing(kokoro)
                 if self.audio_postprocessing is None or self._owns_audio_postprocessing:
                     self.audio_postprocessing = audio_postprocessor
                     self._owns_audio_postprocessing = True
@@ -1097,7 +1137,12 @@ def _unit_text_hash(
     cfg: PipelineConfig,
     marker_events: Sequence[Any],
 ) -> str:
-    """Create a stable identity hash from prepared semantic content, not audio."""
+    """Create a stable identity hash from prepared audio-semantic content.
+
+    The ``pykokoro-audio-unit-v1`` schema intentionally excludes tracing,
+    retention, cache-directory, provider-session, and machine-local path state.
+    Callers changing the hash schema must use a new schema prefix.
+    """
     payload = {
         "schema": "pykokoro-audio-unit-v1",
         "paragraph_idx": paragraph_idx,
@@ -1126,10 +1171,29 @@ def _unit_text_hash(
             (event.pos, event.attrs.get("marker"), _freeze_config_value(event.attrs))
             for event in marker_events
         ],
-        "config": _freeze_config_value(cfg),
+        "config": _audio_identity_config(cfg),
     }
     encoded = json.dumps(payload, sort_keys=True, default=repr, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _audio_identity_config(cfg: PipelineConfig) -> dict[str, object]:
+    """Project pipeline settings that can change rendered unit audio."""
+    return {
+        "voice": _freeze_config_value(cfg.voice),
+        "generation": _freeze_config_value(cfg.generation),
+        "ssmd": _freeze_config_value(cfg.ssmd),
+        "prosody": _freeze_config_value(cfg.prosody),
+        "model_quality": cfg.model_quality,
+        "model_source": cfg.model_source,
+        "model_variant": cfg.model_variant,
+        "model_identity": cfg.model_identity,
+        "provider": cfg.provider,
+        "tokenizer_config": _freeze_config_value(cfg.tokenizer_config),
+        "espeak_config": _freeze_config_value(cfg.espeak_config),
+        "short_sentence_config": _freeze_config_value(cfg.short_sentence_config),
+        "overlap_mode": cfg.overlap_mode,
+    }
 
 
 def _copy_phoneme_segment(segment: PhonemeSegment) -> PhonemeSegment:

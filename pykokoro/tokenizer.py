@@ -43,7 +43,9 @@ class TokenizerConfig:
             Only applies when backend='espeak'.
         use_goruut_fallback: Whether to use goruut for OOV words (default: False).
             Requires pygoruut to be installed. Only applies when backend='goruut'
-        use_spacy: Whether to use spaCy for POS tagging (default: True).
+        use_spacy: Whether to use spaCy for POS tagging. ``False`` disables it,
+            ``None`` selects the best compatible local model when available and
+            otherwise falls back, and ``True`` requires a compatible local model.
             Only applies to English.
         spacy_model: Explicit spaCy model package, or None for automatic selection.
             ``"auto"`` remains accepted as a compatibility alias for None.
@@ -74,7 +76,7 @@ class TokenizerConfig:
 
     use_espeak_fallback: bool = True
     use_goruut_fallback: bool = False
-    use_spacy: bool = True
+    use_spacy: bool | None = None
     spacy_model: str | None = None
     spacy_model_size: SpacyModelSize | None = None
     use_dictionary: bool = True
@@ -533,7 +535,7 @@ class Tokenizer:
 def create_tokenizer(
     use_espeak_fallback: bool = True,
     use_goruut_fallback: bool = False,
-    use_spacy: bool = True,
+    use_spacy: bool | None = None,
     spacy_model: str | None = None,
     spacy_model_size: SpacyModelSize | None = None,
 ) -> Tokenizer:
@@ -542,8 +544,9 @@ def create_tokenizer(
     Args:
         use_espeak_fallback: Whether to use espeak for OOV words
         use_goruut_fallback: Whether to use goruut for OOV words
-        use_spacy: Whether to use spaCy for POS tagging
-        spacy_model: Explicit spaCy model package, or None for highest available
+        use_spacy: False to disable spaCy, None for local-only automatic selection,
+            or True to require a compatible local model.
+        spacy_model: Explicit spaCy model package, or None for automatic selection
         model selection.
         spacy_model_size: Exact spaCy package tier, or None for highest available.
 

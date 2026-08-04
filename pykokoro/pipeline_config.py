@@ -35,6 +35,7 @@ class PipelineConfig:
     model_variant: ModelVariant = DEFAULT_MODEL_VARIANT
     model_path: Path | str | None = None
     voices_path: Path | str | None = None
+    model_identity: str | None = None
     provider: ProviderType | None = None
     provider_options: dict[str, Any] | None = None
     session_options: Any | None = None

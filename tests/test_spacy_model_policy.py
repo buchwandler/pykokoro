@@ -69,7 +69,7 @@ def test_plain_parser_forwards_unset_request_and_records_selected_model(monkeypa
         "language_model": None,
         "language": "en",
         "model_size": None,
-        "use_spacy": True,
+        "use_spacy": None,
         "apply_corrections": True,
     }
     assert doc.metadata["spacy_models"]["sentence"]["selected_model"] == "en_core_web_lg"
@@ -104,6 +104,55 @@ def test_plain_parser_forwards_exact_model_and_size(monkeypatch):
 
     assert captured["language_model"] == "en_core_web_sm"
     assert captured["model_size"] == "sm"
+
+
+def test_plain_parser_keeps_explicit_spacy_requests_strict(monkeypatch):
+    calls: list[dict[str, object]] = []
+
+    def fake_resolve(**kwargs: object) -> SimpleNamespace:
+        calls.append(kwargs)
+        raise RuntimeError("model unavailable")
+
+    fake_phrasplit = SimpleNamespace(
+        resolve_spacy_model=fake_resolve,
+        split_with_offsets=lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "pykokoro.stages.doc_parsers.plain.importlib.import_module",
+        lambda _name: fake_phrasplit,
+    )
+    cfg = PipelineConfigType(
+        tokenizer_config=TokenizerConfig(use_spacy=True, spacy_model="en_core_web_sm")
+    )
+
+    with pytest.raises(RuntimeError, match="model unavailable"):
+        PhrasplitSentenceSplitter().split(DocumentResult(clean_text="Hello."), cfg, Trace())
+    assert calls[0]["require"] is True
+
+
+def test_plain_parser_auto_spacy_falls_back_without_a_local_model(monkeypatch):
+    calls: list[dict[str, object]] = []
+
+    def fake_resolve(**kwargs: object) -> SimpleNamespace:
+        calls.append(kwargs)
+        raise RuntimeError("no model installed")
+
+    fake_phrasplit = SimpleNamespace(
+        resolve_spacy_model=fake_resolve,
+        split_with_offsets=lambda text, **_kwargs: [
+            SimpleNamespace(text=text, start=0, end=len(text), paragraph=0, sentence=0)
+        ],
+    )
+    monkeypatch.setattr(
+        "pykokoro.stages.doc_parsers.plain.importlib.import_module",
+        lambda _name: fake_phrasplit,
+    )
+
+    segments = PhrasplitSentenceSplitter().split(
+        DocumentResult(clean_text="Hello."), PipelineConfigType(), Trace()
+    )
+    assert segments[0].text == "Hello."
+    assert calls[0]["require"] is False
 
 
 def test_ssmd_wrapper_preserves_exact_forwarding(monkeypatch):

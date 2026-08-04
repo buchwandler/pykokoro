@@ -105,7 +105,11 @@ class SsmdDocumentParser:
                 boundary_pos = self._paragraph_boundary_pos(previous_start, previous_end)
                 if boundary_pos is not None:
                     header_duration = pause_defaults.paragraph if pause_defaults else None
-                    duration = header_duration or cfg.generation.pause_paragraph
+                    duration = (
+                        header_duration
+                        if header_duration is not None
+                        else cfg.generation.pause_paragraph
+                    )
                     if duration is not None:
                         boundaries.append(
                             self._default_candidate(
@@ -193,18 +197,25 @@ class SsmdDocumentParser:
                 if previous_voice != current_voice:
                     boundary_pos = self._pause_boundary_pos(previous.char_start, previous.char_end)
                     if boundary_pos is not None:
-                        boundaries.append(
-                            self._default_candidate(
-                                boundary_pos,
-                                (pause_defaults.voice_change if pause_defaults else None) or 0.0,
-                                "voice_change",
-                                "header_default",
+                        voice_change = pause_defaults.voice_change if pause_defaults else None
+                        if voice_change is not None:
+                            boundaries.append(
+                                self._default_candidate(
+                                    boundary_pos,
+                                    voice_change,
+                                    "voice_change",
+                                    "header_default",
+                                )
                             )
-                        )
 
         clean_text = "".join(clean_parts)
         boundaries.extend(
-            self._sentence_candidates(doc_segments, pause_defaults, cfg.generation.pause_mode)
+            self._sentence_candidates(
+                doc_segments,
+                pause_defaults,
+                cfg.generation.pause_mode,
+                cfg.generation.pause_sentence,
+            )
         )
         return clean_text, spans, boundaries, doc_segments
 
@@ -238,6 +249,7 @@ class SsmdDocumentParser:
         segments: list[Segment],
         pause_defaults: ResolvedPauseDefaults | None,
         pause_mode: str,
+        pause_sentence: float,
     ) -> list[PauseCandidate]:
         if not segments:
             return []
@@ -259,7 +271,7 @@ class SsmdDocumentParser:
             ):
                 header_duration = pause_defaults.sentence if pause_defaults else None
                 if header_duration is not None or pause_mode == "auto":
-                    duration = header_duration or 0.6
+                    duration = header_duration if header_duration is not None else pause_sentence
                     out.append(
                         self._default_candidate(
                             max(0, last_end - 1),

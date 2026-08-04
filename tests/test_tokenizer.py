@@ -2,7 +2,12 @@
 
 import pytest
 
-from pykokoro.constants import MAX_PHONEME_LENGTH, SAMPLE_RATE, SUPPORTED_LANGUAGES
+from pykokoro.constants import (
+    ESPEAK_ONLY_LANGUAGES,
+    MAX_PHONEME_LENGTH,
+    SAMPLE_RATE,
+    SUPPORTED_LANGUAGES,
+)
 from pykokoro.mixed_language_handler import MixedLanguageHandler
 from pykokoro.tokenizer import (
     EspeakConfig,
@@ -36,7 +41,7 @@ class TestTokenizerConfig:
         """Test default config values."""
         config = TokenizerConfig()
         assert config.use_espeak_fallback is True
-        assert config.use_spacy is True
+        assert config.use_spacy is None
         assert config.spacy_model is None
         assert config.spacy_model_size is None
         assert config.use_dictionary is True
@@ -101,6 +106,8 @@ class TestConstants:
         assert "en-gb" in SUPPORTED_LANGUAGES
         assert "en" in SUPPORTED_LANGUAGES
         assert SUPPORTED_LANGUAGES["en"] == "en-us"
+        assert set(ESPEAK_ONLY_LANGUAGES) == {"pl", "tr", "ru"}
+        assert not set(ESPEAK_ONLY_LANGUAGES).intersection(SUPPORTED_LANGUAGES)
 
 
 class TestVocab:

@@ -150,6 +150,13 @@ releases the previous unit before yielding the next one, so consumers should cop
 persist audio inside the loop. Closing the prepared object releases prepared segment
 audio but does not close the reusable pipeline backend.
 
+Each descriptor has a zero-based source-order index and a `text_hash` using the
+`pykokoro-audio-unit-v1` schema. Store both values in resume manifests; schema changes
+must use a new prefix. Hashes include audio-semantic settings such as voice, pauses,
+language, prosody, model variant, and explicit `model_identity`, but ignore tracing,
+retention, cache-directory, and machine-local runtime toggles. Persist or copy a unit's
+waveform before advancing the iterator because advancing releases the previous result.
+
 ## Pipeline Stages
 
 The pipeline is built from composable stages so you can swap behavior without rewriting

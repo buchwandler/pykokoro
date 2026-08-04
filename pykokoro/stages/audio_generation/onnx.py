@@ -3,12 +3,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ...exceptions import ConfigurationError
-from ...onnx_backend import Kokoro
 from ...types import PhonemeSegment, Trace
 
 if TYPE_CHECKING:
     import numpy as np
 
+    from ...onnx_backend import Kokoro
     from ...pipeline_config import PipelineConfig
 
 

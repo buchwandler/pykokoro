@@ -6,12 +6,12 @@ from typing import TYPE_CHECKING, Any, cast
 from audiosig import AudioSignalError
 
 from ...audio_generator import resolve_audio_annotation
-from ...onnx_backend import Kokoro
 from ...types import PhonemeSegment, Trace
 
 if TYPE_CHECKING:
     import numpy as np
 
+    from ...onnx_backend import Kokoro
     from ...pipeline_config import PipelineConfig
 
 
