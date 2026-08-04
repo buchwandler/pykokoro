@@ -58,7 +58,9 @@ jobs:
         python -m pip install \
           "kokorog2p[espeak,en]==0.7.1" \
           "phrasplit==0.3.4" \
-          "ssmd==0.8.1"
+          "ssmd==0.8.1" \
+          "audiosig==0.1.1" \
+          platformdirs
         python -m pip install -e . --no-deps
     - name: Lower-bound contract tests
       run: |
