@@ -383,7 +383,7 @@ class TestCreateTokenizer:
         """Test creating tokenizer with defaults."""
         tokenizer = create_tokenizer()
         assert tokenizer.config.use_espeak_fallback is True
-        assert tokenizer.config.use_spacy is True
+        assert tokenizer.config.use_spacy is None
         assert tokenizer.config.spacy_model is None
         assert tokenizer.config.spacy_model_size is None
 
