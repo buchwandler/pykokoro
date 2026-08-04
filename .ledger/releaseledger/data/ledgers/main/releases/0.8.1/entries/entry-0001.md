@@ -3,7 +3,7 @@ schema_version: 2
 object_type: release_entry
 versioning:
   schema_version: 1
-  revision: 1
+  revision: 2
 entry_id: entry-0001
 release_version: 0.8.1
 kind: added
@@ -15,6 +15,7 @@ audience: null
 scopes: []
 source_refs:
   - tl:task-0013
+  - git:34215e44b3425b19e0706c17ffed6978ad63693f
 paths:
   - pykokoro/pipeline.py
   - pykokoro/types.py
