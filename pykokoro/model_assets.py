@@ -14,8 +14,8 @@ from .config_types import (
     ModelSource,
     ModelVariant,
 )
-from .utils import get_user_cache_path
 from .model_profiles import get_model_profile
+from .utils import get_user_cache_path
 
 
 def _is_nonempty_file(path: Path) -> bool:

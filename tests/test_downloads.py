@@ -10,6 +10,7 @@ import pytest
 from typing_extensions import Self
 
 import pykokoro.onnx_backend as backend
+from pykokoro.exceptions import ConfigurationError
 from pykokoro.model_assets import (
     are_models_downloaded,
     are_voices_downloaded,
@@ -61,6 +62,34 @@ def test_download_streaming_success(tmp_path, monkeypatch):
 
     assert result == destination
     assert destination.read_bytes() == payload
+
+
+def test_download_resumes_partial_file_with_http_range(tmp_path, monkeypatch):
+    destination = tmp_path / "model.onnx"
+    part_path = destination.with_suffix(destination.suffix + ".part")
+    part_path.write_bytes(b"prefix-")
+    seen_range: list[str] = []
+
+    class RangeResponse(FakeResponse):
+        status = 206
+        headers = {"Content-Range": "bytes 7-12/13"}
+
+    def fake_urlopen(request, timeout=None):
+        seen_range.append(request.headers["Range"])
+        return RangeResponse(b"suffix")
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    _download_from_github(
+        "https://example.com/model.onnx",
+        destination,
+        min_size=1,
+        retries=1,
+        lock_timeout=1,
+    )
+
+    assert seen_range == ["bytes=7-"]
+    assert destination.read_bytes() == b"prefix-suffix"
+    assert not part_path.exists()
 
 
 def test_download_validation_failure(tmp_path, monkeypatch):
@@ -248,6 +277,81 @@ def test_martin_github_downloads_use_exact_urls_and_checksums(tmp_path, monkeypa
     assert calls[1][0].endswith("model-files-german-martin-v1.2/voices-german-martin-v1.2.bin")
     assert calls[1][1]["expected_sha256"].startswith("5b9c8553")
     assert (tmp_path / "voices" / "nested").is_dir()
+
+
+def test_martin_github_downloads_forward_offline_and_exact_sizes(tmp_path, monkeypatch):
+    calls: list[dict[str, object]] = []
+
+    def fake_download(url, local_path, *args, **kwargs):
+        calls.append(kwargs)
+        return local_path
+
+    monkeypatch.setattr(backend, "_download_from_github", fake_download)
+    monkeypatch.setattr(backend, "_validate_onnx_file", lambda path: None)
+    monkeypatch.setattr(backend, "get_model_dir", lambda source, variant: tmp_path / "models")
+    monkeypatch.setattr(backend, "get_voices_archive_path", lambda source, variant: tmp_path / "voices.bin")
+
+    backend.download_model_github("v1.2-de-martin", "fp32", offline=True)
+    backend.download_voices_github("v1.2-de-martin", offline=True)
+
+    assert calls[0]["offline"] is True
+    assert calls[0]["expected_size"] == 325_512_630
+    assert calls[1]["offline"] is True
+    assert calls[1]["expected_size"] == 522_506
+
+
+def test_ensure_models_revalidates_managed_nonempty_paths(tmp_path, monkeypatch):
+    managed_model = tmp_path / "managed.onnx"
+    managed_voices = tmp_path / "managed.bin"
+    managed_model.write_bytes(b"stale model")
+    managed_voices.write_bytes(b"stale voices")
+    calls: list[str] = []
+
+    kokoro = object.__new__(backend.Kokoro)
+    kokoro._model_path = tmp_path / "cached.onnx"
+    kokoro._voices_path = tmp_path / "cached.bin"
+    kokoro._model_path.write_bytes(b"non-empty but untrusted")
+    kokoro._voices_path.write_bytes(b"non-empty but untrusted")
+    kokoro._model_path_provided = False
+    kokoro._voices_path_provided = False
+    kokoro._model_source = "github"
+    kokoro._model_variant = "v1.2-de-martin"
+    kokoro._model_quality = "fp32"
+
+    def download_model(**kwargs):
+        calls.append("model")
+        return managed_model
+
+    def download_voices(**kwargs):
+        calls.append("voices")
+        return managed_voices
+
+    monkeypatch.setattr(backend, "download_model_github", download_model)
+    monkeypatch.setattr(backend, "download_voices_github", download_voices)
+    kokoro._ensure_models()
+
+    assert calls == ["model", "voices"]
+    assert kokoro._model_path == managed_model
+    assert kokoro._voices_path == managed_voices
+
+
+def test_ensure_models_does_not_download_for_missing_custom_paths(tmp_path, monkeypatch):
+    kokoro = object.__new__(backend.Kokoro)
+    kokoro._model_path = tmp_path / "missing.onnx"
+    kokoro._voices_path = tmp_path / "missing.bin"
+    kokoro._model_path_provided = True
+    kokoro._voices_path_provided = True
+    kokoro._model_source = "github"
+    kokoro._model_variant = "v1.2-de-martin"
+    kokoro._model_quality = "fp32"
+    monkeypatch.setattr(
+        backend,
+        "download_model_github",
+        lambda **kwargs: pytest.fail("custom model path must not download"),
+    )
+
+    with pytest.raises(ConfigurationError, match="Explicit model_path"):
+        kokoro._ensure_models()
 
 def test_model_asset_queries_do_not_leak_between_source_variant_or_quality(tmp_path, monkeypatch):
     monkeypatch.setattr("pykokoro.model_assets.get_user_cache_path", lambda: tmp_path)

@@ -35,3 +35,9 @@ kokorog2p release should expand dates, times, decimal commas, measurements, ordi
 durations, Euro amounts, and abbreviations such as `Prof.`, `ggf.`, `ca.`, and `zzgl.`
 before G2P. Sentence segmentation and source offsets continue to refer to the original
 document text.
+
+Managed Martin cache hits are checked against the pinned SHA-256 digests before use;
+invalid files are removed and downloaded again. Explicit custom paths are validated in
+place and are never replaced by managed downloads. The profile's `suggested_speed`
+metadata is advisory only, so callers should set `GenerationConfig(speed=1.125)` when
+they want the demonstration speed.

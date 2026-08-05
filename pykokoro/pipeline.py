@@ -561,6 +561,12 @@ def _default_lang_from_voice(cfg: PipelineConfig) -> PipelineConfig:
     default_lang = GenerationConfig().lang
     if cfg.generation.lang != default_lang:
         return cfg
+    from .model_profiles import profile_for_voice
+
+    profile = profile_for_voice(cfg.voice)
+    if profile is not None and profile.language_codes:
+        generation = replace(cfg.generation, lang=profile.language_codes[0])
+        return replace(cfg, generation=generation)
     voice_key = cfg.voice.split("_", 1)[0].strip().lower()
     if not voice_key:
         return cfg

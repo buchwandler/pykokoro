@@ -11,26 +11,20 @@ import sqlite3
 import tempfile
 import time
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Mapping, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import onnxruntime as rt
 from huggingface_hub import hf_hub_download
 
 from .artifact_manifest import (
-    GITHUB_MODEL_SHA256,
-    GITHUB_RELEASE_REVISIONS,
-    GITHUB_VOICES_SHA256,
     hf_config_spec,
     hf_model_spec,
     hf_voice_spec,
 )
 from .asset_constants import (
-    GITHUB_VOICES_FILENAME_V1_0,
-    GITHUB_VOICES_FILENAME_V1_1_DE,
-    GITHUB_VOICES_FILENAME_V1_1_ZH,
     HF_CONFIG_FILENAME,
     HF_MODEL_SUBFOLDER,
     MODEL_QUALITY_CACHE_FILES_HF_V1_0,
@@ -57,7 +51,6 @@ from .model_assets import (
     get_model_asset_paths,
     get_voices_archive_path,
 )
-from .model_profiles import get_model_profile
 from .model_assets import (
     are_models_downloaded as _are_models_downloaded,
 )
@@ -67,6 +60,7 @@ from .model_assets import (
 from .model_assets import (
     is_model_downloaded as _is_model_downloaded,
 )
+from .model_profiles import get_model_profile
 from .onnx_session import OnnxSessionManager
 from .provider_config import ProviderConfigManager
 from .tokenizer import EspeakConfig, Tokenizer, TokenizerConfig
@@ -553,6 +547,17 @@ def _validate_min_size(path: Path, min_size: int) -> None:
         )
 
 
+def _validate_exact_size(path: Path, expected_size: int | None) -> None:
+    if expected_size is None:
+        return
+    actual_size = path.stat().st_size
+    if actual_size != expected_size:
+        raise ArtifactValidationError(
+            f"Downloaded file {path.name} has size {actual_size} bytes; "
+            f"expected exactly {expected_size} bytes."
+        )
+
+
 def _validate_onnx_file(path: Path) -> None:
     _validate_min_size(path, MIN_ONNX_BYTES)
 
@@ -631,12 +636,15 @@ def _validate_artifact(
     min_size: int | None = None,
     validator: Callable[[Path], None] | None = None,
     expected_sha256: str | None = None,
+    expected_size: int | None = None,
 ) -> None:
     if min_size is not None:
         _validate_min_size(path, min_size)
+    _validate_exact_size(path, expected_size)
+    # A pinned digest rejects known-wrong large files before expensive ONNX parsing.
+    _validate_sha256(path, expected_sha256)
     if validator is not None:
         validator(path)
-    _validate_sha256(path, expected_sha256)
 
 
 def _remove_invalid_cached_file(
@@ -645,6 +653,7 @@ def _remove_invalid_cached_file(
     min_size: int | None = None,
     validator: Callable[[Path], None] | None = None,
     expected_sha256: str | None = None,
+    expected_size: int | None = None,
 ) -> bool:
     if not path.exists():
         return False
@@ -654,6 +663,7 @@ def _remove_invalid_cached_file(
             min_size=min_size,
             validator=validator,
             expected_sha256=expected_sha256,
+            expected_size=expected_size,
         )
     except (OSError, ArtifactValidationError) as exc:
         logger.warning("Removing invalid cached artifact %s: %s", path, exc)
@@ -746,38 +756,47 @@ def _stream_download(
     min_size: int | None = None,
     validator: Callable[[Path], None] | None = None,
     expected_sha256: str | None = None,
+    expected_size: int | None = None,
 ) -> Path:
     local_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with tempfile.NamedTemporaryFile(
-        delete=False,
-        dir=local_path.parent,
-        prefix=f"{local_path.name}.",
-        suffix=".tmp",
-    ) as tmp_file:
-        tmp_path = Path(tmp_file.name)
-        try:
-            with urllib.request.urlopen(url, timeout=timeout) as response:
+    part_path = local_path.with_suffix(local_path.suffix + ".part")
+    resume_from = part_path.stat().st_size if part_path.is_file() else 0
+    request: urllib.request.Request | str = url
+    if resume_from:
+        request = urllib.request.Request(url, headers={"Range": f"bytes={resume_from}-"})
+
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            status = getattr(response, "status", None)
+            content_range = response.headers.get("Content-Range", "") if hasattr(response, "headers") else ""
+            can_resume = bool(
+                resume_from
+                and status == 206
+                and content_range.startswith(f"bytes {resume_from}-")
+            )
+            mode = "ab" if can_resume else "wb"
+            with part_path.open(mode) as part_file:
                 for chunk in iter(lambda: response.read(DOWNLOAD_CHUNK_SIZE), b""):
-                    tmp_file.write(chunk)
-            tmp_file.flush()
-            os.fsync(tmp_file.fileno())
-        except Exception:
-            with contextlib.suppress(FileNotFoundError):
-                tmp_path.unlink()
-            raise
+                    part_file.write(chunk)
+                part_file.flush()
+                os.fsync(part_file.fileno())
+    except Exception:
+        # Preserve a partial transfer so a retry can use HTTP Range when supported.
+        raise
 
     try:
         _validate_artifact(
-            tmp_path,
+            part_path,
             min_size=min_size,
             validator=validator,
             expected_sha256=expected_sha256,
+            expected_size=expected_size,
         )
-        os.replace(tmp_path, local_path)
+        os.replace(part_path, local_path)
     except Exception:
         with contextlib.suppress(FileNotFoundError):
-            tmp_path.unlink()
+            part_path.unlink()
         raise
 
     return local_path
@@ -1361,6 +1380,7 @@ def _download_from_github(
     retries: int = DOWNLOAD_RETRIES,
     lock_timeout: float = DOWNLOAD_LOCK_TIMEOUT_SECONDS,
     expected_sha256: str | None = None,
+    expected_size: int | None = None,
     offline: bool = False,
 ) -> Path:
     """
@@ -1383,6 +1403,7 @@ def _download_from_github(
             min_size=min_size,
             validator=validator,
             expected_sha256=expected_sha256,
+            expected_size=expected_size,
         )
     ):
         logger.debug(f"File already exists: {local_path}")
@@ -1392,6 +1413,10 @@ def _download_from_github(
 
     logger.info(f"Downloading from {url} to {local_path}")
 
+    if force:
+        with contextlib.suppress(FileNotFoundError):
+            local_path.with_suffix(local_path.suffix + ".part").unlink()
+
     def _download() -> Path:
         return _stream_download(
             url,
@@ -1400,6 +1425,7 @@ def _download_from_github(
             min_size=min_size,
             validator=validator,
             expected_sha256=expected_sha256,
+            expected_size=expected_size,
         )
 
     with _download_lock(local_path, timeout=lock_timeout):
@@ -1411,6 +1437,7 @@ def _download_from_github(
                 min_size=min_size,
                 validator=validator,
                 expected_sha256=expected_sha256,
+                expected_size=expected_size,
             )
         ):
             logger.debug(f"File already exists: {local_path}")
@@ -1429,6 +1456,7 @@ def download_model_github(
     variant: ModelVariant = DEFAULT_MODEL_VARIANT,
     quality: ModelQuality = DEFAULT_MODEL_QUALITY,
     force: bool = False,
+    offline: bool = False,
 ) -> Path:
     """
     Download a model file from GitHub releases.
@@ -1446,13 +1474,6 @@ def download_model_github(
     """
     profile = get_model_profile(variant, "github")
     quality_files = profile.quality_files
-    base_url = {
-        "v1.0": GITHUB_BASE_URL_V1_0,
-        "v1.1-zh": GITHUB_BASE_URL_V1_1_ZH,
-        "v1.1-de": GITHUB_BASE_URL_V1_1_DE,
-        "v1.2-de-martin": GITHUB_BASE_URL_V1_2_DE_MARTIN,
-    }[variant]
-    release_revision = profile.release_revision or GITHUB_RELEASE_REVISIONS[variant]
 
     # Check if quality is available for this variant
     if quality not in quality_files:
@@ -1464,13 +1485,19 @@ def download_model_github(
 
     # Get filename and construct URL
     filename = quality_files[quality]
-    url = f"{base_url}/{filename}"
+    if not profile.release_repository or not profile.release_tag:
+        raise ValueError(f"GitHub profile {variant!r} has no release coordinates")
+    url = f"https://github.com/{profile.release_repository}/releases/download/{profile.release_tag}/{filename}"
 
     # Use new path structure
     model_dir = get_model_dir(source="github", variant=variant)
     local_path = model_dir / filename
 
-    logger.info("Using immutable GitHub release commit %s", release_revision)
+    logger.info(
+        "Using GitHub release tag %s; associated commit %s",
+        profile.release_tag,
+        profile.release_commit or "unknown",
+    )
 
     # Download
     return _download_from_github(
@@ -1478,14 +1505,16 @@ def download_model_github(
         local_path,
         force,
         validator=_validate_onnx_file,
-        expected_sha256=(profile.model_sha256 or {}).get(filename)
-        or GITHUB_MODEL_SHA256.get((variant, filename)),
+        expected_sha256=(profile.model_sha256 or {}).get(filename),
+        expected_size=(profile.model_sizes or {}).get(filename),
+        offline=offline,
     )
 
 
 def download_voices_github(
     variant: ModelVariant = DEFAULT_MODEL_VARIANT,
     force: bool = False,
+    offline: bool = False,
 ) -> Path:
     """
     Download voices.bin file from GitHub releases.
@@ -1499,22 +1528,21 @@ def download_voices_github(
     """
     profile = get_model_profile(variant, "github")
     filename = profile.voices_filename
-    base_url = {
-        "v1.0": GITHUB_BASE_URL_V1_0,
-        "v1.1-zh": GITHUB_BASE_URL_V1_1_ZH,
-        "v1.1-de": GITHUB_BASE_URL_V1_1_DE,
-        "v1.2-de-martin": GITHUB_BASE_URL_V1_2_DE_MARTIN,
-    }[variant]
-    release_revision = profile.release_revision or GITHUB_RELEASE_REVISIONS[variant]
 
     # Construct URL
-    url = f"{base_url}/{filename}"
+    if not profile.release_repository or not profile.release_tag:
+        raise ValueError(f"GitHub profile {variant!r} has no release coordinates")
+    url = f"https://github.com/{profile.release_repository}/releases/download/{profile.release_tag}/{filename}"
 
     # Use new path structure
     local_path = get_voices_archive_path("github", variant)
     local_path.parent.mkdir(parents=True, exist_ok=True)
 
-    logger.info("Using immutable GitHub release commit %s", release_revision)
+    logger.info(
+        "Using GitHub release tag %s; associated commit %s",
+        profile.release_tag,
+        profile.release_commit or "unknown",
+    )
 
     # Download
     return _download_from_github(
@@ -1524,7 +1552,9 @@ def download_voices_github(
         validator=lambda path: _validate_voice_archive(
             path, expected_voice_names=profile.voice_names
         ),
-        expected_sha256=profile.voices_sha256 or GITHUB_VOICES_SHA256.get(variant),
+        expected_sha256=profile.voices_sha256,
+        expected_size=profile.voices_size,
+        offline=offline,
     )
 
 
@@ -1533,6 +1563,7 @@ def download_all_models_github(
     quality: ModelQuality = DEFAULT_MODEL_QUALITY,
     progress_callback: Callable[[str, int, int], None] | None = None,
     force: bool = False,
+    offline: bool = False,
 ) -> dict[str, Path]:
     """
     Download model and voices files from GitHub.
@@ -1551,13 +1582,13 @@ def download_all_models_github(
     # Download model
     if progress_callback:
         progress_callback("model", 0, 2)
-    model_path = download_model_github(variant, quality, force)
+    model_path = download_model_github(variant, quality, force, offline)
     paths[model_path.name] = model_path
 
     # Download voices
     if progress_callback:
         progress_callback("voices", 1, 2)
-    voices_path = download_voices_github(variant, force)
+    voices_path = download_voices_github(variant, force, offline)
     paths[voices_path.name] = voices_path
 
     if progress_callback:
@@ -1671,6 +1702,7 @@ class Kokoro:
         self._voice_manager: VoiceManager | None = None
         self._audio_generator: AudioGenerator | None = None
         self._np = np
+        self._model_path_provided = model_path is not None
         self._voices_path_provided = voices_path is not None
 
         # Deprecation warning for use_gpu
@@ -1851,31 +1883,54 @@ class Kokoro:
 
     def _ensure_models(self) -> None:
         """Ensure model, voice, and config files are downloaded for current variant."""
-        # Download model if needed
-        if not _is_nonempty_file(self._model_path):
-            if self._model_source == "github":
-                download_model_github(variant=self._model_variant, quality=self._model_quality)
-            else:  # huggingface
-                download_model(variant=self._model_variant, quality=self._model_quality)
+        if self._model_path_provided:
+            if not _is_nonempty_file(self._model_path):
+                raise ConfigurationError(
+                    f"Explicit model_path does not point to a non-empty file: {self._model_path}"
+                )
+            try:
+                _validate_onnx_file(self._model_path)
+            except (OSError, ArtifactValidationError) as exc:
+                raise ConfigurationError(f"Explicit model_path is not a valid ONNX model: {exc}") from exc
+        elif self._model_source == "github":
+            self._model_path = download_model_github(
+                variant=self._model_variant,
+                quality=self._model_quality,
+            )
+        else:
+            self._model_path = download_model(
+                variant=self._model_variant,
+                quality=self._model_quality,
+            )
 
-        # Download voices if needed
-        if not _is_nonempty_file(self._voices_path):
-            if self._model_source == "github":
-                download_voices_github(variant=self._model_variant)
-            else:  # huggingface
-                download_all_voices(variant=self._model_variant)
+        if self._voices_path_provided:
+            if not _is_nonempty_file(self._voices_path):
+                raise ConfigurationError(
+                    f"Explicit voices_path does not point to a non-empty file: {self._voices_path}"
+                )
+            try:
+                _validate_voice_archive(self._voices_path)
+            except (OSError, ArtifactValidationError) as exc:
+                raise ConfigurationError(
+                    f"Explicit voices_path is not a valid voice archive: {exc}"
+                ) from exc
+        elif self._model_source == "github":
+            self._voices_path = download_voices_github(variant=self._model_variant)
+        else:
+            self._voices_path = download_all_voices(variant=self._model_variant)
 
         profile = get_model_profile(self._model_variant, self._model_source)
-        if profile.vocabulary_source == "downloaded-config":
-            if not is_config_downloaded(variant=self._model_variant):
-                download_config(variant=self._model_variant)
+        if profile.vocabulary_source == "downloaded-config" and not is_config_downloaded(
+            variant=self._model_variant
+        ):
+            download_config(variant=self._model_variant)
 
     def _redownload_voices(self, force: bool = False) -> None:
         if self._model_source == "github":
-            download_voices_github(variant=self._model_variant, force=force)
+            self._voices_path = download_voices_github(variant=self._model_variant, force=force)
             return
 
-        download_all_voices(variant=self._model_variant, force=force)
+        self._voices_path = download_all_voices(variant=self._model_variant, force=force)
 
     def _get_default_provider_options(self, provider: str) -> dict[str, str]:
         """

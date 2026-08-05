@@ -959,7 +959,9 @@ explicit model settings, PyKokoro selects the GitHub `v1.2-de-martin` profile, i
 fp32-only `kokoro-german-martin-v1.2.onnx` model, and the single `martin` voice before
 backend and G2P caches are constructed. The first run downloads roughly 311 MB of
 model and voice assets into the normal `~/.cache/pykokoro` cache. GitHub downloads are
-verified with the published SHA-256 digests; invalid cached files are removed.
+verified with the published SHA-256 digests and structural checks; invalid managed
+cached files are removed and re-downloaded. Explicit `model_path` and `voices_path`
+files are validated in place and are never silently replaced.
 
 ```python
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
@@ -983,9 +985,12 @@ config = PipelineConfig(
 
 The legacy GitHub `v1.1-de` profile remains available explicitly with `df_eva` and
 `dm_bernd`. Martin uses the built-in Kokoro v1.0 vocabulary and does not download a
-Tundragoon config. German structured normalization belongs to the kokorog2p dependency
-and must be supplied by the compatible kokorog2p release; PyKokoro keeps source offsets
-tied to the original text.
+Tundragoon config. `martin` alone also infers German; custom voice archives may expose
+additional voice names when selected explicitly. The profile's suggested speed of
+`1.125` is advisory, so applications must set it explicitly when they want it.
+German structured normalization belongs to the kokorog2p dependency and must be
+supplied by the compatible kokorog2p release; PyKokoro keeps source offsets tied to
+the original text.
 
 ## Model Quality Options
 
@@ -1054,8 +1059,8 @@ print(assets.model, assets.voices, assets.missing)
 print(are_models_downloaded(source="github", variant="v1.0", quality="fp32"))
 ```
 
-Inspection only checks for nonempty regular files; it does not download assets or
-consult another source, variant, or quality.
+Inspection does not download assets or consult another source, variant, or quality.
+Runtime startup performs checksum and structural validation for managed assets.
 
 ## Configuration
 

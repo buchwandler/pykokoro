@@ -62,7 +62,23 @@ def resolve_model_defaults(cfg: PipelineConfig) -> PipelineConfig:
     paths, are preserved and incompatible combinations fail before backend or
     G2P construction.
     """
-    from .model_profiles import get_model_profile, normalize_language_code, profile_for_language
+    from .model_profiles import (
+        get_model_profile,
+        normalize_language_code,
+        profile_for_language,
+        profile_for_voice,
+    )
+
+    if (
+        cfg.generation.lang == GenerationConfig().lang
+        and isinstance(cfg.voice, str)
+        and (voice_profile := profile_for_voice(cfg.voice)) is not None
+        and voice_profile.language_codes
+    ):
+        cfg = replace(
+            cfg,
+            generation=replace(cfg.generation, lang=voice_profile.language_codes[0]),
+        )
 
     lang = normalize_language_code(cfg.generation.lang)
     source = cfg.model_source
@@ -96,7 +112,12 @@ def resolve_model_defaults(cfg: PipelineConfig) -> PipelineConfig:
     voice = cfg.voice
     if voice is None:
         voice = profile.default_voice
-    elif isinstance(voice, str) and profile.voice_names and voice not in profile.voice_names:
+    elif (
+        cfg.voices_path is None
+        and isinstance(voice, str)
+        and profile.voice_names
+        and voice not in profile.voice_names
+    ):
         available = ", ".join(profile.voice_names)
         raise ValueError(
             f"Voice {voice!r} is not available for model variant {variant!r}. "

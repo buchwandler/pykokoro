@@ -76,7 +76,13 @@ artifacts are checked against their published SHA-256 digests before being cache
 The previous `v1.1-de` Eva/Bernd model remains an explicit compatibility choice. Use
 `PipelineConfig(model_source="github", model_variant="v1.1-de", voice="df_eva")` or
 `dm_bernd` when that legacy profile is required. Custom `model_path` and `voices_path`
-are never replaced by automatic selection.
+are never replaced by automatic selection; missing custom files fail directly rather
+than triggering a download to the shared cache. Managed cache hits are checksum and
+structure checked before use. The public GitHub download helpers also accept
+`offline=True` when a valid managed cache is required.
+Interrupted GitHub transfers retain a temporary `.part` file and resume with HTTP
+Range requests when the release host supports them; completed files are still checked
+for exact size, SHA-256, and structure before replacement.
 
 ## System requirements
 
