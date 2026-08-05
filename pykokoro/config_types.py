@@ -8,7 +8,7 @@ ModelQuality = Literal[
     "fp32", "fp16", "fp16-gpu", "q8", "q8f16", "q4", "q4f16", "uint8", "uint8f16"
 ]
 ModelSource = Literal["huggingface", "github"]
-ModelVariant = Literal["v1.0", "v1.1-zh", "v1.1-de"]
+ModelVariant = Literal["v1.0", "v1.1-zh", "v1.1-de", "v1.2-de-martin"]
 ProviderAlias: TypeAlias = Literal[
     "auto",
     "cpu",
@@ -36,4 +36,5 @@ LANG_CODE_TO_ONNX: dict[str, str] = {
     "j": "ja",
     "p": "pt-br",
     "z": "zh",
+    "d": "de",
 }

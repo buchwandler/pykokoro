@@ -27,6 +27,10 @@ class OnnxAudioGenerationAdapter:
         cfg: PipelineConfig,
         trace: Trace,
     ) -> list[PhonemeSegment]:
+        from ...pipeline_config import resolve_model_defaults
+
+        cfg = resolve_model_defaults(cfg)
+        assert cfg.voice is not None
         for segment in phoneme_segments:
             metadata = segment.ssmd_metadata or {}
             voice_name = metadata.get("voice_name")

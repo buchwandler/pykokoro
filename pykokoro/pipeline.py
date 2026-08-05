@@ -17,7 +17,7 @@ from .config_types import LANG_CODE_TO_ONNX
 from .constants import SAMPLE_RATE
 from .emphasis import apply_emphasis_policy
 from .generation_config import GenerationConfig
-from .pipeline_config import PipelineConfig
+from .pipeline_config import PipelineConfig, resolve_model_defaults
 from .runtime.tracing import trace_timing
 from .spacy_models import SpacyModelSize
 from .ssmd_config import SSMDRenderConfig
@@ -632,6 +632,7 @@ class KokoroPipeline:
             self._prepared_objects.remove(prepared)
 
     def _kokoro_key(self, cfg: PipelineConfig) -> tuple[object, ...]:
+        cfg = resolve_model_defaults(_default_lang_from_voice(cfg))
         model_path = str(cfg.model_path) if cfg.model_path else None
         voices_path = str(cfg.voices_path) if cfg.voices_path else None
         return (
@@ -657,6 +658,7 @@ class KokoroPipeline:
             close()
 
     def _ensure_kokoro(self, cfg: PipelineConfig) -> tuple[Kokoro, bool]:
+        cfg = resolve_model_defaults(_default_lang_from_voice(cfg))
         kokoro_key = self._kokoro_key(cfg)
         if self._kokoro is not None and self._kokoro_config_key == kokoro_key:
             return self._kokoro, False
@@ -672,6 +674,9 @@ class KokoroPipeline:
 
         previous_kokoro = self._kokoro
         previous_owned = self._owns_kokoro
+        assert cfg.model_source is not None
+        assert cfg.model_variant is not None
+        assert cfg.voice is not None
         new_kokoro = Kokoro(
             model_path=Path(cfg.model_path) if cfg.model_path else None,
             voices_path=Path(cfg.voices_path) if cfg.voices_path else None,
@@ -697,7 +702,7 @@ class KokoroPipeline:
 
     def _resolve_run_config(self, overrides: dict[str, Any]) -> PipelineConfig:
         if not overrides:
-            return _default_lang_from_voice(self.config)
+            return resolve_model_defaults(_default_lang_from_voice(self.config))
         overrides = dict(overrides)
         lang = overrides.pop("lang", None)
         has_generation_override = "generation" in overrides
@@ -712,7 +717,7 @@ class KokoroPipeline:
             overrides["generation"] = generation
         if ssmd_value is not None:
             overrides["ssmd"] = _coerce_ssmd(self.config.ssmd, ssmd_value)
-        return _default_lang_from_voice(replace(self.config, **overrides))
+        return resolve_model_defaults(_default_lang_from_voice(replace(self.config, **overrides)))
 
     def prepare_units(
         self,

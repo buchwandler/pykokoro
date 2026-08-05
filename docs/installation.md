@@ -65,6 +65,19 @@ No spaCy model is downloaded automatically. The native kokorog2p backend support
 languages declared by `pykokoro.constants.SUPPORTED_LANGUAGES`; languages in
 `ESPEAK_ONLY_LANGUAGES` require an explicit fallback backend.
 
+## German Martin assets
+
+German runs automatically select the single-speaker GitHub `v1.2-de-martin` profile
+when no model or voice is supplied. It provides only `fp32` and downloads approximately
+311 MB for the ONNX model plus a 522,506-byte `martin` voice archive on first use. Both
+artifacts are checked against their published SHA-256 digests before being cached under
+`~/.cache/pykokoro`.
+
+The previous `v1.1-de` Eva/Bernd model remains an explicit compatibility choice. Use
+`PipelineConfig(model_source="github", model_variant="v1.1-de", voice="df_eva")` or
+`dm_bernd` when that legacy profile is required. Custom `model_path` and `voices_path`
+are never replaced by automatic selection.
+
 ## System requirements
 
 Install `espeak-ng` when using the espeak fallback or backend.

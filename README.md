@@ -952,6 +952,41 @@ audio = res.audio
 **Note:** Chinese text generation requires proper phonemization support (currently in
 development).
 
+### German Martin v1.2
+
+When `GenerationConfig(lang="de")` (or `de-de`, `de-at`, or `de-ch`) is used without
+explicit model settings, PyKokoro selects the GitHub `v1.2-de-martin` profile, its
+fp32-only `kokoro-german-martin-v1.2.onnx` model, and the single `martin` voice before
+backend and G2P caches are constructed. The first run downloads roughly 311 MB of
+model and voice assets into the normal `~/.cache/pykokoro` cache. GitHub downloads are
+verified with the published SHA-256 digests; invalid cached files are removed.
+
+```python
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
+
+config = PipelineConfig(generation=GenerationConfig(lang="de", speed=1.125))
+with KokoroPipeline(config) as pipe:
+    result = pipe.run("Das ist ein deutscher Testsatz.")
+```
+
+For reproducible configuration, select the profile explicitly:
+
+```python
+config = PipelineConfig(
+    voice="martin",
+    model_source="github",
+    model_variant="v1.2-de-martin",
+    model_quality="fp32",
+    generation=GenerationConfig(lang="de", speed=1.125),
+)
+```
+
+The legacy GitHub `v1.1-de` profile remains available explicitly with `df_eva` and
+`dm_bernd`. Martin uses the built-in Kokoro v1.0 vocabulary and does not download a
+Tundragoon config. German structured normalization belongs to the kokorog2p dependency
+and must be supplied by the compatible kokorog2p release; PyKokoro keeps source offsets
+tied to the original text.
+
 ## Model Quality Options
 
 Available quality options vary by source:
@@ -977,6 +1012,10 @@ Available quality options vary by source:
 **GitHub v1.1-zh Models:**
 
 - `fp32`: Full precision only
+
+**GitHub v1.2-de-martin:**
+
+- `fp32`: Full precision only; no fp16 or quantized Martin artifacts are published
 
 ```python
 from pykokoro import KokoroPipeline, PipelineConfig

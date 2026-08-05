@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from .config_types import (
-    DEFAULT_MODEL_SOURCE,
-    DEFAULT_MODEL_VARIANT,
     ModelQuality,
     ModelSource,
     ModelVariant,
@@ -24,15 +22,15 @@ from .voice_manager import VoiceBlend
 class PipelineConfig:
     """User-facing configuration for the end-to-end pipeline."""
 
-    voice: str | VoiceBlend = "af"
+    voice: str | VoiceBlend | None = None
     generation: GenerationConfig = field(default_factory=GenerationConfig)
     ssmd: SSMDRenderConfig = field(default_factory=SSMDRenderConfig)
     prosody: ProsodyConfig = field(default_factory=ProsodyConfig)
 
     # Model + provider configuration
     model_quality: ModelQuality | None = None
-    model_source: ModelSource = DEFAULT_MODEL_SOURCE
-    model_variant: ModelVariant = DEFAULT_MODEL_VARIANT
+    model_source: ModelSource | None = None
+    model_variant: ModelVariant | None = None
     model_path: Path | str | None = None
     voices_path: Path | str | None = None
     model_identity: str | None = None
@@ -55,3 +53,62 @@ class PipelineConfig:
 
     # Caching
     cache_dir: str | None = None
+
+
+def resolve_model_defaults(cfg: PipelineConfig) -> PipelineConfig:
+    """Resolve language-aware model and voice defaults into a concrete config.
+
+    ``None`` means automatic selection. Explicit values, including custom asset
+    paths, are preserved and incompatible combinations fail before backend or
+    G2P construction.
+    """
+    from .model_profiles import get_model_profile, normalize_language_code, profile_for_language
+
+    lang = normalize_language_code(cfg.generation.lang)
+    source = cfg.model_source
+    variant = cfg.model_variant
+
+    if variant is None:
+        language_profile = profile_for_language(lang)
+        if language_profile is not None and source in {None, "github"}:
+            variant = language_profile.variant
+            source = language_profile.source if source is None else source
+        elif lang.startswith("zh") and source in {None, "github"}:
+            variant = "v1.1-zh"
+            source = "github" if source is None else source
+        else:
+            variant = "v1.0"
+            source = "huggingface" if source is None else source
+    elif source is None:
+        source = "github" if variant != "v1.0" else "huggingface"
+
+    assert source is not None
+    assert variant is not None
+    profile = get_model_profile(variant, source)
+
+    quality = cfg.model_quality or cast(ModelQuality, profile.available_qualities[0])
+    if quality not in profile.quality_files:
+        available = ", ".join(profile.quality_files) or "none"
+        raise ValueError(
+            f"Quality {quality!r} is not available for {source}/{variant}. Available: {available}"
+        )
+
+    voice = cfg.voice
+    if voice is None:
+        voice = profile.default_voice
+    elif isinstance(voice, str) and profile.voice_names and voice not in profile.voice_names:
+        available = ", ".join(profile.voice_names)
+        raise ValueError(
+            f"Voice {voice!r} is not available for model variant {variant!r}. "
+            f"Available voices: {available}"
+        )
+
+    generation = cfg.generation if cfg.generation.lang == lang else replace(cfg.generation, lang=lang)
+    return replace(
+        cfg,
+        voice=voice,
+        generation=generation,
+        model_quality=quality,
+        model_source=source,
+        model_variant=variant,
+    )

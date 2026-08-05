@@ -44,7 +44,7 @@ class SsmdDocumentParser:
         sentence_diagnostics = parsed.sentence_diagnostics
         selected_model = getattr(sentence_diagnostics, "selected_model", None)
         selected_size = getattr(sentence_diagnostics, "selected_model_size", None)
-        doc_metadata = {
+        doc_metadata: dict[str, object] = {
             "spacy_models": {
                 "sentence": spacy_selection_metadata(
                     language=generation.lang,

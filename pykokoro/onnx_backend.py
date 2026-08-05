@@ -13,14 +13,16 @@ import time
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Mapping, cast
 
 import numpy as np
 import onnxruntime as rt
 from huggingface_hub import hf_hub_download
 
 from .artifact_manifest import (
+    GITHUB_MODEL_SHA256,
     GITHUB_RELEASE_REVISIONS,
+    GITHUB_VOICES_SHA256,
     hf_config_spec,
     hf_model_spec,
     hf_voice_spec,
@@ -55,6 +57,7 @@ from .model_assets import (
     get_model_asset_paths,
     get_voices_archive_path,
 )
+from .model_profiles import get_model_profile
 from .model_assets import (
     are_models_downloaded as _are_models_downloaded,
 )
@@ -83,7 +86,7 @@ DOWNLOAD_RETRIES = 3
 DOWNLOAD_TIMEOUT_SECONDS = 30
 DOWNLOAD_LOCK_TIMEOUT_SECONDS = 30
 MIN_ONNX_BYTES = 1_000_000
-MIN_VOICE_ARCHIVE_BYTES = 1_000_000
+MIN_VOICE_ARCHIVE_BYTES = 64 * 1024
 MIN_VOICE_BIN_BYTES = 100_000
 MIN_CONFIG_BYTES = 100
 
@@ -123,6 +126,11 @@ GITHUB_REPO_GERMAN = "holgern/kokoro-onnx-model"
 GITHUB_RELEASE_TAG_V1_1_DE = "model-files-german-v1.1"
 GITHUB_BASE_URL_V1_1_DE = (
     f"https://github.com/{GITHUB_REPO_GERMAN}/releases/download/{GITHUB_RELEASE_TAG_V1_1_DE}"
+)
+
+GITHUB_RELEASE_TAG_V1_2_DE_MARTIN = "model-files-german-martin-v1.2"
+GITHUB_BASE_URL_V1_2_DE_MARTIN = (
+    f"https://github.com/{GITHUB_REPO_GERMAN}/releases/download/{GITHUB_RELEASE_TAG_V1_2_DE_MARTIN}"
 )
 
 # All available voice names for v1.0 (54 voices - English/multilingual)
@@ -443,21 +451,7 @@ def get_model_path(
     """
     model_dir = get_model_dir(source, variant)
 
-    # Get appropriate filename mapping based on source and variant
-    if source == "huggingface":
-        if variant == "v1.0":
-            quality_files = MODEL_QUALITY_CACHE_FILES_HF_V1_0
-        else:
-            quality_files = MODEL_QUALITY_FILES_HF
-    elif source == "github":
-        if variant == "v1.0":
-            quality_files = MODEL_QUALITY_FILES_GITHUB_V1_0
-        elif variant == "v1.1-de":
-            quality_files = MODEL_QUALITY_FILES_GITHUB_V1_1_DE
-        else:  # v1.1-zh
-            quality_files = MODEL_QUALITY_FILES_GITHUB_V1_1_ZH
-    else:
-        raise ValueError(f"Unknown source: {source}")
+    quality_files = get_model_profile(variant, source).quality_files
 
     # Get filename for quality
     if quality not in quality_files:
@@ -577,20 +571,30 @@ def _validate_onnx_file(path: Path) -> None:
         ) from exc
 
 
-def _validate_voice_archive(path: Path) -> None:
+def _validate_voice_archive(
+    path: Path,
+    *,
+    expected_voice_names: tuple[str, ...] | None = None,
+) -> None:
     _validate_min_size(path, MIN_VOICE_ARCHIVE_BYTES)
 
     try:
         with np.load(str(path), allow_pickle=False) as voices:
             if not voices.files:
                 raise RuntimeError("Voice archive is empty")
-            first_key = voices.files[0]
-            normalize_voice_style(
-                voices[first_key],
-                expected_length=None,
-                require_dtype=True,
-                voice_name=first_key,
-            )
+            if expected_voice_names is not None:
+                missing = sorted(set(expected_voice_names) - set(voices.files))
+                if missing:
+                    raise RuntimeError(
+                        "Voice archive is missing expected voices: " + ", ".join(missing)
+                    )
+            for voice_name in expected_voice_names or (voices.files[0],):
+                normalize_voice_style(
+                    voices[voice_name],
+                    expected_length=None,
+                    require_dtype=True,
+                    voice_name=voice_name,
+                )
     except Exception as exc:
         raise ArtifactValidationError(
             f"Downloaded voice archive '{path.name}' is invalid: {exc}"
@@ -1440,19 +1444,15 @@ def download_model_github(
     Raises:
         ValueError: If quality is not available for the variant
     """
-    # Get the appropriate quality mapping and base URL
-    if variant == "v1.0":
-        quality_files = MODEL_QUALITY_FILES_GITHUB_V1_0
-        base_url = GITHUB_BASE_URL_V1_0
-    elif variant == "v1.1-zh":
-        quality_files = MODEL_QUALITY_FILES_GITHUB_V1_1_ZH
-        base_url = GITHUB_BASE_URL_V1_1_ZH
-    elif variant == "v1.1-de":
-        quality_files = MODEL_QUALITY_FILES_GITHUB_V1_1_DE
-        base_url = GITHUB_BASE_URL_V1_1_DE
-    else:
-        raise ValueError(f"Unknown model variant: {variant}")
-    release_revision = GITHUB_RELEASE_REVISIONS[variant]
+    profile = get_model_profile(variant, "github")
+    quality_files = profile.quality_files
+    base_url = {
+        "v1.0": GITHUB_BASE_URL_V1_0,
+        "v1.1-zh": GITHUB_BASE_URL_V1_1_ZH,
+        "v1.1-de": GITHUB_BASE_URL_V1_1_DE,
+        "v1.2-de-martin": GITHUB_BASE_URL_V1_2_DE_MARTIN,
+    }[variant]
+    release_revision = profile.release_revision or GITHUB_RELEASE_REVISIONS[variant]
 
     # Check if quality is available for this variant
     if quality not in quality_files:
@@ -1478,6 +1478,8 @@ def download_model_github(
         local_path,
         force,
         validator=_validate_onnx_file,
+        expected_sha256=(profile.model_sha256 or {}).get(filename)
+        or GITHUB_MODEL_SHA256.get((variant, filename)),
     )
 
 
@@ -1495,25 +1497,22 @@ def download_voices_github(
     Returns:
         Path to the downloaded voices.bin file
     """
-    # Get the appropriate filename and base URL
-    if variant == "v1.0":
-        filename = GITHUB_VOICES_FILENAME_V1_0
-        base_url = GITHUB_BASE_URL_V1_0
-    elif variant == "v1.1-zh":
-        filename = GITHUB_VOICES_FILENAME_V1_1_ZH
-        base_url = GITHUB_BASE_URL_V1_1_ZH
-    elif variant == "v1.1-de":
-        filename = GITHUB_VOICES_FILENAME_V1_1_DE
-        base_url = GITHUB_BASE_URL_V1_1_DE
-    else:
-        raise ValueError(f"Unknown model variant: {variant}")
-    release_revision = GITHUB_RELEASE_REVISIONS[variant]
+    profile = get_model_profile(variant, "github")
+    filename = profile.voices_filename
+    base_url = {
+        "v1.0": GITHUB_BASE_URL_V1_0,
+        "v1.1-zh": GITHUB_BASE_URL_V1_1_ZH,
+        "v1.1-de": GITHUB_BASE_URL_V1_1_DE,
+        "v1.2-de-martin": GITHUB_BASE_URL_V1_2_DE_MARTIN,
+    }[variant]
+    release_revision = profile.release_revision or GITHUB_RELEASE_REVISIONS[variant]
 
     # Construct URL
     url = f"{base_url}/{filename}"
 
     # Use new path structure
     local_path = get_voices_archive_path("github", variant)
+    local_path.parent.mkdir(parents=True, exist_ok=True)
 
     logger.info("Using immutable GitHub release commit %s", release_revision)
 
@@ -1522,7 +1521,10 @@ def download_voices_github(
         url,
         local_path,
         force,
-        validator=_validate_voice_archive,
+        validator=lambda path: _validate_voice_archive(
+            path, expected_voice_names=profile.voice_names
+        ),
+        expected_sha256=profile.voices_sha256 or GITHUB_VOICES_SHA256.get(variant),
     )
 
 
@@ -1713,12 +1715,17 @@ class Kokoro:
 
         # Validate quality is available for the selected source/variant
         if model_source == "github":
+            available_qualities: Mapping[str, str]
             if model_variant == "v1.0":
                 available_qualities = MODEL_QUALITY_FILES_GITHUB_V1_0
             elif model_variant == "v1.1-zh":
                 available_qualities = MODEL_QUALITY_FILES_GITHUB_V1_1_ZH
             elif model_variant == "v1.1-de":
                 available_qualities = MODEL_QUALITY_FILES_GITHUB_V1_1_DE
+            elif model_variant == "v1.2-de-martin":
+                available_qualities = get_model_profile(
+                    model_variant, "github"
+                ).quality_files
             else:
                 raise ValueError(f"Unknown model variant: {model_variant}")
 
@@ -1766,8 +1773,8 @@ class Kokoro:
 
         # Tokenizer for phoneme-based generation
         self._tokenizer: Tokenizer | None = None
-        # Use model variant as vocab version for proper filtering
-        self._vocab_version = self._model_variant
+        profile = get_model_profile(self._model_variant, self._model_source)
+        self._vocab_version = profile.tokenizer_vocab_version
         self._espeak_config = espeak_config
         self._tokenizer_config = tokenizer_config
 
@@ -1782,8 +1789,8 @@ class Kokoro:
         """
         from kokorog2p import get_kokoro_vocab
 
-        # For GitHub models or v1.1-zh, load variant-specific vocab from config
-        if self._model_source == "github" or self._model_variant == "v1.1-zh":
+        profile = get_model_profile(self._model_variant, self._model_source)
+        if profile.vocabulary_source == "downloaded-config":
             return load_vocab_from_config(self._model_variant)
 
         # For HuggingFace v1.0 or default, use standard vocab
@@ -1858,12 +1865,8 @@ class Kokoro:
             else:  # huggingface
                 download_all_voices(variant=self._model_variant)
 
-        # Download variant-specific config if needed
-        if self._model_source == "github":
-            if not is_config_downloaded(variant=self._model_variant):
-                logger.info(f"Downloading config for variant '{self._model_variant}'...")
-                download_config(variant=self._model_variant)
-        else:
+        profile = get_model_profile(self._model_variant, self._model_source)
+        if profile.vocabulary_source == "downloaded-config":
             if not is_config_downloaded(variant=self._model_variant):
                 download_config(variant=self._model_variant)
 

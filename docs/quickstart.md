@@ -38,6 +38,23 @@ sf.write("hello.wav", result.audio, result.sample_rate)
 
 That's it! You've generated your first audio file.
 
+### German speech
+
+German selects the Martin v1.2 GitHub model automatically when model and voice fields
+are omitted:
+
+```python
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
+
+config = PipelineConfig(generation=GenerationConfig(lang="de", speed=1.125))
+with KokoroPipeline(config) as pipe:
+    result = pipe.run("Zum 14.05.2026 um 18:20 Uhr ist das Abendessen geplant.")
+```
+
+The profile is fp32-only and uses the `martin` voice. For explicit reproducibility,
+set `model_source="github"`, `model_variant="v1.2-de-martin"`, `model_quality="fp32"`,
+and `voice="martin"`. Downloads are SHA-256 verified and cached locally.
+
 ### Choosing a Voice
 
 PyKokoro comes with 54 voices (v1.0) or 103 voices (v1.1-zh). Here are some popular

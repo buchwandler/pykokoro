@@ -3,12 +3,12 @@ from __future__ import annotations
 import re
 from dataclasses import asdict
 from types import ModuleType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from ...constants import MAX_PHONEME_LENGTH, SUPPORTED_LANGUAGES
 from ...runtime.cache import cache_from_dir, make_g2p_key
 from ...runtime.spans import slice_boundaries, slice_spans
-from ...spacy_models import make_spacy_model_request, spacy_selection_metadata
+from ...spacy_models import SpacyModelSize, make_spacy_model_request, spacy_selection_metadata
 from ...types import PhonemeSegment
 from ..protocols import DocumentResult, G2PAdapter
 
@@ -251,7 +251,7 @@ class KokoroG2PAdapter(G2PAdapter):
         if isinstance(selected_model, str):
             suffix = selected_model.rsplit("_", 1)[-1]
             if suffix in {"sm", "md", "lg", "trf"}:
-                selected_size = suffix
+                selected_size = cast(SpacyModelSize, suffix)
         models = doc.metadata.setdefault("spacy_models", {})
         if not isinstance(models, dict):
             models = {}
@@ -269,7 +269,13 @@ class KokoroG2PAdapter(G2PAdapter):
 
     @staticmethod
     def _get_model_version(cfg: PipelineConfig) -> str:
-        return "1.1" if cfg.model_variant == "v1.1-zh" else "1.0"
+        from ...model_profiles import get_model_profile
+        from ...pipeline_config import resolve_model_defaults
+
+        cfg = resolve_model_defaults(cfg)
+        assert cfg.model_variant is not None
+        assert cfg.model_source is not None
+        return get_model_profile(cfg.model_variant, cfg.model_source).tokenizer_vocab_version
 
     def _split_phoneme_batches(
         self,

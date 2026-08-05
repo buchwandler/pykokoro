@@ -5,9 +5,10 @@ import logging
 import os
 import re
 from bisect import bisect_left
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from ...spacy_models import (
+    SpacyModelSize,
     make_spacy_model_request,
     normalize_spacy_language,
     spacy_selection_metadata,
@@ -132,7 +133,7 @@ class PhrasplitSentenceSplitter:
             ]
 
         sentence_model: str | None = None
-        sentence_size: str | None = None
+        sentence_size: SpacyModelSize | None = None
         resolver = getattr(phrasplit, "resolve_spacy_model", None)
         strict_request = tokenizer_config.use_spacy is True or request.mode != "highest_available"
         if tokenizer_config.use_spacy is not False and resolver is not None:
@@ -144,14 +145,20 @@ class PhrasplitSentenceSplitter:
                     require=strict_request,
                 )
                 sentence_model = getattr(resolution, "selected_model", None)
-                sentence_size = getattr(resolution, "model_size", None)
+                size = getattr(resolution, "model_size", None)
+                if size in {"sm", "md", "lg", "trf"}:
+                    sentence_size = cast(SpacyModelSize, size)
             except Exception:
                 if strict_request:
                     raise
                 # The splitter remains the source of truth for runtime errors;
                 # diagnostics must not turn a successful fallback into a warning.
                 pass
-        doc.metadata.setdefault("spacy_models", {})["sentence"] = spacy_selection_metadata(
+        spacy_models = doc.metadata.setdefault("spacy_models", {})
+        if not isinstance(spacy_models, dict):
+            spacy_models = {}
+            doc.metadata["spacy_models"] = spacy_models
+        spacy_models["sentence"] = spacy_selection_metadata(
             language=language,
             request=request,
             selected_model=sentence_model,
@@ -184,7 +191,7 @@ class PhrasplitSentenceSplitter:
                         phrasplit,
                         chunk,
                         request.model,
-                        use_spacy=tokenizer_config.use_spacy,
+                        use_spacy=cast(bool, tokenizer_config.use_spacy),
                         language=language,
                         model_size=request.size,
                     )
@@ -196,6 +203,8 @@ class PhrasplitSentenceSplitter:
                     split_items = self._split_with_offsets(phrasplit, chunk, request.model)
                 if not split_items:
                     split_items = [(chunk, 0, len(chunk), None, None, None)]
+                if language == "de":
+                    split_items = self._merge_abbreviation_splits(chunk, split_items)
 
             cursor = 0
             chunk_len = len(chunk)
@@ -324,6 +333,43 @@ class PhrasplitSentenceSplitter:
             else:
                 logger.debug("Segment reconstruction matches clean_text")
         return segments
+
+    @staticmethod
+    def _merge_abbreviation_splits(
+        source: str, items: list[SplitItem]
+    ) -> list[SplitItem]:
+        """Keep dotted abbreviations and ordinal markers inside one sentence."""
+        if len(items) < 2:
+            return items
+        merged: list[SplitItem] = []
+        abbreviation_end = re.compile(r"(?:\b(?:Prof|Min|ltr|ca|ggf|zzgl)\.|\b\d+\.)$")
+        ordinal_noun = re.compile(r"^(?:Schiene|Reihe|Klasse)\b", re.IGNORECASE)
+        for item in items:
+            if not merged:
+                merged.append(item)
+                continue
+            previous = merged[-1]
+            previous_text = previous[0] or ""
+            next_text = item[0] or ""
+            should_merge = bool(abbreviation_end.search(previous_text.rstrip()))
+            if previous_text.rstrip().split()[-1:] and re.search(r"\b\d+\.$", previous_text.rstrip()):
+                should_merge = bool(ordinal_noun.match(next_text.lstrip()))
+            if previous_text.rstrip() and next_text.lstrip()[:1].islower():
+                should_merge = True
+            if not should_merge:
+                merged.append(item)
+                continue
+            start = previous[1] if previous[1] is not None else 0
+            end = item[2] if item[2] is not None else len(source)
+            merged[-1] = (
+                source[start:end],
+                start,
+                end,
+                previous[3],
+                previous[4],
+                previous[5],
+            )
+        return merged
 
     def _hard_ranges(
         self,

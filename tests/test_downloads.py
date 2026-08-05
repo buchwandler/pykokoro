@@ -208,7 +208,6 @@ def test_model_asset_completeness_requires_three_nonempty_regular_files(tmp_path
     assets = get_model_asset_paths(quality="fp32", source="github", variant="v1.0")
     assert assets.missing == ("config", "model", "voices")
     assert not assets.complete
-
     assets.config.parent.mkdir(parents=True)
     assets.config.write_bytes(b"config")
     assets.model.parent.mkdir(parents=True)
@@ -224,6 +223,31 @@ def test_model_asset_completeness_requires_three_nonempty_regular_files(tmp_path
     assert assets.missing == ("model",)
     assert not assets.complete
 
+
+def test_martin_github_downloads_use_exact_urls_and_checksums(tmp_path, monkeypatch):
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_download(url, local_path, *args, **kwargs):
+        calls.append((url, kwargs))
+        return local_path
+
+    monkeypatch.setattr(backend, "_download_from_github", fake_download)
+    monkeypatch.setattr(backend, "_validate_onnx_file", lambda path: None)
+    monkeypatch.setattr(backend, "get_model_dir", lambda source, variant: tmp_path / "models")
+    monkeypatch.setattr(
+        backend,
+        "get_voices_archive_path",
+        lambda source, variant: tmp_path / "voices" / "nested" / "voices.bin",
+    )
+
+    backend.download_model_github(variant="v1.2-de-martin", quality="fp32")
+    backend.download_voices_github(variant="v1.2-de-martin")
+
+    assert calls[0][0].endswith("model-files-german-martin-v1.2/kokoro-german-martin-v1.2.onnx")
+    assert calls[0][1]["expected_sha256"].startswith("c302f1d8")
+    assert calls[1][0].endswith("model-files-german-martin-v1.2/voices-german-martin-v1.2.bin")
+    assert calls[1][1]["expected_sha256"].startswith("5b9c8553")
+    assert (tmp_path / "voices" / "nested").is_dir()
 
 def test_model_asset_queries_do_not_leak_between_source_variant_or_quality(tmp_path, monkeypatch):
     monkeypatch.setattr("pykokoro.model_assets.get_user_cache_path", lambda: tmp_path)

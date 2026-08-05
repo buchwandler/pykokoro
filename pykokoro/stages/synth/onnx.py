@@ -14,6 +14,12 @@ class OnnxSynthesizerAdapter:
     def synthesize(
         self, phoneme_segments: list[PhonemeSegment], cfg: PipelineConfig, trace: Trace
     ) -> np.ndarray:
+        from ...pipeline_config import resolve_model_defaults
+
+        cfg = resolve_model_defaults(cfg)
+        assert cfg.model_source is not None
+        assert cfg.model_variant is not None
+        assert cfg.voice is not None
         kokoro = self._kokoro or Kokoro(
             model_quality=cfg.model_quality,
             model_source=cfg.model_source,
