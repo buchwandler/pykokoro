@@ -37,6 +37,12 @@ def main() -> None:
     print(f"Created {OUTPUT_FILE}")
     print(f"Sample rate: {result.sample_rate} Hz")
     print(f"Duration: {duration:.2f} seconds")
+    print("\nPhoneme segments:")
+    for index, segment in enumerate(result.phoneme_segments, start=1):
+        print(f"  [{index}] {segment.text!r}")
+        print(f"      {segment.phonemes}")
+    print("\nFull phoneme stream:")
+    print(" ".join(segment.phonemes for segment in result.phoneme_segments))
     if result.trace and result.trace.warnings:
         print("Warnings:")
         for warning in result.trace.warnings:

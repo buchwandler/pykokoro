@@ -51,10 +51,10 @@ with KokoroPipeline(config) as pipe:
     result = pipe.run("Zum 14.05.2026 um 18:20 Uhr ist das Abendessen geplant.")
 ```
 
-The profile is fp32-only and uses the `martin` voice. For explicit reproducibility,
-set `model_source="github"`, `model_variant="v1.2-de-martin"`, `model_quality="fp32"`,
-and `voice="martin"`. Downloads are SHA-256 verified and cached locally.
-The profile's suggested speed (`1.125`) is advisory and is not applied unless set in
+The profile is fp32-only and uses the `martin` voice. For explicit reproducibility, set
+`model_source="github"`, `model_variant="v1.2-de-martin"`, `model_quality="fp32"`, and
+`voice="martin"`. Downloads are SHA-256 verified and cached locally. The profile's
+suggested speed (`1.125`) is advisory and is not applied unless set in
 `GenerationConfig`. A standalone `voice="martin"` also infers German; custom voice
 archives can provide additional names when `voices_path` is supplied.
 

@@ -769,11 +769,11 @@ def _stream_download(
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             status = getattr(response, "status", None)
-            content_range = response.headers.get("Content-Range", "") if hasattr(response, "headers") else ""
+            content_range = (
+                response.headers.get("Content-Range", "") if hasattr(response, "headers") else ""
+            )
             can_resume = bool(
-                resume_from
-                and status == 206
-                and content_range.startswith(f"bytes {resume_from}-")
+                resume_from and status == 206 and content_range.startswith(f"bytes {resume_from}-")
             )
             mode = "ab" if can_resume else "wb"
             with part_path.open(mode) as part_file:
@@ -1755,9 +1755,7 @@ class Kokoro:
             elif model_variant == "v1.1-de":
                 available_qualities = MODEL_QUALITY_FILES_GITHUB_V1_1_DE
             elif model_variant == "v1.2-de-martin":
-                available_qualities = get_model_profile(
-                    model_variant, "github"
-                ).quality_files
+                available_qualities = get_model_profile(model_variant, "github").quality_files
             else:
                 raise ValueError(f"Unknown model variant: {model_variant}")
 
@@ -1891,7 +1889,9 @@ class Kokoro:
             try:
                 _validate_onnx_file(self._model_path)
             except (OSError, ArtifactValidationError) as exc:
-                raise ConfigurationError(f"Explicit model_path is not a valid ONNX model: {exc}") from exc
+                raise ConfigurationError(
+                    f"Explicit model_path is not a valid ONNX model: {exc}"
+                ) from exc
         elif self._model_source == "github":
             self._model_path = download_model_github(
                 variant=self._model_variant,

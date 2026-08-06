@@ -66,9 +66,7 @@ GERMAN_MARTIN_V1_2 = ModelProfile(
             "c302f1d8bc7adf40a842cb550e18c39a5026bdb1afdd29dbb700b501cb49276b"
         ),
     },
-    voices_sha256=(
-        "5b9c8553398d7abf67498ce500c186cefaa7b68fed3e3d415da5380670105acd"
-    ),
+    voices_sha256=("5b9c8553398d7abf67498ce500c186cefaa7b68fed3e3d415da5380670105acd"),
     model_sizes={"kokoro-german-martin-v1.2.onnx": 325_512_630},
     voices_size=522_506,
     suggested_speed=1.125,
@@ -103,8 +101,16 @@ def get_model_profile(
     if source == "github":
         data: dict[ModelVariant, tuple[Mapping[str, str], str, tuple[str, ...]]] = {
             "v1.0": (MODEL_QUALITY_FILES_GITHUB_V1_0, GITHUB_VOICES_FILENAME_V1_0, ("af",)),
-            "v1.1-zh": (MODEL_QUALITY_FILES_GITHUB_V1_1_ZH, GITHUB_VOICES_FILENAME_V1_1_ZH, ("af_maple",)),
-            "v1.1-de": (MODEL_QUALITY_FILES_GITHUB_V1_1_DE, GITHUB_VOICES_FILENAME_V1_1_DE, ("df_eva", "dm_bernd")),
+            "v1.1-zh": (
+                MODEL_QUALITY_FILES_GITHUB_V1_1_ZH,
+                GITHUB_VOICES_FILENAME_V1_1_ZH,
+                ("af_maple",),
+            ),
+            "v1.1-de": (
+                MODEL_QUALITY_FILES_GITHUB_V1_1_DE,
+                GITHUB_VOICES_FILENAME_V1_1_DE,
+                ("df_eva", "dm_bernd"),
+            ),
         }
         try:
             quality_files, voices_filename, voice_names = data[variant]
@@ -119,9 +125,7 @@ def get_model_profile(
             voice_names=voice_names,
             default_voice=voice_names[0],
             vocabulary_source=(
-                "downloaded-config"
-                if variant in {"v1.0", "v1.1-zh"}
-                else "builtin-v1.0"
+                "downloaded-config" if variant in {"v1.0", "v1.1-zh"} else "builtin-v1.0"
             ),
             tokenizer_vocab_version="1.1" if variant == "v1.1-zh" else "1.0",
             release_repository=(
@@ -143,7 +147,9 @@ def get_model_profile(
             source=source,
             variant=variant,
             language_codes=(),
-            quality_files=(MODEL_QUALITY_CACHE_FILES_HF_V1_0 if variant == "v1.0" else MODEL_QUALITY_FILES_HF),
+            quality_files=(
+                MODEL_QUALITY_CACHE_FILES_HF_V1_0 if variant == "v1.0" else MODEL_QUALITY_FILES_HF
+            ),
             voices_filename="voices.bin.npz",
             voice_names=(),
             default_voice="af",

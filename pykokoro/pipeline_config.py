@@ -124,7 +124,9 @@ def resolve_model_defaults(cfg: PipelineConfig) -> PipelineConfig:
             f"Available voices: {available}"
         )
 
-    generation = cfg.generation if cfg.generation.lang == lang else replace(cfg.generation, lang=lang)
+    generation = (
+        cfg.generation if cfg.generation.lang == lang else replace(cfg.generation, lang=lang)
+    )
     return replace(
         cfg,
         voice=voice,

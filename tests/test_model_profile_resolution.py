@@ -14,7 +14,9 @@ def test_martin_profile_metadata_is_pinned():
     assert profile.release_tag == "model-files-german-martin-v1.2"
     assert profile.release_revision == "670bf630bb02428ad323f78195f9583f52c5c604"
     assert profile.model_sha256 is not None
-    assert profile.voices_sha256 == "5b9c8553398d7abf67498ce500c186cefaa7b68fed3e3d415da5380670105acd"
+    assert (
+        profile.voices_sha256 == "5b9c8553398d7abf67498ce500c186cefaa7b68fed3e3d415da5380670105acd"
+    )
     assert profile.model_sizes == {"kokoro-german-martin-v1.2.onnx": 325_512_630}
     assert profile.voices_size == 522_506
     assert profile.suggested_speed == 1.125

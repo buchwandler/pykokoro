@@ -335,9 +335,7 @@ class PhrasplitSentenceSplitter:
         return segments
 
     @staticmethod
-    def _merge_abbreviation_splits(
-        source: str, items: list[SplitItem]
-    ) -> list[SplitItem]:
+    def _merge_abbreviation_splits(source: str, items: list[SplitItem]) -> list[SplitItem]:
         """Keep dotted abbreviations and ordinal markers inside one sentence."""
         if len(items) < 2:
             return items
@@ -352,7 +350,9 @@ class PhrasplitSentenceSplitter:
             previous_text = previous[0] or ""
             next_text = item[0] or ""
             should_merge = bool(abbreviation_end.search(previous_text.rstrip()))
-            if previous_text.rstrip().split()[-1:] and re.search(r"\b\d+\.$", previous_text.rstrip()):
+            if previous_text.rstrip().split()[-1:] and re.search(
+                r"\b\d+\.$", previous_text.rstrip()
+            ):
                 should_merge = bool(ordinal_noun.match(next_text.lstrip()))
             if previous_text.rstrip() and next_text.lstrip()[:1].islower():
                 should_merge = True

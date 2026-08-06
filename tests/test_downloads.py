@@ -289,7 +289,9 @@ def test_martin_github_downloads_forward_offline_and_exact_sizes(tmp_path, monke
     monkeypatch.setattr(backend, "_download_from_github", fake_download)
     monkeypatch.setattr(backend, "_validate_onnx_file", lambda path: None)
     monkeypatch.setattr(backend, "get_model_dir", lambda source, variant: tmp_path / "models")
-    monkeypatch.setattr(backend, "get_voices_archive_path", lambda source, variant: tmp_path / "voices.bin")
+    monkeypatch.setattr(
+        backend, "get_voices_archive_path", lambda source, variant: tmp_path / "voices.bin"
+    )
 
     backend.download_model_github("v1.2-de-martin", "fp32", offline=True)
     backend.download_voices_github("v1.2-de-martin", offline=True)
@@ -352,6 +354,7 @@ def test_ensure_models_does_not_download_for_missing_custom_paths(tmp_path, monk
 
     with pytest.raises(ConfigurationError, match="Explicit model_path"):
         kokoro._ensure_models()
+
 
 def test_model_asset_queries_do_not_leak_between_source_variant_or_quality(tmp_path, monkeypatch):
     monkeypatch.setattr("pykokoro.model_assets.get_user_cache_path", lambda: tmp_path)

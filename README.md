@@ -957,8 +957,8 @@ development).
 When `GenerationConfig(lang="de")` (or `de-de`, `de-at`, or `de-ch`) is used without
 explicit model settings, PyKokoro selects the GitHub `v1.2-de-martin` profile, its
 fp32-only `kokoro-german-martin-v1.2.onnx` model, and the single `martin` voice before
-backend and G2P caches are constructed. The first run downloads roughly 311 MB of
-model and voice assets into the normal `~/.cache/pykokoro` cache. GitHub downloads are
+backend and G2P caches are constructed. The first run downloads roughly 311 MB of model
+and voice assets into the normal `~/.cache/pykokoro` cache. GitHub downloads are
 verified with the published SHA-256 digests and structural checks; invalid managed
 cached files are removed and re-downloaded. Explicit `model_path` and `voices_path`
 files are validated in place and are never silently replaced.
@@ -987,10 +987,9 @@ The legacy GitHub `v1.1-de` profile remains available explicitly with `df_eva` a
 `dm_bernd`. Martin uses the built-in Kokoro v1.0 vocabulary and does not download a
 Tundragoon config. `martin` alone also infers German; custom voice archives may expose
 additional voice names when selected explicitly. The profile's suggested speed of
-`1.125` is advisory, so applications must set it explicitly when they want it.
-German structured normalization belongs to the kokorog2p dependency and must be
-supplied by the compatible kokorog2p release; PyKokoro keeps source offsets tied to
-the original text.
+`1.125` is advisory, so applications must set it explicitly when they want it. German
+structured normalization belongs to the kokorog2p dependency and must be supplied by the
+compatible kokorog2p release; PyKokoro keeps source offsets tied to the original text.
 
 ## Model Quality Options
 

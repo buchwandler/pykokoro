@@ -67,9 +67,9 @@ languages declared by `pykokoro.constants.SUPPORTED_LANGUAGES`; languages in
 
 ## German Martin assets
 
-German runs automatically select the single-speaker GitHub `v1.2-de-martin` profile
-when no model or voice is supplied. It provides only `fp32` and downloads approximately
-311 MB for the ONNX model plus a 522,506-byte `martin` voice archive on first use. Both
+German runs automatically select the single-speaker GitHub `v1.2-de-martin` profile when
+no model or voice is supplied. It provides only `fp32` and downloads approximately 311
+MB for the ONNX model plus a 522,506-byte `martin` voice archive on first use. Both
 artifacts are checked against their published SHA-256 digests before being cached under
 `~/.cache/pykokoro`.
 
@@ -79,10 +79,10 @@ The previous `v1.1-de` Eva/Bernd model remains an explicit compatibility choice.
 are never replaced by automatic selection; missing custom files fail directly rather
 than triggering a download to the shared cache. Managed cache hits are checksum and
 structure checked before use. The public GitHub download helpers also accept
-`offline=True` when a valid managed cache is required.
-Interrupted GitHub transfers retain a temporary `.part` file and resume with HTTP
-Range requests when the release host supports them; completed files are still checked
-for exact size, SHA-256, and structure before replacement.
+`offline=True` when a valid managed cache is required. Interrupted GitHub transfers
+retain a temporary `.part` file and resume with HTTP Range requests when the release
+host supports them; completed files are still checked for exact size, SHA-256, and
+structure before replacement.
 
 ## System requirements
 

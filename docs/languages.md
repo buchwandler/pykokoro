@@ -1,7 +1,7 @@
 # Language and model profiles
 
-PyKokoro resolves omitted model settings from the requested language before creating
-the ONNX backend or G2P cache. Non-German runs retain the existing Hugging Face v1.0
+PyKokoro resolves omitted model settings from the requested language before creating the
+ONNX backend or G2P cache. Non-German runs retain the existing Hugging Face v1.0
 default; Chinese automatic selection retains the GitHub v1.1-zh policy.
 
 ## German
@@ -15,9 +15,9 @@ default; Chinese automatic selection retains the GitHub v1.1-zh policy.
 - vocabulary: built-in Kokoro v1.0
 
 The Martin profile is a single-speaker model. Its ONNX file is
-`kokoro-german-martin-v1.2.onnx`; its voice archive is
-`voices-german-martin-v1.2.bin`. Both downloads are checked with SHA-256 and the
-voice archive must contain `martin`. No model-specific config file is downloaded.
+`kokoro-german-martin-v1.2.onnx`; its voice archive is `voices-german-martin-v1.2.bin`.
+Both downloads are checked with SHA-256 and the voice archive must contain `martin`. No
+model-specific config file is downloaded.
 
 The legacy Eva/Bernd profile remains explicit:
 
