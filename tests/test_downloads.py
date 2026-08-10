@@ -194,7 +194,7 @@ def test_hf_v1_download_ignores_old_non_timestamped_cache(tmp_path, monkeypatch)
         assert kwargs["local_dir"] is None
         return str(hub_path)
 
-    monkeypatch.setattr(backend, "hf_hub_download", fake_hf_hub_download)
+    monkeypatch.setattr(backend, "_hf_hub_download", fake_hf_hub_download)
 
     result = backend.download_model(variant="v1.0", quality="fp32")
 
@@ -226,19 +226,17 @@ def test_voice_archive_paths_are_source_and_variant_aware(
 def test_model_asset_paths_are_source_variant_and_quality_aware(tmp_path, monkeypatch):
     monkeypatch.setattr("pykokoro.model_assets.get_user_cache_path", lambda: tmp_path)
     assets = get_model_asset_paths(quality="fp32", source="github", variant="v1.0")
-    assert assets.config == tmp_path / "config" / "v1.0" / "config.json"
+    assert assets.config is None
     assert assets.model == tmp_path / "models" / "github" / "v1.0" / "kokoro-v1.0.onnx"
     assert assets.voices == tmp_path / "voices" / "github" / "v1.0" / "voices-v1.0.bin"
     assert not (tmp_path / "models" / "github" / "v1.0").exists()
 
 
-def test_model_asset_completeness_requires_three_nonempty_regular_files(tmp_path, monkeypatch):
+def test_github_v1_model_asset_completeness_requires_model_and_voices(tmp_path, monkeypatch):
     monkeypatch.setattr("pykokoro.model_assets.get_user_cache_path", lambda: tmp_path)
     assets = get_model_asset_paths(quality="fp32", source="github", variant="v1.0")
-    assert assets.missing == ("config", "model", "voices")
+    assert assets.missing == ("model", "voices")
     assert not assets.complete
-    assets.config.parent.mkdir(parents=True)
-    assets.config.write_bytes(b"config")
     assets.model.parent.mkdir(parents=True)
     assets.model.write_bytes(b"model")
     assets.voices.parent.mkdir(parents=True)
@@ -251,6 +249,20 @@ def test_model_asset_completeness_requires_three_nonempty_regular_files(tmp_path
     assets.model.write_bytes(b"")
     assert assets.missing == ("model",)
     assert not assets.complete
+
+
+def test_huggingface_model_asset_completeness_requires_config(tmp_path, monkeypatch):
+    monkeypatch.setattr("pykokoro.model_assets.get_user_cache_path", lambda: tmp_path)
+    assets = get_model_asset_paths(quality="fp32", source="huggingface", variant="v1.0")
+    assert assets.config is not None
+    assert assets.missing == ("config", "model", "voices")
+    assert not assets.complete
+    for path in (assets.config, assets.model, assets.voices):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"asset")
+    assert assets.missing == ()
+    assert assets.complete
+    assert are_models_downloaded("fp32", "huggingface", "v1.0")
 
 
 def test_martin_github_downloads_use_exact_urls_and_checksums(tmp_path, monkeypatch):
@@ -337,6 +349,116 @@ def test_ensure_models_revalidates_managed_nonempty_paths(tmp_path, monkeypatch)
     assert kokoro._voices_path == managed_voices
 
 
+def test_ensure_models_huggingface_stores_archive_file(tmp_path, monkeypatch):
+    managed_model = tmp_path / "managed.onnx"
+    voices_directory = tmp_path / "voices" / "huggingface" / "v1.0"
+    combined_archive = voices_directory / "voices.bin.npz"
+    managed_model.write_bytes(b"model")
+    combined_archive.parent.mkdir(parents=True)
+    combined_archive.write_bytes(b"voices")
+
+    kokoro = object.__new__(backend.Kokoro)
+    kokoro._model_path = tmp_path / "cached.onnx"
+    kokoro._voices_path = tmp_path / "cached.bin"
+    kokoro._model_path_provided = False
+    kokoro._voices_path_provided = False
+    kokoro._model_source = "huggingface"
+    kokoro._model_variant = "v1.0"
+    kokoro._model_quality = "fp32"
+
+    monkeypatch.setattr(backend, "download_model", lambda **kwargs: managed_model)
+
+    def fake_download_all_voices(**kwargs):
+        return voices_directory
+
+    monkeypatch.setattr(backend, "download_all_voices", fake_download_all_voices)
+    monkeypatch.setattr(
+        backend,
+        "get_voices_archive_path",
+        lambda source, variant: combined_archive,
+    )
+    monkeypatch.setattr(backend, "is_config_downloaded", lambda variant: True)
+
+    kokoro._ensure_models()
+
+    assert kokoro._voices_path == combined_archive
+    assert kokoro._voices_path.is_file()
+    assert kokoro._voices_path != voices_directory
+
+
+def test_redownload_huggingface_voices_stores_archive_file(tmp_path, monkeypatch):
+    voices_directory = tmp_path / "voices" / "huggingface" / "v1.0"
+    combined_archive = voices_directory / "voices.bin.npz"
+    combined_archive.parent.mkdir(parents=True)
+    combined_archive.write_bytes(b"voices")
+
+    kokoro = object.__new__(backend.Kokoro)
+    kokoro._model_source = "huggingface"
+    kokoro._model_variant = "v1.0"
+
+    monkeypatch.setattr(backend, "download_all_voices", lambda **kwargs: voices_directory)
+    monkeypatch.setattr(
+        backend,
+        "get_voices_archive_path",
+        lambda source, variant: combined_archive,
+    )
+
+    kokoro._redownload_voices(force=True)
+
+    assert kokoro._voices_path == combined_archive
+    assert kokoro._voices_path.is_file()
+    assert kokoro._voices_path != voices_directory
+
+
+def test_github_v1_model_setup_does_not_download_config_or_call_hf_client(tmp_path, monkeypatch):
+    managed_model = tmp_path / "model.onnx"
+    managed_voices = tmp_path / "voices.bin"
+    managed_model.write_bytes(b"model")
+    managed_voices.write_bytes(b"voices")
+
+    kokoro = object.__new__(backend.Kokoro)
+    kokoro._model_path = tmp_path / "cached.onnx"
+    kokoro._voices_path = tmp_path / "cached.bin"
+    kokoro._model_path_provided = False
+    kokoro._voices_path_provided = False
+    kokoro._model_source = "github"
+    kokoro._model_variant = "v1.0"
+    kokoro._model_quality = "fp32"
+
+    monkeypatch.setattr(backend, "download_model_github", lambda **kwargs: managed_model)
+    monkeypatch.setattr(backend, "download_voices_github", lambda **kwargs: managed_voices)
+    monkeypatch.setattr(
+        backend,
+        "download_config",
+        lambda **kwargs: pytest.fail("GitHub v1.0 must not download config.json"),
+    )
+    monkeypatch.setattr(
+        backend,
+        "_hf_hub_download",
+        lambda **kwargs: pytest.fail("GitHub-only setup must not call Hugging Face"),
+    )
+
+    kokoro._ensure_models()
+
+    assert kokoro._model_path == managed_model
+    assert kokoro._voices_path == managed_voices
+
+
+def test_github_v1_uses_embedded_vocabulary(tmp_path, monkeypatch):
+    kokoro = object.__new__(backend.Kokoro)
+    kokoro._model_source = "github"
+    kokoro._model_variant = "v1.0"
+    monkeypatch.setattr(
+        backend,
+        "load_vocab_from_config",
+        lambda variant: pytest.fail("GitHub v1.0 must use embedded vocabulary"),
+    )
+
+    vocabulary = kokoro._get_vocabulary()
+
+    assert vocabulary
+
+
 def test_ensure_models_does_not_download_for_missing_custom_paths(tmp_path, monkeypatch):
     kokoro = object.__new__(backend.Kokoro)
     kokoro._model_path = tmp_path / "missing.onnx"
@@ -359,7 +481,7 @@ def test_ensure_models_does_not_download_for_missing_custom_paths(tmp_path, monk
 def test_model_asset_queries_do_not_leak_between_source_variant_or_quality(tmp_path, monkeypatch):
     monkeypatch.setattr("pykokoro.model_assets.get_user_cache_path", lambda: tmp_path)
     github = get_model_asset_paths(quality="fp32", source="github", variant="v1.0")
-    for path in (github.config, github.model, github.voices):
+    for path in (github.model, github.voices):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"asset")
 

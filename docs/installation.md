@@ -26,6 +26,31 @@ with KokoroPipeline(PipelineConfig(provider="nnapi")) as pipeline:
 `provider="auto"` selects the highest-priority available provider. PyKokoro does not
 infer provider availability from platform names.
 
+### Termux/Android model assets
+
+HuggingFace remains the default model source. If HuggingFace downloads are unavailable
+in Termux, select the self-contained GitHub v1.0 profile explicitly:
+
+```python
+from pykokoro import KokoroPipeline, PipelineConfig
+
+pipeline = KokoroPipeline(
+    PipelineConfig(
+        voice="af_heart",
+        model_source="github",
+        model_variant="v1.0",
+        model_quality="fp32",
+    )
+)
+```
+
+GitHub v1.0 uses the embedded standard v1.0 vocabulary and does not download HuggingFace
+`config.json`. PyKokoro never silently changes the configured source. If `model_path`
+and `voices_path` are supplied, each file is validated and used in place; missing custom
+files do not trigger a managed-cache download. The `Unsupported platform (android)`
+warning printed by some ONNX Runtime packages is independent of this model-source and
+asset fix.
+
 ## Other providers
 
 ```bash

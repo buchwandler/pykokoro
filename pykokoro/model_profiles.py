@@ -124,9 +124,7 @@ def get_model_profile(
             voices_filename=voices_filename,
             voice_names=voice_names,
             default_voice=voice_names[0],
-            vocabulary_source=(
-                "downloaded-config" if variant in {"v1.0", "v1.1-zh"} else "builtin-v1.0"
-            ),
+            vocabulary_source=("downloaded-config" if variant == "v1.1-zh" else "builtin-v1.0"),
             tokenizer_vocab_version="1.1" if variant == "v1.1-zh" else "1.0",
             release_repository=(
                 "holgern/kokoro-onnx-model" if variant == "v1.1-de" else "thewh1teagle/kokoro-onnx"

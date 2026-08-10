@@ -895,7 +895,8 @@ PyKokoro supports downloading models from multiple sources:
 
 ### HuggingFace (Default)
 
-The default source with 54 multi-language voices:
+HuggingFace is the default source with 54 multi-language voices. It downloads the model,
+voice archive, and the vocabulary config required by the HuggingFace profile:
 
 ```python
 from pykokoro import KokoroPipeline, PipelineConfig
@@ -927,6 +928,30 @@ pipe = KokoroPipeline(
 )
 res = pipe.run("Hello world")
 ```
+
+### Termux/Android: GitHub v1.0
+
+When HuggingFace downloads are unavailable, select the GitHub `v1.0` source explicitly.
+GitHub v1.0 downloads only its ONNX model and voice archive and uses the embedded
+standard v1.0 vocabulary, so it does not require a HuggingFace `config.json`:
+
+```python
+from pykokoro import KokoroPipeline, PipelineConfig
+
+pipe = KokoroPipeline(
+    PipelineConfig(
+        voice="af_heart",
+        model_source="github",
+        model_variant="v1.0",
+        model_quality="fp32",
+    )
+)
+```
+
+PyKokoro never silently switches between model sources. Explicit `model_path` and
+`voices_path` files are validated in place and are never replaced with managed cache
+files. A Termux/Android ONNX Runtime warning is a separate runtime-provider issue; it
+does not change model-download or source-selection behavior.
 
 ### GitHub v1.1-zh (English + Chinese)
 

@@ -7,7 +7,16 @@ Run this after installing ``onnxruntime`` and PyKokoro::
 
 ONNX Runtime may print an ``Unsupported platform (android)`` warning on
 Termux. That warning is expected for the current package build; the provider
-list is still useful for selecting a PyKokoro execution provider.
+list is still useful for selecting a PyKokoro execution provider. It is independent
+of model downloads. When HuggingFace downloads are unavailable, select the
+self-contained GitHub v1.0 assets explicitly with::
+
+    PipelineConfig(
+        model_source="github", model_variant="v1.0", model_quality="fp32"
+    )
+
+GitHub v1.0 uses the embedded standard vocabulary and PyKokoro never silently changes
+the configured model source.
 """
 
 from __future__ import annotations
@@ -27,6 +36,10 @@ def main() -> None:
     print("ONNX Runtime:", getattr(ort, "version", ort.__version__))
     print("Providers:", list(runtime_providers))
     print("PyKokoro providers:", list(get_available_execution_providers()))
+
+    print("\nTermux model source example:")
+    print('  PipelineConfig(model_source="github", model_variant="v1.0", model_quality="fp32")')
+    print("  GitHub v1.0 is explicit and does not require HuggingFace config.json.")
 
     print("\nRequested provider resolutions:")
     for requested in ("nnapi", "xnnpack", "cpu"):

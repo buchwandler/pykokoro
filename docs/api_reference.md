@@ -223,6 +223,27 @@ print(phonemes)
 These utilities live in `pykokoro.onnx_backend` and are used for model and voice
 management.
 
+HuggingFace is the default model source. For Termux/Android installations where
+HuggingFace downloads are unavailable, select GitHub v1.0 explicitly:
+
+```python
+from pykokoro import KokoroPipeline, PipelineConfig
+
+pipe = KokoroPipeline(
+    PipelineConfig(
+        voice="af_heart",
+        model_source="github",
+        model_variant="v1.0",
+        model_quality="fp32",
+    )
+)
+```
+
+GitHub v1.0 uses the embedded standard v1.0 vocabulary and does not require a
+HuggingFace `config.json`. Model sources are never silently switched. Explicit
+`model_path` and `voices_path` files remain validated in place, and Android ONNX Runtime
+warnings are independent of model asset selection.
+
 ```{eval-rst}
 .. autofunction:: pykokoro.onnx_backend.download_model
 ```

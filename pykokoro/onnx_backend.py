@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import onnxruntime as rt
-from huggingface_hub import hf_hub_download
 
 from .artifact_manifest import (
     hf_config_spec,
@@ -83,6 +82,13 @@ MIN_ONNX_BYTES = 1_000_000
 MIN_VOICE_ARCHIVE_BYTES = 64 * 1024
 MIN_VOICE_BIN_BYTES = 100_000
 MIN_CONFIG_BYTES = 100
+
+
+def _hf_hub_download(**kwargs: Any) -> str:
+    """Load and call the Hugging Face client only for Hugging Face downloads."""
+    from huggingface_hub import hf_hub_download
+
+    return hf_hub_download(**kwargs)
 
 
 class ArtifactValidationError(RuntimeError):
@@ -868,7 +874,7 @@ def _download_from_hf(
             raise RuntimeError(
                 f"Offline mode is enabled and {filename} is not available in the cache."
             )
-        downloaded_path = hf_hub_download(
+        downloaded_path = _hf_hub_download(
             repo_id=repo_id,
             filename=filename,
             subfolder=subfolder,
@@ -1320,6 +1326,19 @@ def download_all_voices(
             )
 
     return voices_dir
+
+
+def _download_hf_voice_archive(
+    variant: ModelVariant,
+    *,
+    force: bool = False,
+) -> Path:
+    """Download Hugging Face voices and return the canonical archive file."""
+    download_all_voices(variant=variant, force=force)
+    archive_path = get_voices_archive_path("huggingface", variant)
+    if not _is_nonempty_file(archive_path):
+        raise RuntimeError(f"Hugging Face voice download completed without creating {archive_path}")
+    return archive_path
 
 
 def download_all_models(
@@ -1917,7 +1936,7 @@ class Kokoro:
         elif self._model_source == "github":
             self._voices_path = download_voices_github(variant=self._model_variant)
         else:
-            self._voices_path = download_all_voices(variant=self._model_variant)
+            self._voices_path = _download_hf_voice_archive(self._model_variant)
 
         profile = get_model_profile(self._model_variant, self._model_source)
         if profile.vocabulary_source == "downloaded-config" and not is_config_downloaded(
@@ -1930,7 +1949,10 @@ class Kokoro:
             self._voices_path = download_voices_github(variant=self._model_variant, force=force)
             return
 
-        self._voices_path = download_all_voices(variant=self._model_variant, force=force)
+        self._voices_path = _download_hf_voice_archive(
+            self._model_variant,
+            force=force,
+        )
 
     def _get_default_provider_options(self, provider: str) -> dict[str, str]:
         """

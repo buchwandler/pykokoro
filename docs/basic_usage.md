@@ -37,10 +37,18 @@ pipe = KokoroPipeline(
     )
 )
 
+# GitHub v1.0 is the explicit Termux-friendly source when HuggingFace is unavailable.
+# It uses the embedded v1.0 vocabulary and does not need config.json from HuggingFace.
+
 # Custom generation settings
 generation = GenerationConfig(lang="en-us", speed=1.1)
 pipe = KokoroPipeline(PipelineConfig(voice="af_bella", generation=generation))
 ```
+
+HuggingFace is the default source, and source selection is deterministic: PyKokoro does
+not silently fall back to another source. Explicit `model_path` and `voices_path` files
+continue to be validated and used in place. ONNX Runtime Android/provider warnings are
+separate from model downloads.
 
 ### Reusing the Pipeline
 
