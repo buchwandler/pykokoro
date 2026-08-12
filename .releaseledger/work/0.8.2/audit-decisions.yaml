@@ -1,0 +1,96 @@
+rows:
+  - sha: 97f9ddb6808f2afb9c2eb1fb199249f8a4163de4
+    inspected: true
+    inspected_paths:
+      - .ledger/releaseledger/data/ledgers/main/events/events.jsonl
+      - .ledger/releaseledger/data/ledgers/main/releases/0.9.0/entries/entry-0001.md
+      - .ledger/releaseledger/data/ledgers/main/releases/0.9.0/release.md
+      - README.md
+      - docs/changelog.md
+      - docs/installation.md
+      - docs/languages.md
+      - docs/quickstart.md
+      - examples/german.py
+      - pykokoro/artifact_manifest.py
+      - pykokoro/asset_constants.py
+      - pykokoro/config_types.py
+      - pykokoro/model_assets.py
+      - pykokoro/model_profiles.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/pipeline.py
+      - pykokoro/pipeline_config.py
+      - pykokoro/stages/audio_generation/onnx.py
+      - pykokoro/stages/doc_parsers/plain.py
+      - pykokoro/stages/doc_parsers/ssmd.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/stages/synth/onnx.py
+      - tests/test_downloads.py
+      - tests/test_german_example.py
+      - tests/test_german_segmentation.py
+      - tests/test_model_assets.py
+      - tests/test_model_profile_resolution.py
+    observed_behavior:
+      "German language model defaults, automatic profile resolution, embedded vocabulary"
+    public_impact: public
+    decision: accepted
+    target_entry_key: entry-0001
+    notes: "Covers German Martin v1.2 profile and language-aware defaults"
+  - sha: c9e6a0868fd24540984b82bcc3268e1ee3e97dec
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/installation.md
+      - docs/languages.md
+      - docs/quickstart.md
+      - pykokoro/model_assets.py
+      - pykokoro/model_profiles.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/pipeline.py
+      - pykokoro/pipeline_config.py
+      - tests/test_downloads.py
+      - tests/test_model_profile_resolution.py
+    observed_behavior:
+      "German language model improvements and pipeline config resolution"
+    public_impact: public
+    decision: accepted
+    target_entry_key: entry-0001
+    notes: "Covers German support improvements and model profiles"
+  - sha: aed7fce71f7effddca2c8822b39a04f3a33a30c7
+    inspected: true
+    inspected_paths:
+      - .ledger/releaseledger/data/ledgers/main/releases/0.9.0/entries/entry-0001.md
+      - README.md
+      - docs/changelog.md
+      - docs/installation.md
+      - docs/languages.md
+      - docs/quickstart.md
+      - examples/german.py
+      - pykokoro/model_profiles.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/pipeline_config.py
+      - pykokoro/stages/doc_parsers/plain.py
+      - tests/test_downloads.py
+      - tests/test_model_profile_resolution.py
+    observed_behavior: "Pre-commit formatting and lint fixes only"
+    public_impact: internal
+    decision: internal
+    target_entry_key: null
+    notes: "Internal cleanup, no user-facing change"
+  - sha: c745d4021803a5346699664ef7af7c85b947a29d
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/api_reference.md
+      - docs/basic_usage.md
+      - docs/changelog.md
+      - docs/installation.md
+      - examples/termux_android_onnx.py
+      - pykokoro/model_profiles.py
+      - pykokoro/onnx_backend.py
+      - tests/test_downloads.py
+    observed_behavior:
+      "Fixed download detection thresholds and HuggingFace voice path handling"
+    public_impact: public
+    decision: accepted
+    target_entry_key: entry-0003
+    notes: "Covers model download detection fix and voice loading path"

@@ -3,12 +3,12 @@ schema_version: 2
 object_type: release
 versioning:
   schema_version: 1
-  revision: 7
+  revision: 8
 version: 0.8.0
 status: released
 title: Release 0.8.0
 released_at: "2026-08-01"
-previous_version: 0.7.4
+previous_version: 0.7.5
 cancel_reason: null
 superseded_by: null
 changelog_file: null

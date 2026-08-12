@@ -3,13 +3,13 @@ schema_version: 2
 object_type: release
 versioning:
   schema_version: 1
-  revision: 2
+  revision: 3
 version: 0.9.0
-status: planned
+status: canceled
 title: Release 0.9.0
 released_at: null
 previous_version: 0.8.1
-cancel_reason: null
+cancel_reason: Superseded by v0.8.2
 superseded_by: null
 changelog_file: null
 boundary_ref: null
