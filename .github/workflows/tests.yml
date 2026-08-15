@@ -27,22 +27,31 @@ jobs:
     - name: Install espeak-ng (Windows)
       if: matrix.os == 'windows-latest'
       run: |
-        $maxAttempts = 3
-        $exitCode = 1
-        for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
-          Write-Host "Installing espeak-ng (attempt $attempt/$maxAttempts)..."
-          choco install espeak-ng --yes --no-progress
-          $exitCode = $LASTEXITCODE
-          if ($exitCode -eq 0) {
-            break
-          }
-          if ($attempt -lt $maxAttempts) {
-            Start-Sleep -Seconds (5 * $attempt)
-          }
+        $version = "1.52.0"
+        $msiPath = Join-Path $env:RUNNER_TEMP "espeak-ng-$version.msi"
+        $downloadUrl = "https://github.com/espeak-ng/espeak-ng/releases/download/$version/espeak-ng.msi"
+        $expectedHash = "7F673C709EA5DD579D3B5EBB98688CC575328A6AB7438D2BC405B88CEDAEAFB9"
+
+        Invoke-WebRequest -Uri $downloadUrl -OutFile $msiPath
+        $actualHash = (Get-FileHash -Path $msiPath -Algorithm SHA256).Hash
+        if ($actualHash -ne $expectedHash) {
+          throw "Unexpected SHA-256 for espeak-ng MSI: $actualHash"
         }
-        if ($exitCode -ne 0) {
-          throw "Chocolatey failed to install espeak-ng after $maxAttempts attempts (exit code $exitCode)."
+
+        $installer = Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" /quiet /norestart" -Wait -PassThru
+        if ($installer.ExitCode -notin @(0, 3010)) {
+          throw "espeak-ng MSI installation failed (exit code $($installer.ExitCode))."
         }
+
+        $installPath = @(
+          (Join-Path ${env:ProgramFiles} "eSpeak NG"),
+          (Join-Path ${env:ProgramFiles(x86)} "eSpeak NG")
+        ) | Where-Object { Test-Path (Join-Path $_ "espeak-ng.exe") } | Select-Object -First 1
+        if (-not $installPath) {
+          throw "espeak-ng was not installed in either Program Files directory"
+        }
+        $env:Path = "$installPath;$env:Path"
+        $installPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
     - name: Install packages
       run: |
         pip install pytest ruff mypy
