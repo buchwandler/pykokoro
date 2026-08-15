@@ -255,11 +255,14 @@ and logical voice roles can be mapped without changing the spoken body. Use
 `SSMDRenderConfig(parse_header=False)` when the leading delimiter is literal text.
 
 SSMD emphasis is metadata-only by default: `emphasis_mode="plain"` preserves the
-annotation without changing speech. For audible, deterministic volume-only emphasis, opt
-in with `SSMDRenderConfig(emphasis_mode="approximate")`; this maps strong to `+6dB`,
-moderate to `+3dB`, and reduced to `-3dB`. The `none` level is always a silent no-op.
-`warn` emits one diagnostic per logical source segment, and `error` rejects effectful
-emphasis before inference.
+annotation without changing speech. For audible, deterministic gain-only emphasis, opt
+in with `SSMDRenderConfig(emphasis_mode="approximate")`; at the default scale of `1.0`,
+this maps strong to `+6dB`, moderate to `+3dB`, and reduced to `-3dB`. Use
+`emphasis_gain_scale=0.5` for half gain or `1.5` for 50% stronger gain; values from
+`0.0` through `2.0` are supported. The scale does not change semantic emphasis or add
+automatic pitch/rate changes, and explicit SSMD volume overrides it. The `none` level is
+always a silent no-op. `warn` emits one diagnostic per logical source segment, and
+`error` rejects effectful emphasis before inference.
 
 ```python
 from pykokoro import KokoroPipeline, PipelineConfig

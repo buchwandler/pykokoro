@@ -18,6 +18,7 @@ Output:
 Features demonstrated:
     - Break markers: ...c ...s ...p ...800ms ...2s
     - Emphasis: *moderate* **strong**
+      (configure automatic gain with SSMDRenderConfig.emphasis_gain_scale)
     - Language switching: [Bonjour]{lang="fr"}
     - Phonetic pronunciation: [creak]{ipa="kɹiːk"}
     - Substitution: [H2O]{sub="water"}
@@ -91,7 +92,10 @@ def main():
         PipelineConfig(
             voice=VOICE,
             generation=GenerationConfig(lang=LANG, speed=1.0),
-            ssmd=SSMDRenderConfig(emphasis_mode="approximate"),
+            ssmd=SSMDRenderConfig(
+                emphasis_mode="approximate",
+                emphasis_gain_scale=1.0,
+            ),
         )
     )
 

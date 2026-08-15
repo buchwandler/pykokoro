@@ -300,12 +300,15 @@ offsets. Audio annotations require an explicit resolver and fall back to `alt` t
 Kokoro extensions are rejected by profile validation.
 
 `SSMDRenderConfig.emphasis_mode` defaults to `"plain"`, preserving emphasis metadata
-without changing generated audio. `"approximate"` applies core volume-only mappings
-(`strong` `+6dB`, `moderate` `+3dB`, `reduced` `-3dB`); explicit prosody values win.
-`"warn"` preserves audio and adds one `ssmd.emphasis_unsupported` warning per logical
-source segment, while `"error"` rejects effectful emphasis before inference. The `none`
-level is always a silent no-op. Approximation is processed by the core AudioSig
-dependency; no prosody extra is required.
+without changing generated audio. `"approximate"` applies core gain-only mappings
+(`strong` `+6dB`, `moderate` `+3dB`, `reduced` `-3dB`) at `emphasis_gain_scale=1.0`. The
+scale accepts finite values from `0.0` through `2.0`; `0.5` halves automatic gain and
+`1.5` makes it 50% stronger without changing semantic emphasis. Explicit `volume` values
+win. `"warn"` preserves audio and adds one `ssmd.emphasis_unsupported` warning per
+logical source segment, while `"error"` rejects effectful emphasis before inference. The
+`none` level is always a silent no-op. Scaling is gain-only: it adds no automatic `rate`
+or `pitch` fields. Explicit SSMD prosody remains independent and no prosody extra is
+required.
 
 ## See Also
 

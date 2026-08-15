@@ -495,18 +495,28 @@ SSMD emphasis is preserved in segment metadata, but PyKokoro defaults to
 surprisingly. The policy modes are:
 
 - `plain`: preserve emphasis metadata and synthesize unmodified speech silently
-- `approximate`: apply deterministic volume-only changes: `strong` `+6dB`, `moderate`
-  `+3dB`, and `reduced` `-3dB`
+- `approximate`: apply deterministic gain-only changes: `strong` `+6dB`, `moderate`
+  `+3dB`, and `reduced` `-3dB` by default
 - `warn`: synthesize unmodified speech and emit one `ssmd.emphasis_unsupported` trace
   warning per logical source segment
 - `error`: reject effectful emphasis before model inference
 
-`emphasis="none"` means ordinary speech and is accepted silently in every mode. Explicit
-`volume`, `rate`, or `pitch` metadata takes precedence over approximation. Approximation
-uses the core AudioSig dependency for gain, pitch, and rate processing; no optional
-prosody extra is required. SSMD volume, pitch, and rate processing is available in the
-core package through AudioSig. No librosa, SciPy, audiomentations, signalsmith-stretch,
-or Python-stretch installation is required.
+`emphasis="none"` means ordinary speech and is accepted silently in every mode. Set
+`emphasis_gain_scale` on `SSMDRenderConfig` to scale only the automatic gain while
+preserving the semantic level. `1.0` is the current/default strength, `0.5` halves the
+automatic gain, and `1.5` makes it 50% stronger; the supported range is `0.0..2.0`.
+Explicit SSMD `volume` metadata takes precedence over automatic emphasis gain. This
+setting does not add automatic pitch or rate changes, and PyKokoro does not provide
+TTSForge's user-facing integer emphasis presets.
+
+```python
+config = PipelineConfig(
+    ssmd=SSMDRenderConfig(
+        emphasis_mode="approximate",
+        emphasis_gain_scale=1.5,
+    )
+)
+```
 
 ### Prosody backend selection
 

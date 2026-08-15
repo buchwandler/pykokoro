@@ -381,10 +381,13 @@ annotations require an explicit resolver.
 
 The default `SSMDRenderConfig(emphasis_mode="plain")` preserves emphasis metadata but
 leaves speech unmodified. Use `emphasis_mode="approximate"` to opt into the core
-volume-only mapping `strong` `+6dB`, `moderate` `+3dB`, and `reduced` `-3dB`. `warn`
-keeps ordinary speech and reports one trace warning per logical source segment; `error`
-rejects effectful emphasis before inference. `emphasis="none"` is silently accepted in
-every mode, and explicit prosody values take precedence.
+gain-only mapping `strong` `+6dB`, `moderate` `+3dB`, and `reduced` `-3dB`. Set
+`emphasis_gain_scale` between `0.0` and `2.0` to adjust only that automatic gain: `1.0`
+is the current/default strength, `0.5` halves it, and `1.5` makes it 50% stronger.
+`warn` keeps ordinary speech and reports one trace warning per logical source segment;
+`error` rejects effectful emphasis before inference. `emphasis="none"` is silently
+accepted in every mode. Explicit SSMD `volume` takes precedence, and scaling does not
+add automatic pitch or rate changes.
 
 ```python
 from pykokoro import KokoroPipeline, PipelineConfig, SSMDRenderConfig
@@ -400,7 +403,13 @@ pause_defaults:
 ---
 <div voice="host">Welcome to the portable podcast.</div>
 """
-result = KokoroPipeline(PipelineConfig(ssmd=SSMDRenderConfig())).run(script)
+config = PipelineConfig(
+    ssmd=SSMDRenderConfig(
+        emphasis_mode="approximate",
+        emphasis_gain_scale=1.5,
+    )
+)
+result = KokoroPipeline(config).run(script)
 print(result.document_metadata["title"])
 ```
 

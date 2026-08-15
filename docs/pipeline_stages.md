@@ -265,18 +265,20 @@ pipeline = build_pipeline(
 
 `PipelineConfig.ssmd` controls header parsing, provider-scoped API binding overrides,
 unknown-header strictness, missing-voice behavior, pause-default overrides, emphasis
-policy, and the explicit audio source resolver. Header bindings override direct logical
-references, while API bindings override header bindings. Document pause defaults are
-reduced before G2P; explicit breaks take precedence and simultaneous implicit defaults
-use the maximum duration. `DocumentResult.header`/`body` and
-`AudioResult.document_metadata` expose copied metadata.
+policy and gain scaling, and the explicit audio source resolver. Header bindings
+override direct logical references, while API bindings override header bindings.
+Document pause defaults are reduced before G2P; explicit breaks take precedence and
+simultaneous implicit defaults use the maximum duration. `DocumentResult.header`/`body`
+and `AudioResult.document_metadata` expose copied metadata.
 
 Emphasis capability policy is evaluated after phoneme processing and before
 `audio_generation`. `plain` preserves metadata without modifying audio, `warn` emits one
 diagnostic per logical source segment, `error` rejects before inference, and
-`approximate` adds deterministic volume metadata (`strong` `+6dB`, `moderate` `+3dB`,
-`reduced` `-3dB`). `none` is ordinary speech in every mode. Explicit prosody metadata is
-retained with precedence over approximation.
+`approximate` adds deterministic gain metadata (`strong` `+6dB`, `moderate` `+3dB`,
+`reduced` `-3dB`) at `emphasis_gain_scale=1.0`. The scale accepts finite values from
+`0.0` through `2.0` and changes only automatic gain; semantic emphasis remains intact.
+`none` is ordinary speech in every mode. Explicit `volume` metadata is retained with
+precedence over approximation, and no automatic rate or pitch metadata is added.
 
 ## Local model files and providers
 

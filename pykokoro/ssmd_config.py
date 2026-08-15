@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from numbers import Real
 from typing import Any, Literal
 
 from .exceptions import SSMDDocumentError
@@ -99,6 +101,7 @@ class SSMDRenderConfig:
     missing_voice: Literal["error", "use-default"] = "error"
     validate_profile: bool = True
     emphasis_mode: Literal["plain", "approximate", "warn", "error"] = "plain"
+    emphasis_gain_scale: float = 1.0
     audio_source_resolver: Any | None = None
     audio_max_bytes: int = 20_000_000
     audio_max_duration_s: float = 120.0
@@ -114,6 +117,12 @@ class SSMDRenderConfig:
             raise ValueError("missing_voice must be 'error' or 'use-default'")
         if self.emphasis_mode not in {"plain", "approximate", "warn", "error"}:
             raise ValueError("emphasis_mode must be 'plain', 'approximate', 'warn', or 'error'")
+        scale: object = self.emphasis_gain_scale
+        if isinstance(scale, bool) or not isinstance(scale, Real):
+            raise ValueError("emphasis_gain_scale must be finite and between 0.0 and 2.0")
+        numeric_scale = float(scale)
+        if not math.isfinite(numeric_scale) or not 0.0 <= numeric_scale <= 2.0:
+            raise ValueError("emphasis_gain_scale must be finite and between 0.0 and 2.0")
         if isinstance(self.audio_max_bytes, bool) or self.audio_max_bytes <= 0:
             raise ValueError("audio_max_bytes must be a positive integer")
         if self.audio_max_duration_s < 0:

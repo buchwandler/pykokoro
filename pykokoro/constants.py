@@ -70,10 +70,10 @@ RATE_ABSOLUTE_MAP = {
 
 # Core-only SSMD emphasis approximation. These relative values are deterministic
 # and avoid making emphasis behavior depend on optional rate/pitch backends.
-EMPHASIS_VOLUME_APPROXIMATION = {
-    "strong": "+6dB",
-    "moderate": "+3dB",
-    "reduced": "-3dB",
+EMPHASIS_GAIN_DB = {
+    "strong": 6.0,
+    "moderate": 3.0,
+    "reduced": -3.0,
 }
 
 PITCH_ABSOLUTE_MAP = {

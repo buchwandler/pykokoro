@@ -8,6 +8,8 @@
 ### Added
 
 - Added a spoken-form showcase for raw structured text through the PyKokoro pipeline
+- Added configurable SSMD emphasis gain scaling for gain-only automatic emphasis
+  approximation
 
 ### Changed
 

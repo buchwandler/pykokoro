@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from .constants import EMPHASIS_VOLUME_APPROXIMATION
+from .constants import EMPHASIS_GAIN_DB
 from .exceptions import CapabilityError
 from .types import PhonemeSegment, Trace
 
@@ -25,7 +25,20 @@ class EmphasisDecision:
     reject: bool = False
 
 
-def resolve_emphasis(level: object, mode: EmphasisMode) -> EmphasisDecision:
+def _format_gain_db(value: float) -> str:
+    """Format a gain in the compact form accepted by AudioSig."""
+
+    if value > 0:
+        return f"+{value:g}dB"
+    return f"{value:g}dB"
+
+
+def resolve_emphasis(
+    level: object,
+    mode: EmphasisMode,
+    *,
+    gain_scale: float = 1.0,
+) -> EmphasisDecision:
     """Resolve an SSMD emphasis value without touching audio or metadata."""
 
     if level is None or level == "" or level == "none":
@@ -35,9 +48,10 @@ def resolve_emphasis(level: object, mode: EmphasisMode) -> EmphasisDecision:
     if mode == "plain":
         return EmphasisDecision(level=normalized)
     if mode == "approximate":
+        base_gain = EMPHASIS_GAIN_DB.get(normalized)
         return EmphasisDecision(
             level=normalized,
-            volume=EMPHASIS_VOLUME_APPROXIMATION.get(normalized),
+            volume=None if base_gain is None else _format_gain_db(base_gain * gain_scale),
         )
     if mode == "warn":
         return EmphasisDecision(level=normalized, warning_code="ssmd.emphasis_unsupported")
@@ -61,7 +75,11 @@ def apply_emphasis_policy(
     for segment in phoneme_segments:
         metadata = segment.ssmd_metadata or {}
         emphasis = metadata.get("emphasis")
-        decision = resolve_emphasis(emphasis, cfg.ssmd.emphasis_mode)
+        decision = resolve_emphasis(
+            emphasis,
+            cfg.ssmd.emphasis_mode,
+            gain_scale=cfg.ssmd.emphasis_gain_scale,
+        )
         if decision.level == "none":
             continue
 

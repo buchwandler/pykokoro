@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import math
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
-from pykokoro.emphasis import apply_emphasis_policy
+from pykokoro.emphasis import apply_emphasis_policy, resolve_emphasis
 from pykokoro.exceptions import CapabilityError
 from pykokoro.pipeline import KokoroPipeline
 from pykokoro.pipeline_config import PipelineConfig
@@ -36,11 +37,58 @@ def _segment(
     )
 
 
-def _cfg(mode: str) -> SimpleNamespace:
+def _cfg(mode: str, *, scale: float = 1.0) -> SimpleNamespace:
     return SimpleNamespace(
-        ssmd=SSMDRenderConfig(emphasis_mode=mode),
+        ssmd=SSMDRenderConfig(emphasis_mode=mode, emphasis_gain_scale=scale),
         generation=SimpleNamespace(pause_mode="none"),
     )
+
+
+@pytest.mark.parametrize(
+    ("level", "scale", "expected"),
+    [
+        ("moderate", 0.5, "+1.5dB"),
+        ("strong", 0.5, "+3dB"),
+        ("reduced", 0.5, "-1.5dB"),
+        ("moderate", 1.0, "+3dB"),
+        ("strong", 1.0, "+6dB"),
+        ("reduced", 1.0, "-3dB"),
+        ("moderate", 1.5, "+4.5dB"),
+        ("strong", 1.5, "+9dB"),
+        ("reduced", 1.5, "-4.5dB"),
+    ],
+)
+def test_approximate_gain_scale_uses_deterministic_db_format(
+    level: str, scale: float, expected: str
+) -> None:
+    decision = resolve_emphasis(level, "approximate", gain_scale=scale)
+
+    assert decision.volume == expected
+    assert "e" not in decision.volume.lower()
+
+
+def test_default_emphasis_gain_scale_preserves_released_behavior() -> None:
+    assert SSMDRenderConfig().emphasis_gain_scale == 1.0
+    assert resolve_emphasis("moderate", "approximate").volume == "+3dB"
+    assert resolve_emphasis("strong", "approximate").volume == "+6dB"
+    assert resolve_emphasis("reduced", "approximate").volume == "-3dB"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [-0.1, 2.1, math.nan, math.inf, -math.inf, True, False],
+)
+def test_invalid_emphasis_gain_scale_is_rejected(value: object) -> None:
+    with pytest.raises(ValueError, match="emphasis_gain_scale"):
+        SSMDRenderConfig(emphasis_gain_scale=value)  # type: ignore[arg-type]
+
+
+def test_zero_emphasis_gain_scale_is_accepted_without_semantic_remapping() -> None:
+    segment = _segment("strong")
+
+    apply_emphasis_policy([segment], _cfg("approximate", scale=0.0), Trace())
+
+    assert segment.ssmd_metadata == {"emphasis": "strong", "prosody_volume": "0dB"}
 
 
 @pytest.mark.parametrize("mode", ["plain", "approximate", "warn", "error"])
@@ -64,6 +112,14 @@ def test_plain_preserves_all_levels_without_mutation(level: str) -> None:
 
     assert segment.ssmd_metadata == original
     assert trace.warnings == []
+
+
+def test_plain_produces_no_gain_regardless_of_scale() -> None:
+    segment = _segment("strong")
+
+    apply_emphasis_policy([segment], _cfg("plain", scale=1.5), Trace())
+
+    assert segment.ssmd_metadata == {"emphasis": "strong"}
 
 
 @pytest.mark.parametrize("level", ["reduced", "moderate", "strong"])
@@ -94,6 +150,16 @@ def test_explicit_prosody_wins_over_approximation() -> None:
     }
 
 
+def test_approximate_gain_does_not_add_rate_or_pitch() -> None:
+    segment = _segment("strong")
+
+    apply_emphasis_policy([segment], _cfg("approximate", scale=1.5), Trace())
+
+    assert segment.ssmd_metadata == {"emphasis": "strong", "prosody_volume": "+9dB"}
+    assert "prosody_rate" not in segment.ssmd_metadata
+    assert "prosody_pitch" not in segment.ssmd_metadata
+
+
 def test_warn_emits_one_diagnostic_per_logical_source_segment() -> None:
     segments = [
         _segment("strong", segment_id="source-1"),
@@ -102,17 +168,21 @@ def test_warn_emits_one_diagnostic_per_logical_source_segment() -> None:
     ]
     trace = Trace()
 
-    apply_emphasis_policy(segments, _cfg("warn"), trace)
+    apply_emphasis_policy(segments, _cfg("warn", scale=1.5), trace)
 
     assert trace.warnings == [
         "ssmd.emphasis_unsupported: using unmodified speech",
         "ssmd.emphasis_unsupported: using unmodified speech",
     ]
+    assert all(
+        segment.ssmd_metadata == {"emphasis": level}
+        for segment, level in zip(segments, ["strong", "strong", "moderate"], strict=True)
+    )
 
 
 def test_error_rejects_before_generation() -> None:
     with pytest.raises(CapabilityError):
-        apply_emphasis_policy([_segment("strong")], _cfg("error"), Trace())
+        apply_emphasis_policy([_segment("strong")], _cfg("error", scale=1.5), Trace())
 
 
 def test_ssmd_parser_emphasis_reaches_policy_metadata() -> None:
