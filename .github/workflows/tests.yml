@@ -27,7 +27,22 @@ jobs:
     - name: Install espeak-ng (Windows)
       if: matrix.os == 'windows-latest'
       run: |
-        choco install espeak-ng
+        $maxAttempts = 3
+        $exitCode = 1
+        for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+          Write-Host "Installing espeak-ng (attempt $attempt/$maxAttempts)..."
+          choco install espeak-ng --yes --no-progress
+          $exitCode = $LASTEXITCODE
+          if ($exitCode -eq 0) {
+            break
+          }
+          if ($attempt -lt $maxAttempts) {
+            Start-Sleep -Seconds (5 * $attempt)
+          }
+        }
+        if ($exitCode -ne 0) {
+          throw "Chocolatey failed to install espeak-ng after $maxAttempts attempts (exit code $exitCode)."
+        }
     - name: Install packages
       run: |
         pip install pytest ruff mypy
