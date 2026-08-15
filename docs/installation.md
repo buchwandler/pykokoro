@@ -69,9 +69,12 @@ pip install onnxruntime-gpu==1.19.2
 
 ## Dependencies and optional spaCy
 
-The package installs kokorog2p, phrasplit, SSMD, NumPy, AudioSig, soundfile, and the
-other runtime support libraries it needs. `spacy` itself and language models are
-optional. The default tokenizer policy is safe on a clean install:
+PyKokoro 0.8.3 requires `kokorog2p[espeak,en]>=0.8.0,<0.9`. The package installs
+kokorog2p, phrasplit, SSMD, NumPy, AudioSig, soundfile, and the other runtime support
+libraries it needs. kokorog2p 0.8.0 owns automatic written-to-spoken preparation and
+installs its compatible Spokenform and abbr2words dependencies transitively; do not
+install `spokenform` separately. `spacy` itself and language models are optional. The
+default tokenizer policy is safe on a clean install:
 
 - `use_spacy=False` disables spaCy;
 - `use_spacy=None` selects the best compatible installed local model and falls back

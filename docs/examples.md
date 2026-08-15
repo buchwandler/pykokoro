@@ -15,6 +15,18 @@ Use the stage showcase script to see how the new pipeline stages fit together:
 
 `examples/pipeline_stage_showcase.py`
 
+## Spoken-Form Normalization
+
+Run:
+
+`python examples/spokenform_showcase.py`
+
+The example feeds unannotated text containing abbreviations, dates, times, currency,
+measurements, and other structured expressions through kokorog2p 0.8+'s automatic
+spoken-form preparation. It prints the prepared text and phonemes, then synthesizes the
+same raw source with PyKokoro. Use `--inspect-only` to inspect the front-end result
+without loading a synthesis model.
+
 ## Hello World
 
 The simplest example:

@@ -23,8 +23,8 @@ A Python library for Kokoro TTS (Text-to-Speech) using ONNX runtime.
 - **Language-Aware spaCy Models**: Automatic spaCy model name resolution from language
   with configurable size (`sm`/`md`/`lg`/`trf`)
 - **Hugging Face Integration**: Automatic model downloading from Hugging Face Hub
-- **Text Normalization**: Automatic say-as support for numbers, dates, phone numbers,
-  and more using SSMD markup
+- **Text Normalization**: Automatic spoken-form preparation through kokorog2p 0.8+ plus
+  explicit SSMD say-as overrides
 
 ## Installation
 
@@ -585,10 +585,35 @@ text = "[Hello]{voice='af_sarah'} ...s [World]{voice='am_michael'}"
 res = pipe.run(text)
 ```
 
-### Text Normalization (Say-As)
+### Automatic Spoken-Form Normalization
 
-PyKokoro supports automatic text normalization using SSMD (Speech Synthesis Markdown)
-syntax. Convert numbers, dates, phone numbers, and more into speakable text:
+PyKokoro delegates ordinary written-to-spoken text preparation to kokorog2p 0.8+. Common
+abbreviations and structured forms such as dates, times, numbers, currency,
+measurements, ordinals, and other supported expressions can be spoken naturally from raw
+text:
+
+```python
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
+
+text = (
+    "Dr. Smith will see you at 10:30 on 05/20/2023. "
+    "The box weighs 5 kg and costs $10.99."
+)
+pipeline = KokoroPipeline(
+    PipelineConfig(generation=GenerationConfig(lang="en-us"))
+)
+result = pipeline.run(text)
+```
+
+The preparation happens inside kokorog2p using its Spokenform and abbreviation layers
+before G2P. PyKokoro retains source-oriented segmentation and offsets. See
+`examples/spokenform_showcase.py` to inspect the prepared text and synthesize the same
+raw source.
+
+### Explicit SSMD Say-As Overrides
+
+Use SSMD (Speech Synthesis Markdown) say-as annotations when the author needs explicit
+interpretation or an override. They are not required for common automatic forms:
 
 ```python
 from pykokoro import KokoroPipeline, PipelineConfig
@@ -1013,8 +1038,9 @@ The legacy GitHub `v1.1-de` profile remains available explicitly with `df_eva` a
 Tundragoon config. `martin` alone also infers German; custom voice archives may expose
 additional voice names when selected explicitly. The profile's suggested speed of
 `1.125` is advisory, so applications must set it explicitly when they want it. German
-structured normalization belongs to the kokorog2p dependency and must be supplied by the
-compatible kokorog2p release; PyKokoro keeps source offsets tied to the original text.
+Language-specific automatic spoken-form normalization belongs to the compatible
+kokorog2p release. PyKokoro keeps source offsets and segments tied to the original input
+text, consumes kokorog2p's prepared G2P result, and owns synthesis.
 
 ## Model Quality Options
 
@@ -1289,7 +1315,7 @@ This library is licensed under the Apache License 2.0.
 - **Kokoro Model**: [hexgrad/Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M)
 - **ONNX Models**:
   [onnx-community/Kokoro-82M-v1.0-ONNX](https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX)
-- **Phonemizer**: [kokorog2p](https://github.com/remyxai/kokorog2p)
+- **Phonemizer**: [kokorog2p](https://github.com/buchwandler/kokorog2p)
 
 ## Contributing
 

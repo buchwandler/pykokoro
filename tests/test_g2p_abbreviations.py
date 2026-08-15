@@ -1,5 +1,4 @@
 import kokorog2p
-import pytest
 
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline_config import PipelineConfig
@@ -39,8 +38,14 @@ def test_kokorog2p_abbreviations_have_phonemes():
             None,
         )
         assert token is not None
-        if not _token_phonemes(token).strip():
-            pytest.xfail("kokorog2p does not emit phonemes for Ms./and with punctuation")
+        assert _token_phonemes(token).strip(), f"missing phonemes for {abbr}"
+
+    and_token = next(
+        (t for t in tokens if getattr(t, "text", "").lower() == "and"),
+        None,
+    )
+    assert and_token is not None
+    assert _token_phonemes(and_token).strip()
 
 
 def test_kokorog2p_punctuation():

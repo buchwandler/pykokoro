@@ -17,16 +17,21 @@ def test_license_and_release_fallback_version_are_present() -> None:
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
     assert "Apache License" in license_text
-    assert pyproject["tool"]["setuptools_scm"]["fallback_version"] == "0.8.1"
+    assert pyproject["tool"]["setuptools_scm"]["fallback_version"] == "0.8.3"
 
 
-def test_companion_dependency_floors_match_the_081_contract() -> None:
+def test_companion_dependency_floors_match_the_083_contract() -> None:
     dependencies = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
         "dependencies"
     ]
 
-    assert "kokorog2p[espeak,en]>=0.7.1,<0.8" in dependencies
+    assert "kokorog2p[espeak,en]>=0.8.0,<0.9" in dependencies
     assert "phrasplit>=0.3.4,<0.4" in dependencies
+
+
+def test_test_requirements_keep_kokorog2p_in_supported_window() -> None:
+    requirements = (ROOT / "requirements-test.txt").read_text(encoding="utf-8")
+    assert "kokorog2p[all]>=0.8.0,<0.9" in requirements
 
 
 def test_provider_extras_do_not_install_every_runtime_distribution() -> None:

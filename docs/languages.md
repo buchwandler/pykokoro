@@ -30,11 +30,13 @@ PipelineConfig(
 )
 ```
 
-German structured normalization is owned by the kokorog2p dependency. The compatible
-kokorog2p release should expand dates, times, decimal commas, measurements, ordinals,
-durations, Euro amounts, and abbreviations such as `Prof.`, `ggf.`, `ca.`, and `zzgl.`
-before G2P. Sentence segmentation and source offsets continue to refer to the original
-document text.
+Automatic written-to-spoken preparation is owned by the compatible kokorog2p 0.8.x
+dependency across the language pipelines where kokorog2p supports it. This includes
+structured forms such as dates, times, decimal commas, measurements, ordinals,
+durations, currency amounts, and abbreviations before G2P. Sentence segmentation and
+source offsets continue to refer to the original document text. PyKokoro's supported
+language and model list remains authoritative; kokorog2p support alone does not add a
+new synthesizer language.
 
 Managed Martin cache hits are checked against the pinned SHA-256 digests before use;
 invalid files are removed and downloaded again. Explicit custom paths are validated in

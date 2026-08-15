@@ -22,7 +22,7 @@ authors = [
 ]
 keywords = ["tts", "text-to-speech", "kokoro", "phonemizer", "espeak"]
 dependencies = [
-    "kokorog2p[espeak,en]>=0.7.1,<0.8",
+    "kokorog2p[espeak,en]>=0.8.0,<0.9",
     "phrasplit>=0.3.4,<0.4",
     "numpy",
     "audiosig>=0.1.1,<0.2",
@@ -81,7 +81,7 @@ all = [
 
 [tool.setuptools_scm]
 write_to = "pykokoro/_version.py"
-fallback_version = "0.8.1"
+fallback_version = "0.8.3"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
