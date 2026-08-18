@@ -166,7 +166,9 @@ def _parse_jsonl(path: Path, locale: str) -> list[PolyNormCase]:
             raise PolyNormDataError(f"Invalid JSON in {path} line {line_number}.") from exc
         if not isinstance(payload, dict):
             raise PolyNormDataError(f"Expected an object in {path} line {line_number}.")
-        cases.append(_parse_case_payload(payload, locale=locale, path=path, line_number=line_number))
+        case = _parse_case_payload(payload, locale=locale, path=path, line_number=line_number)
+        if case is not None:
+            cases.append(case)
     return cases
 
 
@@ -176,14 +178,23 @@ def _parse_case_payload(
     locale: str,
     path: Path,
     line_number: int,
-) -> PolyNormCase:
+) -> PolyNormCase | None:
     required = ("index", "category", "original_text", "normalized_text")
     values: dict[str, str] = {}
     for key in required:
         value = payload.get(key)
-        if not isinstance(value, str) or not value:
+        if (
+            not isinstance(value, str)
+            or (not value and key not in {"original_text", "normalized_text"})
+        ):
             raise PolyNormDataError(f"Missing or invalid {key!r} in {path} line {line_number}.")
         values[key] = value
+    if not values["original_text"] and not values["normalized_text"]:
+        # The pinned corpus contains an empty placeholder row with no text to evaluate.
+        return None
+    for key in ("original_text", "normalized_text"):
+        if not values[key]:
+            raise PolyNormDataError(f"Missing or invalid {key!r} in {path} line {line_number}.")
     return PolyNormCase(
         polynorm_locale=locale,
         index=values["index"],

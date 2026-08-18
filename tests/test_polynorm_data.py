@@ -37,6 +37,44 @@ def test_load_cases_parses_and_orders_deterministically(tmp_path: Path) -> None:
     assert [case.case_id for case in cases] == ["en-US:2", "en-US:10"]
 
 
+def test_load_cases_skips_empty_placeholder(tmp_path: Path) -> None:
+    _write_locale_fixture(
+        tmp_path,
+        "en-US",
+        [
+            '{"index":"1","category":"Date","original_text":"one","normalized_text":"one"}',
+            '{"index":"2","category":"Abbreviation","original_text":"","normalized_text":""}',
+            '{"index":"3","category":"Date","original_text":"three","normalized_text":"three"}',
+        ],
+    )
+
+    cases = load_cases(locales=["en-US"], cache_dir=tmp_path, offline=True)
+
+    assert [case.case_id for case in cases] == ["en-US:1", "en-US:3"]
+
+
+@pytest.mark.parametrize(
+    ("original_text", "normalized_text", "invalid_field"),
+    [("", "spoken", "original_text"), ("source", "", "normalized_text")],
+)
+def test_load_cases_rejects_partially_empty_text(
+    tmp_path: Path,
+    original_text: str,
+    normalized_text: str,
+    invalid_field: str,
+) -> None:
+    _write_locale_fixture(
+        tmp_path,
+        "en-US",
+        [
+            f'{{"index":"1","category":"Date","original_text":"{original_text}","normalized_text":"{normalized_text}"}}',
+        ],
+    )
+
+    with pytest.raises(PolyNormDataError, match=invalid_field):
+        load_cases(locales=["en-US"], cache_dir=tmp_path, offline=True)
+
+
 def test_load_cases_rejects_missing_fields(tmp_path: Path) -> None:
     _write_locale_fixture(
         tmp_path,
