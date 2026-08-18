@@ -8,8 +8,8 @@ PolyNorm text -> PyKokoro document parsing -> kokorog2p / Spokenform semantics -
 
 The benchmark compares phonemizing the original PolyNorm text against phonemizing the
 reviewed spoken-form target. It uses the real PyKokoro pipeline through G2P and swaps
-only the downstream audio stages for no-op adapters, so it does not require ONNX
-Runtime or Kokoro model downloads.
+only the downstream audio stages for no-op adapters, so it does not require ONNX Runtime
+or Kokoro model downloads.
 
 ## License and pinned corpus
 

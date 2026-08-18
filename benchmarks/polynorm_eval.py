@@ -129,9 +129,7 @@ class PyKokoroPhonemeHarness:
             segment.phonemes for segment in result.phoneme_segments if segment.phonemes
         )
         phonemes = _collapse_whitespace(phonemes)
-        tokens = tuple(
-            token for segment in result.phoneme_segments for token in segment.tokens
-        )
+        tokens = tuple(token for segment in result.phoneme_segments for token in segment.tokens)
         warnings = tuple(result.trace.warnings) if result.trace is not None else ()
         return PhonemeObservation(
             phonemes=phonemes,
@@ -222,10 +220,9 @@ def evaluate_case(
 
     if original_observation is not None and expected_observation is not None:
         raw_phoneme_exact = original_observation.phonemes == expected_observation.phonemes
-        semantic_phoneme_exact = (
-            semantic_phoneme_key(original_observation.phonemes)
-            == semantic_phoneme_key(expected_observation.phonemes)
-        )
+        semantic_phoneme_exact = semantic_phoneme_key(
+            original_observation.phonemes
+        ) == semantic_phoneme_key(expected_observation.phonemes)
         token_exact = original_observation.tokens == expected_observation.tokens
         phoneme_edit = edit_distance(
             tuple(original_observation.phonemes),
@@ -485,7 +482,9 @@ def direct_spokenform_observer(locale: str) -> Callable[[str], str | None]:
 def write_summary(path: str | Path, summary: dict[str, Any]) -> Path:
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    output_path.write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
     return output_path
 
 
@@ -574,9 +573,7 @@ def _bucket_metrics(results: Sequence[CaseEvaluation]) -> dict[str, Any]:
             sum(1 for result in results if result.raw_phoneme_exact),
             count,
         ),
-        "semantic_phoneme_exact": sum(
-            1 for result in results if result.semantic_phoneme_exact
-        ),
+        "semantic_phoneme_exact": sum(1 for result in results if result.semantic_phoneme_exact),
         "semantic_phoneme_exact_rate": _rate(
             sum(1 for result in results if result.semantic_phoneme_exact),
             count,
@@ -612,10 +609,18 @@ def _failure_record(result: CaseEvaluation) -> dict[str, Any]:
         "likely_owner": result.likely_owner,
         "original_text": result.original_text,
         "normalized_text": result.normalized_text,
-        "original_phonemes": result.original_observation.phonemes if result.original_observation else "",
-        "expected_phonemes": result.expected_observation.phonemes if result.expected_observation else "",
-        "original_tokens": list(result.original_observation.tokens) if result.original_observation else [],
-        "expected_tokens": list(result.expected_observation.tokens) if result.expected_observation else [],
+        "original_phonemes": result.original_observation.phonemes
+        if result.original_observation
+        else "",
+        "expected_phonemes": result.expected_observation.phonemes
+        if result.expected_observation
+        else "",
+        "original_tokens": list(result.original_observation.tokens)
+        if result.original_observation
+        else [],
+        "expected_tokens": list(result.expected_observation.tokens)
+        if result.expected_observation
+        else [],
         "warnings": list(result.warnings),
         "direct_spokenform_text": result.direct_spokenform_text,
         "phoneme_edit_distance": result.phoneme_edit_distance,

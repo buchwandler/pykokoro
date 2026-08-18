@@ -76,7 +76,9 @@ def ensure_locale_dataset(
     if offline:
         if refresh:
             raise PolyNormDataError("Offline mode cannot refresh the PolyNorm cache.")
-        raise PolyNormDataError(f"Offline mode requested but no cached PolyNorm data exists for {locale}.")
+        raise PolyNormDataError(
+            f"Offline mode requested but no cached PolyNorm data exists for {locale}."
+        )
     if not accept_license:
         raise PolyNormLicenseError(
             "PolyNorm download requires explicit acknowledgement of the "
@@ -183,9 +185,8 @@ def _parse_case_payload(
     values: dict[str, str] = {}
     for key in required:
         value = payload.get(key)
-        if (
-            not isinstance(value, str)
-            or (not value and key not in {"original_text", "normalized_text"})
+        if not isinstance(value, str) or (
+            not value and key not in {"original_text", "normalized_text"}
         ):
             raise PolyNormDataError(f"Missing or invalid {key!r} in {path} line {line_number}.")
         values[key] = value

@@ -94,7 +94,9 @@ def main(argv: list[str] | None = None) -> int:
     if baseline_path.exists():
         baseline = load_baseline(baseline_path)
         if baseline["dataset_commit"] not in {None, environment["polynorm_commit"]}:
-            print("error: baseline dataset commit does not match this benchmark run", file=sys.stderr)
+            print(
+                "error: baseline dataset commit does not match this benchmark run", file=sys.stderr
+            )
             return 2
         if baseline["config_hash"] not in {None, environment["config_hash"]}:
             print("error: baseline config hash does not match this benchmark run", file=sys.stderr)

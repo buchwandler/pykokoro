@@ -86,7 +86,9 @@ def render_comparison(comparison: dict[str, Any]) -> str:
 
 
 def _delta_metric(before: dict[str, Any], after: dict[str, Any], name: str) -> float:
-    return float(after.get("metrics", {}).get(name, 0)) - float(before.get("metrics", {}).get(name, 0))
+    return float(after.get("metrics", {}).get(name, 0)) - float(
+        before.get("metrics", {}).get(name, 0)
+    )
 
 
 def _delta_bucket_map(
