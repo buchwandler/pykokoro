@@ -12,11 +12,11 @@ status: accepted
 audience: null
 scopes: []
 source_refs:
-- git:443916cb369f60dca5ba0517f37279ccaa5ef02b
+  - git:443916cb369f60dca5ba0517f37279ccaa5ef02b
 paths:
-- benchmarks/polynorm_eval.py
-- tests/test_polynorm_eval.py
-- tests/test_polynorm_data.py
+  - benchmarks/polynorm_eval.py
+  - tests/test_polynorm_eval.py
+  - tests/test_polynorm_data.py
 issues: []
 prs: []
 sources: []
