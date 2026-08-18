@@ -15,6 +15,7 @@ advanced_features
 pipeline_stages
 api_reference
 examples
+polynorm_benchmark
 changelog
 ```
 

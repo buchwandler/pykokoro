@@ -1,7 +1,8 @@
 """Tokenizer for pykokoro - converts text to phonemes and tokens.
 
-This module provides text-to-phoneme and phoneme-to-token conversion using
-kokorog2p (dictionary + espeak fallback) as the phonemizer backend.
+This module provides text-to-phoneme and phoneme-to-token conversion using the
+native kokorog2p path. As of kokorog2p 0.8, migrated locales on that path use
+Spokenform-backed semantic preparation before G2P.
 """
 
 from __future__ import annotations
@@ -66,8 +67,10 @@ class TokenizerConfig:
             Format: {"word": "/phoneme/"} where phonemes are in IPA format.
         phoneme_dict_case_sensitive: Whether phoneme dictionary matching should
             be case-sensitive (default: False).
-        backend: Phonemization backend: "kokorog2p" (default), "espeak") or "goruut".
-            Requires pygoruut for goruut backend. Raises ImportError if unavailable.
+        backend: Phonemization backend: "kokorog2p" (default), "espeak", or "goruut".
+            The native "kokorog2p" path includes Spokenform-backed semantic
+            preparation on supported locales in kokorog2p 0.8+. Requires pygoruut
+            for goruut backend. Raises ImportError if unavailable.
         load_gold: Load gold-tier dictionary (~170k common words). Only applies
             to languages with dictionaries (English, French, German). Default: True.
         load_silver: Load silver-tier dictionary (~100k extra entries). Only applies
@@ -137,7 +140,7 @@ class Tokenizer:
     """Text-to-phoneme-to-token converter using kokorog2p.
 
     This class handles:
-    1. Text normalization
+    1. Text normalization / semantic preparation
     2. Text to phoneme conversion (via kokorog2p dictionary + espeak fallback)
     3. Phoneme to token conversion (via Kokoro vocabulary)
     4. Token to phoneme conversion (reverse lookup)

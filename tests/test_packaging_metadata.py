@@ -20,7 +20,7 @@ def test_license_and_release_fallback_version_are_present() -> None:
     assert pyproject["tool"]["setuptools_scm"]["fallback_version"] == "0.8.3"
 
 
-def test_companion_dependency_floors_match_the_083_contract() -> None:
+def test_companion_dependency_floors_match_the_080_spokenform_contract() -> None:
     dependencies = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
         "dependencies"
     ]

@@ -23,6 +23,13 @@ CASES = [
     ),
 ]
 
+NORMALIZATION_EQUIVALENCE_CASES = [
+    ("2", "two"),
+    ("42 kg", "forty two kilograms"),
+    ("Meet Dr. Smith at 5:30.", "Meet Doctor Smith at five thirty."),
+    ("$5", "five dollars"),
+]
+
 
 def _build_pipeline(doc_parser, cfg: PipelineConfig) -> KokoroPipeline:
     return KokoroPipeline(
@@ -52,4 +59,19 @@ def test_ssmd_and_plain_phonemes_match(ssmd_text, plain_text):
     assert plain_res.phoneme_segments
     assert _normalize_phonemes(ssmd_res.phoneme_segments) == _normalize_phonemes(
         plain_res.phoneme_segments
+    )
+
+
+@pytest.mark.parametrize("original_text, normalized_text", NORMALIZATION_EQUIVALENCE_CASES)
+def test_plain_pipeline_matches_spokenform_equivalent_pairs(original_text, normalized_text):
+    cfg = PipelineConfig(generation=GenerationConfig(lang="en-us"))
+    pipeline = _build_pipeline(PlainTextDocumentParser(), cfg)
+
+    original_res = pipeline.run(original_text)
+    normalized_res = pipeline.run(normalized_text)
+
+    assert original_res.phoneme_segments
+    assert normalized_res.phoneme_segments
+    assert _normalize_phonemes(original_res.phoneme_segments) == _normalize_phonemes(
+        normalized_res.phoneme_segments
     )

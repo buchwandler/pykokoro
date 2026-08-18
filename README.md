@@ -25,6 +25,10 @@ A Python library for Kokoro TTS (Text-to-Speech) using ONNX runtime.
 - **Hugging Face Integration**: Automatic model downloading from Hugging Face Hub
 - **Text Normalization**: Automatic spoken-form preparation through kokorog2p 0.8+ plus
   explicit SSMD say-as overrides
+- **Text Normalization**: Automatic say-as support for numbers, dates, phone numbers,
+  and more using SSMD markup
+- **Maintainer Benchmarking**: PolyNorm-based phoneme regression tooling for the
+  PyKokoro frontend path
 
 ## Installation
 
@@ -268,6 +272,9 @@ print(resolve_execution_provider("auto"))
 ```
 
 ## Usage Examples
+
+Maintainer benchmark documentation for the PolyNorm phoneme gate lives in
+`docs/polynorm_benchmark.md`.
 
 ### Basic Text-to-Speech
 

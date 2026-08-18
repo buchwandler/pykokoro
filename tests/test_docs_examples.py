@@ -44,17 +44,11 @@ def test_current_docs_python_fences_parse_and_use_public_names() -> None:
 
 def test_maintained_examples_compile_and_import_without_running_main() -> None:
     for path in MAINTAINED_EXAMPLES:
-        ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        module_name = f"pykokoro_smoke_{path.stem}"
-        spec = importlib.util.spec_from_file_location(module_name, path)
-        assert spec is not None and spec.loader is not None
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
-        try:
-            spec.loader.exec_module(module)
-        finally:
-            sys.modules.pop(module_name, None)
-        assert module.__name__ == module_name
+        _import_example(path)
+
+
+def test_spokenform_example_imports_without_running_main() -> None:
+    _import_example(ROOT / "examples" / "spokenform_phoneme_equivalence.py")
 
 
 def test_removed_api_is_confined_to_archived_examples() -> None:
@@ -64,3 +58,17 @@ def test_removed_api_is_confined_to_archived_examples() -> None:
         text = path.read_text(encoding="utf-8")
         assert "Kokoro(" not in text, path
         assert ".create(" not in text, path
+
+
+def _import_example(path: Path) -> None:
+    ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    module_name = f"pykokoro_smoke_{path.stem}"
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(module_name, None)
+    assert module.__name__ == module_name

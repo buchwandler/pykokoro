@@ -40,6 +40,7 @@ For questions, contact us via email at info@example.com or call us ASAP.
 
 The package weighs 5 lbs. and measures 10 ft. by 3 in..
 The temperature reached 98°F, or approximately 37°C.
+It takes .2 seconds.
 
 Lt. Commander Harris served in the U.S. Navy for 15 yrs..
 He earned a Ph.D. in Computer Science from MIT in Sept. 2010.

@@ -90,6 +90,8 @@ python_functions = ["test_*"]
 addopts = "-v --tb=short"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "polynorm: requires the externally licensed PolyNorm benchmark corpus",
+    "external_data: requires explicitly provisioned external benchmark data",
 ]
 
 [tool.ruff]

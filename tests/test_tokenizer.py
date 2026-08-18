@@ -219,6 +219,29 @@ class TestTokenizer:
         assert len(us_phonemes) > 0
         assert len(gb_phonemes) > 0
 
+    @pytest.mark.parametrize(
+        ("original_text", "normalized_text"),
+        [
+            ("2", "two"),
+            ("42 kg", "forty two kilograms"),
+            ("Dr. Smith", "Doctor Smith"),
+            ("$5", "five dollars"),
+        ],
+    )
+    def test_native_backend_matches_spokenform_equivalent_pairs(
+        self,
+        original_text,
+        normalized_text,
+    ):
+        """Normalization-sensitive text should phonemize identically on the 0.8 path."""
+        tokenizer = Tokenizer(config=TokenizerConfig(backend="kokorog2p", use_spacy=False))
+
+        original_phonemes = tokenizer.phonemize(original_text, lang="en-us")
+        normalized_phonemes = tokenizer.phonemize(normalized_text, lang="en-us")
+
+        assert original_phonemes == normalized_phonemes
+        assert tokenizer.tokenize(original_phonemes) == tokenizer.tokenize(normalized_phonemes)
+
     def test_phonemize_with_punctuation(self, tokenizer):
         """Test phonemization with punctuation."""
         phonemes = tokenizer.phonemize("Hello, world!")

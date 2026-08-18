@@ -210,6 +210,8 @@ pykokoro/_version.py
 *.wav
 TASKS.md
 context_pykokoro.*
+.benchmarks/
+benchmarks/results/
 
 # Taskledger (legacy and current config with machine-specific paths)
 .taskledger.toml

@@ -5,7 +5,8 @@ Backend Comparison Example for pykokoro.
 This example demonstrates how different phonemization backends affect
 the quality and pronunciation of synthesized speech. It compares:
 
-1. gold+silver+espeak (default) - Full dictionaries with espeak fallback
+1. native kokorog2p (default) - Full dictionaries with espeak fallback and
+   Spokenform-backed semantic normalization on migrated locales
 2. gold_only_no_espeak - Gold dictionary only, no silver, no espeak
 3. espeak_only - Pure espeak without dictionary lookup
 4. goruut - Goruut backend (requires pygoruut)
@@ -240,11 +241,12 @@ def main():
             print(f"{result['name']:<40} {'✗':<10} {result.get('error', 'Unknown')[:30]}")
 
     print("\nBackend Comparison:")
-    print("  • gold+silver+espeak: Default, best coverage and quality")
+    print("  • native kokorog2p: Default, best coverage and quality")
     print("  • gold_only: Good quality, reduced memory (~22-31 MB saved)")
     print("  • espeak_only: Fastest initialization, consistent but simpler")
     print("  • goruut: Alternative backend (requires pygoruut)")
     print("  • misaki: External G2P library with advanced features (requires misaki)")
+    print("  • kokorog2p 0.8+ folds Spokenform semantic normalization into the native path")
 
     print("\nPhoneme Differences:")
     if len([r for r in results if r["success"]]) > 1:

@@ -176,3 +176,14 @@ def test_backend_cache_key_snapshots_mutable_nested_configuration() -> None:
 
     tokenizer_config.mixed_language_allowed.append("de")
     assert pipeline._kokoro_key(cfg) != initial_key
+
+
+def test_backend_cache_key_snapshots_mutable_spokenform_sensitive_tokenizer_flags() -> None:
+    pipeline = KokoroPipeline(PipelineConfig())
+    tokenizer_config = TokenizerConfig(load_gold=True, load_silver=True, use_espeak_fallback=True)
+    cfg = replace(pipeline.config, tokenizer_config=tokenizer_config)
+
+    initial_key = pipeline._kokoro_key(cfg)
+    tokenizer_config.load_silver = False
+
+    assert pipeline._kokoro_key(cfg) != initial_key

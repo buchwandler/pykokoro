@@ -59,7 +59,7 @@ jobs:
         pip install -r requirements-test.txt
         pip install spacy
         python -m spacy download en_core_web_sm
-        python -m compileall -q pykokoro tests
+        python -m compileall -q benchmarks pykokoro tests
     - name: Tests
       run: pytest -m "not slow"
 
