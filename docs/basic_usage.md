@@ -177,6 +177,21 @@ Playback is blocking until the audio finishes. To select a particular output dev
 result.play(device="Built-in Audio")
 ```
 
+## Low-latency streaming playback
+
+For long text, `play_streaming()` starts playback after the first sentence and generates
+subsequent sentence units while one persistent output stream consumes queued audio:
+
+```python
+from pykokoro import KokoroPipeline, PipelineConfig
+
+with KokoroPipeline(PipelineConfig(voice="af_bella")) as pipe:
+    pipe.play_streaming("First sentence. Second sentence. Third sentence.")
+```
+
+Preparation is still global; only audio generation and postprocessing are deferred per
+selected unit. The default bounded queue has capacity two and no temporary WAV or final
+concatenated waveform is created.
 ## Voice Selection
 
 Voice names follow the pattern: `{accent}_{gender}_{name}`

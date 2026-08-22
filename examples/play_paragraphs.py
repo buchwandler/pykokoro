@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate paragraphs and play them through one persistent audio stream.
+"""Generate paragraphs through one persistent audio stream.
 
 Install the optional playback dependency before running this example::
 
@@ -9,8 +9,10 @@ Run from the repository root::
 
     python examples/play_paragraphs.py
 
-Audio is copied into a bounded playback queue before each rendered result is
-released. No WAV files are created.
+Paragraph units are larger chunks with fewer queue operations. For lower startup
+latency with interactive long-form text, prefer ``pipeline.play_streaming()`` with
+the default sentence units. Audio is copied into a bounded queue before release;
+no WAV files are created.
 """
 
 from __future__ import annotations

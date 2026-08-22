@@ -3,11 +3,12 @@
 This guide covers the supported pipeline-first API for controlled generation and
 long-form rendering.
 
-## Paragraph-wise rendering
+## Unit-wise rendering
 
-`prepare_units()` prepares the complete document once, then renders selected paragraphs
-one at a time. This preserves document-global SSMD offsets, voice bindings, pauses, and
-marker ownership while bounding live generated waveform memory:
+`prepare_units()` prepares the complete document once, then renders selected paragraph or
+sentence units one at a time. This preserves document-global SSMD offsets, voice bindings,
+pauses, and marker ownership while bounding live generated waveform memory to the selected
+unit:
 
 ```python
 from pathlib import Path
@@ -29,6 +30,15 @@ with KokoroPipeline(PipelineConfig(voice="af_sarah")) as pipeline:
                 result.release_audio()
 ```
 
+Sentence units provide the low-startup-latency direct-playback path:
+
+```python
+with KokoroPipeline(PipelineConfig(voice="af_sarah")) as pipeline:
+    pipeline.play_streaming(script, unit="sentence", queue_size=2)
+```
+
+Playback starts after the first sentence and uses one persistent bounded output stream.
+
 Descriptors are available before inference and contain source-order indices, clean-text
 offsets, segment ownership, marker names, and a `text_hash`. Store the
 `pykokoro-audio-unit-v1` schema beside hashes in a resume manifest. Hashes include
@@ -49,7 +59,7 @@ generation and postprocessing.
 
 Portable YAML headers can define logical voices, pause defaults, title metadata, and
 markers. Bind logical roles to provider voices through `SSMDRenderConfig` and render
-paragraph units with the same lifecycle shown above. See
+either paragraph or sentence units with the same lifecycle shown above. See
 `examples/paragraph_ssmd_voices.py` for a complete script and marker offsets.
 
 ## Generation and pauses

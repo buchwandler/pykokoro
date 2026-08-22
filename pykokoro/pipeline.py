@@ -8,7 +8,7 @@ from copy import copy, deepcopy
 from dataclasses import dataclass, fields, is_dataclass, replace
 from pathlib import Path
 from types import MappingProxyType, TracebackType
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from typing_extensions import Self
@@ -33,6 +33,7 @@ from .stages.protocols import (
 from .types import (
     AudioResult,
     AudioUnitDescriptor,
+    AudioUnitKind,
     AudioUnitResult,
     PhonemeSegment,
     Segment,
@@ -78,6 +79,7 @@ class _PreparedUnitGroup:
 @dataclass(slots=True)
 class _PreparedDocument:
     cfg: PipelineConfig
+    unit_kind: AudioUnitKind
     trace: Trace
     doc: Any
     segments: list[Segment]
@@ -89,12 +91,13 @@ class _PreparedDocument:
 
 
 class PreparedAudioUnits:
-    """A globally prepared document that can render paragraph units sequentially."""
+    """A globally prepared document that can render selected units sequentially."""
 
     def __init__(self, pipeline: KokoroPipeline, prepared: _PreparedDocument) -> None:
         self._pipeline = pipeline
         self._prepared: _PreparedDocument | None = prepared
         self._units = tuple(group.descriptor for group in prepared.groups)
+        self._unit_kind = prepared.unit_kind
         self._document_metadata = {
             "title": _copy_metadata_value(prepared.doc.header.get("title")),
             "voice_bindings": _copy_metadata_value(prepared.doc.header.get("voice_bindings", {})),
@@ -110,6 +113,10 @@ class PreparedAudioUnits:
     @property
     def units(self) -> tuple[AudioUnitDescriptor, ...]:
         return self._units
+
+    @property
+    def unit_kind(self) -> AudioUnitKind:
+        return self._unit_kind
 
     @property
     def document_metadata(self) -> Mapping[str, Any]:
@@ -729,14 +736,14 @@ class KokoroPipeline:
         self,
         text: str,
         *,
-        unit: Literal["paragraph"] = "paragraph",
+        unit: AudioUnitKind = "paragraph",
         **overrides: Any,
     ) -> PreparedAudioUnits:
-        """Prepare a document globally for sequential paragraph rendering."""
-        if unit != "paragraph":
+        """Prepare a document globally for sequential unit rendering."""
+        if unit not in ("paragraph", "sentence"):
             raise ValueError(f"Unsupported audio unit kind: {unit!r}")
         cfg = deepcopy(self._resolve_run_config(overrides))
-        prepared = self._prepare_document(text, cfg)
+        prepared = self._prepare_document(text, cfg, unit)
         result = PreparedAudioUnits(self, prepared)
         self._prepared_objects.append(result)
         return result
@@ -745,15 +752,17 @@ class KokoroPipeline:
         self,
         text: str,
         *,
-        unit: Literal["paragraph"] = "paragraph",
+        unit: AudioUnitKind = "paragraph",
         skip_indices: Collection[int] = (),
         **overrides: Any,
     ) -> Iterator[AudioUnitResult]:
-        """Yield paragraph results while owning the prepared document lifecycle."""
+        """Yield unit results while owning the prepared document lifecycle."""
         with self.prepare_units(text, unit=unit, **overrides) as prepared:
             yield from prepared.render(skip_indices=skip_indices)
 
-    def _prepare_document(self, text: str, cfg: PipelineConfig) -> _PreparedDocument:
+    def _prepare_document(
+        self, text: str, cfg: PipelineConfig, unit: AudioUnitKind
+    ) -> _PreparedDocument:
         trace = Trace()
 
         with trace_timing(trace, "doc", "parse"):
@@ -786,9 +795,10 @@ class KokoroPipeline:
 
         apply_emphasis_policy(phoneme_segments, cfg, trace)
 
-        groups = self._build_unit_groups(doc, segments, phoneme_segments, cfg)
+        groups = self._build_unit_groups(doc, segments, phoneme_segments, cfg, unit)
         return _PreparedDocument(
             cfg=cfg,
+            unit_kind=unit,
             trace=trace,
             doc=doc,
             segments=segments,
@@ -840,33 +850,51 @@ class KokoroPipeline:
         segments: list[Segment],
         phoneme_segments: list[PhonemeSegment],
         cfg: PipelineConfig,
+        unit: AudioUnitKind,
     ) -> tuple[_PreparedUnitGroup, ...]:
         if not phoneme_segments:
             return ()
 
-        groups_data: list[tuple[int, int, int]] = []
-        closed_paragraphs: set[int] = set()
+        groups_data: list[tuple[tuple[object, ...], int, int, int, int | None]] = []
+        closed_keys: set[tuple[object, ...]] = set()
+        current_key: tuple[object, ...] | None = None
         current_paragraph: int | None = None
         for phoneme_index, segment in enumerate(phoneme_segments):
             paragraph = segment.paragraph_idx
             if paragraph is None:
                 paragraph = current_paragraph if current_paragraph is not None else 0
-            if current_paragraph != paragraph:
-                if paragraph in closed_paragraphs:
+            if unit == "paragraph":
+                key = ("paragraph", paragraph)
+                sentence = None
+            elif segment.sentence_idx is not None:
+                sentence = segment.sentence_idx
+                key = ("sentence", paragraph, sentence)
+            else:
+                sentence = None
+                key = ("sentence-fallback", paragraph, segment.segment_id)
+            if current_key != key:
+                if key in closed_keys:
                     raise RuntimeError(
-                        f"Prepared paragraph {paragraph} is disjoint in phoneme segment order"
+                        f"Prepared {unit} {key!r} is disjoint in phoneme segment order"
                     )
-                if current_paragraph is not None:
-                    closed_paragraphs.add(current_paragraph)
-                groups_data.append((paragraph, phoneme_index, phoneme_index + 1))
+                if current_key is not None:
+                    closed_keys.add(current_key)
+                groups_data.append((key, paragraph, sentence, phoneme_index, phoneme_index + 1))
+                current_key = key
                 current_paragraph = paragraph
             else:
-                paragraph_idx, start, _ = groups_data[-1]
-                groups_data[-1] = (paragraph_idx, start, phoneme_index + 1)
+                group_key, group_paragraph, group_sentence, start, _ = groups_data[-1]
+                groups_data[-1] = (
+                    group_key,
+                    group_paragraph,
+                    group_sentence,
+                    start,
+                    phoneme_index + 1,
+                )
 
         segment_by_id = {segment.id: segment for segment in segments}
         groups: list[_PreparedUnitGroup] = []
-        for index, (paragraph, start, end) in enumerate(groups_data):
+        for index, (_, paragraph, sentence, start, end) in enumerate(groups_data):
             group_phonemes = phoneme_segments[start:end]
             segment_ids = tuple(dict.fromkeys(segment.segment_id for segment in group_phonemes))
             group_segments = [
@@ -903,6 +931,8 @@ class KokoroPipeline:
                 ),
                 segment_ids=segment_ids,
                 phoneme_segment_ids=tuple(segment.id for segment in group_phonemes),
+                unit_kind=unit,
+                sentence_idx=sentence,
             )
             groups.append(_PreparedUnitGroup(descriptor, start, end, ()))
 
@@ -977,6 +1007,8 @@ class KokoroPipeline:
                     ms=0.0,
                     details={
                         "unit_index": index,
+                        "unit_kind": group.descriptor.unit_kind,
+                        "sentence_idx": group.descriptor.sentence_idx,
                         "paragraph_idx": group.descriptor.paragraph_idx,
                         "phoneme_segment_count": len(generated),
                         "character_count": len(group.descriptor.text),
@@ -1057,6 +1089,21 @@ class KokoroPipeline:
             markers=markers,
         )
 
+    def play_streaming(
+        self,
+        text: str,
+        *,
+        unit: AudioUnitKind = "sentence",
+        device: int | str | None = None,
+        queue_size: int = 2,
+        **overrides: Any,
+    ) -> None:
+        """Generate and play selected units through one persistent output stream."""
+        from .playback import play_prepared_units
+
+        with self.prepare_units(text, unit=unit, **overrides) as prepared:
+            play_prepared_units(prepared, device=device, queue_size=queue_size)
+
     def __call__(self, text: str, **overrides: Any) -> AudioResult:
         return self.run(text, **overrides)
 
@@ -1109,6 +1156,8 @@ def _collect_marker_offsets(
                     **(
                         {
                             "paragraph_idx": descriptor.paragraph_idx,
+                            "unit_kind": descriptor.unit_kind,
+                            "sentence_idx": descriptor.sentence_idx,
                             "unit_index": descriptor.index,
                         }
                         if descriptor is not None

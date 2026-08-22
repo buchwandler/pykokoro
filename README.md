@@ -88,9 +88,12 @@ For direct playback from memory, install the optional feature extra:
 pip install "pykokoro[cpu,playback]"
 ```
 
-`AudioResult.play()` sends the generated NumPy waveform directly to the system audio
-output. Playback is blocking and does not create a WAV file. Linux-like systems may also
-need a PortAudio system package. The older `pykokoro[sounddevice]` extra remains valid.
+`AudioResult.play()` sends an already-generated NumPy waveform directly to the system audio
+output. Playback is blocking and does not create a WAV file. For long text with low startup
+latency, use `pipeline.play_streaming(text, unit="sentence")`; it prepares the document
+globally, then generates sentence audio while one persistent bounded stream plays earlier
+sentences. Linux-like systems may also need a PortAudio system package. The older
+`pykokoro[sounddevice]` extra remains valid.
 
 
 ### Performance Comparison
@@ -336,25 +339,34 @@ for text_chunk in chunks:
     result.play()
 ```
 
-For bounded long-form paragraph playback, use the persistent player with the supported
-unit-streaming API:
+For long text with low startup latency, prefer sentence streaming through one persistent
+bounded output stream:
 
 ```python
 from pykokoro import KokoroPipeline, PipelineConfig
-from pykokoro.playback import SoundDevicePlayer
 
-text = "First paragraph.\n\nSecond paragraph."
-
+text = "First sentence. Second sentence. Third sentence."
 with KokoroPipeline(PipelineConfig(voice="af_sarah")) as pipe:
-    with pipe.prepare_units(text, unit="paragraph") as prepared:
-        with SoundDevicePlayer(24_000) as player:
-            for result in prepared.render():
-                try:
-                    player.submit(result.audio)
-                finally:
-                    result.release_audio()
-            player.drain()
+    pipe.play_streaming(text, unit="sentence", queue_size=2)
 ```
+
+`play_streaming()` performs global document preparation first, then generates and queues
+each selected unit as playback consumes the previous one. It creates no temporary WAV and
+retains no complete generated waveform. `queue_size` is bounded pending-waveform capacity,
+not an exact startup prebuffer count.
+
+For custom consumers or paragraph-sized chunks, use the prepared-unit API directly:
+
+```python
+with pipe.prepare_units(text, unit="paragraph") as prepared:
+    for result in prepared.render():
+        try:
+            consume(result.audio, result.sample_rate)
+        finally:
+            result.release_audio()
+```
+
+Use `result.play()` for a short utterance that has already been generated completely.
 
 ### Phoneme-Based Generation
 

@@ -189,7 +189,7 @@ class AudioResult:
 
         play_audio(self.audio, self.sample_rate, device=device)
 
-AudioUnitKind = Literal["paragraph"]
+AudioUnitKind = Literal["paragraph", "sentence"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,6 +205,8 @@ class AudioUnitDescriptor:
     segment_ids: tuple[str, ...]
     phoneme_segment_ids: tuple[str, ...]
     marker_names: tuple[str, ...] = ()
+    unit_kind: AudioUnitKind = "paragraph"
+    sentence_idx: int | None = None
 
 
 @dataclass(slots=True)

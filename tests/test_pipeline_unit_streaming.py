@@ -327,3 +327,68 @@ def test_empty_input_has_no_units_and_fallback_document_is_renderable() -> None:
     with pipeline.prepare_units("") as prepared:
         assert prepared.units == ()
         assert list(prepared.render()) == []
+
+
+def test_sentence_units_are_ordered_and_lazily_rendered() -> None:
+    g2p = CountingG2P()
+    processor = CountingProcessor()
+    generator = CountingGenerator()
+    pipeline = build_pipeline(g2p=g2p, processor=processor, generator=generator)
+    text = "First sentence. Second sentence.\n\nThird paragraph."
+
+    with pipeline.prepare_units(text, unit="sentence") as prepared:
+        assert prepared.unit_kind == "sentence"
+        assert [(unit.paragraph_idx, unit.sentence_idx) for unit in prepared.units] == [
+            (0, 0),
+            (0, 1),
+            (1, 0),
+        ]
+        assert [unit.unit_kind for unit in prepared.units] == ["sentence"] * 3
+        assert [unit.text for unit in prepared.units] == [
+            "First sentence.",
+            "Second sentence.",
+            "Third paragraph.",
+        ]
+        assert [unit.text for unit in prepared.units] == [
+            text[unit.char_start : unit.char_end] for unit in prepared.units
+        ]
+        assert (g2p.calls, processor.calls, generator.calls) == (1, 1, 0)
+
+        results = list(prepared.render(skip_indices={1}))
+        assert [result.descriptor.index for result in results] == [0, 2]
+        assert generator.calls == 2
+
+
+def test_sentence_units_match_paragraph_audio_for_noop_stages() -> None:
+    pipeline = build_pipeline()
+    text = "First sentence. Second sentence. Third sentence."
+    legacy = pipeline.run(text)
+
+    pieces: list[np.ndarray] = []
+    with pipeline.prepare_units(text, unit="sentence") as prepared:
+        for result in prepared.render():
+            pieces.append(result.audio.copy())
+            result.release_audio()
+
+    np.testing.assert_array_equal(legacy.audio, np.concatenate(pieces))
+
+
+def test_sentence_unit_rejects_unsupported_kinds() -> None:
+    pipeline = build_pipeline()
+    with pytest.raises(ValueError, match="Unsupported audio unit kind"):
+        pipeline.prepare_units("One.", unit="clause")  # type: ignore[arg-type]
+
+
+def test_play_streaming_uses_sentence_units_and_forwards_playback_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, int, int | str | None]] = []
+
+    def fake_play(prepared, *, device, queue_size):
+        calls.append((prepared.unit_kind, queue_size, device))
+
+    monkeypatch.setattr("pykokoro.playback.play_prepared_units", fake_play)
+    pipeline = build_pipeline()
+    pipeline.play_streaming("One. Two.", device="test-device", queue_size=3)
+
+    assert calls == [("sentence", 3, "test-device")]

@@ -23,7 +23,7 @@ result = pipe.run("Hello, world!")
 print(result.sample_rate)
 ```
 
-### Paragraph unit streaming
+### Unit streaming
 
 ```{eval-rst}
 .. autoclass:: pykokoro.PreparedAudioUnits
@@ -43,19 +43,38 @@ print(result.sample_rate)
    :undoc-members:
 ```
 
-`KokoroPipeline.prepare_units(text, unit="paragraph")` parses, phonemizes, and
-preprocesses the complete document once, then exposes deterministic paragraph
-descriptors before any audio is generated. Rendered results own one final unit waveform
-and should be released after consumption:
+`AudioUnitKind` supports `"paragraph"` and `"sentence"`; paragraph remains the default
+for `prepare_units()` and `iter_units()`. `unit_kind` and `sentence_idx` identify the
+selected grouping on each descriptor. Preparation parses, phonemizes, and preprocesses
+the complete document once, then defers audio generation until a selected unit is
+rendered. Generated waveform memory is bounded by the selected unit size and the
+playback queue, while document metadata remains global.
 
 ```python
-with pipe.prepare_units(script) as prepared:
+with pipe.prepare_units(script, unit="sentence") as prepared:
     for result in prepared.render(skip_indices=completed_indices):
         try:
             consume(result.audio, result.sample_rate)
         finally:
             result.release_audio()
 ```
+
+### Streaming playback
+
+`KokoroPipeline.play_streaming(text, unit="sentence", device=None, queue_size=2)` uses one
+persistent `SoundDevicePlayer`. It begins playback after the first rendered unit, queues
+copied waveforms with bounded backpressure, and blocks until the final queued unit has
+finished. It creates no temporary WAV and does not concatenate a final waveform. The
+queue capacity is pending waveform capacity in addition to the actively written waveform,
+not an exact startup prebuffer count. Empty input opens no device.
+
+`play_prepared_units()` is the lower-level helper for callers that already own a prepared
+unit lifecycle. `SoundDevicePlayer` is also available for custom consumers; its `submit()`
+copy makes releasing a source `AudioUnitResult` after submission safe. Synthesis remains
+sequential on the caller thread; playback is the only worker-thread operation.
+
+`AudioResult.play()` and `AudioUnitResult.play()` remain blocking helpers for an already
+generated single waveform.
 
 ### PipelineConfig
 
@@ -131,7 +150,8 @@ Set `PipelineConfig(retain_segment_audio=False)` for compact results when segmen
 waveforms are not needed. This reduces retained memory after generation, but
 whole-result concatenation still occurs and peak memory remains dependent on input
 duration. `run()` retains whole-result concatenation semantics; use `prepare_units()` or
-`iter_units()` when peak waveform memory should remain bounded to one paragraph.
+`iter_units()` when generated waveform memory should remain bounded to the selected unit size
+plus the bounded playback queue.
 
 Prepared unit descriptor hashes use the `pykokoro-audio-unit-v1` schema. Store the
 schema alongside each hash for resumable exporters. Indices are zero-based source order,

@@ -6,10 +6,12 @@ scripts below use the current pipeline-first API.
 ## Basic pipeline
 
 - `german.py` — short German synthesis example; requires ONNX Runtime and model assets.
-- `play_audio.py` — generate speech and play it directly; install
+- `play_audio.py` — generate a short waveform completely, then play it; install
   `pykokoro[cpu,playback]`.
-- `play_paragraphs.py` — render paragraphs through one persistent, bounded playback
-  stream; install `pykokoro[cpu,playback]`.
+- `play_streaming.py` — preferred low-startup-latency long-form sentence playback
+  through one persistent bounded stream; install `pykokoro[cpu,playback]`.
+- `play_paragraphs.py` — render larger paragraph chunks through one persistent stream;
+  install `pykokoro[cpu,playback]`.
 - `split_and_phonemize_demo.py` — custom document/G2P stage inspection; import-only
   until a backend is selected.
 - `termux_android_onnx.py` — Android/Termux provider configuration; requires a
@@ -29,8 +31,12 @@ The maintained analysis and language demos are also import-safe and indexed here
 `short_sentence_voices_demo.py`, `spanish.py`, `split_and_phonemize_demo.py`,
 `ssmd_080_portable_podcast.py`, `ssmd_demo.py`, and `termux_android_onnx.py`.
 
-## Paragraph and long-form rendering
+## Paragraph and sentence long-form rendering
 
+- Use `play_streaming.py` for direct playback with the lowest startup latency. It renders
+  sentence units sequentially while one persistent stream consumes prior audio.
+- Use the paragraph examples when larger chunks, file export, markers, or resumable
+  manifests are more important than minimum startup latency.
 - `paragraph_wave_export.py` — one WAV per paragraph with an atomic resumable manifest;
   requires ONNX Runtime, model assets, and `soundfile`.
 - `paragraph_ssmd_voices.py` — SSMD 0.8 YAML voice bindings, pause defaults, and
@@ -39,9 +45,9 @@ The maintained analysis and language demos are also import-safe and indexed here
   marker sidecar; requires ONNX Runtime and model assets.
 
 Preparation is global: parsing, G2P, and phoneme preprocessing happen once, while
-generation and postprocessing are bounded to one selected paragraph waveform. Persist or
-copy a result before advancing the iterator because advancing releases the previous
-waveform. Descriptor hashes use the `pykokoro-audio-unit-v1` schema.
+generation and postprocessing are bounded to the selected unit waveform and playback
+queue. Persist or copy a result before advancing the iterator because advancing releases
+the previous waveform. Descriptor hashes use the `pykokoro-audio-unit-v1` schema.
 
 ## Archived examples
 

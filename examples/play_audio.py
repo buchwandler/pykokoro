@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate speech and play it directly through the system audio device.
+"""Generate a short utterance completely, then play its waveform.
 
 Install the optional playback dependency before running this example::
 
@@ -9,7 +9,8 @@ Run from the repository root::
 
     python examples/play_audio.py
 
-This example keeps the generated waveform in memory and does not create a WAV file.
+This is the complete-waveform case. For long text with low startup latency, use
+``pipeline.play_streaming()`` instead. No WAV file is created here.
 """
 
 from __future__ import annotations

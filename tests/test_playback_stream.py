@@ -9,7 +9,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from pykokoro.playback import SoundDevicePlayer
+from pykokoro.playback import SoundDevicePlayer, play_prepared_units
+from pykokoro.types import AudioUnitDescriptor, AudioUnitResult
 
 
 class FakeOutputStream:
@@ -72,7 +73,11 @@ def test_multiple_units_use_one_stream_in_order_and_copy_inputs(
     player.close()
     player.close()
 
-    assert stream.kwargs == {"samplerate": 24_000, "device": "test-device"}
+    assert stream.kwargs == {
+        "samplerate": 24_000,
+        "channels": 1,
+        "device": "test-device",
+    }
     assert stream.started and stream.stopped and stream.closed
     assert len(stream.writes) == 2
     np.testing.assert_array_equal(stream.writes[0], [1.0, 2.0])
@@ -129,7 +134,92 @@ def test_player_validates_configuration_and_audio() -> None:
         SoundDevicePlayer(0)
     with pytest.raises(ValueError, match="queue_size"):
         SoundDevicePlayer(24_000, queue_size=0)
+    with pytest.raises(ValueError, match="channels"):
+        SoundDevicePlayer(24_000, channels=0)
+
 
     player = SoundDevicePlayer(24_000)
     with pytest.raises(RuntimeError, match="not been started"):
         player.submit(np.ones(1, dtype=np.float32))
+
+
+def _audio_unit(index: int, value: float) -> AudioUnitResult:
+    return AudioUnitResult(
+        descriptor=AudioUnitDescriptor(
+            index=index,
+            paragraph_idx=0,
+            char_start=index,
+            char_end=index + 1,
+            text=f"unit-{index}",
+            text_hash=str(index),
+            segment_ids=(f"segment-{index}",),
+            phoneme_segment_ids=(f"phoneme-{index}",),
+            unit_kind="sentence",
+            sentence_idx=index,
+        ),
+        audio=np.array([value], dtype=np.float32),
+        sample_rate=24_000,
+    )
+
+
+
+def test_prepared_units_derive_stereo_channel_count(monkeypatch: pytest.MonkeyPatch) -> None:
+    stream = FakeOutputStream()
+    _install_backend(monkeypatch, stream)
+
+    class Prepared:
+        def render(self):
+            result = _audio_unit(0, 1.0)
+            result.audio = np.ones((2, 2), dtype=np.float32)
+            yield result
+
+    play_prepared_units(Prepared())
+
+    assert stream.kwargs == {"samplerate": 24_000, "channels": 2}
+
+def test_prepared_units_start_playback_before_next_generation(monkeypatch: pytest.MonkeyPatch) -> None:
+    stream = FakeOutputStream()
+    _install_backend(monkeypatch, stream)
+
+    class Prepared:
+        def render(self):
+            yield _audio_unit(0, 1.0)
+            assert stream.write_started.wait(timeout=1)
+            yield _audio_unit(1, 2.0)
+            yield _audio_unit(2, 3.0)
+
+    play_prepared_units(Prepared())
+
+    assert [write.tolist() for write in stream.writes] == [[1.0], [2.0], [3.0]]
+    assert stream.stopped and stream.closed
+
+
+def test_prepared_units_empty_input_does_not_open_stream(monkeypatch: pytest.MonkeyPatch) -> None:
+    stream = FakeOutputStream()
+    _install_backend(monkeypatch, stream)
+
+    class Prepared:
+        def render(self):
+            return iter(())
+
+    play_prepared_units(Prepared())
+
+    assert not stream.started
+    assert not stream.closed
+
+
+def test_prepared_units_preserve_generation_error_and_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stream = FakeOutputStream()
+    _install_backend(monkeypatch, stream)
+
+    class Prepared:
+        def render(self):
+            yield _audio_unit(0, 1.0)
+            raise ValueError("generation failed")
+
+    with pytest.raises(ValueError, match="generation failed"):
+        play_prepared_units(Prepared())
+
+    assert stream.stopped and stream.closed
