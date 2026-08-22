@@ -74,6 +74,7 @@ gpu = ["onnxruntime-gpu>=1.17.0"]
 openvino = ["onnxruntime-openvino>=1.17.0"]
 directml = ["onnxruntime-directml>=1.17.0"]
 coreml = ["onnxruntime>=1.17.0", "coremltools>=7.0"]
+playback = ["sounddevice"]
 sounddevice = ["sounddevice"]
 all = [
     "sounddevice",

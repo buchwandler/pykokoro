@@ -110,3 +110,16 @@ def test_production_source_has_no_forbidden_dsp_imports() -> None:
         if any(token in path.read_text(encoding="utf-8") for token in forbidden)
     ]
     assert matches == []
+
+
+def test_playback_extra_is_optional_and_keeps_compatibility_alias() -> None:
+    optional = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+        "optional-dependencies"
+    ]
+    dependencies = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+        "dependencies"
+    ]
+
+    assert optional["playback"] == ["sounddevice"]
+    assert optional["sounddevice"] == ["sounddevice"]
+    assert "sounddevice" not in dependencies

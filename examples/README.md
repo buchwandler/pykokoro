@@ -6,8 +6,10 @@ scripts below use the current pipeline-first API.
 ## Basic pipeline
 
 - `german.py` — short German synthesis example; requires ONNX Runtime and model assets.
-- `play_audio.py` — generate speech and play it directly; install the optional
-  `sounddevice` dependency.
+- `play_audio.py` — generate speech and play it directly; install
+  `pykokoro[cpu,playback]`.
+- `play_paragraphs.py` — render paragraphs through one persistent, bounded playback
+  stream; install `pykokoro[cpu,playback]`.
 - `split_and_phonemize_demo.py` — custom document/G2P stage inspection; import-only
   until a backend is selected.
 - `termux_android_onnx.py` — Android/Termux provider configuration; requires a

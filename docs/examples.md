@@ -32,13 +32,16 @@ without loading a synthesis model.
 The simplest example:
 
 ```python
-import soundfile as sf
-
 from pykokoro import KokoroPipeline, PipelineConfig
 
 pipe = KokoroPipeline(PipelineConfig(voice="af_bella"))
 result = pipe.run("Hello, world!")
-sf.write("hello.wav", result.audio, result.sample_rate)
+
+# Direct system playback, using the optional playback dependency:
+result.play()
+
+# Or persist the waveform:
+result.save_wav("hello.wav")
 ```
 
 ## Multi-Voice Demo

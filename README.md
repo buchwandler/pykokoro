@@ -80,6 +80,19 @@ pip install pykokoro[coreml]
 pip install pykokoro[all]
 ```
 
+### Direct Playback
+
+For direct playback from memory, install the optional feature extra:
+
+```bash
+pip install "pykokoro[cpu,playback]"
+```
+
+`AudioResult.play()` sends the generated NumPy waveform directly to the system audio
+output. Playback is blocking and does not create a WAV file. Linux-like systems may also
+need a PortAudio system package. The older `pykokoro[sounddevice]` extra remains valid.
+
+
 ### Performance Comparison
 
 To find the best provider for your system, run the benchmark:
@@ -309,7 +322,9 @@ res = pipe.run("Mixed voice")
 audio = res.audio
 ```
 
-### Streaming Generation
+### Direct Playback of Generated Chunks
+
+For independent chunks, `AudioResult.play()` plays each generated waveform directly:
 
 ```python
 from pykokoro import KokoroPipeline, PipelineConfig
@@ -317,8 +332,28 @@ from pykokoro import KokoroPipeline, PipelineConfig
 pipe = KokoroPipeline(PipelineConfig(voice="af_sarah"))
 chunks = ["Long text", "here..."]
 for text_chunk in chunks:
-    res = pipe.run(text_chunk)
-    play_audio(res.audio, res.sample_rate)
+    result = pipe.run(text_chunk)
+    result.play()
+```
+
+For bounded long-form paragraph playback, use the persistent player with the supported
+unit-streaming API:
+
+```python
+from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro.playback import SoundDevicePlayer
+
+text = "First paragraph.\n\nSecond paragraph."
+
+with KokoroPipeline(PipelineConfig(voice="af_sarah")) as pipe:
+    with pipe.prepare_units(text, unit="paragraph") as prepared:
+        with SoundDevicePlayer(24_000) as player:
+            for result in prepared.render():
+                try:
+                    player.submit(result.audio)
+                finally:
+                    result.release_audio()
+            player.drain()
 ```
 
 ### Phoneme-Based Generation

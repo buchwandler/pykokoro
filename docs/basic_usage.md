@@ -154,6 +154,29 @@ result = pipe.run("Hello!")
 sf.write("output.wav", result.audio, result.sample_rate)
 ```
 
+
+Install the optional playback support:
+
+```bash
+pip install "pykokoro[cpu,playback]"
+```
+
+Then play the generated waveform without creating an intermediate WAV file:
+
+```python
+from pykokoro import KokoroPipeline, PipelineConfig
+
+pipe = KokoroPipeline(PipelineConfig(voice="af_bella"))
+result = pipe.run("Hello!")
+result.play()
+```
+
+Playback is blocking until the audio finishes. To select a particular output device:
+
+```python
+result.play(device="Built-in Audio")
+```
+
 ## Voice Selection
 
 Voice names follow the pattern: `{accent}_{gender}_{name}`

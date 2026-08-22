@@ -179,15 +179,15 @@ class AudioResult:
 
         sf.write(path, self.audio, self.sample_rate)
 
-    def play(self) -> None:
-        """Play audio in a Jupyter notebook."""
-        try:
-            import sounddevice as sd
-        except ImportError:
-            raise ImportError("sounddevice is required for audio playback") from None
-        sd.play(self.audio, self.sample_rate)
-        sd.wait()
+    def play(self, *, device: int | str | None = None) -> None:
+        """Play the generated waveform through the system audio output.
 
+        Playback is blocking, requires the optional ``sounddevice`` dependency,
+        and does not create an intermediate audio file.
+        """
+        from .playback import play_audio
+
+        play_audio(self.audio, self.sample_rate, device=device)
 
 AudioUnitKind = Literal["paragraph"]
 
@@ -235,6 +235,12 @@ class AudioUnitResult:
         dtype = self.audio.dtype if isinstance(self.audio, np.ndarray) else np.dtype(np.float32)
         self.audio = np.empty(0, dtype=dtype)
         self.release_segment_audio()
+
+    def play(self, *, device: int | str | None = None) -> None:
+        """Play this rendered unit through the system audio output."""
+        from .playback import play_audio
+
+        play_audio(self.audio, self.sample_rate, device=device)
 
 
 # Backward compatibility aliases

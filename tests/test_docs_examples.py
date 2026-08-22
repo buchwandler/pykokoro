@@ -72,3 +72,8 @@ def _import_example(path: Path) -> None:
     finally:
         sys.modules.pop(module_name, None)
     assert module.__name__ == module_name
+
+
+def test_readme_has_no_undefined_playback_helper() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "play_audio(res.audio, res.sample_rate)" not in readme

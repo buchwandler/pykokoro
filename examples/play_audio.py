@@ -3,7 +3,7 @@
 
 Install the optional playback dependency before running this example::
 
-    pip install "pykokoro[cpu,sounddevice]"
+    pip install "pykokoro[cpu,playback]"
 
 Run from the repository root::
 
