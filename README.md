@@ -88,13 +88,12 @@ For direct playback from memory, install the optional feature extra:
 pip install "pykokoro[cpu,playback]"
 ```
 
-`AudioResult.play()` sends an already-generated NumPy waveform directly to the system audio
-output. Playback is blocking and does not create a WAV file. For long text with low startup
-latency, use `pipeline.play_streaming(text, unit="sentence")`; it prepares the document
-globally, then generates sentence audio while one persistent bounded stream plays earlier
-sentences. Linux-like systems may also need a PortAudio system package. The older
-`pykokoro[sounddevice]` extra remains valid.
-
+`AudioResult.play()` sends an already-generated NumPy waveform directly to the system
+audio output. Playback is blocking and does not create a WAV file. For long text with
+low startup latency, use `pipeline.play_streaming(text, unit="sentence")`; it prepares
+the document globally, then generates sentence audio while one persistent bounded stream
+plays earlier sentences. Linux-like systems may also need a PortAudio system package.
+The older `pykokoro[sounddevice]` extra remains valid.
 
 ### Performance Comparison
 
@@ -351,9 +350,9 @@ with KokoroPipeline(PipelineConfig(voice="af_sarah")) as pipe:
 ```
 
 `play_streaming()` performs global document preparation first, then generates and queues
-each selected unit as playback consumes the previous one. It creates no temporary WAV and
-retains no complete generated waveform. `queue_size` is bounded pending-waveform capacity,
-not an exact startup prebuffer count.
+each selected unit as playback consumes the previous one. It creates no temporary WAV
+and retains no complete generated waveform. `queue_size` is bounded pending-waveform
+capacity, not an exact startup prebuffer count.
 
 For custom consumers or paragraph-sized chunks, use the prepared-unit API directly:
 

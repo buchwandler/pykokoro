@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 __all__ = ["SoundDevicePlayer", "play_audio", "play_prepared_units"]
 
+
 def _import_sounddevice() -> Any:
     try:
         import sounddevice as sd

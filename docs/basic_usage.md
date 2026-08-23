@@ -154,7 +154,6 @@ result = pipe.run("Hello!")
 sf.write("output.wav", result.audio, result.sample_rate)
 ```
 
-
 Install the optional playback support:
 
 ```bash
@@ -192,6 +191,7 @@ with KokoroPipeline(PipelineConfig(voice="af_bella")) as pipe:
 Preparation is still global; only audio generation and postprocessing are deferred per
 selected unit. The default bounded queue has capacity two and no temporary WAV or final
 concatenated waveform is created.
+
 ## Voice Selection
 
 Voice names follow the pattern: `{accent}_{gender}_{name}`

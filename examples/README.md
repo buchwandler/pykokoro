@@ -33,8 +33,8 @@ The maintained analysis and language demos are also import-safe and indexed here
 
 ## Paragraph and sentence long-form rendering
 
-- Use `play_streaming.py` for direct playback with the lowest startup latency. It renders
-  sentence units sequentially while one persistent stream consumes prior audio.
+- Use `play_streaming.py` for direct playback with the lowest startup latency. It
+  renders sentence units sequentially while one persistent stream consumes prior audio.
 - Use the paragraph examples when larger chunks, file export, markers, or resumable
   manifests are more important than minimum startup latency.
 - `paragraph_wave_export.py` — one WAV per paragraph with an atomic resumable manifest;

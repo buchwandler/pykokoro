@@ -31,23 +31,24 @@ This is the third paragraph, also sent directly to the audio device.
 
 def main() -> None:
     player: SoundDevicePlayer | None = None
-    with KokoroPipeline(PipelineConfig(voice="af_sarah")) as pipeline, pipeline.prepare_units(
-        TEXT, unit="paragraph"
-    ) as prepared:
-            try:
-                for result in prepared.render():
-                    try:
-                        if player is None:
-                            player = SoundDevicePlayer(result.sample_rate, queue_size=2)
-                            player.start()
-                        player.submit(result.audio)
-                    finally:
-                        result.release_audio()
-                if player is not None:
-                    player.drain()
-            finally:
-                if player is not None:
-                    player.close()
+    with (
+        KokoroPipeline(PipelineConfig(voice="af_sarah")) as pipeline,
+        pipeline.prepare_units(TEXT, unit="paragraph") as prepared,
+    ):
+        try:
+            for result in prepared.render():
+                try:
+                    if player is None:
+                        player = SoundDevicePlayer(result.sample_rate, queue_size=2)
+                        player.start()
+                    player.submit(result.audio)
+                finally:
+                    result.release_audio()
+            if player is not None:
+                player.drain()
+        finally:
+            if player is not None:
+                player.close()
 
 
 if __name__ == "__main__":

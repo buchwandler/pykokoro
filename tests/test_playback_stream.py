@@ -14,7 +14,9 @@ from pykokoro.types import AudioUnitDescriptor, AudioUnitResult
 
 
 class FakeOutputStream:
-    def __init__(self, *, fail: BaseException | None = None, block: bool = False, **kwargs: object) -> None:
+    def __init__(
+        self, *, fail: BaseException | None = None, block: bool = False, **kwargs: object
+    ) -> None:
         self.kwargs = kwargs
         self.fail = fail
         self.block = block
@@ -137,7 +139,6 @@ def test_player_validates_configuration_and_audio() -> None:
     with pytest.raises(ValueError, match="channels"):
         SoundDevicePlayer(24_000, channels=0)
 
-
     player = SoundDevicePlayer(24_000)
     with pytest.raises(RuntimeError, match="not been started"):
         player.submit(np.ones(1, dtype=np.float32))
@@ -162,7 +163,6 @@ def _audio_unit(index: int, value: float) -> AudioUnitResult:
     )
 
 
-
 def test_prepared_units_derive_stereo_channel_count(monkeypatch: pytest.MonkeyPatch) -> None:
     stream = FakeOutputStream()
     _install_backend(monkeypatch, stream)
@@ -177,7 +177,10 @@ def test_prepared_units_derive_stereo_channel_count(monkeypatch: pytest.MonkeyPa
 
     assert stream.kwargs == {"samplerate": 24_000, "channels": 2}
 
-def test_prepared_units_start_playback_before_next_generation(monkeypatch: pytest.MonkeyPatch) -> None:
+
+def test_prepared_units_start_playback_before_next_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     stream = FakeOutputStream()
     _install_backend(monkeypatch, stream)
 

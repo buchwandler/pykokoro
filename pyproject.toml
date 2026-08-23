@@ -82,7 +82,7 @@ all = [
 
 [tool.setuptools_scm]
 write_to = "pykokoro/_version.py"
-fallback_version = "0.8.3"
+fallback_version = "0.8.6"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

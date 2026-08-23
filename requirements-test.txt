@@ -9,4 +9,4 @@ tomli>=2.0.1; python_version < '3.11'
 coverage
 tox
 lingua-language-detector
-kokorog2p[all]>=0.8.0,<0.9
+kokorog2p[all]>=0.8.1,<0.9

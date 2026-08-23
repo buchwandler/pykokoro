@@ -5,10 +5,10 @@ long-form rendering.
 
 ## Unit-wise rendering
 
-`prepare_units()` prepares the complete document once, then renders selected paragraph or
-sentence units one at a time. This preserves document-global SSMD offsets, voice bindings,
-pauses, and marker ownership while bounding live generated waveform memory to the selected
-unit:
+`prepare_units()` prepares the complete document once, then renders selected paragraph
+or sentence units one at a time. This preserves document-global SSMD offsets, voice
+bindings, pauses, and marker ownership while bounding live generated waveform memory to
+the selected unit:
 
 ```python
 from pathlib import Path

@@ -189,6 +189,7 @@ class AudioResult:
 
         play_audio(self.audio, self.sample_rate, device=device)
 
+
 AudioUnitKind = Literal["paragraph", "sentence"]
 
 
