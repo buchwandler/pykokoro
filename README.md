@@ -1371,9 +1371,20 @@ are rejected for the Kokoro profile.
 
 ## Word timings
 
-Timestamp-capable Kokoro ONNX models expose model-derived word timings on the final audio result. `AudioUnitResult.word_timings` is relative to that unit's waveform, while `AudioResult.word_timings` is relative to the complete waveform. Each `WordTiming` uses integer sample offsets and clean-text character offsets; derive seconds with `start_seconds(sample_rate)` and `end_seconds(sample_rate)`. Waveform-only models return an empty list rather than fabricated estimates.
+Timestamp-capable Kokoro ONNX models expose model-derived word timings from named
+duration outputs (`pred_dur`, `pred_duration`, or `durations`).
+`AudioUnitResult.word_timings` is relative to that unit's waveform, while
+`AudioResult.word_timings` is relative to the complete waveform. Each `WordTiming` uses
+integer sample offsets into the exact final waveform and clean-text character offsets;
+derive seconds with `start_seconds(sample_rate)` and `end_seconds(sample_rate)`. Missing
+or incomplete duration output, waveform-only models, and externally replaced audio
+produce no fabricated timings. The G2P cache rebuilds schema-incompatible entries after
+upgrade, and `release_audio()` preserves timing metadata.
 
-For sentence streaming, see `examples/stream_with_word_timings.py`. Applications can copy each unit's audio, keep its timing metadata, and highlight `text[word.char_start:word.char_end]` whenever the playback sample cursor is within `[word.start_sample, word.end_sample)`.
+For sentence streaming, see `examples/stream_with_word_timings.py`. Applications can
+copy each unit's audio, keep its timing metadata, and highlight
+`document.clean_text[word.char_start:word.char_end]` whenever the playback sample cursor
+is within `[word.start_sample, word.end_sample)`.
 
 ## License
 

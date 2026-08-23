@@ -21,7 +21,7 @@ from pykokoro.short_sentence_handler import (
     RandomizedPhraseResolveMode,
     ShortSentenceConfig,
 )
-from pykokoro.types import PhonemeSegment, Trace
+from pykokoro.types import PhonemeSegment, Trace, WordTiming
 
 
 class DummyTokenizer:
@@ -1245,6 +1245,7 @@ def test_prepare_phrase_audio_falls_back_to_wrap_when_cut_is_uncertain(
     metadata = segment.ssmd_metadata[SHORT_SENTENCE_META_KEY]
     assert metadata["fallback_used"] == "wrap"
     assert metadata["cut_applied"] is True
+    assert segment.word_timings == []
     assert "falling back to wrap mode" in caplog.text
 
 
@@ -1414,3 +1415,89 @@ def test_prepare_phrase_audio_obeys_phrase_fallback_tries(
     metadata = segment.ssmd_metadata[SHORT_SENTENCE_META_KEY]
     assert metadata["fallback_used"] == "wrap"
     assert metadata["retry_attempts"] == 1
+
+
+def test_prepare_phrase_audio_replaces_stale_timings_with_cropped_retry_timings(
+    monkeypatch,
+) -> None:
+    generator = AudioGenerator(
+        session=cast(Any, DummySession()),
+        tokenizer=cast(Any, DummyTokenizer(factor=1)),
+    )
+    retry_audio = np.ones(240, dtype=np.float32)
+    retry_timings = [
+        {
+            "text": "Go",
+            "phonemes": "go",
+            "model_token_count": 1,
+            "whitespace": "",
+            "is_target": True,
+            "char_start": 0,
+            "char_end": 2,
+        }
+    ]
+
+    def fake_cut(audio: np.ndarray, metadata: dict[str, object]):
+        _ = audio
+        if metadata.get("phrase_template") != "Retry {segment}":
+            return None
+        metadata["cut_left"] = 10
+        metadata["cut_right"] = 100
+        return retry_audio[10:100]
+
+    def fake_retry(
+        segment: PhonemeSegment,
+        phrase_template: str,
+        base_metadata: dict[str, object],
+    ):
+        _ = segment, phrase_template, base_metadata
+        return short_sentence_handler.ShortSentenceApplication(
+            phonemes="retry",
+            tokens=[1],
+            metadata={
+                "kind": "phrase",
+                "phrase_template": "Retry {segment}",
+                "timing_tokens": retry_timings,
+            },
+        )
+
+    monkeypatch.setattr("pykokoro.audio_generator.cut_short_sentence_phrase_audio", fake_cut)
+    monkeypatch.setattr("pykokoro.audio_generator.build_short_sentence_phrase_retry", fake_retry)
+    monkeypatch.setattr(
+        generator,
+        "_run_onnx",
+        lambda phonemes, voice_style, speed: (
+            retry_audio,
+            np.asarray([1.0, 10.0, 1.0], dtype=np.float32),
+        ),
+    )
+
+    segment = PhonemeSegment(
+        id="seg-1",
+        segment_id="seg-1",
+        phoneme_id=0,
+        text="Go",
+        phonemes="old",
+        tokens=[9],
+        word_timings=[WordTiming("Go", 0, 2, 100, 110, "seg-1")],
+        ssmd_metadata={
+            SHORT_SENTENCE_META_KEY: {
+                "kind": "phrase",
+                "phrase_template": "Primary {segment}",
+                "phrase_fallback_templates": ["Retry {segment}"],
+                "phrase_fallback_tries": 1,
+            }
+        },
+    )
+
+    audio = generator._prepare_short_sentence_phrase_audio(
+        segment,
+        np.zeros(240, dtype=np.float32),
+        voice_style=np.zeros((16, 256), dtype=np.float32),
+        speed=1.0,
+    )
+
+    assert len(audio) == 90
+    assert len(segment.word_timings) == 1
+    assert segment.word_timings[0].start_sample == 0
+    assert segment.word_timings[0].end_sample == 90

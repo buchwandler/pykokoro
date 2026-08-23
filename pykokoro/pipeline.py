@@ -1032,11 +1032,7 @@ class KokoroPipeline:
                         **prepared.doc.metadata,
                     }
                 ),
-                word_timings=[
-                    timing
-                    for segment in generated
-                    for timing in segment.word_timings
-                ],
+                word_timings=[timing for segment in generated for timing in segment.word_timings],
             )
             if not prepared.cfg.retain_segment_audio:
                 result.release_segment_audio()
@@ -1102,7 +1098,7 @@ class KokoroPipeline:
             trace=trace if cfg.return_trace else None,
             document_metadata=metadata,
             markers=markers,
-            word_timings=word_timings
+            word_timings=word_timings,
         )
 
     def play_streaming(

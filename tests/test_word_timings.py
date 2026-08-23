@@ -12,6 +12,7 @@ from pykokoro.audio_generator import (
     _scale_word_timings,
     _translate_word_timings,
 )
+from pykokoro.constants import MAX_PHONEME_LENGTH
 from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
 from pykokoro.types import G2PAlignmentToken, PhonemeSegment, Segment, WordTiming
 
@@ -58,9 +59,7 @@ def test_timestamp_output_is_selected_by_name() -> None:
         cast(Any, _NamedTimestampSession()),
         cast(Any, _Tokenizer()),
     )
-    audio, durations = generator._run_onnx(
-        "ab", np.zeros((2, 256), dtype=np.float32), 1.0
-    )
+    audio, durations = generator._run_onnx("ab", np.zeros((2, 256), dtype=np.float32), 1.0)
     assert len(audio) == 240
     assert durations is not None
     assert durations.tolist() == [3, 1, 1, 2, 2, 2, 0]
@@ -135,9 +134,7 @@ def test_invalid_or_missing_timing_output_is_safe() -> None:
         tokens=[1],
     )
     assert generator._map_pred_dur_to_word_timings(segment, None, 100) == []
-    assert generator._map_pred_dur_to_word_timings(
-        segment, np.asarray([np.nan, 1, 1]), 100
-    ) == []
+    assert generator._map_pred_dur_to_word_timings(segment, np.asarray([np.nan, 1, 1]), 100) == []
 
 
 def test_kokorog2p_alignment_reads_token_metadata() -> None:
@@ -155,12 +152,64 @@ def test_kokorog2p_alignment_reads_token_metadata() -> None:
         meta={"phonemes": "həˈloʊ", "whitespace": ""},
     )
 
-    tokens = KokoroG2PAdapter._normalize_alignment_tokens(
-        [raw_token], segment, G2P(), "1.0"
-    )
+    tokens = KokoroG2PAdapter._normalize_alignment_tokens([raw_token], segment, G2P(), "1.0")
 
     assert len(tokens) == 1
     assert tokens[0].text == "Hello"
     assert tokens[0].phonemes == "həˈloʊ"
     assert tokens[0].char_start == 0
     assert tokens[0].char_end == 5
+
+
+def test_alignment_offsets_are_rebased_to_document_clean_text() -> None:
+    class G2P:
+        @staticmethod
+        def phonemes_to_ids(phonemes: str, *, model: str) -> list[int]:
+            _ = model
+            return list(range(len(phonemes)))
+
+    segment = Segment(id="segment-2", text="Hello", char_start=100, char_end=105)
+    raw_token = SimpleNamespace(
+        text="Hello",
+        char_start=0,
+        char_end=5,
+        meta={"phonemes": "həloʊ", "whitespace": ""},
+    )
+
+    tokens = KokoroG2PAdapter._normalize_alignment_tokens([raw_token], segment, G2P(), "1.0")
+
+    assert tokens[0].char_start == 100
+    assert tokens[0].char_end == 105
+
+
+def test_alignment_partition_counts_whitespace_model_positions_across_batches() -> None:
+    alignment = [
+        G2PAlignmentToken(
+            text="word",
+            phonemes="w",
+            whitespace=" ",
+            model_token_count=1,
+        ),
+        *[
+            G2PAlignmentToken(text="word", phonemes="w", model_token_count=1)
+            for _ in range(MAX_PHONEME_LENGTH - 1)
+        ],
+    ]
+
+    batches = KokoroG2PAdapter._partition_alignment_tokens(alignment, [MAX_PHONEME_LENGTH, 1])
+
+    assert [len(batch) for batch in batches] == [MAX_PHONEME_LENGTH - 1, 1]
+
+
+def test_strict_timestamp_join_rejects_incomplete_duration_mapping() -> None:
+    tokens = [
+        {
+            "text": "word",
+            "phonemes": "word",
+            "model_token_count": 4,
+            "whitespace": "",
+        }
+    ]
+    durations = np.asarray([1.0, 1.0, 1.0, 0.0], dtype=np.float32)
+
+    assert _join_timestamps(tokens, durations, strict=True) == []

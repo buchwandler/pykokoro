@@ -255,3 +255,7 @@
 {"data":{"kind":"added","status":"accepted"},"entry_id":"entry-0001","event":"entry.added","event_id":"event-0255","record_revisions":{"entry:0.8.6/entry-0001":1,"release:0.8.6":2},"release_version":"0.8.6","schema_version":2}
 {"data":{"kind":"added","status":"accepted"},"entry_id":"entry-0002","event":"entry.added","event_id":"event-0256","record_revisions":{"entry:0.8.6/entry-0002":1,"release:0.8.6":3},"release_version":"0.8.6","schema_version":2}
 {"data":{"kind":"docs","status":"accepted"},"entry_id":"entry-0003","event":"entry.added","event_id":"event-0257","record_revisions":{"entry:0.8.6/entry-0003":1,"release:0.8.6":4},"release_version":"0.8.6","schema_version":2}
+{"data":{"kind":"added","status":"accepted"},"entry_id":"entry-0004","event":"entry.added","event_id":"event-0258","record_revisions":{"entry:0.8.6/entry-0004":1,"release:0.8.6":5},"release_version":"0.8.6","schema_version":2}
+{"data":{"kind":"fixed","status":"accepted"},"entry_id":"entry-0005","event":"entry.added","event_id":"event-0259","record_revisions":{"entry:0.8.6/entry-0005":1,"release:0.8.6":6},"release_version":"0.8.6","schema_version":2}
+{"data":{"kind":"docs","status":"accepted"},"entry_id":"entry-0006","event":"entry.added","event_id":"event-0260","record_revisions":{"entry:0.8.6/entry-0006":1,"release:0.8.6":7},"release_version":"0.8.6","schema_version":2}
+{"data":{"released_at":"2026-08-23"},"event":"release.finalized","event_id":"event-0261","record_revisions":{"release:0.8.6":8},"release_version":"0.8.6","schema_version":2}

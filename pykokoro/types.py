@@ -82,6 +82,19 @@ class G2PAlignmentToken:
         }
 
 
+def _model_span_token_count(token: G2PAlignmentToken | dict[str, Any]) -> int | None:
+    """Return model input positions consumed by an alignment item, including whitespace."""
+    if isinstance(token, G2PAlignmentToken):
+        model_token_count = token.model_token_count
+        whitespace = token.whitespace
+    else:
+        model_token_count = token.get("model_token_count")
+        whitespace = token.get("whitespace") or ""
+    if not isinstance(model_token_count, int) or isinstance(model_token_count, bool):
+        return None
+    if model_token_count <= 0:
+        return None
+    return model_token_count + (1 if whitespace else 0)
 
 
 @dataclass
@@ -98,8 +111,6 @@ class PhonemeSegment:
     text: str
     phonemes: str
     tokens: list[int]
-    alignment_tokens: list[G2PAlignmentToken] = field(default_factory=list, repr=False)
-    word_timings: list[WordTiming] = field(default_factory=list, repr=False)
     lang: str = "en-us"
     char_start: int = 0
     char_end: int = 0
@@ -115,6 +126,12 @@ class PhonemeSegment:
     voice_variant: str | None = None
     raw_audio: np.ndarray | None = field(default=None, repr=False)
     processed_audio: np.ndarray | None = field(default=None, repr=False)
+    alignment_tokens: list[G2PAlignmentToken] = field(
+        default_factory=list, repr=False, compare=False, kw_only=True
+    )
+    word_timings: list[WordTiming] = field(
+        default_factory=list, repr=False, compare=False, kw_only=True
+    )
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -200,6 +217,7 @@ class AudioResult:
     document_metadata: dict[str, Any] = field(default_factory=dict)
     markers: list[dict[str, Any]] = field(default_factory=list)
     word_timings: list[WordTiming] = field(default_factory=list)
+
     def release_segment_audio(self) -> None:
         """Release per-segment raw and processed audio arrays.
 
@@ -274,6 +292,7 @@ class AudioUnitResult:
     trace: Trace | None = None
     document_metadata: dict[str, Any] = field(default_factory=dict)
     word_timings: list[WordTiming] = field(default_factory=list)
+
     def release_segment_audio(self) -> None:
         """Destructively release raw and processed arrays for this unit."""
         for segment in self.phoneme_segments:

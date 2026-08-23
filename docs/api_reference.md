@@ -42,19 +42,26 @@ print(result.sample_rate)
    :members:
    :undoc-members:
 ```
+
 ```{eval-rst}
 .. autoclass:: pykokoro.WordTiming
    :members:
    :undoc-members:
 ```
 
-`AudioUnitResult.word_timings` uses sample offsets relative to that unit's `audio`; `AudioResult.word_timings` uses offsets relative to the complete result waveform. `char_start` and `char_end` refer to clean-text positions. Timing lists are preserved by `release_audio()`.
-`AudioUnitKind` supports `"paragraph"` and `"sentence"`; paragraph remains the default
-for `prepare_units()` and `iter_units()`. `unit_kind` and `sentence_idx` identify the
-selected grouping on each descriptor. Preparation parses, phonemizes, and preprocesses
-the complete document once, then defers audio generation until a selected unit is
-rendered. Generated waveform memory is bounded by the selected unit size and the
-playback queue, while document metadata remains global.
+`AudioUnitResult.word_timings` uses sample offsets relative to that unit's `audio`;
+`AudioResult.word_timings` uses offsets relative to the complete result waveform.
+`char_start` and `char_end` refer to `document.clean_text`, not SSMD markup. Timings are
+derived only from named model duration outputs (`pred_dur`, `pred_duration`, or
+`durations`); waveform-only or incomplete-duration models return `[]` rather than
+estimates. The timings follow the exact final waveform after phrase fallback, trimming,
+prosody, pauses, and unit concatenation, and timing lists are preserved by
+`release_audio()`. `AudioUnitKind` supports `"paragraph"` and `"sentence"`; paragraph
+remains the default for `prepare_units()` and `iter_units()`. `unit_kind` and
+`sentence_idx` identify the selected grouping on each descriptor. Preparation parses,
+phonemizes, and preprocesses the complete document once, then defers audio generation
+until a selected unit is rendered. Generated waveform memory is bounded by the selected
+unit size and the playback queue, while document metadata remains global.
 
 ```python
 with pipe.prepare_units(script, unit="sentence") as prepared:

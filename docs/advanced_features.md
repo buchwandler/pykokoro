@@ -116,9 +116,19 @@ not require ONNX Runtime. Default audio stages require one of the provider extra
 
 ## Word timings
 
-Timestamp-capable models map Kokoro `pred_dur` output through G2P alignment and carry the result through trimming, prosody, pauses, and sentence-unit concatenation. `WordTiming.start_sample` and `end_sample` always address the final returned waveform; source character offsets address clean text, not SSMD markup.
+Timestamp-capable Kokoro ONNX models expose model-derived word timings from the named
+duration outputs `pred_dur`, `pred_duration`, or `durations`. The G2P alignment cache is
+schema-versioned; after upgrading, stale entries are rebuilt so alignment metadata is
+available. `WordTiming.start_sample` and `end_sample` address the exact final waveform
+after phrase cutting, trimming, prosody, pauses, and unit concatenation. Character
+offsets address `document.clean_text`, not source SSMD markup. If duration output is
+missing or incomplete, the public timing list is empty rather than partially fabricated.
 
-When an external SSMD audio source replaces generated TTS, timings for that segment are cleared because model timings cannot describe the replacement audio. Unsupported waveform-only models likewise return no fabricated timings. Use `examples/stream_with_word_timings.py` as a GUI-neutral integration pattern.
+When an external SSMD audio source replaces generated TTS, timings for that segment are
+cleared because model timings cannot describe the replacement audio. Unsupported
+waveform-only models likewise return no fabricated estimates. `release_audio()`
+preserves timing metadata. Use `examples/stream_with_word_timings.py` as a GUI-neutral
+integration pattern.
 
 ## spaCy policy
 

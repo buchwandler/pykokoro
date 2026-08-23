@@ -9,7 +9,7 @@ from ...constants import MAX_PHONEME_LENGTH, SUPPORTED_LANGUAGES
 from ...runtime.cache import cache_from_dir, make_g2p_key
 from ...runtime.spans import slice_boundaries, slice_spans
 from ...spacy_models import SpacyModelSize, make_spacy_model_request, spacy_selection_metadata
-from ...types import G2PAlignmentToken, PhonemeSegment
+from ...types import G2PAlignmentToken, PhonemeSegment, _model_span_token_count
 from ..protocols import DocumentResult, G2PAdapter
 
 if TYPE_CHECKING:
@@ -254,9 +254,7 @@ class KokoroG2PAdapter(G2PAdapter):
                 text = getattr(raw_token, "text", None)
                 phonemes = getattr(raw_token, "phonemes", None) or metadata.get("phonemes")
                 whitespace = (
-                    getattr(raw_token, "whitespace", None)
-                    or metadata.get("whitespace")
-                    or ""
+                    getattr(raw_token, "whitespace", None) or metadata.get("whitespace") or ""
                 )
                 raw_start = getattr(raw_token, "char_start", None)
                 raw_end = getattr(raw_token, "char_end", None)
@@ -264,13 +262,23 @@ class KokoroG2PAdapter(G2PAdapter):
                 continue
             if not isinstance(whitespace, str):
                 whitespace = str(whitespace)
-            if isinstance(raw_start, int) and isinstance(raw_end, int):
-                char_start, char_end = raw_start, raw_end
+            if (
+                isinstance(raw_start, int)
+                and not isinstance(raw_start, bool)
+                and isinstance(raw_end, int)
+                and not isinstance(raw_end, bool)
+            ):
+                if not 0 <= raw_start <= raw_end <= len(segment.text):
+                    continue
+                char_start = segment.char_start + raw_start
+                char_end = segment.char_start + raw_end
+                cursor = max(cursor, raw_end)
             else:
                 found = segment.text.find(text, cursor) if text else cursor
-                char_start = segment.char_start + (found if found >= 0 else cursor)
+                local_start = found if found >= 0 else cursor
+                char_start = segment.char_start + local_start
                 char_end = char_start + len(text)
-                cursor = max(cursor, char_end - segment.char_start)
+                cursor = max(cursor, local_start + len(text))
             try:
                 model_token_count = len(g2p.phonemes_to_ids(phonemes, model=model_version))
             except (AttributeError, TypeError, ValueError, RuntimeError):
@@ -305,12 +313,13 @@ class KokoroG2PAdapter(G2PAdapter):
             while token_index < len(alignment) and consumed < batch_count:
                 token = alignment[token_index]
                 current.append(token)
-                consumed += token.model_token_count or 0
+                consumed += _model_span_token_count(token) or 0
                 token_index += 1
             if consumed != batch_count:
                 return [[] for _ in batch_counts]
             result.append(current)
         return result if token_index == len(alignment) else [[] for _ in batch_counts]
+
     def _get_g2p_instance(self, lang: str, cfg: PipelineConfig) -> G2PBase:
         from ...tokenizer import TokenizerConfig
 
