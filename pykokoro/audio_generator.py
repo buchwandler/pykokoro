@@ -24,7 +24,7 @@ from .short_sentence_handler import (
     cut_short_sentence_phrase_audio,
 )
 from .tokenizer import Tokenizer
-from .types import PhonemeSegment
+from .types import G2PAlignmentToken, PhonemeSegment, WordTiming
 from .utils import generate_silence
 from .voice_manager import normalize_voice_style
 
@@ -243,14 +243,18 @@ class AudioGenerator:
         )
         get_outputs = getattr(session, "get_outputs", None)
         outputs = get_outputs() if callable(get_outputs) else []
+        self._timestamp_output_index: int | None = None
         try:
-            self._has_timestamp_output = len(outputs) > 1
+            for index, output in enumerate(outputs):
+                name = str(getattr(output, "name", "")).lower()
+                if name in {"pred_dur", "pred_duration", "durations"}:
+                    self._timestamp_output_index = index
+                    break
+            self._has_timestamp_output = self._timestamp_output_index is not None
         except TypeError:
             # Some lightweight test doubles expose get_outputs() as a bare Mock.
-            # Treat an unsized result as no timestamp output.
             self._has_timestamp_output = False
         self._reported_missing_timestamp_output = False
-
     def _tokenize_phonemes(self, phonemes: str) -> list[int]:
         trimmed = phonemes[:MAX_PHONEME_LENGTH]
         return self._tokenizer.tokenize(trimmed)
@@ -312,7 +316,12 @@ class AudioGenerator:
         results = self._session.run(None, inputs)
         audio = np.asarray(results[0]).T
         audio = np.squeeze(audio)
-        pred_dur = np.asarray(results[1]).squeeze() if len(results) > 1 else None
+        timestamp_index = self._timestamp_output_index
+        pred_dur = (
+            np.asarray(results[timestamp_index]).squeeze()
+            if timestamp_index is not None and timestamp_index < len(results)
+            else None
+        )
         return audio, pred_dur
 
     def generate_from_phonemes(
@@ -601,6 +610,28 @@ class AudioGenerator:
                         metadata = dict(segment.ssmd_metadata or {})
                         metadata[SHORT_SENTENCE_META_KEY] = short_sentence.metadata
                         segment = dataclasses.replace(segment, ssmd_metadata=metadata)
+                        if short_sentence.metadata.get("kind") in {
+                            "phrase",
+                            "randomized-phrase",
+                        }:
+                            # Phrase tokens describe synthetic context; use target metadata instead.
+                            segment = dataclasses.replace(segment, alignment_tokens=[])
+                        elif short_sentence.metadata.get("kind") == "wrap" and segment.alignment_tokens:
+                            pretext = effective_config.phoneme_pretext
+                            pre_count = len(self._tokenizer.tokenize(pretext))
+                            synthetic = G2PAlignmentToken(
+                                text="",
+                                phonemes=pretext,
+                                model_token_count=pre_count,
+                            )
+                            segment = dataclasses.replace(
+                                segment,
+                                alignment_tokens=[
+                                    synthetic,
+                                    *segment.alignment_tokens,
+                                    synthetic,
+                                ],
+                            )
 
             if len(tokens) > MAX_PHONEME_LENGTH:
                 batches = [
@@ -652,6 +683,9 @@ class AudioGenerator:
 
             segment_voice_style = self._resolve_segment_voice(segment, voice_style, voice_resolver)
             audio, pred_dur = self._run_onnx(segment.phonemes, segment_voice_style, speed)
+            segment.word_timings = self._map_pred_dur_to_word_timings(
+                segment, pred_dur, len(audio)
+            )
             self._log_short_sentence_timestamps(segment, pred_dur)
             segment.raw_audio = self._prepare_short_sentence_phrase_audio(
                 segment,
@@ -661,6 +695,71 @@ class AudioGenerator:
             )
 
         return segments
+
+    def _map_pred_dur_to_word_timings(
+        self, segment: PhonemeSegment, pred_dur: np.ndarray | None, audio_length: int
+    ) -> list[WordTiming]:
+        if pred_dur is None or audio_length <= 0:
+            return []
+        durations = np.asarray(pred_dur).reshape(-1)
+        if durations.size < 3 or not np.isfinite(durations).all() or np.any(durations < 0):
+            return []
+        metadata = (segment.ssmd_metadata or {}).get(SHORT_SENTENCE_META_KEY)
+        raw_tokens: list[dict[str, object]]
+        if isinstance(metadata, dict) and isinstance(metadata.get("timing_tokens"), list):
+            raw_tokens = [
+                dict(token) for token in metadata["timing_tokens"] if isinstance(token, dict)
+            ]
+            for token in raw_tokens:
+                if token.get("is_target") and isinstance(token.get("char_start"), int):
+                    token["char_start"] = segment.char_start + cast(int, token["char_start"])
+                if token.get("is_target") and isinstance(token.get("char_end"), int):
+                    token["char_end"] = segment.char_start + cast(int, token["char_end"])
+        elif segment.alignment_tokens:
+            raw_tokens = [token.to_dict() for token in segment.alignment_tokens]
+        else:
+            return []
+        timestamped = _join_timestamps(cast(list[object], raw_tokens), durations)
+        if not timestamped:
+            return []
+        grouped: dict[tuple[int, int], WordTiming] = {}
+        for token in timestamped:
+            text = str(token.get("text") or "")
+            char_start = token.get("char_start")
+            char_end = token.get("char_end")
+            start_ts = token.get("start_ts")
+            end_ts = token.get("speech_end_ts", token.get("end_ts"))
+            if (
+                not any(char.isalnum() for char in text)
+                or not isinstance(char_start, int)
+                or not isinstance(char_end, int)
+                or not isinstance(start_ts, (int, float))
+                or not isinstance(end_ts, (int, float))
+            ):
+                continue
+            start = max(0, min(audio_length, round(float(start_ts) * SAMPLE_RATE)))
+            end = max(start, min(audio_length, round(float(end_ts) * SAMPLE_RATE)))
+            if end <= start:
+                continue
+            key = (char_start, char_end)
+            current = grouped.get(key)
+            if current is None:
+                grouped[key] = WordTiming(
+                    text=text,
+                    char_start=char_start,
+                    char_end=char_end,
+                    start_sample=start,
+                    end_sample=end,
+                    segment_id=segment.id,
+                )
+            else:
+                grouped[key] = dataclasses.replace(
+                    current,
+                    start_sample=min(current.start_sample, start),
+                    end_sample=max(current.end_sample, end),
+                )
+        return sorted(grouped.values(), key=lambda item: (item.start_sample, item.end_sample))
+
 
     def _log_short_sentence_timestamps(
         self,
@@ -711,6 +810,12 @@ class AudioGenerator:
 
         cut_audio = cut_short_sentence_phrase_audio(audio, short_sentence_metadata)
         if cut_audio is not None:
+            left_cut = short_sentence_metadata.get("cut_left")
+            right_cut = short_sentence_metadata.get("cut_right")
+            if isinstance(left_cut, int) and isinstance(right_cut, int):
+                segment.word_timings = _crop_word_timings(
+                    segment.word_timings, left_cut, right_cut
+                )
             short_sentence_metadata["cut_applied"] = True
             return cut_audio
 
@@ -853,18 +958,37 @@ class AudioGenerator:
             ):
                 cut_audio = cut_short_sentence_phrase_audio(audio, short_sentence_metadata)
                 if cut_audio is not None:
+                    left_cut = short_sentence_metadata.get("cut_left")
+                    right_cut = short_sentence_metadata.get("cut_right")
+                    if isinstance(left_cut, int) and isinstance(right_cut, int):
+                        segment.word_timings = _crop_word_timings(
+                            segment.word_timings, left_cut, right_cut
+                        )
                     audio = cut_audio
             if (
                 trim_silence
                 or (segment.ssmd_metadata or {}).get("deterministic_pause_boundary") == "true"
             ):
-                audio, _ = trim_audio(audio)
-            segment.processed_audio = self._apply_segment_prosody(
+                trim_result: Any = trim_audio(audio)
+                if isinstance(trim_result, tuple) and len(trim_result) == 2:
+                    audio, trim_bounds = trim_result
+                    segment.word_timings = _crop_word_timings(
+                        segment.word_timings, int(trim_bounds[0]), int(trim_bounds[1])
+                    )
+                else:
+                    audio = trim_result
+            old_length = len(audio)
+            processed_audio = self._apply_segment_prosody(
                 audio,
                 segment,
                 prosody_config,
                 trace,
             )
+            if old_length and len(processed_audio) != old_length:
+                segment.word_timings = _scale_word_timings(
+                    segment.word_timings, old_length, len(processed_audio)
+                )
+            segment.processed_audio = processed_audio
 
         return segments
 
@@ -875,16 +999,22 @@ class AudioGenerator:
         trace: Trace | None = None,
     ) -> np.ndarray:
         audio_parts: list[np.ndarray] = []
+        cursor_samples = 0
         previous_index: int | None = None
         previous_segment: PhonemeSegment | None = None
 
         for segment in segments:
             if segment.pause_before > 0:
-                audio_parts.append(generate_silence(segment.pause_before, SAMPLE_RATE))
+                pause = generate_silence(segment.pause_before, SAMPLE_RATE)
+                audio_parts.append(pause)
+                cursor_samples += len(pause)
                 previous_index = None
                 previous_segment = None
 
             if segment.processed_audio is not None:
+                segment.word_timings = _translate_word_timings(
+                    segment.word_timings, cursor_samples
+                )
                 current = np.asarray(segment.processed_audio)
                 if (
                     previous_index is not None
@@ -913,12 +1043,15 @@ class AudioGenerator:
                 audio_parts.append(current)
                 previous_index = len(audio_parts) - 1
                 previous_segment = segment
+                cursor_samples += len(current)
             else:
                 previous_index = None
                 previous_segment = None
 
             if segment.pause_after > 0:
-                audio_parts.append(generate_silence(segment.pause_after, SAMPLE_RATE))
+                pause = generate_silence(segment.pause_after, SAMPLE_RATE)
+                audio_parts.append(pause)
+                cursor_samples += len(pause)
                 previous_index = None
                 previous_segment = None
 
@@ -1079,6 +1212,58 @@ class AudioGenerator:
         return audio, SAMPLE_RATE
 
 
+def _crop_word_timings(
+    timings: list[WordTiming], start_sample: int, end_sample: int
+) -> list[WordTiming]:
+    if end_sample <= start_sample:
+        return []
+    cropped: list[WordTiming] = []
+    for timing in timings:
+        start = max(timing.start_sample, start_sample)
+        end = min(timing.end_sample, end_sample)
+        if end <= start:
+            continue
+        cropped.append(
+            dataclasses.replace(
+                timing,
+                start_sample=start - start_sample,
+                end_sample=end - start_sample,
+            )
+        )
+    return cropped
+
+
+def _scale_word_timings(
+    timings: list[WordTiming], old_length: int, new_length: int
+) -> list[WordTiming]:
+    if old_length <= 0 or new_length <= 0:
+        return []
+    return [
+        dataclasses.replace(
+            timing,
+            start_sample=max(0, min(new_length, round(timing.start_sample * new_length / old_length))),
+            end_sample=max(0, min(new_length, round(timing.end_sample * new_length / old_length))),
+        )
+        for timing in timings
+        if timing.start_sample < timing.end_sample
+    ]
+
+
+def _translate_word_timings(
+    timings: list[WordTiming], sample_offset: int
+) -> list[WordTiming]:
+    if not sample_offset:
+        return list(timings)
+    return [
+        dataclasses.replace(
+            timing,
+            start_sample=timing.start_sample + sample_offset,
+            end_sample=timing.end_sample + sample_offset,
+        )
+        for timing in timings
+    ]
+
+
 def _join_timestamps(
     tokens: list[object],
     pred_dur: np.ndarray,
@@ -1110,7 +1295,10 @@ def _join_timestamps(
             timestamped.append(token)
             continue
 
-        j = i + len(phonemes)
+        token_count = token.get("model_token_count")
+        if not isinstance(token_count, int) or token_count <= 0:
+            token_count = len(phonemes)
+        j = i + token_count
         if j >= len(durations):
             break
 

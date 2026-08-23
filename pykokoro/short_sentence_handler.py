@@ -116,11 +116,12 @@ class ShortSentenceApplication:
 @dataclass
 class ShortSentenceTimingToken:
     """Serializable token metadata used to map timestamped model durations."""
-
     text: str
     phonemes: str
     whitespace: str
     is_target: bool = False
+    char_start: int | None = None
+    char_end: int | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -128,8 +129,9 @@ class ShortSentenceTimingToken:
             "phonemes": self.phonemes,
             "whitespace": self.whitespace,
             "is_target": self.is_target,
+            "char_start": self.char_start,
+            "char_end": self.char_end,
         }
-
 
 @dataclass
 class ShortSentenceConfig:
@@ -704,12 +706,24 @@ def _build_timing_tokens(
             segment_start=segment_start,
             segment_end=segment_end,
         )
+        source_start = (
+            max(0, char_start - segment_start)
+            if isinstance(char_start, int) and is_target
+            else None
+        )
+        source_end = (
+            max(0, char_end - segment_start)
+            if isinstance(char_end, int) and is_target
+            else None
+        )
         timing_tokens.append(
             ShortSentenceTimingToken(
                 text=text,
                 phonemes=str(phonemes),
                 whitespace=whitespace,
                 is_target=is_target,
+                char_start=source_start,
+                char_end=source_end,
             ).to_dict()
         )
     return timing_tokens

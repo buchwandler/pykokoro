@@ -21,6 +21,8 @@ def cut_with_energy_valley(
     if cut_bounds is None:
         return None
     left_cut, right_cut = cut_bounds
+    metadata["cut_left"] = left_cut
+    metadata["cut_right"] = right_cut
     return audio[left_cut:right_cut]
 
 

@@ -56,6 +56,11 @@ class OnnxAudioPostprocessingAdapter:
                     max_bytes=cfg.ssmd.audio_max_bytes,
                     max_duration_s=cfg.ssmd.audio_max_duration_s,
                 )
+                if segment.word_timings:
+                    segment.word_timings = []
+                    trace.warnings.append(
+                        "word_timing unavailable: segment audio replaced by SSMD audio source"
+                    )
             except (OSError, TypeError, ValueError, AudioSignalError) as exc:
                 trace.warnings.append(f"ssmd.audio_fallback: {exc}")
         concatenate = self._kokoro.concatenate_audio_segments

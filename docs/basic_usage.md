@@ -451,6 +451,20 @@ result = KokoroPipeline(config).run(script)
 print(result.document_metadata["title"])
 ```
 
+## Word timings
+
+Use sentence units when a GUI needs to coordinate source highlighting with streamed audio. Timing offsets are integer samples relative to `AudioUnitResult.audio`, and `char_start`/`char_end` refer to `DocumentResult.clean_text`:
+
+```python
+with pipeline.prepare_units(text, unit="sentence") as prepared:
+    for result in prepared.render():
+        for word in result.word_timings:
+            source_span = text[word.char_start:word.char_end]
+            print(source_span, word.start_sample, word.end_sample)
+        result.release_audio()
+```
+
+Waveform-only models return `word_timings == []`; PyKokoro does not silently estimate timings. See `examples/stream_with_word_timings.py` for sample-cursor highlighting.
 ## Next Steps
 
 - {doc}`advanced_features` - Voice blending, phoneme control, and more

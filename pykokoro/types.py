@@ -39,6 +39,51 @@ class Segment:
     clause_idx: int | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class WordTiming:
+    """Model-derived timing for one source-text word or spoken source span."""
+
+    text: str
+    char_start: int
+    char_end: int
+    start_sample: int
+    end_sample: int
+    segment_id: str
+    source: Literal["model_pred_dur"] = "model_pred_dur"
+
+    def start_seconds(self, sample_rate: int) -> float:
+        """Return the start offset in seconds for ``sample_rate``."""
+        return self.start_sample / sample_rate
+
+    def end_seconds(self, sample_rate: int) -> float:
+        """Return the end offset in seconds for ``sample_rate``."""
+        return self.end_sample / sample_rate
+
+
+@dataclass(frozen=True, slots=True)
+class G2PAlignmentToken:
+    """Normalized third-party G2P token metadata used for timing alignment."""
+
+    text: str
+    phonemes: str
+    whitespace: str = ""
+    char_start: int | None = None
+    char_end: int | None = None
+    model_token_count: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "text": self.text,
+            "phonemes": self.phonemes,
+            "whitespace": self.whitespace,
+            "char_start": self.char_start,
+            "char_end": self.char_end,
+            "model_token_count": self.model_token_count,
+        }
+
+
+
+
 @dataclass
 class PhonemeSegment:
     """A segment of text with its phoneme representation.
@@ -53,6 +98,8 @@ class PhonemeSegment:
     text: str
     phonemes: str
     tokens: list[int]
+    alignment_tokens: list[G2PAlignmentToken] = field(default_factory=list, repr=False)
+    word_timings: list[WordTiming] = field(default_factory=list, repr=False)
     lang: str = "en-us"
     char_start: int = 0
     char_end: int = 0
@@ -152,7 +199,7 @@ class AudioResult:
     trace: Trace | None = None
     document_metadata: dict[str, Any] = field(default_factory=dict)
     markers: list[dict[str, Any]] = field(default_factory=list)
-
+    word_timings: list[WordTiming] = field(default_factory=list)
     def release_segment_audio(self) -> None:
         """Release per-segment raw and processed audio arrays.
 
@@ -226,7 +273,7 @@ class AudioUnitResult:
     markers: list[dict[str, Any]] = field(default_factory=list)
     trace: Trace | None = None
     document_metadata: dict[str, Any] = field(default_factory=dict)
-
+    word_timings: list[WordTiming] = field(default_factory=list)
     def release_segment_audio(self) -> None:
         """Destructively release raw and processed arrays for this unit."""
         for segment in self.phoneme_segments:

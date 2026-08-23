@@ -855,7 +855,7 @@ class KokoroPipeline:
         if not phoneme_segments:
             return ()
 
-        groups_data: list[tuple[tuple[object, ...], int, int, int, int | None]] = []
+        groups_data: list[tuple[tuple[object, ...], int, int | None, int, int]] = []
         closed_keys: set[tuple[object, ...]] = set()
         current_key: tuple[object, ...] | None = None
         current_paragraph: int | None = None
@@ -863,6 +863,7 @@ class KokoroPipeline:
             paragraph = segment.paragraph_idx
             if paragraph is None:
                 paragraph = current_paragraph if current_paragraph is not None else 0
+            key: tuple[object, ...]
             if unit == "paragraph":
                 key = ("paragraph", paragraph)
                 sentence = None
@@ -1031,6 +1032,11 @@ class KokoroPipeline:
                         **prepared.doc.metadata,
                     }
                 ),
+                word_timings=[
+                    timing
+                    for segment in generated
+                    for timing in segment.word_timings
+                ],
             )
             if not prepared.cfg.retain_segment_audio:
                 result.release_segment_audio()
@@ -1050,6 +1056,7 @@ class KokoroPipeline:
             cfg = prepared._prepared.cfg if prepared._prepared is not None else self.config
             final_audio: list[Any] = []
             markers: list[dict[str, Any]] = []
+            word_timings: list[Any] = []
             retained_phonemes: list[PhonemeSegment] = []
             base_offset = 0
             for unit_result in prepared.render():
@@ -1061,6 +1068,14 @@ class KokoroPipeline:
                         "sample_offset": marker["sample_offset"] + base_offset,
                     }
                     for marker in unit_result.markers
+                )
+                word_timings.extend(
+                    replace(
+                        timing,
+                        start_sample=timing.start_sample + base_offset,
+                        end_sample=timing.end_sample + base_offset,
+                    )
+                    for timing in unit_result.word_timings
                 )
                 if cfg.retain_segment_audio:
                     retained_phonemes.extend(
@@ -1087,6 +1102,7 @@ class KokoroPipeline:
             trace=trace if cfg.return_trace else None,
             document_metadata=metadata,
             markers=markers,
+            word_timings=word_timings
         )
 
     def play_streaming(

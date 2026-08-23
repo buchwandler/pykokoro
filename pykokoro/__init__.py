@@ -49,13 +49,14 @@ def __getattr__(name: str) -> Any:
             "with_spacy_model": with_spacy_model,
             "with_spacy_model_size": with_spacy_model_size,
         }[name]
-    if name in {"AudioUnitDescriptor", "AudioUnitKind", "AudioUnitResult"}:
-        from .types import AudioUnitDescriptor, AudioUnitKind, AudioUnitResult
+    if name in {"AudioUnitDescriptor", "AudioUnitKind", "AudioUnitResult", "WordTiming"}:
+        from .types import AudioUnitDescriptor, AudioUnitKind, AudioUnitResult, WordTiming
 
         return {
             "AudioUnitDescriptor": AudioUnitDescriptor,
             "AudioUnitKind": AudioUnitKind,
             "AudioUnitResult": AudioUnitResult,
+            "WordTiming": WordTiming,
         }[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -70,6 +71,7 @@ __all__ = [
     "AudioUnitDescriptor",
     "AudioUnitKind",
     "AudioUnitResult",
+    "WordTiming",
     "PreparedAudioUnits",
     "PipelineConfig",
     "__version__",

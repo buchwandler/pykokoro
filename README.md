@@ -1369,6 +1369,12 @@ language, gender, and variant hints are preserved as metadata but do not select 
 audio annotations require an application-supplied resolver, and unsupported extensions
 are rejected for the Kokoro profile.
 
+## Word timings
+
+Timestamp-capable Kokoro ONNX models expose model-derived word timings on the final audio result. `AudioUnitResult.word_timings` is relative to that unit's waveform, while `AudioResult.word_timings` is relative to the complete waveform. Each `WordTiming` uses integer sample offsets and clean-text character offsets; derive seconds with `start_seconds(sample_rate)` and `end_seconds(sample_rate)`. Waveform-only models return an empty list rather than fabricated estimates.
+
+For sentence streaming, see `examples/stream_with_word_timings.py`. Applications can copy each unit's audio, keep its timing metadata, and highlight `text[word.char_start:word.char_end]` whenever the playback sample cursor is within `[word.start_sample, word.end_sample)`.
+
 ## License
 
 This library is licensed under the Apache License 2.0.

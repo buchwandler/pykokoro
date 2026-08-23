@@ -42,7 +42,13 @@ print(result.sample_rate)
    :members:
    :undoc-members:
 ```
+```{eval-rst}
+.. autoclass:: pykokoro.WordTiming
+   :members:
+   :undoc-members:
+```
 
+`AudioUnitResult.word_timings` uses sample offsets relative to that unit's `audio`; `AudioResult.word_timings` uses offsets relative to the complete result waveform. `char_start` and `char_end` refer to clean-text positions. Timing lists are preserved by `release_audio()`.
 `AudioUnitKind` supports `"paragraph"` and `"sentence"`; paragraph remains the default
 for `prepare_units()` and `iter_units()`. `unit_kind` and `sentence_idx` identify the
 selected grouping on each descriptor. Preparation parses, phonemizes, and preprocesses

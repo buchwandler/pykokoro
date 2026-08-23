@@ -211,8 +211,9 @@ def test_g2p_cache_schema_recomputes_and_preserves_warnings(tmp_path, monkeypatc
     assert second_trace.warnings == ["fallback"]
     cached = DiskCache(tmp_path).get(key)
     assert cached == {
-        "schema": 1,
+        "schema": 3,
         "phonemes": "həˈloʊ",
         "tokens": [1, 2],
+        "alignment_tokens": [],
         "warnings": ["fallback"],
     }

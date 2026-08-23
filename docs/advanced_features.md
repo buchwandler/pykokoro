@@ -114,6 +114,12 @@ Custom stages can be injected into `KokoroPipeline` for tests, experiments, and
 dependency-light processing. Importing the pipeline and running fully custom stages does
 not require ONNX Runtime. Default audio stages require one of the provider extras.
 
+## Word timings
+
+Timestamp-capable models map Kokoro `pred_dur` output through G2P alignment and carry the result through trimming, prosody, pauses, and sentence-unit concatenation. `WordTiming.start_sample` and `end_sample` always address the final returned waveform; source character offsets address clean text, not SSMD markup.
+
+When an external SSMD audio source replaces generated TTS, timings for that segment are cleared because model timings cannot describe the replacement audio. Unsupported waveform-only models likewise return no fabricated timings. Use `examples/stream_with_word_timings.py` as a GUI-neutral integration pattern.
+
 ## spaCy policy
 
 `TokenizerConfig(use_spacy=...)` is tri-state and local-only:

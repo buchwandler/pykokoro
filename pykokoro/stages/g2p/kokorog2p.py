@@ -9,7 +9,7 @@ from ...constants import MAX_PHONEME_LENGTH, SUPPORTED_LANGUAGES
 from ...runtime.cache import cache_from_dir, make_g2p_key
 from ...runtime.spans import slice_boundaries, slice_spans
 from ...spacy_models import SpacyModelSize, make_spacy_model_request, spacy_selection_metadata
-from ...types import PhonemeSegment
+from ...types import G2PAlignmentToken, PhonemeSegment
 from ..protocols import DocumentResult, G2PAdapter
 
 if TYPE_CHECKING:
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 
 class KokoroG2PAdapter(G2PAdapter):
-    _cache_schema = 1
+    _cache_schema = 3
 
     def __init__(self) -> None:
         self._g2p: ModuleType | None = None
@@ -101,8 +101,9 @@ class KokoroG2PAdapter(G2PAdapter):
             )
             cached = cache.get(cache_key)
             cached_payload = self._read_cache_payload(cached)
+            alignment_tokens: list[G2PAlignmentToken] = []
             if cached_payload is not None:
-                phonemes, tokens, cached_warnings = cached_payload
+                phonemes, tokens, alignment_tokens, cached_warnings = cached_payload
                 trace.warnings.extend(cached_warnings)
             else:
                 if cached is not None:
@@ -128,6 +129,9 @@ class KokoroG2PAdapter(G2PAdapter):
                         getattr(result, "phonemes", None) or getattr(result, "phoneme", "")
                     )
                     tokens = getattr(result, "ids", None) or getattr(result, "token_ids", [])
+                    alignment_tokens = self._normalize_alignment_tokens(
+                        getattr(result, "tokens", []), segment, g2p, model_version
+                    )
                     result_warnings = [str(warning) for warning in getattr(result, "warnings", [])]
                     if result_warnings:
                         trace.warnings.extend(result_warnings)
@@ -137,6 +141,7 @@ class KokoroG2PAdapter(G2PAdapter):
                         "schema": self._cache_schema,
                         "phonemes": str(phonemes),
                         "tokens": list(tokens),
+                        "alignment_tokens": [token.to_dict() for token in alignment_tokens],
                         "warnings": result_warnings,
                     },
                 )
@@ -151,6 +156,9 @@ class KokoroG2PAdapter(G2PAdapter):
                 g2p, str(phonemes), list(tokens), model_version, generation
             )
             total_batches = len(phoneme_batches)
+            batch_alignments = self._partition_alignment_tokens(
+                alignment_tokens, [len(batch_tokens) for _, batch_tokens, _ in phoneme_batches]
+            )
             for idx, (batch_phonemes, batch_tokens, batch_pause_after) in enumerate(
                 phoneme_batches, start=0
             ):
@@ -167,6 +175,7 @@ class KokoroG2PAdapter(G2PAdapter):
                         text=segment.text,
                         phonemes=str(batch_phonemes),
                         tokens=list(batch_tokens),
+                        alignment_tokens=batch_alignments[idx],
                         lang=lang,
                         char_start=segment.char_start,
                         char_end=segment.char_end,
@@ -186,22 +195,122 @@ class KokoroG2PAdapter(G2PAdapter):
         return out
 
     @classmethod
-    def _read_cache_payload(cls, cached: Any) -> tuple[str, list[int], list[str]] | None:
+    def _read_cache_payload(
+        cls, cached: Any
+    ) -> tuple[str, list[int], list[G2PAlignmentToken], list[str]] | None:
         if not isinstance(cached, dict) or cached.get("schema") != cls._cache_schema:
             return None
         phonemes = cached.get("phonemes")
         tokens = cached.get("tokens")
+        raw_alignment = cached.get("alignment_tokens")
         warnings = cached.get("warnings")
         if not isinstance(phonemes, str) or not isinstance(tokens, list):
             return None
         if not all(isinstance(token, int) and not isinstance(token, bool) for token in tokens):
             return None
-        if not isinstance(warnings, list) or not all(
-            isinstance(warning, str) for warning in warnings
-        ):
+        if not isinstance(raw_alignment, list) or not isinstance(warnings, list):
             return None
-        return phonemes, tokens, warnings
+        if not all(isinstance(warning, str) for warning in warnings):
+            return None
+        alignment: list[G2PAlignmentToken] = []
+        for item in raw_alignment:
+            if not isinstance(item, dict) or not isinstance(item.get("text"), str):
+                return None
+            phoneme_text = item.get("phonemes")
+            whitespace = item.get("whitespace", "")
+            if not isinstance(phoneme_text, str) or not isinstance(whitespace, str):
+                return None
+            alignment.append(
+                G2PAlignmentToken(
+                    text=item["text"],
+                    phonemes=phoneme_text,
+                    whitespace=whitespace,
+                    char_start=item.get("char_start"),
+                    char_end=item.get("char_end"),
+                    model_token_count=item.get("model_token_count"),
+                )
+            )
+        return phonemes, tokens, alignment, warnings
 
+    @staticmethod
+    def _normalize_alignment_tokens(
+        raw_tokens: Any, segment: Segment, g2p: Any, model_version: str
+    ) -> list[G2PAlignmentToken]:
+        if not isinstance(raw_tokens, (list, tuple)):
+            return []
+        normalized: list[G2PAlignmentToken] = []
+        cursor = 0
+        for raw_token in raw_tokens:
+            if isinstance(raw_token, dict):
+                text = raw_token.get("text")
+                phonemes = raw_token.get("phonemes")
+                whitespace = raw_token.get("whitespace") or ""
+                raw_start = raw_token.get("char_start")
+                raw_end = raw_token.get("char_end")
+            else:
+                metadata = getattr(raw_token, "meta", {})
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                text = getattr(raw_token, "text", None)
+                phonemes = getattr(raw_token, "phonemes", None) or metadata.get("phonemes")
+                whitespace = (
+                    getattr(raw_token, "whitespace", None)
+                    or metadata.get("whitespace")
+                    or ""
+                )
+                raw_start = getattr(raw_token, "char_start", None)
+                raw_end = getattr(raw_token, "char_end", None)
+            if not isinstance(text, str) or not isinstance(phonemes, str):
+                continue
+            if not isinstance(whitespace, str):
+                whitespace = str(whitespace)
+            if isinstance(raw_start, int) and isinstance(raw_end, int):
+                char_start, char_end = raw_start, raw_end
+            else:
+                found = segment.text.find(text, cursor) if text else cursor
+                char_start = segment.char_start + (found if found >= 0 else cursor)
+                char_end = char_start + len(text)
+                cursor = max(cursor, char_end - segment.char_start)
+            try:
+                model_token_count = len(g2p.phonemes_to_ids(phonemes, model=model_version))
+            except (AttributeError, TypeError, ValueError, RuntimeError):
+                model_token_count = None
+            normalized.append(
+                G2PAlignmentToken(
+                    text=text,
+                    phonemes=phonemes,
+                    whitespace=whitespace,
+                    char_start=char_start,
+                    char_end=char_end,
+                    model_token_count=model_token_count,
+                )
+            )
+        return normalized
+
+    @staticmethod
+    def _partition_alignment_tokens(
+        alignment: list[G2PAlignmentToken], batch_counts: list[int]
+    ) -> list[list[G2PAlignmentToken]]:
+        if not alignment:
+            return [[] for _ in batch_counts]
+        if len(batch_counts) == 1:
+            return [list(alignment)]
+        if any(token.model_token_count is None for token in alignment):
+            return [[] for _ in batch_counts]
+        result: list[list[G2PAlignmentToken]] = []
+        token_index = 0
+        for batch_count in batch_counts:
+            current: list[G2PAlignmentToken] = []
+            consumed = 0
+            while token_index < len(alignment) and consumed < batch_count:
+                token = alignment[token_index]
+                current.append(token)
+                consumed += token.model_token_count or 0
+                token_index += 1
+            if consumed != batch_count:
+                return [[] for _ in batch_counts]
+            result.append(current)
+        return result if token_index == len(alignment) else [[] for _ in batch_counts]
     def _get_g2p_instance(self, lang: str, cfg: PipelineConfig) -> G2PBase:
         from ...tokenizer import TokenizerConfig
 
