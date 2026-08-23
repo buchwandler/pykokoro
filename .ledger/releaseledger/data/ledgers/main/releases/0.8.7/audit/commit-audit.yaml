@@ -1,0 +1,115 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: 0.8.7
+git_base_ref: v0.8.6
+git_base_sha: 48c86c8742c4cef5c4b4e61eb752b63090d1e8c1
+git_head_ref: HEAD
+git_head_sha: 02d48e8018e2f3ad520bfed2d43c951f84c0a0d4
+git_range: 48c86c8742c4cef5c4b4e61eb752b63090d1e8c1..02d48e8018e2f3ad520bfed2d43c951f84c0a0d4
+commit_count: 2
+rows:
+- sha: 2a9768503be7bfc47ca06f7b7918958405781971
+  source_ref: git:2a9768503be7bfc47ca06f7b7918958405781971
+  short_sha: 2a97685
+  changed_paths:
+  - README.md
+  - docs/advanced_features.md
+  - docs/api_reference.md
+  - docs/basic_usage.md
+  - examples/stream_with_word_timings.py
+  - pykokoro/__init__.py
+  - pykokoro/audio_generator.py
+  - pykokoro/pipeline.py
+  - pykokoro/short_sentence_cutters/energy_valley.py
+  - pykokoro/short_sentence_handler.py
+  - pykokoro/stages/audio_postprocessing/onnx.py
+  - pykokoro/stages/g2p/kokorog2p.py
+  - pykokoro/types.py
+  - tests/test_maintainer_review4_download_cache.py
+  - tests/test_word_timings.py
+  stats:
+    files_changed: 0
+    insertions: 635
+    deletions: 26
+  inspected: true
+  inspected_paths:
+  - README.md
+  - docs/advanced_features.md
+  - docs/api_reference.md
+  - docs/basic_usage.md
+  - examples/stream_with_word_timings.py
+  - pykokoro/__init__.py
+  - pykokoro/audio_generator.py
+  - pykokoro/pipeline.py
+  - pykokoro/short_sentence_cutters/energy_valley.py
+  - pykokoro/short_sentence_handler.py
+  - pykokoro/stages/audio_postprocessing/onnx.py
+  - pykokoro/stages/g2p/kokorog2p.py
+  - pykokoro/types.py
+  - tests/test_maintainer_review4_download_cache.py
+  - tests/test_word_timings.py
+  observed_behavior: Added public model-derived WordTiming metadata, source-text alignment,
+    final-waveform sample offsets, sentence streaming example, and regression coverage
+    for timestamp mapping and unavailable outputs.
+  public_impact: public
+  decision: accepted
+  evidence_subject: 'feat: add word timings'
+  target_entry_id: entry-0001
+  notes: The feature is exposed through AudioResult and AudioUnitResult and is documented
+    for application highlighting.
+- sha: 02d48e8018e2f3ad520bfed2d43c951f84c0a0d4
+  source_ref: git:02d48e8018e2f3ad520bfed2d43c951f84c0a0d4
+  short_sha: 02d48e8
+  changed_paths:
+  - .ledger/releaseledger/data/ledgers/main/events/events.jsonl
+  - .ledger/releaseledger/data/ledgers/main/releases/0.8.6/entries/entry-0004.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.8.6/entries/entry-0005.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.8.6/entries/entry-0006.md
+  - .ledger/releaseledger/data/ledgers/main/releases/0.8.6/release.md
+  - README.md
+  - docs/advanced_features.md
+  - docs/api_reference.md
+  - docs/basic_usage.md
+  - docs/changelog.md
+  - examples/stream_with_word_timings.py
+  - pykokoro/audio_generator.py
+  - pykokoro/pipeline.py
+  - pykokoro/short_sentence_handler.py
+  - pykokoro/stages/g2p/kokorog2p.py
+  - pykokoro/types.py
+  - tests/test_audio_splitting.py
+  - tests/test_public_api_compatibility.py
+  - tests/test_word_timings.py
+  stats:
+    files_changed: 0
+    insertions: 605
+    deletions: 96
+  inspected: true
+  inspected_paths:
+  - README.md
+  - docs/advanced_features.md
+  - docs/api_reference.md
+  - docs/basic_usage.md
+  - examples/stream_with_word_timings.py
+  - pykokoro/audio_generator.py
+  - pykokoro/pipeline.py
+  - pykokoro/short_sentence_handler.py
+  - pykokoro/stages/audio_postprocessing/onnx.py
+  - pykokoro/stages/g2p/kokorog2p.py
+  - pykokoro/types.py
+  - tests/test_audio_splitting.py
+  - tests/test_public_api_compatibility.py
+  - tests/test_word_timings.py
+  observed_behavior: Hardened timestamp mapping to named duration outputs and complete
+    mappings, preserved timing metadata through phrase cuts, trimming, prosody, pauses,
+    and unit concatenation, cleared unsupported or externally replaced audio timings,
+    and added compatibility regressions.
+  public_impact: public
+  decision: accepted
+  evidence_subject: 'feat: api for timestamps improved'
+  target_entry_id: entry-0002
+  notes: The commit also updates existing releaseledger records; those bookkeeping
+    changes are not release-note behavior for 0.8.7.
