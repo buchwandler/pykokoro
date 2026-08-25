@@ -20,7 +20,30 @@ from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
 from pykokoro.stages.phoneme_processing.noop import NoopPhonemeProcessorAdapter
 from pykokoro.stages.protocols import DocumentResult
 from pykokoro.tokenizer import TokenizerConfig
-from pykokoro.types import Segment, Trace
+from pykokoro.types import BoundaryEvent, Segment, Trace
+
+
+def _detailed_result(
+    text: str,
+    *,
+    selected_model: str | None = None,
+    selected_size: str | None = None,
+    backend: str | None = None,
+) -> SimpleNamespace:
+    segment = SimpleNamespace(
+        text=text,
+        start=0,
+        end=len(text),
+        paragraph=0,
+        sentence=0,
+        clause=None,
+    )
+    diagnostics = SimpleNamespace(
+        selected_model=selected_model,
+        selected_model_size=selected_size,
+        backend=backend or ("spacy" if selected_model else "regex"),
+    )
+    return SimpleNamespace(segments=[segment], diagnostics=diagnostics)
 
 
 def test_default_request_is_highest_available_and_auto_is_unset():
@@ -44,20 +67,21 @@ def test_explicit_model_wins_over_size_in_request():
     assert request.mode == "explicit"
 
 
-def test_plain_parser_forwards_unset_request_and_records_selected_model(monkeypatch):
+def test_plain_parser_uses_split_diagnostics_without_preflight_resolution(monkeypatch):
     captured: dict[str, object] = {}
+    calls = {"resolve": 0}
 
-    def fake_resolve(**kwargs: object) -> SimpleNamespace:
-        captured["resolve"] = kwargs
-        return SimpleNamespace(selected_model="en_core_web_lg", model_size="lg")
+    def forbidden_resolve(**_kwargs: object) -> None:
+        calls["resolve"] += 1
+        raise AssertionError("plain parser must not pre-resolve PhraseSplit")
 
-    def fake_split(text: str, **kwargs: object) -> list[SimpleNamespace]:
+    def fake_split(text: str, **kwargs: object) -> SimpleNamespace:
         captured["split"] = kwargs
-        return [SimpleNamespace(text=text, start=0, end=len(text), paragraph=0, sentence=0)]
+        return _detailed_result(text, selected_model="en_core_web_lg", selected_size="lg")
 
     fake_phrasplit = SimpleNamespace(
-        resolve_spacy_model=fake_resolve,
-        split_with_offsets=fake_split,
+        resolve_spacy_model=forbidden_resolve,
+        split_with_offsets_with_diagnostics=fake_split,
     )
     monkeypatch.setattr(
         "pykokoro.stages.doc_parsers.plain.importlib.import_module",
@@ -67,6 +91,7 @@ def test_plain_parser_forwards_unset_request_and_records_selected_model(monkeypa
     doc = DocumentResult(clean_text="Hello.")
     segments = PhrasplitSentenceSplitter().split(doc, PipelineConfigType(), Trace())
 
+    assert calls["resolve"] == 0
     assert captured["split"] == {
         "mode": "sentence",
         "language_model": None,
@@ -82,15 +107,13 @@ def test_plain_parser_forwards_unset_request_and_records_selected_model(monkeypa
 def test_plain_parser_forwards_exact_model_and_size(monkeypatch):
     captured: dict[str, object] = {}
 
-    def fake_split(text: str, **kwargs: object) -> list[SimpleNamespace]:
+    def fake_split(text: str, **kwargs: object) -> SimpleNamespace:
         captured.update(kwargs)
-        return [SimpleNamespace(text=text, start=0, end=len(text), paragraph=0, sentence=0)]
+        return _detailed_result(text, selected_model="en_core_web_sm", selected_size="sm")
 
     fake_phrasplit = SimpleNamespace(
-        resolve_spacy_model=lambda **_kwargs: SimpleNamespace(
-            selected_model="en_core_web_sm", model_size="sm"
-        ),
-        split_with_offsets=fake_split,
+        resolve_spacy_model=lambda **_kwargs: pytest.fail("unexpected resolver call"),
+        split_with_offsets_with_diagnostics=fake_split,
     )
     monkeypatch.setattr(
         "pykokoro.stages.doc_parsers.plain.importlib.import_module",
@@ -110,15 +133,12 @@ def test_plain_parser_forwards_exact_model_and_size(monkeypatch):
 
 
 def test_plain_parser_keeps_explicit_spacy_requests_strict(monkeypatch):
-    calls: list[dict[str, object]] = []
-
-    def fake_resolve(**kwargs: object) -> SimpleNamespace:
-        calls.append(kwargs)
+    def fake_split(_text: str, **_kwargs: object) -> SimpleNamespace:
         raise RuntimeError("model unavailable")
 
     fake_phrasplit = SimpleNamespace(
-        resolve_spacy_model=fake_resolve,
-        split_with_offsets=lambda *_args, **_kwargs: [],
+        resolve_spacy_model=lambda **_kwargs: pytest.fail("unexpected resolver call"),
+        split_with_offsets_with_diagnostics=fake_split,
     )
     monkeypatch.setattr(
         "pykokoro.stages.doc_parsers.plain.importlib.import_module",
@@ -130,32 +150,63 @@ def test_plain_parser_keeps_explicit_spacy_requests_strict(monkeypatch):
 
     with pytest.raises(RuntimeError, match="model unavailable"):
         PhrasplitSentenceSplitter().split(DocumentResult(clean_text="Hello."), cfg, Trace())
-    assert calls[0]["require"] is True
 
 
 def test_plain_parser_auto_spacy_falls_back_without_a_local_model(monkeypatch):
-    calls: list[dict[str, object]] = []
-
-    def fake_resolve(**kwargs: object) -> SimpleNamespace:
-        calls.append(kwargs)
-        raise RuntimeError("no model installed")
+    def fake_split(text: str, **_kwargs: object) -> SimpleNamespace:
+        return _detailed_result(text, backend="regex")
 
     fake_phrasplit = SimpleNamespace(
-        resolve_spacy_model=fake_resolve,
-        split_with_offsets=lambda text, **_kwargs: [
-            SimpleNamespace(text=text, start=0, end=len(text), paragraph=0, sentence=0)
-        ],
+        resolve_spacy_model=lambda **_kwargs: pytest.fail("unexpected resolver call"),
+        split_with_offsets_with_diagnostics=fake_split,
     )
     monkeypatch.setattr(
         "pykokoro.stages.doc_parsers.plain.importlib.import_module",
         lambda _name: fake_phrasplit,
     )
 
-    segments = PhrasplitSentenceSplitter().split(
-        DocumentResult(clean_text="Hello."), PipelineConfigType(), Trace()
-    )
+    doc = DocumentResult(clean_text="Hello.")
+    segments = PhrasplitSentenceSplitter().split(doc, PipelineConfigType(), Trace())
+
     assert segments[0].text == "Hello."
-    assert calls[0]["require"] is False
+    assert doc.metadata["spacy_models"]["sentence"]["selected_model"] is None
+
+
+def test_plain_parser_uses_no_preflight_for_multiple_hard_ranges(monkeypatch):
+    calls = {"resolve": 0, "split": 0}
+
+    def forbidden_resolve(**_kwargs: object) -> None:
+        calls["resolve"] += 1
+        raise AssertionError("plain parser must not pre-resolve PhraseSplit")
+
+    def fake_split(text: str, **_kwargs: object) -> SimpleNamespace:
+        calls["split"] += 1
+        return _detailed_result(text, backend="regex")
+
+    fake_phrasplit = SimpleNamespace(
+        resolve_spacy_model=forbidden_resolve,
+        split_with_offsets_with_diagnostics=fake_split,
+    )
+    monkeypatch.setattr(
+        "pykokoro.stages.doc_parsers.plain.importlib.import_module",
+        lambda _name: fake_phrasplit,
+    )
+    doc = DocumentResult(
+        clean_text="First range. Second range.",
+        boundary_events=[
+            BoundaryEvent(
+                pos=11,
+                kind="pause",
+                duration_s=None,
+                attrs={"strength": "p"},
+            )
+        ],
+    )
+
+    segments = PhrasplitSentenceSplitter().split(doc, PipelineConfigType(), Trace())
+
+    assert calls == {"resolve": 0, "split": 2}
+    assert [segment.text for segment in segments] == ["First range.", " Second range."]
 
 
 def test_ssmd_wrapper_preserves_exact_forwarding(monkeypatch):

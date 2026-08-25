@@ -5,6 +5,7 @@ from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline_config import PipelineConfig
 from pykokoro.stages.doc_parsers.plain import PhrasplitSentenceSplitter
 from pykokoro.stages.protocols import DocumentResult
+from pykokoro.tokenizer import TokenizerConfig
 from pykokoro.types import Trace
 
 
@@ -83,6 +84,35 @@ def test_phrasplit_splitter_repair_non_whitespace_gap():
 
     assert segments[1].text.startswith("People")
     assert segments[1].char_start == text.index("People")
+
+
+def test_real_phrasplit_detailed_offsets_are_exact_slices() -> None:
+    import phrasplit
+
+    text = "First sentence. Second sentence."
+    detailed = phrasplit.split_with_offsets_with_diagnostics(
+        text,
+        mode="sentence",
+        use_spacy=False,
+        language="en",
+    )
+    assert detailed.diagnostics.backend == "regex"
+    for segment in detailed.segments:
+        assert segment.text == text[segment.char_start : segment.char_end]
+
+    doc = DocumentResult(clean_text=text)
+    segments = PhrasplitSentenceSplitter().split(
+        doc,
+        PipelineConfig(
+            generation=GenerationConfig(lang="en-us"),
+            tokenizer_config=TokenizerConfig(use_spacy=False),
+        ),
+        Trace(),
+    )
+
+    for segment in segments:
+        assert segment.text == text[segment.char_start : segment.char_end]
+    assert doc.metadata["spacy_models"]["sentence"]["selected_model"] is None
 
 
 class patch_sys_modules:

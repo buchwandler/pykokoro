@@ -264,3 +264,6 @@
 {"data":{"row_count":2},"event":"audit.created","event_id":"event-0264","record_revisions":{"commit_audit_sheet":1},"release_version":"0.8.7","schema_version":2}
 {"data":{"updated_rows":2},"event":"audit.updated","event_id":"event-0265","record_revisions":{"commit_audit_sheet":2},"release_version":"0.8.7","schema_version":2}
 {"data":{"entry_ids":["entry-0001","entry-0002"],"synced_audit_rows":2},"event":"entry.batch_added","event_id":"event-0266","record_revisions":{"commit_audit_sheet":3,"entry:0.8.7/entry-0001":1,"entry:0.8.7/entry-0002":1,"release:0.8.7":3},"release_version":"0.8.7","schema_version":2}
+{"data":{"kind":"changed","status":"accepted"},"entry_id":"entry-0003","event":"entry.added","event_id":"event-0267","record_revisions":{"entry:0.8.7/entry-0003":1,"release:0.8.7":4},"release_version":"0.8.7","schema_version":2}
+{"data":{"kind":"changed","status":"accepted"},"entry_id":"entry-0004","event":"entry.added","event_id":"event-0268","record_revisions":{"entry:0.8.7/entry-0004":1,"release:0.8.7":5},"release_version":"0.8.7","schema_version":2}
+{"data":{"kind":"quality","status":"accepted"},"entry_id":"entry-0005","event":"entry.added","event_id":"event-0269","record_revisions":{"entry:0.8.7/entry-0005":1,"release:0.8.7":6},"release_version":"0.8.7","schema_version":2}

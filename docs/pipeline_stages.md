@@ -176,12 +176,14 @@ annotations override individual fields.
 
 ### Plain text sentence splitting
 
-`PlainTextDocumentParser` uses the optional `phrasplit` package for sentence splitting.
-When `phrasplit` is unavailable, it falls back to a single segment. The language model
-is derived from `generation.lang` using spaCy package naming rules (for example
-`en_core_web_sm` for English).
-
-Split boundaries are forced at SSMD pause boundaries and at spans that contain phoneme
+`PlainTextDocumentParser` uses PhraseSplit 0.3.6's offset-preserving detailed split API
+for sentence splitting. The returned diagnostics come from the same operation that
+produced the segments, so sentence-model metadata does not require a separate
+model-resolution pass. When `phrasplit` is unavailable, it falls back to a single
+segment. PhraseSplit may resolve once per hard range; PyKokoro does not claim one
+resolution for the whole document. The language model is derived from `generation.lang`
+using spaCy package naming rules (for example `en_core_web_sm` for English). Split
+boundaries are forced at SSMD pause boundaries and at spans that contain phoneme
 overrides so those overrides are kept intact. Set `PYKOKORO_DEBUG_SEGMENTS=1` to log
 segment offsets.
 

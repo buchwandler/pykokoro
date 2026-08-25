@@ -23,14 +23,14 @@ authors = [
 keywords = ["tts", "text-to-speech", "kokoro", "phonemizer", "espeak"]
 dependencies = [
     "kokorog2p[espeak,en]>=0.8.1,<0.9",
-    "phrasplit>=0.3.4,<0.4",
+    "phrasplit>=0.3.6,<0.4",
     "numpy",
     "audiosig>=0.1.1,<0.2",
     "platformdirs",
     "chardet",
     "charset-normalizer",
     "huggingface-hub",
-    "ssmd>=0.8.2,<0.9",
+    "ssmd>=0.8.4,<0.9",
     "num2words>=0.5.12",
     "babel>=2.12.0",
     "soundfile",

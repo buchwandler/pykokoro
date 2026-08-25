@@ -20,13 +20,13 @@ def test_license_and_release_fallback_version_are_present() -> None:
     assert pyproject["tool"]["setuptools_scm"]["fallback_version"] == "0.8.6"
 
 
-def test_companion_dependency_floors_match_the_080_spokenform_contract() -> None:
+def test_companion_dependency_floors_match_current_integration_contract() -> None:
     dependencies = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
         "dependencies"
     ]
 
     assert "kokorog2p[espeak,en]>=0.8.1,<0.9" in dependencies
-    assert "phrasplit>=0.3.4,<0.4" in dependencies
+    assert "phrasplit>=0.3.6,<0.4" in dependencies
 
 
 def test_test_requirements_keep_kokorog2p_in_supported_window() -> None:
@@ -55,11 +55,11 @@ def test_provider_extras_do_not_install_every_runtime_distribution() -> None:
     }
 
 
-def test_ssmd_dependency_targets_08_contract() -> None:
+def test_ssmd_dependency_targets_current_contract() -> None:
     dependencies = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
         "dependencies"
     ]
-    assert "ssmd>=0.8.2,<0.9" in dependencies
+    assert "ssmd>=0.8.4,<0.9" in dependencies
 
 
 def test_audiosig_is_the_only_declared_dsp_backend() -> None:

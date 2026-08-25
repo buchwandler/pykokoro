@@ -118,6 +118,16 @@ class PhrasplitSentenceSplitter:
         try:
             phrasplit = importlib.import_module("phrasplit")
         except ImportError:
+            spacy_models = doc.metadata.setdefault("spacy_models", {})
+            if not isinstance(spacy_models, dict):
+                spacy_models = {}
+                doc.metadata["spacy_models"] = spacy_models
+            spacy_models["sentence"] = spacy_selection_metadata(
+                language=language,
+                request=request,
+                selected_model=None,
+                selected_size=None,
+            )
             if not text:
                 return []
             return [
@@ -132,39 +142,7 @@ class PhrasplitSentenceSplitter:
                 )
             ]
 
-        sentence_model: str | None = None
-        sentence_size: SpacyModelSize | None = None
-        resolver = getattr(phrasplit, "resolve_spacy_model", None)
-        strict_request = tokenizer_config.use_spacy is True or request.mode != "highest_available"
-        if tokenizer_config.use_spacy is not False and resolver is not None:
-            try:
-                resolution = resolver(
-                    language=language,
-                    model=request.model,
-                    size=request.size,
-                    require=strict_request,
-                )
-                sentence_model = getattr(resolution, "selected_model", None)
-                size = getattr(resolution, "model_size", None)
-                if size in {"sm", "md", "lg", "trf"}:
-                    sentence_size = cast(SpacyModelSize, size)
-            except Exception:
-                if strict_request:
-                    raise
-                # The splitter remains the source of truth for runtime errors;
-                # diagnostics must not turn a successful fallback into a warning.
-                pass
-        spacy_models = doc.metadata.setdefault("spacy_models", {})
-        if not isinstance(spacy_models, dict):
-            spacy_models = {}
-            doc.metadata["spacy_models"] = spacy_models
-        spacy_models["sentence"] = spacy_selection_metadata(
-            language=language,
-            request=request,
-            selected_model=sentence_model,
-            selected_size=sentence_size,
-        )
-
+        sentence_diagnostics: Any | None = None
         override_ranges = self._override_ranges(doc.annotation_spans)
         ranges = self._hard_ranges(text, doc.boundary_events, override_ranges)
         paragraph_breaks = sorted(
@@ -186,6 +164,7 @@ class PhrasplitSentenceSplitter:
             if (start, end) in override_ranges:
                 split_items = [(chunk, 0, len(chunk), None, None, None)]
             else:
+                diagnostics_sink: list[Any] = []
                 try:
                     split_items = self._split_with_offsets(
                         phrasplit,
@@ -194,6 +173,7 @@ class PhrasplitSentenceSplitter:
                         use_spacy=cast(bool, tokenizer_config.use_spacy),
                         language=language,
                         model_size=request.size,
+                        diagnostics_sink=diagnostics_sink,
                     )
                 except TypeError as exc:
                     # Keep third-party/custom splitter subclasses that implement
@@ -201,6 +181,8 @@ class PhrasplitSentenceSplitter:
                     if "unexpected keyword argument" not in str(exc):
                         raise
                     split_items = self._split_with_offsets(phrasplit, chunk, request.model)
+                if diagnostics_sink and sentence_diagnostics is None:
+                    sentence_diagnostics = diagnostics_sink[-1]
                 if not split_items:
                     split_items = [(chunk, 0, len(chunk), None, None, None)]
                 if language == "de":
@@ -298,6 +280,22 @@ class PhrasplitSentenceSplitter:
                 )
                 seg_idx += 1
                 cursor = max(cursor, seg_end)
+
+        selected_model = getattr(sentence_diagnostics, "selected_model", None)
+        selected_size = getattr(sentence_diagnostics, "selected_model_size", None)
+        sentence_size: SpacyModelSize | None = None
+        if selected_size in {"sm", "md", "lg", "trf"}:
+            sentence_size = cast(SpacyModelSize, selected_size)
+        spacy_models = doc.metadata.setdefault("spacy_models", {})
+        if not isinstance(spacy_models, dict):
+            spacy_models = {}
+            doc.metadata["spacy_models"] = spacy_models
+        spacy_models["sentence"] = spacy_selection_metadata(
+            language=language,
+            request=request,
+            selected_model=selected_model,
+            selected_size=sentence_size,
+        )
 
         if not segments and text:
             segments.append(
@@ -421,6 +419,7 @@ class PhrasplitSentenceSplitter:
         use_spacy: bool = True,
         language: str = "en",
         model_size: str | None = None,
+        diagnostics_sink: list[Any] | None = None,
     ) -> list[SplitItem]:
         kwargs: dict[str, object] = {
             "mode": "sentence",
@@ -431,10 +430,29 @@ class PhrasplitSentenceSplitter:
             "apply_corrections": True,
         }
 
-        if hasattr(phrasplit_module, "split_with_offsets"):
+        if hasattr(phrasplit_module, "split_with_offsets_with_diagnostics"):
+            result = phrasplit_module.split_with_offsets_with_diagnostics(text, **kwargs)
+            if diagnostics_sink is not None:
+                diagnostics_sink.append(getattr(result, "diagnostics", None))
+            segments = getattr(result, "segments", [])
+        elif hasattr(phrasplit_module, "split_with_offsets"):
             try:
                 segments = phrasplit_module.split_with_offsets(text, **kwargs)
-            except (OSError, TypeError):
+            except TypeError as exc:
+                if "unexpected keyword argument" not in str(exc):
+                    raise
+                try:
+                    segments = phrasplit_module.split_with_offsets(
+                        text,
+                        mode="sentence",
+                        language_model=language_model,
+                        language=language,
+                        model_size=model_size,
+                        use_spacy=use_spacy,
+                    )
+                except OSError:
+                    return []
+            except OSError:
                 try:
                     segments = phrasplit_module.split_with_offsets(
                         text,
@@ -449,7 +467,23 @@ class PhrasplitSentenceSplitter:
         elif hasattr(phrasplit_module, "iter_split_with_offsets"):
             try:
                 segments = list(phrasplit_module.iter_split_with_offsets(text, **kwargs))
-            except (OSError, TypeError):
+            except TypeError as exc:
+                if "unexpected keyword argument" not in str(exc):
+                    raise
+                try:
+                    segments = list(
+                        phrasplit_module.iter_split_with_offsets(
+                            text,
+                            mode="sentence",
+                            language_model=language_model,
+                            language=language,
+                            model_size=model_size,
+                            use_spacy=use_spacy,
+                        )
+                    )
+                except OSError:
+                    return []
+            except OSError:
                 try:
                     segments = list(
                         phrasplit_module.iter_split_with_offsets(
