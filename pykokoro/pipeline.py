@@ -649,7 +649,9 @@ class KokoroPipeline:
         model_path = str(cfg.model_path) if cfg.model_path else None
         voices_path = str(cfg.voices_path) if cfg.voices_path else None
         model_config_path = str(cfg.model_config_path) if cfg.model_config_path else None
-        release_manifest_path = str(cfg.release_manifest_path) if cfg.release_manifest_path else None
+        release_manifest_path = (
+            str(cfg.release_manifest_path) if cfg.release_manifest_path else None
+        )
         return (
             model_path,
             voices_path,

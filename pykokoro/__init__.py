@@ -16,6 +16,18 @@ except ImportError:
 
 
 def __getattr__(name: str) -> Any:
+    if name in {"available_model_releases", "resolve_model_release", "download_model_release"}:
+        from .release_catalog import (
+            available_model_releases,
+            download_model_release,
+            resolve_model_release,
+        )
+
+        return {
+            "available_model_releases": available_model_releases,
+            "resolve_model_release": resolve_model_release,
+            "download_model_release": download_model_release,
+        }[name]
     if name == "PipelineConfig":
         from .pipeline_config import PipelineConfig
 
@@ -62,6 +74,9 @@ def __getattr__(name: str) -> Any:
 
 
 __all__ = [
+    "available_model_releases",
+    "download_model_release",
+    "resolve_model_release",
     "GenerationConfig",
     "ProsodyConfig",
     "ProsodyMethod",

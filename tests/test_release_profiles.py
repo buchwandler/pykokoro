@@ -5,16 +5,16 @@ from pykokoro.model_profiles import get_model_profile
 from pykokoro.pipeline_config import PipelineConfig, resolve_model_defaults
 
 
-def test_new_release_profiles_are_first_class():
+def test_runtime_profiles_do_not_duplicate_published_inventory():
     for variant in ("vi-contextbox", "vi-anphunl", "ar-nabra", "de-crane", "he-hebrew-nc"):
         profile = get_model_profile(variant, "github")
-        assert profile.release_repository == "buchwandler/kokoro-onnx-models"
-        assert profile.voice_names
+        assert profile.quality_files == {}
+        assert profile.voice_names == ()
         assert profile.onnx_inputs["speed"] == "float32"
         assert profile.frontend_experimental is (variant != "ar-nabra")
     nabra = get_model_profile("ar-nabra", "github")
     assert nabra.vocabulary_source == "downloaded-release"
-    assert nabra.vocabulary_filename == "vocab-arabic-nabra-v0.1.json"
+    assert not hasattr(nabra, "vocabulary_filename")
     assert nabra.onnx_inputs == {
         "input_ids": "int64",
         "ref_s": "float32",
@@ -22,8 +22,9 @@ def test_new_release_profiles_are_first_class():
     }
     assert nabra.max_tokens == 510
 
-def test_hebrew_release_is_disabled():
-    assert get_model_profile("he-hebrew-nc", "github").publication_enabled is False
+
+def test_publication_policy_is_remote_manifest_metadata():
+    assert not hasattr(get_model_profile("he-hebrew-nc", "github"), "publication_enabled")
 
 
 def test_release_manifest_resolves_explicit_assets(tmp_path):
@@ -32,9 +33,9 @@ def test_release_manifest_resolves_explicit_assets(tmp_path):
         json.dumps(
             {
                 "assets": [
-                    {"name": "model.onnx"},
+                    {"name": "model.onnx", "role": "model", "quality": "fp32"},
                     {"name": "voices.npz", "role": "voices", "format": "numpy-npz"},
-                    {"name": "config.json"},
+                    {"name": "config.json", "role": "config", "format": "json"},
                 ]
             }
         ),

@@ -23,21 +23,11 @@ class FrontendFixture:
 
 
 FRONTEND_FIXTURES: dict[ModelVariant, FrontendFixture] = {
-    "vi-contextbox": FrontendFixture(
-        "vi-contextbox", "vi", "Xin chào", "espeak", "sˈi1n tʃˈaː2w"
-    ),
-    "vi-anphunl": FrontendFixture(
-        "vi-anphunl", "vi", "Xin chào", "espeak", "sˈi1n tʃˈaː2w"
-    ),
-    "ar-nabra": FrontendFixture(
-        "ar-nabra", "ar", "مَرْحَبًا", "espeak", "mˈarħabˌan"
-    ),
-    "de-crane": FrontendFixture(
-        "de-crane", "de", "Hallo", "espeak", "hˈaloː"
-    ),
-    "he-hebrew-nc": FrontendFixture(
-        "he-hebrew-nc", "he", "שלום", "espeak", "ʃalˈom"
-    ),
+    "vi-contextbox": FrontendFixture("vi-contextbox", "vi", "Xin chào", "espeak", "sˈi1n tʃˈaː2w"),
+    "vi-anphunl": FrontendFixture("vi-anphunl", "vi", "Xin chào", "espeak", "sˈi1n tʃˈaː2w"),
+    "ar-nabra": FrontendFixture("ar-nabra", "ar", "مَرْحَبًا", "espeak", "mˈarħabˌan"),
+    "de-crane": FrontendFixture("de-crane", "de", "Hallo", "espeak", "hˈaloː"),
+    "he-hebrew-nc": FrontendFixture("he-hebrew-nc", "he", "שלום", "espeak", "ʃalˈom"),
 }
 
 

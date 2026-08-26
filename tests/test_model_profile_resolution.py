@@ -8,18 +8,14 @@ from pykokoro.pipeline import KokoroPipeline
 from pykokoro.pipeline_config import PipelineConfig, resolve_model_defaults
 
 
-def test_martin_profile_metadata_is_pinned():
+def test_martin_profile_contains_runtime_metadata_only():
     profile = get_model_profile("v1.2-de-martin", "github")
     assert profile == GERMAN_MARTIN_V1_2
-    assert profile.release_tag == "model-files-german-martin-v1.2"
-    assert profile.release_revision is None
-    assert profile.model_sha256 is not None
-    assert (
-        profile.voices_sha256 == "5b9c8553398d7abf67498ce500c186cefaa7b68fed3e3d415da5380670105acd"
-    )
-    assert profile.model_sizes == {"kokoro-german-martin-v1.2.onnx": 325_512_630}
-    assert profile.voices_size == 522_506
-    assert profile.suggested_speed == 1.125
+    assert profile.frontend == "german-ipa-v1"
+    assert profile.default_voice == "martin"
+    assert profile.quality_files == {}
+    assert not hasattr(profile, "release_tag")
+    assert not hasattr(profile, "model_sha256")
 
 
 @pytest.mark.parametrize("lang", ["de", "de-DE", "de_at", "de-ch"])
@@ -32,17 +28,15 @@ def test_german_defaults_resolve_to_martin(lang):
     assert resolved.generation.lang == lang.lower().replace("_", "-")
 
 
-
-
-def test_incompatible_explicit_martin_voice_is_rejected():
-    with pytest.raises(ValueError, match="Voice 'df_eva'.*martin"):
-        resolve_model_defaults(
-            PipelineConfig(
-                voice="df_eva",
-                model_variant="v1.2-de-martin",
-                generation=GenerationConfig(lang="de"),
-            )
+def test_explicit_voice_validation_is_deferred_to_release_metadata():
+    resolved = resolve_model_defaults(
+        PipelineConfig(
+            voice="df_eva",
+            model_variant="v1.2-de-martin",
+            generation=GenerationConfig(lang="de"),
         )
+    )
+    assert resolved.voice == "df_eva"
 
 
 def test_martin_voice_alone_infers_german_profile():

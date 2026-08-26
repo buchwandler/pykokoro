@@ -327,6 +327,7 @@ class KokoroG2PAdapter(G2PAdapter):
         kokorog2p_lang = SUPPORTED_LANGUAGES.get(lang, lang)
         from ...frontend_contracts import require_frontend
         from ...model_profiles import get_model_profile
+
         profile = (
             get_model_profile(cfg.model_variant, cfg.model_source)
             if cfg.model_variant and cfg.model_source
@@ -335,9 +336,7 @@ class KokoroG2PAdapter(G2PAdapter):
         model_version = self._get_model_version(cfg)
         version = "1.0" if model_version == "nabra-82m-v0.1" else model_version
         if profile is not None:
-            require_frontend(
-                profile.variant, allow_experimental=cfg.allow_experimental_frontend
-            )
+            require_frontend(profile.variant, allow_experimental=cfg.allow_experimental_frontend)
         request = make_spacy_model_request(
             model=tokenizer_config.spacy_model,
             size=tokenizer_config.spacy_model_size,

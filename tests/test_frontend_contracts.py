@@ -7,10 +7,10 @@ from pykokoro.model_profiles import get_model_profile
 @pytest.mark.parametrize(
     ("variant", "frontend"),
     [
-        ("vi-contextbox", "vig2p"),
-        ("vi-anphunl", "vig2p"),
-        ("de-crane", "German IPA"),
-        ("he-hebrew-nc", "Hebrew-specific G2P"),
+        ("vi-contextbox", "vig2p-v1"),
+        ("vi-anphunl", "vig2p-v1"),
+        ("de-crane", "german-ipa-v1"),
+        ("he-hebrew-nc", "hebrew-g2p-v1"),
     ],
 )
 def test_experimental_frontend_contracts_are_explicit(variant, frontend):

@@ -12,6 +12,7 @@ import tempfile
 import time
 import urllib.request
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -46,6 +47,9 @@ from .model_assets import (
     _is_nonempty_file,
     get_model_asset_paths,
     get_voices_archive_path,
+    installed_manifest_path,
+    installed_sidecar_path,
+    release_asset_path,
 )
 from .model_assets import (
     are_models_downloaded as _are_models_downloaded,
@@ -59,6 +63,12 @@ from .model_assets import (
 from .model_profiles import get_model_profile
 from .onnx_session import OnnxSessionManager
 from .provider_config import ProviderConfigManager
+from .release_catalog import (
+    MODEL_REPOSITORY,
+    ReleaseAsset,
+    RemoteModelRelease,
+    resolve_model_release,
+)
 from .tokenizer import EspeakConfig, Tokenizer, TokenizerConfig
 from .utils import get_user_cache_path
 from .voice_manager import VoiceBlend, VoiceManager, normalize_voice_style
@@ -92,34 +102,12 @@ class ArtifactValidationError(RuntimeError):
     """Raised when a cached or downloaded artifact fails integrity checks."""
 
 
-# HuggingFace repositories for models and voices (onnx-community)
+# GitHub release discovery is centralized in release_catalog.py.
 HF_REPO_V1_0 = "onnx-community/Kokoro-82M-v1.0-ONNX-timestamped"
 HF_REPO_V1_1_ZH = "onnx-community/Kokoro-82M-v1.1-zh-ONNX"
-
-# HuggingFace repositories for configs (hexgrad)
 HF_CONFIG_REPO_V1_0 = "hexgrad/Kokoro-82M"
 HF_CONFIG_REPO_V1_1_ZH = "hexgrad/Kokoro-82M-v1.1-zh"
-
 HF_VOICES_SUBFOLDER = "voices"
-
-# URLs for model files (GitHub)
-GITHUB_REPO = "thewh1teagle/kokoro-onnx"
-
-GITHUB_RELEASE_TAG_V1_0 = "model-files-v1.0"
-GITHUB_BASE_URL_V1_0 = (
-    f"https://github.com/{GITHUB_REPO}/releases/download/{GITHUB_RELEASE_TAG_V1_0}"
-)
-
-GITHUB_RELEASE_TAG_V1_1_ZH = "model-files-v1.1"
-GITHUB_BASE_URL_V1_1_ZH = (
-    f"https://github.com/{GITHUB_REPO}/releases/download/{GITHUB_RELEASE_TAG_V1_1_ZH}"
-)
-
-GITHUB_RELEASE_TAG_V1_2_DE_MARTIN = "model-files-german-martin-v1.2"
-GITHUB_BASE_URL_V1_2_DE_MARTIN = (
-    f"https://github.com/{GITHUB_REPO}/releases/download/{GITHUB_RELEASE_TAG_V1_2_DE_MARTIN}"
-)
-
 # All available voice names for v1.0 (54 voices - English/multilingual)
 # Used by both HuggingFace and GitHub sources
 # These are used for downloading individual voice files from HuggingFace
@@ -405,9 +393,14 @@ def get_config_path(variant: ModelVariant = DEFAULT_MODEL_VARIANT) -> Path:
     config_dir.mkdir(parents=True, exist_ok=True)
     return config_dir / HF_CONFIG_FILENAME
 
+
 def get_vocabulary_path(variant: ModelVariant) -> Path:
     profile = get_model_profile(variant, "github")
-    filename = profile.vocabulary_filename or HF_CONFIG_FILENAME
+    filename = (
+        HF_CONFIG_FILENAME
+        if profile.vocabulary_source != "downloaded-release"
+        else "vocabulary.json"
+    )
     path = get_user_cache_path("config") / variant / filename
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
@@ -442,23 +435,17 @@ def get_model_path(
         ValueError: If quality is not available for the source/variant combination
     """
     model_dir = get_model_dir(source, variant)
-
-    quality_files = get_model_profile(variant, source).quality_files
-
-    # Get filename for quality
-    if quality not in quality_files:
-        available = ", ".join(quality_files.keys())
+    if source == "github":
+        return model_dir / f"{quality}.onnx"
+    profile = get_model_profile(variant, source)
+    try:
+        filename = profile.quality_files[quality]
+    except KeyError as exc:
+        available = ", ".join(profile.quality_files.keys())
         raise ValueError(
             f"Quality '{quality}' not available for {source}/{variant}. Available: {available}"
-        )
-
-    filename = quality_files[quality]
-
-    # HuggingFace models are stored in onnx/ subdirectory
-    if source == "huggingface":
-        return model_dir / HF_MODEL_SUBFOLDER / filename
-
-    return model_dir / filename
+        ) from exc
+    return model_dir / HF_MODEL_SUBFOLDER / filename
 
 
 def get_voice_path(
@@ -980,6 +967,8 @@ def download_config(
         expected_sha256=sha256,
         offline=offline,
     )
+
+
 def _validate_vocabulary(path: Path) -> None:
     _validate_min_size(path, MIN_CONFIG_BYTES)
     try:
@@ -995,31 +984,130 @@ def _validate_vocabulary(path: Path) -> None:
         )
 
 
+def _record_installed_release(release: RemoteModelRelease, quality: str) -> None:
+    manifest_path = installed_manifest_path(release)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_data = json.dumps(release.manifest, indent=2, ensure_ascii=False).encode() + b"\n"
+    manifest_path.write_bytes(manifest_data)
+    model_asset = release.model_asset(quality)
+    voice_asset = release.voice_asset()
+    auxiliary = [asset.name for asset in release.assets if asset.role not in {"model", "voices"}]
+    sidecar = {
+        "install_format": 1,
+        "repository": MODEL_REPOSITORY,
+        "profile": release.profile,
+        "model_version": release.model_version,
+        "release_tag": release.release_tag,
+        "release_published_at": release.release_published_at,
+        "manifest_schema": release.manifest_schema,
+        "runtime_contract": release.runtime_contract,
+        "quality": quality,
+        "model_asset": model_asset.name,
+        "voices_asset": voice_asset.name,
+        "auxiliary_assets": auxiliary,
+        "installed_at": datetime.now(UTC).isoformat(),
+        "manifest_sha256": hashlib.sha256(manifest_data).hexdigest(),
+    }
+    installed_sidecar_path(release).write_text(
+        json.dumps(sidecar, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+
+
+def _download_release_asset(
+    release: RemoteModelRelease,
+    asset: ReleaseAsset,
+    *,
+    quality: str,
+    force: bool,
+    validator: Callable[[Path], None] | None = None,
+    offline: bool = False,
+) -> Path:
+    path = release_asset_path(release, asset)
+    result = _download_from_github(
+        asset.download_url,
+        path,
+        force,
+        validator=validator,
+        expected_sha256=asset.sha256,
+        expected_size=asset.size,
+        offline=offline,
+    )
+    _record_installed_release(release, quality)
+    return result
+
+
 def download_vocabulary_github(
     variant: ModelVariant,
     force: bool = False,
     offline: bool = False,
+    *,
+    tag: str | None = None,
 ) -> Path:
     profile = get_model_profile(variant, "github")
-    filename = profile.vocabulary_filename
-    if profile.vocabulary_source != "downloaded-release" or not filename:
+    if profile.vocabulary_source != "downloaded-release":
         raise ValueError(f"GitHub profile {variant!r} has no release vocabulary")
-    if not profile.release_repository or not profile.release_tag:
-        raise ValueError(f"GitHub profile {variant!r} has no release coordinates")
-    url = (
-        f"https://github.com/{profile.release_repository}/releases/download/"
-        f"{profile.release_tag}/{filename}"
+    release = resolve_model_release(
+        variant, tag=tag, quality=DEFAULT_MODEL_QUALITY, offline=offline
     )
-    return _download_from_github(
-        url,
-        get_vocabulary_path(variant),
-        force,
-        min_size=MIN_CONFIG_BYTES,
+    asset = release.asset("vocab", format="json")
+    return _download_release_asset(
+        release,
+        asset,
+        quality=DEFAULT_MODEL_QUALITY,
+        force=force,
         validator=_validate_vocabulary,
         offline=offline,
     )
 
 
+def _validate_json_asset(path: Path) -> None:
+    try:
+        json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ArtifactValidationError(f"JSON asset {path.name} is invalid: {exc}") from exc
+
+
+def download_release_auxiliary(
+    variant: ModelVariant,
+    role: str,
+    force: bool = False,
+    offline: bool = False,
+    *,
+    tag: str | None = None,
+) -> Path:
+    release = resolve_model_release(
+        variant, tag=tag, quality=DEFAULT_MODEL_QUALITY, offline=offline
+    )
+    asset = release.asset(role)
+    validator = _validate_vocabulary if role == "vocab" else _validate_json_asset
+    return _download_release_asset(
+        release,
+        asset,
+        quality=DEFAULT_MODEL_QUALITY,
+        force=force,
+        validator=validator,
+        offline=offline,
+    )
+
+
+def download_config_github(
+    variant: ModelVariant,
+    force: bool = False,
+    offline: bool = False,
+    *,
+    tag: str | None = None,
+) -> Path:
+    return download_release_auxiliary(variant, "config", force, offline, tag=tag)
+
+
+def download_bundle_github(
+    variant: ModelVariant,
+    force: bool = False,
+    offline: bool = False,
+    *,
+    tag: str | None = None,
+) -> Path:
+    return download_release_auxiliary(variant, "bundle", force, offline, tag=tag)
 
 
 def load_vocab_from_config(
@@ -1510,56 +1598,17 @@ def download_model_github(
     quality: ModelQuality = DEFAULT_MODEL_QUALITY,
     force: bool = False,
     offline: bool = False,
+    *,
+    tag: str | None = None,
 ) -> Path:
-    """
-    Download a model file from GitHub releases.
-
-    Args:
-        variant: Model variant (v1.0 for English, v1.1-zh for Chinese)
-        quality: Model quality/quantization level
-        force: Force re-download even if file exists
-
-    Returns:
-        Path to the downloaded model file
-
-    Raises:
-        ValueError: If quality is not available for the variant
-    """
-    profile = get_model_profile(variant, "github")
-    quality_files = profile.quality_files
-
-    # Check if quality is available for this variant
-    if quality not in quality_files:
-        available = ", ".join(quality_files.keys())
-        raise ValueError(
-            f"Quality '{quality}' not available for variant '{variant}'. "
-            f"Available qualities: {available}"
-        )
-
-    # Get filename and construct URL
-    filename = quality_files[quality]
-    if not profile.release_repository or not profile.release_tag:
-        raise ValueError(f"GitHub profile {variant!r} has no release coordinates")
-    url = f"https://github.com/{profile.release_repository}/releases/download/{profile.release_tag}/{filename}"
-
-    # Use new path structure
-    model_dir = get_model_dir(source="github", variant=variant)
-    local_path = model_dir / filename
-
-    logger.info(
-        "Using GitHub release tag %s; associated commit %s",
-        profile.release_tag,
-        profile.release_commit or "unknown",
-    )
-
-    # Download
-    return _download_from_github(
-        url,
-        local_path,
-        force,
+    release = resolve_model_release(variant, tag=tag, quality=quality, offline=offline)
+    asset = release.model_asset(quality)
+    return _download_release_asset(
+        release,
+        asset,
+        quality=quality,
+        force=force,
         validator=_validate_onnx_file,
-        expected_sha256=(profile.model_sha256 or {}).get(filename),
-        expected_size=(profile.model_sizes or {}).get(filename),
         offline=offline,
     )
 
@@ -1568,45 +1617,24 @@ def download_voices_github(
     variant: ModelVariant = DEFAULT_MODEL_VARIANT,
     force: bool = False,
     offline: bool = False,
+    *,
+    tag: str | None = None,
 ) -> Path:
-    """
-    Download voices.bin file from GitHub releases.
-
-    Args:
-        variant: Model variant (v1.0 for English, v1.1-zh for Chinese)
-        force: Force re-download even if file exists
-
-    Returns:
-        Path to the downloaded voices.bin file
-    """
-    profile = get_model_profile(variant, "github")
-    filename = profile.voices_filename
-
-    # Construct URL
-    if not profile.release_repository or not profile.release_tag:
-        raise ValueError(f"GitHub profile {variant!r} has no release coordinates")
-    url = f"https://github.com/{profile.release_repository}/releases/download/{profile.release_tag}/{filename}"
-
-    # Use new path structure
-    local_path = get_voices_archive_path("github", variant)
-    local_path.parent.mkdir(parents=True, exist_ok=True)
-
-    logger.info(
-        "Using GitHub release tag %s; associated commit %s",
-        profile.release_tag,
-        profile.release_commit or "unknown",
+    release = resolve_model_release(
+        variant, tag=tag, quality=DEFAULT_MODEL_QUALITY, offline=offline
     )
-
-    # Download
-    return _download_from_github(
-        url,
-        local_path,
-        force,
-        validator=lambda path: _validate_voice_archive(
-            path, expected_voice_names=profile.voice_names
-        ),
-        expected_sha256=profile.voices_sha256,
-        expected_size=profile.voices_size,
+    asset = release.voice_asset()
+    validator = (
+        (lambda path: _validate_voice_archive(path, expected_voice_names=release.voices))
+        if asset.format == "numpy-npz"
+        else _validate_voice_bin
+    )
+    return _download_release_asset(
+        release,
+        asset,
+        quality=DEFAULT_MODEL_QUALITY,
+        force=force,
+        validator=validator,
         offline=offline,
     )
 
@@ -1617,36 +1645,20 @@ def download_all_models_github(
     progress_callback: Callable[[str, int, int], None] | None = None,
     force: bool = False,
     offline: bool = False,
+    *,
+    tag: str | None = None,
 ) -> dict[str, Path]:
-    """
-    Download model and voices files from GitHub.
-
-    Args:
-        variant: Model variant (v1.0 for English, v1.1-zh for Chinese)
-        quality: Model quality/quantization level
-        progress_callback: Optional callback (filename, current, total)
-        force: Force re-download even if files exist
-
-    Returns:
-        Dict mapping filename to path
-    """
     paths: dict[str, Path] = {}
-
-    # Download model
     if progress_callback:
         progress_callback("model", 0, 2)
-    model_path = download_model_github(variant, quality, force, offline)
+    model_path = download_model_github(variant, quality, force, offline, tag=tag)
     paths[model_path.name] = model_path
-
-    # Download voices
     if progress_callback:
         progress_callback("voices", 1, 2)
-    voices_path = download_voices_github(variant, force, offline)
+    voices_path = download_voices_github(variant, force, offline, tag=tag)
     paths[voices_path.name] = voices_path
-
     if progress_callback:
         progress_callback("complete", 2, 2)
-
     return paths
 
 
@@ -1802,23 +1814,13 @@ class Kokoro:
                 resolved_quality = quality_from_cfg
 
         # Validate quality is available for the selected source/variant
-        if model_source == "github":
-            available_qualities = get_model_profile(model_variant, "github").quality_files
-            if resolved_quality not in available_qualities:
-                available = ", ".join(available_qualities.keys())
-                raise ValueError(
-                    f"Quality '{resolved_quality}' not available for "
-                    f"GitHub {model_variant}. Available qualities: {available}"
-                )
-        elif model_source == "huggingface":
-            # Both v1.0 and v1.1-zh use same filename convention for HuggingFace
-            if resolved_quality not in MODEL_QUALITY_FILES_HF:
-                available = ", ".join(MODEL_QUALITY_FILES_HF.keys())
-                raise ValueError(
-                    f"Quality '{resolved_quality}' not available for "
-                    f"HuggingFace {model_variant}. Available qualities: {available}"
-                )
-
+        # GitHub qualities are discovered from the selected release manifest.
+        if model_source == "huggingface" and resolved_quality not in MODEL_QUALITY_FILES_HF:
+            available = ", ".join(MODEL_QUALITY_FILES_HF.keys())
+            raise ValueError(
+                f"Quality '{resolved_quality}' not available for HuggingFace {model_variant}. "
+                f"Available qualities: {available}"
+            )
         self._model_quality: ModelQuality = resolved_quality
 
         # Resolve paths
@@ -1973,14 +1975,15 @@ class Kokoro:
                     raise ConfigurationError(
                         f"Explicit model_config_path does not point to a non-empty file: {self._model_config_path}"
                     )
-            elif profile.vocabulary_source == "downloaded-release":
-                if self._model_source != "github":
-                    raise ConfigurationError(
-                        f"No release vocabulary downloader for {self._model_source}/{self._model_variant}"
+            elif self._model_source == "github":
+                if profile.vocabulary_source == "downloaded-release":
+                    self._model_config_path = download_vocabulary_github(
+                        variant=self._model_variant
                     )
-                download_vocabulary_github(variant=self._model_variant)
+                else:
+                    self._model_config_path = download_config_github(variant=self._model_variant)
             elif not is_config_downloaded(variant=self._model_variant):
-                download_config(variant=self._model_variant)
+                self._model_config_path = download_config(variant=self._model_variant)
 
     def _redownload_voices(self, force: bool = False) -> None:
         if self._model_source == "github":

@@ -65,21 +65,31 @@ def _resolve_manifest_paths(cfg: PipelineConfig) -> PipelineConfig:
     manifest_path = Path(cfg.release_manifest_path)
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
     base = manifest_path.parent
-    assets = data.get("assets", [])
-    names = [str(item["name"]) for item in assets if isinstance(item, dict) and item.get("name")]
-    model = next((name for name in names if name.endswith(".onnx")), None)
+    assets = [item for item in data.get("assets", []) if isinstance(item, dict)]
+    model = next((str(item["name"]) for item in assets if item.get("role") == "model"), None)
     voices = next(
-        (str(item["name"]) for item in assets
-         if isinstance(item, dict) and item.get("role") == "voices"
-         and item.get("format") == "numpy-npz"),
-        next((name for name in names if "voice" in name.lower() and name.endswith((".npz", ".bin"))), None),
+        (
+            str(item["name"])
+            for item in assets
+            if item.get("role") == "voices" and item.get("format") == "numpy-npz"
+        ),
+        next((str(item["name"]) for item in assets if item.get("role") == "voices"), None),
     )
-    config = next(
-        (name for name in names if name.endswith(".json") and "manifest" not in name and "bundle" not in name),
-        None,
-    )
+    config = next((str(item["name"]) for item in assets if item.get("role") == "config"), None)
+    if data.get("schema") != 2:
+        names = [str(item["name"]) for item in assets if item.get("name")]
+        model = model or next((name for name in names if name.endswith(".onnx")), None)
+        voices = voices or next((name for name in names if "voice" in name.lower()), None)
+        config = config or next(
+            (
+                name
+                for name in names
+                if name.endswith(".json") and "manifest" not in name and "bundle" not in name
+            ),
+            None,
+        )
     if model is None or voices is None:
-        raise ValueError(f"Release manifest {manifest_path} lacks model or NumPy voice assets")
+        raise ValueError(f"Release manifest {manifest_path} lacks model or voice assets")
     return replace(
         cfg,
         model_path=cfg.model_path or base / model,
@@ -136,8 +146,10 @@ def resolve_model_defaults(cfg: PipelineConfig) -> PipelineConfig:
     assert variant is not None
     profile = get_model_profile(variant, source)
 
-    quality = cfg.model_quality or cast(ModelQuality, profile.available_qualities[0])
-    if quality not in profile.quality_files:
+    quality = cfg.model_quality or cast(
+        ModelQuality, (profile.available_qualities[0] if profile.available_qualities else "fp32")
+    )
+    if source == "huggingface" and quality not in profile.quality_files:
         available = ", ".join(profile.quality_files) or "none"
         raise ValueError(
             f"Quality {quality!r} is not available for {source}/{variant}. Available: {available}"

@@ -86,22 +86,6 @@ HF_CONFIG_SHA256: dict[str, str] = {
     "v1.1-zh": "bc333efa5ce4ceff433c8c8e5d027a1eca0166001e4e4a62bea2d26ff7a46890",
 }
 
-GITHUB_RELEASE_REVISIONS: dict[str, str] = {
-    "v1.0": "6843c53fc280ab130b7a8d206ebd3407e094efdc",
-    "v1.1-zh": "b85309f90fd2660ea3309cf0f2581360e4327555",
-}
-
-GITHUB_MODEL_SHA256: dict[tuple[str, str], str] = {
-    (
-        "v1.2-de-martin",
-        "kokoro-german-martin-v1.2.onnx",
-    ): "c302f1d8bc7adf40a842cb550e18c39a5026bdb1afdd29dbb700b501cb49276b",
-}
-
-GITHUB_VOICES_SHA256: dict[str, str] = {
-    "v1.2-de-martin": "5b9c8553398d7abf67498ce500c186cefaa7b68fed3e3d415da5380670105acd",
-}
-
 
 def hf_model_spec(variant: str, filename: str) -> ArtifactSpec:
     """Return the pinned model coordinates for ``variant`` and ``filename``."""

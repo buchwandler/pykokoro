@@ -18,6 +18,7 @@ from pykokoro.model_assets import (
     get_voices_archive_path,
 )
 from pykokoro.onnx_backend import _download_from_github
+from pykokoro.release_catalog import ReleaseAsset, RemoteModelRelease
 
 
 class FakeResponse:
@@ -264,8 +265,42 @@ def test_huggingface_model_asset_completeness_requires_config(tmp_path, monkeypa
     assert are_models_downloaded("fp32", "huggingface", "v1.0")
 
 
-def test_martin_github_downloads_use_exact_urls_and_checksums(tmp_path, monkeypatch):
+def _fake_github_release() -> RemoteModelRelease:
+    return RemoteModelRelease(
+        profile="v1.2-de-martin",
+        model_version="1.2",
+        release_tag="model-files-german-martin-v1.2",
+        release_published_at="2026-01-01T00:00:00Z",
+        manifest_schema=2,
+        runtime_contract=1,
+        language_codes=("de",),
+        frontend="german-ipa-v1",
+        sample_rate=24000,
+        default_voice="martin",
+        voices=("martin",),
+        assets=(
+            ReleaseAsset(
+                "model.onnx", "model", "onnx", 4, "a" * 64, "https://github/model", "fp32"
+            ),
+            ReleaseAsset("voices.npz", "voices", "numpy-npz", 5, "b" * 64, "https://github/voices"),
+        ),
+        onnx_contract={},
+        publication_enabled=True,
+        manifest={"schema": 2, "runtime_contract": 1, "tag": "model-files-german-martin-v1.2"},
+    )
+
+
+def test_github_downloads_use_manifest_urls_and_integrity(tmp_path, monkeypatch):
     calls: list[tuple[str, dict[str, object]]] = []
+    release = _fake_github_release()
+    monkeypatch.setattr(backend, "resolve_model_release", lambda *args, **kwargs: release)
+    monkeypatch.setattr(backend, "release_asset_path", lambda release, asset: tmp_path / asset.name)
+    monkeypatch.setattr(
+        backend, "installed_manifest_path", lambda release: tmp_path / "release-manifest.json"
+    )
+    monkeypatch.setattr(
+        backend, "installed_sidecar_path", lambda release: tmp_path / "installed.json"
+    )
 
     def fake_download(url, local_path, *args, **kwargs):
         calls.append((url, kwargs))
@@ -273,25 +308,31 @@ def test_martin_github_downloads_use_exact_urls_and_checksums(tmp_path, monkeypa
 
     monkeypatch.setattr(backend, "_download_from_github", fake_download)
     monkeypatch.setattr(backend, "_validate_onnx_file", lambda path: None)
-    monkeypatch.setattr(backend, "get_model_dir", lambda source, variant: tmp_path / "models")
-    monkeypatch.setattr(
-        backend,
-        "get_voices_archive_path",
-        lambda source, variant: tmp_path / "voices" / "nested" / "voices.bin",
-    )
+    monkeypatch.setattr(backend, "_validate_voice_archive", lambda path, **kwargs: None)
 
     backend.download_model_github(variant="v1.2-de-martin", quality="fp32")
     backend.download_voices_github(variant="v1.2-de-martin")
 
-    assert calls[0][0].endswith("model-files-german-martin-v1.2/kokoro-german-martin-v1.2.onnx")
-    assert calls[0][1]["expected_sha256"].startswith("c302f1d8")
-    assert calls[1][0].endswith("model-files-german-martin-v1.2/voices-german-martin-v1.2.bin")
-    assert calls[1][1]["expected_sha256"].startswith("5b9c8553")
-    assert (tmp_path / "voices" / "nested").is_dir()
+    assert calls[0][0] == "https://github/model"
+    assert calls[0][1]["expected_sha256"] == "a" * 64
+    assert calls[0][1]["expected_size"] == 4
+    assert calls[1][0] == "https://github/voices"
+    assert calls[1][1]["expected_sha256"] == "b" * 64
+    assert calls[1][1]["expected_size"] == 5
+    assert (tmp_path / "installed.json").is_file()
 
 
-def test_martin_github_downloads_forward_offline_and_exact_sizes(tmp_path, monkeypatch):
+def test_github_downloads_forward_offline(tmp_path, monkeypatch):
     calls: list[dict[str, object]] = []
+    release = _fake_github_release()
+    monkeypatch.setattr(backend, "resolve_model_release", lambda *args, **kwargs: release)
+    monkeypatch.setattr(backend, "release_asset_path", lambda release, asset: tmp_path / asset.name)
+    monkeypatch.setattr(
+        backend, "installed_manifest_path", lambda release: tmp_path / "release-manifest.json"
+    )
+    monkeypatch.setattr(
+        backend, "installed_sidecar_path", lambda release: tmp_path / "installed.json"
+    )
 
     def fake_download(url, local_path, *args, **kwargs):
         calls.append(kwargs)
@@ -299,18 +340,15 @@ def test_martin_github_downloads_forward_offline_and_exact_sizes(tmp_path, monke
 
     monkeypatch.setattr(backend, "_download_from_github", fake_download)
     monkeypatch.setattr(backend, "_validate_onnx_file", lambda path: None)
-    monkeypatch.setattr(backend, "get_model_dir", lambda source, variant: tmp_path / "models")
-    monkeypatch.setattr(
-        backend, "get_voices_archive_path", lambda source, variant: tmp_path / "voices.bin"
-    )
+    monkeypatch.setattr(backend, "_validate_voice_archive", lambda path, **kwargs: None)
 
     backend.download_model_github("v1.2-de-martin", "fp32", offline=True)
     backend.download_voices_github("v1.2-de-martin", offline=True)
 
     assert calls[0]["offline"] is True
-    assert calls[0]["expected_size"] == 325_512_630
+    assert calls[0]["expected_size"] == 4
     assert calls[1]["offline"] is True
-    assert calls[1]["expected_size"] == 522_506
+    assert calls[1]["expected_size"] == 5
 
 
 def test_ensure_models_revalidates_managed_nonempty_paths(tmp_path, monkeypatch):
