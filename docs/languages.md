@@ -19,16 +19,6 @@ The Martin profile is a single-speaker model. Its ONNX file is
 Both downloads are checked with SHA-256 and the voice archive must contain `martin`. No
 model-specific config file is downloaded.
 
-The legacy Eva/Bernd profile remains explicit:
-
-```python
-PipelineConfig(
-    voice="df_eva",
-    model_source="github",
-    model_variant="v1.1-de",
-    generation=GenerationConfig(lang="de"),
-)
-```
 
 Automatic written-to-spoken preparation is owned by the compatible kokorog2p 0.8.x
 dependency across the language pipelines where kokorog2p supports it. This includes

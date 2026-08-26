@@ -260,7 +260,7 @@ def _coerce_tokenizer(base: TokenizerConfig | None, value: Any) -> TokenizerConf
 
 def _coerce_paths_inplace(data: dict[str, Any]) -> None:
     # Convenience: accept str paths in config dict.
-    for key in ("model_path", "voices_path"):
+    for key in ("model_path", "voices_path", "model_config_path", "release_manifest_path"):
         v = data.get(key)
         if isinstance(v, str):
             data[key] = Path(v)
@@ -648,18 +648,23 @@ class KokoroPipeline:
         cfg = resolve_model_defaults(_default_lang_from_voice(cfg))
         model_path = str(cfg.model_path) if cfg.model_path else None
         voices_path = str(cfg.voices_path) if cfg.voices_path else None
+        model_config_path = str(cfg.model_config_path) if cfg.model_config_path else None
+        release_manifest_path = str(cfg.release_manifest_path) if cfg.release_manifest_path else None
         return (
             model_path,
             voices_path,
             cfg.model_quality,
             cfg.model_source,
             cfg.model_variant,
+            model_config_path,
+            release_manifest_path,
             cfg.provider,
             _freeze_config_value(cfg.provider_options),
             _freeze_config_value(cfg.session_options),
             _freeze_config_value(cfg.tokenizer_config),
             _freeze_config_value(cfg.espeak_config),
             _freeze_config_value(cfg.short_sentence_config),
+            cfg.allow_experimental_frontend,
         )
 
     @staticmethod
@@ -693,6 +698,7 @@ class KokoroPipeline:
         new_kokoro = Kokoro(
             model_path=Path(cfg.model_path) if cfg.model_path else None,
             voices_path=Path(cfg.voices_path) if cfg.voices_path else None,
+            model_config_path=Path(cfg.model_config_path) if cfg.model_config_path else None,
             model_quality=cfg.model_quality,
             model_source=cfg.model_source,
             model_variant=cfg.model_variant,

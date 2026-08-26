@@ -1096,14 +1096,12 @@ config = PipelineConfig(
 )
 ```
 
-The legacy GitHub `v1.1-de` profile remains available explicitly with `df_eva` and
-`dm_bernd`. Martin uses the built-in Kokoro v1.0 vocabulary and does not download a
-Tundragoon config. `martin` alone also infers German; custom voice archives may expose
-additional voice names when selected explicitly. The profile's suggested speed of
-`1.125` is advisory, so applications must set it explicitly when they want it. German
-Language-specific automatic spoken-form normalization belongs to the compatible
-kokorog2p release. PyKokoro keeps source offsets and segments tied to the original input
-text, consumes kokorog2p's prepared G2P result, and owns synthesis.
+Martin uses the built-in Kokoro v1.0 vocabulary and does not download a Tundragoon config. `martin`
+alone also infers German; custom voice archives may expose additional voice names when selected
+explicitly. The profile's suggested speed of `1.125` is advisory, so applications must set it
+explicitly when they want it. German Language-specific automatic spoken-form normalization belongs
+to the compatible kokorog2p release. PyKokoro keeps source offsets and segments tied to the original
+input text, consumes kokorog2p's prepared G2P result, and owns synthesis.
 
 ## Model Quality Options
 

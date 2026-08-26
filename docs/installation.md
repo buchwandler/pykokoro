@@ -102,12 +102,8 @@ MB for the ONNX model plus a 522,506-byte `martin` voice archive on first use. B
 artifacts are checked against their published SHA-256 digests before being cached under
 `~/.cache/pykokoro`.
 
-The previous `v1.1-de` Eva/Bernd model remains an explicit compatibility choice. Use
-`PipelineConfig(model_source="github", model_variant="v1.1-de", voice="df_eva")` or
-`dm_bernd` when that legacy profile is required. Custom `model_path` and `voices_path`
-are never replaced by automatic selection; missing custom files fail directly rather
-than triggering a download to the shared cache. Managed cache hits are checksum and
-structure checked before use. The public GitHub download helpers also accept
+Custom `model_path` and `voices_path` are never replaced by automatic selection; missing custom files fail directly rather
+than triggering a download to the shared cache. Managed cache hits are checksum and structure checked before use.
 `offline=True` when a valid managed cache is required. Interrupted GitHub transfers
 retain a temporary `.part` file and resume with HTTP Range requests when the release
 host supports them; completed files are still checked for exact size, SHA-256, and

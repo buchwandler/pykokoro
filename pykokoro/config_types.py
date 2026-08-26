@@ -8,7 +8,16 @@ ModelQuality = Literal[
     "fp32", "fp16", "fp16-gpu", "q8", "q8f16", "q4", "q4f16", "uint8", "uint8f16"
 ]
 ModelSource = Literal["huggingface", "github"]
-ModelVariant = Literal["v1.0", "v1.1-zh", "v1.1-de", "v1.2-de-martin"]
+ModelVariant = Literal[
+    "v1.0",
+    "v1.1-zh",
+    "v1.2-de-martin",
+    "vi-contextbox",
+    "vi-anphunl",
+    "ar-nabra",
+    "de-crane",
+    "he-hebrew-nc",
+]
 ProviderAlias: TypeAlias = Literal[
     "auto",
     "cpu",

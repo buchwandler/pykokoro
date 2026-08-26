@@ -211,7 +211,6 @@ def test_hf_v1_download_ignores_old_non_timestamped_cache(tmp_path, monkeypatch)
         ("huggingface", "v1.1-zh", "voices.bin.npz"),
         ("github", "v1.0", "voices-v1.0.bin"),
         ("github", "v1.1-zh", "voices-v1.1-zh.bin"),
-        ("github", "v1.1-de", "voices-german-v1.1.bin"),
     ],
 )
 def test_voice_archive_paths_are_source_and_variant_aware(

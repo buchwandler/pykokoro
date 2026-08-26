@@ -29,10 +29,6 @@ MODEL_QUALITY_FILES_GITHUB_V1_1_ZH: dict[str, str] = {
     "fp32": "kokoro-v1.1-zh.onnx",
 }
 
-MODEL_QUALITY_FILES_GITHUB_V1_1_DE: dict[str, str] = {
-    "fp32": "kokoro-german-v1.1.onnx",
-    "q8": "kokoro-german-v1.1.int8.onnx",
-}
 
 MODEL_QUALITY_FILES_GITHUB_V1_2_DE_MARTIN: dict[str, str] = {
     "fp32": "kokoro-german-martin-v1.2.onnx",
@@ -53,5 +49,4 @@ MODEL_QUALITY_FILES = MODEL_QUALITY_FILES_HF
 
 GITHUB_VOICES_FILENAME_V1_0 = "voices-v1.0.bin"
 GITHUB_VOICES_FILENAME_V1_1_ZH = "voices-v1.1-zh.bin"
-GITHUB_VOICES_FILENAME_V1_1_DE = "voices-german-v1.1.bin"
 GITHUB_VOICES_FILENAME_V1_2_DE_MARTIN = "voices-german-martin-v1.2.bin"

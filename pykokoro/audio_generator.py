@@ -238,9 +238,10 @@ class AudioGenerator:
         self._tokenizer = tokenizer
         self._model_source = model_source
         self._short_sentence_config = short_sentence_config
-        self._uses_input_ids = any(
-            input_meta.name == "input_ids" for input_meta in session.get_inputs()
-        )
+        self._input_metas = {
+            str(input_meta.name): input_meta for input_meta in session.get_inputs()
+        }
+        self._uses_input_ids = "input_ids" in self._input_metas
         get_outputs = getattr(session, "get_outputs", None)
         outputs = get_outputs() if callable(get_outputs) else []
         self._timestamp_output_index: int | None = None
@@ -280,28 +281,37 @@ class AudioGenerator:
         speed_int = max(1, round(speed))
         return np.array([speed_int], dtype=np.int32)
 
+    def _input_dtype(self, name: str, default: np.dtype[Any]) -> np.dtype[Any]:
+        meta = self._input_metas.get(name)
+        type_name = str(getattr(meta, "type", "")).lower() if meta is not None else ""
+        return {
+            "tensor(float)": np.dtype(np.float32),
+            "tensor(float16)": np.dtype(np.float16),
+            "tensor(double)": np.dtype(np.float64),
+            "tensor(int64)": np.dtype(np.int64),
+            "tensor(int32)": np.dtype(np.int32),
+            "tensor(int16)": np.dtype(np.int16),
+        }.get(type_name, default)
+
     def _build_onnx_inputs(
         self,
         tokens_padded: list[list[int]],
         voice_style: np.ndarray,
         speed: float,
     ) -> dict[str, np.ndarray | list[list[int]]]:
-        if self._uses_input_ids:
-            if self._model_source == "github":
-                return {
-                    "input_ids": np.array(tokens_padded, dtype=np.int64),
-                    "style": np.array(voice_style, dtype=np.float32),
-                    "speed": self._int_speed_input(speed),
-                }
-            return {
-                "input_ids": tokens_padded,
-                "style": voice_style,
-                "speed": self._float_speed_input(speed),
-            }
+        token_name = "input_ids" if self._uses_input_ids else "tokens"
+        token_dtype = self._input_dtype(token_name, np.dtype(np.int64))
+        style_name = "ref_s" if "ref_s" in self._input_metas else "style"
+        style_dtype = self._input_dtype(style_name, np.dtype(np.float32))
+        speed_dtype = self._input_dtype("speed", np.dtype(np.float32))
+        if np.issubdtype(speed_dtype, np.integer):
+            speed_input = np.array([max(1, round(speed))], dtype=speed_dtype)
+        else:
+            speed_input = np.ones(1, dtype=speed_dtype) * speed
         return {
-            "tokens": tokens_padded,
-            "style": voice_style,
-            "speed": self._float_speed_input(speed),
+            token_name: np.asarray(tokens_padded, dtype=token_dtype),
+            style_name: np.asarray(voice_style, dtype=style_dtype),
+            "speed": speed_input,
         }
 
     def _run_onnx(

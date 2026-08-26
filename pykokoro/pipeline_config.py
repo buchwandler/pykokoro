@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -33,6 +34,8 @@ class PipelineConfig:
     model_variant: ModelVariant | None = None
     model_path: Path | str | None = None
     voices_path: Path | str | None = None
+    model_config_path: Path | str | None = None
+    release_manifest_path: Path | str | None = None
     model_identity: str | None = None
     provider: ProviderType | None = None
     provider_options: dict[str, Any] | None = None
@@ -42,6 +45,7 @@ class PipelineConfig:
     tokenizer_config: TokenizerConfig | None = None
     espeak_config: EspeakConfig | None = None
     short_sentence_config: ShortSentenceConfig | None = None
+    allow_experimental_frontend: bool = False
 
     # Span slicing
     overlap_mode: Literal["snap", "strict"] = "snap"
@@ -55,6 +59,35 @@ class PipelineConfig:
     cache_dir: str | None = None
 
 
+def _resolve_manifest_paths(cfg: PipelineConfig) -> PipelineConfig:
+    if cfg.release_manifest_path is None:
+        return cfg
+    manifest_path = Path(cfg.release_manifest_path)
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    base = manifest_path.parent
+    assets = data.get("assets", [])
+    names = [str(item["name"]) for item in assets if isinstance(item, dict) and item.get("name")]
+    model = next((name for name in names if name.endswith(".onnx")), None)
+    voices = next(
+        (str(item["name"]) for item in assets
+         if isinstance(item, dict) and item.get("role") == "voices"
+         and item.get("format") == "numpy-npz"),
+        next((name for name in names if "voice" in name.lower() and name.endswith((".npz", ".bin"))), None),
+    )
+    config = next(
+        (name for name in names if name.endswith(".json") and "manifest" not in name and "bundle" not in name),
+        None,
+    )
+    if model is None or voices is None:
+        raise ValueError(f"Release manifest {manifest_path} lacks model or NumPy voice assets")
+    return replace(
+        cfg,
+        model_path=cfg.model_path or base / model,
+        voices_path=cfg.voices_path or base / voices,
+        model_config_path=cfg.model_config_path or (base / config if config else None),
+    )
+
+
 def resolve_model_defaults(cfg: PipelineConfig) -> PipelineConfig:
     """Resolve language-aware model and voice defaults into a concrete config.
 
@@ -62,6 +95,7 @@ def resolve_model_defaults(cfg: PipelineConfig) -> PipelineConfig:
     paths, are preserved and incompatible combinations fail before backend or
     G2P construction.
     """
+    cfg = _resolve_manifest_paths(cfg)
     from .model_profiles import (
         get_model_profile,
         normalize_language_code,

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 
 from ...onnx_backend import Kokoro
@@ -21,6 +23,9 @@ class OnnxSynthesizerAdapter:
         assert cfg.model_variant is not None
         assert cfg.voice is not None
         kokoro = self._kokoro or Kokoro(
+            model_path=Path(cfg.model_path) if cfg.model_path else None,
+            voices_path=Path(cfg.voices_path) if cfg.voices_path else None,
+            model_config_path=Path(cfg.model_config_path) if cfg.model_config_path else None,
             model_quality=cfg.model_quality,
             model_source=cfg.model_source,
             model_variant=cfg.model_variant,

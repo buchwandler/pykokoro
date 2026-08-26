@@ -325,12 +325,27 @@ class KokoroG2PAdapter(G2PAdapter):
 
         tokenizer_config = cfg.tokenizer_config or TokenizerConfig()
         kokorog2p_lang = SUPPORTED_LANGUAGES.get(lang, lang)
-        version = self._get_model_version(cfg)
+        from ...frontend_contracts import require_frontend
+        from ...model_profiles import get_model_profile
+        profile = (
+            get_model_profile(cfg.model_variant, cfg.model_source)
+            if cfg.model_variant and cfg.model_source
+            else None
+        )
+        model_version = self._get_model_version(cfg)
+        version = "1.0" if model_version == "nabra-82m-v0.1" else model_version
+        if profile is not None:
+            require_frontend(
+                profile.variant, allow_experimental=cfg.allow_experimental_frontend
+            )
         request = make_spacy_model_request(
             model=tokenizer_config.spacy_model,
             size=tokenizer_config.spacy_model_size,
         )
 
+        backend = tokenizer_config.backend
+        if profile is not None and profile.frontend_experimental and backend == "kokorog2p":
+            backend = "espeak"
         kwargs: dict[str, Any] = {
             "language": kokorog2p_lang,
             "version": version,
@@ -340,11 +355,13 @@ class KokoroG2PAdapter(G2PAdapter):
             "use_spacy": tokenizer_config.use_spacy,
             "spacy_model": request.model,
             "spacy_model_size": request.size,
-            "backend": tokenizer_config.backend,
+            "backend": backend,
             "load_gold": tokenizer_config.load_gold,
             "load_silver": tokenizer_config.load_silver,
         }
 
+        if profile is not None and profile.variant == "ar-nabra":
+            kwargs["model_profile"] = "nabra-82m-v0.1"
         cache_key = tuple(sorted(kwargs.items()))
         if cache_key in self._g2p_instances:
             return self._g2p_instances[cache_key]

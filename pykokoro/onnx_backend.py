@@ -11,7 +11,7 @@ import sqlite3
 import tempfile
 import time
 import urllib.request
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -28,9 +28,6 @@ from .asset_constants import (
     HF_MODEL_SUBFOLDER,
     MODEL_QUALITY_CACHE_FILES_HF_V1_0,
     MODEL_QUALITY_FILES,
-    MODEL_QUALITY_FILES_GITHUB_V1_0,
-    MODEL_QUALITY_FILES_GITHUB_V1_1_DE,
-    MODEL_QUALITY_FILES_GITHUB_V1_1_ZH,
     MODEL_QUALITY_FILES_HF,
 )
 from .audio_generator import AudioGenerator
@@ -102,35 +99,25 @@ HF_REPO_V1_1_ZH = "onnx-community/Kokoro-82M-v1.1-zh-ONNX"
 # HuggingFace repositories for configs (hexgrad)
 HF_CONFIG_REPO_V1_0 = "hexgrad/Kokoro-82M"
 HF_CONFIG_REPO_V1_1_ZH = "hexgrad/Kokoro-82M-v1.1-zh"
-HF_CONFIG_REPO_V1_1_DE = "Tundragoon/Kokoro-German"
 
-# Subfolders within HuggingFace repos
 HF_VOICES_SUBFOLDER = "voices"
 
 # URLs for model files (GitHub)
 GITHUB_REPO = "thewh1teagle/kokoro-onnx"
 
-# GitHub v1.0 (English)
 GITHUB_RELEASE_TAG_V1_0 = "model-files-v1.0"
 GITHUB_BASE_URL_V1_0 = (
     f"https://github.com/{GITHUB_REPO}/releases/download/{GITHUB_RELEASE_TAG_V1_0}"
 )
 
-# GitHub v1.1-zh (Chinese)
 GITHUB_RELEASE_TAG_V1_1_ZH = "model-files-v1.1"
 GITHUB_BASE_URL_V1_1_ZH = (
     f"https://github.com/{GITHUB_REPO}/releases/download/{GITHUB_RELEASE_TAG_V1_1_ZH}"
 )
 
-GITHUB_REPO_GERMAN = "holgern/kokoro-onnx-model"
-GITHUB_RELEASE_TAG_V1_1_DE = "model-files-german-v1.1"
-GITHUB_BASE_URL_V1_1_DE = (
-    f"https://github.com/{GITHUB_REPO_GERMAN}/releases/download/{GITHUB_RELEASE_TAG_V1_1_DE}"
-)
-
 GITHUB_RELEASE_TAG_V1_2_DE_MARTIN = "model-files-german-martin-v1.2"
 GITHUB_BASE_URL_V1_2_DE_MARTIN = (
-    f"https://github.com/{GITHUB_REPO_GERMAN}/releases/download/{GITHUB_RELEASE_TAG_V1_2_DE_MARTIN}"
+    f"https://github.com/{GITHUB_REPO}/releases/download/{GITHUB_RELEASE_TAG_V1_2_DE_MARTIN}"
 )
 
 # All available voice names for v1.0 (54 voices - English/multilingual)
@@ -322,7 +309,6 @@ VOICE_NAMES_V1_1_ZH = [
     "zm_100",
 ]
 
-VOICE_NAMES_V1_1_DE = ["df_eva", "dm_bernd"]
 
 # Voice name documentation by language/variant
 # These voices are dynamically loaded from the model's voices.bin file
@@ -330,7 +316,6 @@ VOICE_NAMES_V1_1_DE = ["df_eva", "dm_bernd"]
 VOICE_NAMES_BY_VARIANT = {
     "v1.0": VOICE_NAMES_V1_0,  # Same as HuggingFace (multi-language)
     "v1.1-zh": VOICE_NAMES_V1_1_ZH,  # Chinese-specific voices
-    "v1.1-de": VOICE_NAMES_V1_1_DE,  # German-specific voices
 }
 
 
@@ -370,7 +355,7 @@ def get_model_dir(
 
     Args:
         source: Model source (huggingface or github)
-        variant: Model variant (v1.0, v1.1-de, v1.1-zh)
+        variant: Model variant (v1.0, v1.1-zh)
 
     Returns:
         Path to model directory
@@ -391,7 +376,7 @@ def get_voices_dir(
 
     Args:
         source: Model source (huggingface or github)
-        variant: Model variant (v1.0 or v1.1-zh, v1.1-de)
+        variant: Model variant (v1.0 or v1.1-zh)
 
     Returns:
         Path to voices directory
@@ -419,6 +404,13 @@ def get_config_path(variant: ModelVariant = DEFAULT_MODEL_VARIANT) -> Path:
     config_dir = get_user_cache_path("config") / variant
     config_dir.mkdir(parents=True, exist_ok=True)
     return config_dir / HF_CONFIG_FILENAME
+
+def get_vocabulary_path(variant: ModelVariant) -> Path:
+    profile = get_model_profile(variant, "github")
+    filename = profile.vocabulary_filename or HF_CONFIG_FILENAME
+    path = get_user_cache_path("config") / variant / filename
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def get_voices_bin_path() -> Path:
@@ -958,7 +950,6 @@ def download_config(
     config_repositories = {
         "v1.0": HF_CONFIG_REPO_V1_0,
         "v1.1-zh": HF_CONFIG_REPO_V1_1_ZH,
-        "v1.1-de": HF_CONFIG_REPO_V1_1_DE,
     }
     try:
         repo_id = config_repositories[variant]
@@ -989,15 +980,56 @@ def download_config(
         expected_sha256=sha256,
         offline=offline,
     )
+def _validate_vocabulary(path: Path) -> None:
+    _validate_min_size(path, MIN_CONFIG_BYTES)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ArtifactValidationError(f"Vocabulary file {path.name} is invalid: {exc}") from exc
+    if not isinstance(data, dict) or not all(
+        isinstance(key, str) and isinstance(value, int) and not isinstance(value, bool)
+        for key, value in data.items()
+    ):
+        raise ArtifactValidationError(
+            f"Vocabulary file {path.name} must map string phonemes to integer IDs"
+        )
+
+
+def download_vocabulary_github(
+    variant: ModelVariant,
+    force: bool = False,
+    offline: bool = False,
+) -> Path:
+    profile = get_model_profile(variant, "github")
+    filename = profile.vocabulary_filename
+    if profile.vocabulary_source != "downloaded-release" or not filename:
+        raise ValueError(f"GitHub profile {variant!r} has no release vocabulary")
+    if not profile.release_repository or not profile.release_tag:
+        raise ValueError(f"GitHub profile {variant!r} has no release coordinates")
+    url = (
+        f"https://github.com/{profile.release_repository}/releases/download/"
+        f"{profile.release_tag}/{filename}"
+    )
+    return _download_from_github(
+        url,
+        get_vocabulary_path(variant),
+        force,
+        min_size=MIN_CONFIG_BYTES,
+        validator=_validate_vocabulary,
+        offline=offline,
+    )
+
+
 
 
 def load_vocab_from_config(
     variant: ModelVariant = DEFAULT_MODEL_VARIANT,
+    config_path: Path | None = None,
 ) -> dict[str, int]:
     """Load vocabulary from variant-specific config.json.
 
     Args:
-        variant: Model variant (v1.0 or v1.1-zh, or v1.1-de)
+        variant: Model variant (v1.0 or v1.1-zh)
 
     Returns:
         Dictionary mapping phoneme characters to token indices
@@ -1010,10 +1042,13 @@ def load_vocab_from_config(
 
     from kokorog2p import get_kokoro_vocab
 
-    config_path = get_config_path(variant)
+    explicit_config_path = config_path is not None
+    config_path = config_path or get_config_path(variant)
 
     # Download if not exists
     if not config_path.exists():
+        if explicit_config_path:
+            raise FileNotFoundError(f"Explicit model config does not exist: {config_path}")
         logger.info(f"Downloading config for variant '{variant}'...")
         try:
             download_config(variant=variant)
@@ -1033,18 +1068,21 @@ def load_vocab_from_config(
         return get_kokoro_vocab()
 
     # Extract vocabulary
-    if "vocab" not in config:
+    # Release vocabularies are direct JSON maps; legacy configs nest the map under vocab.
+    vocab = config.get("vocab") if isinstance(config, dict) else None
+    if vocab is None and isinstance(config, dict):
+        vocab = config
+    if not isinstance(vocab, dict) or not all(
+        isinstance(key, str) and isinstance(value, int) and not isinstance(value, bool)
+        for key, value in vocab.items()
+    ):
         raise ValueError(
-            f"Config at {config_path} does not contain 'vocab' key. "
-            f"Cannot load variant-specific vocabulary."
+            f"Vocabulary at {config_path} must be a JSON object mapping phonemes to IDs"
         )
-
-    vocab = config["vocab"]
     logger.info(
         f"Loaded vocabulary with {len(vocab)} tokens "
         f"for variant '{variant}' from {config_path.name}"
     )
-
     return vocab
 
 
@@ -1077,8 +1115,6 @@ def download_model(
     """
     # Select onnx-community repo based on variant
     repo_id = _huggingface_repo_for_variant(variant)
-    if variant == "v1.1-de":
-        raise ValueError(f"Unknown variant: {variant}")
 
     # Check if quality is available (both variants use same filenames)
     if quality not in MODEL_QUALITY_FILES_HF:
@@ -1133,8 +1169,6 @@ def download_voice(
     """
     # Select repo based on variant
     repo_id = _huggingface_repo_for_variant(variant)
-    if variant == "v1.1-de":
-        raise ValueError(f"Unknown variant: {variant}")
 
     filename = f"{voice_name}.bin"
     if revision is None:
@@ -1628,6 +1662,7 @@ class Kokoro:
         self,
         model_path: Path | None = None,
         voices_path: Path | None = None,
+        model_config_path: Path | None = None,
         use_gpu: bool = False,
         provider: ProviderType | None = None,
         session_options: rt.SessionOptions | None = None,
@@ -1723,6 +1758,8 @@ class Kokoro:
         self._np = np
         self._model_path_provided = model_path is not None
         self._voices_path_provided = voices_path is not None
+        self._model_config_path = model_config_path
+        self._model_config_path_provided = model_config_path is not None
 
         # Deprecation warning for use_gpu
         if use_gpu:
@@ -1766,18 +1803,7 @@ class Kokoro:
 
         # Validate quality is available for the selected source/variant
         if model_source == "github":
-            available_qualities: Mapping[str, str]
-            if model_variant == "v1.0":
-                available_qualities = MODEL_QUALITY_FILES_GITHUB_V1_0
-            elif model_variant == "v1.1-zh":
-                available_qualities = MODEL_QUALITY_FILES_GITHUB_V1_1_ZH
-            elif model_variant == "v1.1-de":
-                available_qualities = MODEL_QUALITY_FILES_GITHUB_V1_1_DE
-            elif model_variant == "v1.2-de-martin":
-                available_qualities = get_model_profile(model_variant, "github").quality_files
-            else:
-                raise ValueError(f"Unknown model variant: {model_variant}")
-
+            available_qualities = get_model_profile(model_variant, "github").quality_files
             if resolved_quality not in available_qualities:
                 available = ", ".join(available_qualities.keys())
                 raise ValueError(
@@ -1839,10 +1865,12 @@ class Kokoro:
         from kokorog2p import get_kokoro_vocab
 
         profile = get_model_profile(self._model_variant, self._model_source)
-        if profile.vocabulary_source == "downloaded-config":
-            return load_vocab_from_config(self._model_variant)
+        vocabulary_path = getattr(self, "_model_config_path", None)
+        if profile.vocabulary_source == "downloaded-release" and vocabulary_path is None:
+            vocabulary_path = download_vocabulary_github(self._model_variant)
+        if profile.vocabulary_source in {"downloaded-config", "downloaded-release"}:
+            return load_vocab_from_config(self._model_variant, vocabulary_path)
 
-        # For HuggingFace v1.0 or default, use standard vocab
         return get_kokoro_vocab()
 
     def _resolve_model_variant(self, lang: str) -> ModelVariant:
@@ -1939,10 +1967,20 @@ class Kokoro:
             self._voices_path = _download_hf_voice_archive(self._model_variant)
 
         profile = get_model_profile(self._model_variant, self._model_source)
-        if profile.vocabulary_source == "downloaded-config" and not is_config_downloaded(
-            variant=self._model_variant
-        ):
-            download_config(variant=self._model_variant)
+        if profile.vocabulary_source in {"downloaded-config", "downloaded-release"}:
+            if getattr(self, "_model_config_path_provided", False):
+                if not _is_nonempty_file(self._model_config_path):
+                    raise ConfigurationError(
+                        f"Explicit model_config_path does not point to a non-empty file: {self._model_config_path}"
+                    )
+            elif profile.vocabulary_source == "downloaded-release":
+                if self._model_source != "github":
+                    raise ConfigurationError(
+                        f"No release vocabulary downloader for {self._model_source}/{self._model_variant}"
+                    )
+                download_vocabulary_github(variant=self._model_variant)
+            elif not is_config_downloaded(variant=self._model_variant):
+                download_config(variant=self._model_variant)
 
     def _redownload_voices(self, force: bool = False) -> None:
         if self._model_source == "github":

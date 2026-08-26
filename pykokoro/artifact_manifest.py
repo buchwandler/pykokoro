@@ -89,8 +89,6 @@ HF_CONFIG_SHA256: dict[str, str] = {
 GITHUB_RELEASE_REVISIONS: dict[str, str] = {
     "v1.0": "6843c53fc280ab130b7a8d206ebd3407e094efdc",
     "v1.1-zh": "b85309f90fd2660ea3309cf0f2581360e4327555",
-    "v1.1-de": "670bf630bb02428ad323f78195f9583f52c5c604",
-    "v1.2-de-martin": "670bf630bb02428ad323f78195f9583f52c5c604",
 }
 
 GITHUB_MODEL_SHA256: dict[tuple[str, str], str] = {
