@@ -108,6 +108,7 @@ def resolve_model_defaults(cfg: PipelineConfig) -> PipelineConfig:
     cfg = _resolve_manifest_paths(cfg)
     from .model_profiles import (
         get_model_profile,
+        model_id_for_voice,
         normalize_language_code,
         profile_for_language,
         profile_for_voice,
@@ -128,6 +129,15 @@ def resolve_model_defaults(cfg: PipelineConfig) -> PipelineConfig:
     source = cfg.model_source
     variant = cfg.model_variant
 
+
+    if variant is None and isinstance(cfg.voice, str):
+        voice_model = model_id_for_voice(cfg.voice)
+        if voice_model is not None:
+            variant = voice_model
+            source = "huggingface"
+            if cfg.generation.lang == GenerationConfig().lang:
+                cfg = replace(cfg, generation=replace(cfg.generation, lang="ru"))
+    lang = normalize_language_code(cfg.generation.lang)
     if variant is None:
         language_profile = profile_for_language(lang)
         if language_profile is not None and source in {None, "github"}:
@@ -146,6 +156,10 @@ def resolve_model_defaults(cfg: PipelineConfig) -> PipelineConfig:
     assert variant is not None
     profile = get_model_profile(variant, source)
 
+    if profile.runtime_available is False and cfg.release_manifest_path is None:
+        raise ValueError(
+            f"Model profile {variant!r} is present but has no runtime-ready distribution"
+        )
     quality = cfg.model_quality or cast(
         ModelQuality, (profile.available_qualities[0] if profile.available_qualities else "fp32")
     )

@@ -82,7 +82,7 @@ huggingface = ["huggingface-hub>=0.27"]
 
 [tool.setuptools_scm]
 write_to = "pykokoro/_version.py"
-fallback_version = "0.8.6"
+fallback_version = "0.8.7"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

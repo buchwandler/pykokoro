@@ -6,8 +6,8 @@ Published artifact inventory is intentionally resolved by :mod:`release_catalog`
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
-from typing import Literal
+from dataclasses import dataclass, field, replace
+from typing import Any, Literal
 
 from .config_types import ModelSource, ModelVariant
 
@@ -32,6 +32,10 @@ class RuntimeProfile:
     quality_files: Mapping[str, str] = field(default_factory=dict)
     voice_names: tuple[str, ...] = ()
 
+    layout: str = "single-onnx-v1"
+    runtime_available: bool = True
+    redistribution_allowed: bool = True
+    support_status: str = "ready"
     @property
     def available_qualities(self) -> tuple[str, ...]:
         return tuple(self.quality_files)
@@ -53,15 +57,15 @@ def _github_profile(
 ) -> RuntimeProfile:
     default_voices = {
         "v1.2-de-martin": "martin",
-        "vi-contextbox": "diem_trinh",
-        "vi-anphunl": "diem_trinh",
-        "ar-nabra": "af_msa",
-        "de-crane": "df_kerstin",
-        "he-hebrew-nc": "he_shaul",
+        "vi-contextbox": "default",
+        "vi-anphunl": "default",
+        "ar-nabra": "default",
+        "de-crane": "default",
+        "he-hebrew-nc": "default"
     }
     return RuntimeProfile(
         source="github",
-        variant=variant,  # type: ignore[arg-type]
+        variant=variant,
         language_codes=language_codes,
         default_voice=default_voices.get(variant),
         vocabulary_source=vocabulary_source,
@@ -116,6 +120,42 @@ MODEL_PROFILES: dict[tuple[ModelSource, ModelVariant], RuntimeProfile] = {
         frontend_experimental=True,
     ),
 }
+
+MODEL_PROFILES[("github", "vi-anphunl")] = replace(
+    MODEL_PROFILES[("github", "vi-anphunl")],
+    runtime_available=False,
+    support_status="registry-unavailable",
+ )
+
+MODEL_PROFILES.update(
+    {
+        ("github", "sv-joakim"): RuntimeProfile(
+            "github", "sv-joakim", ("sv",), "Alice", "builtin-v1.0", "1.0",
+            "kokorog2p-sv-v1", False, voice_names=("Alice", "Anton", "Björn", "Ebba", "Elsa", "Greta", "Lars", "Nils", "Oskar", "Stina"),
+        ),
+        ("github", "de-thorsten"): RuntimeProfile(
+            "github", "de-thorsten", ("de",), "thorsten", "downloaded-config", "1.0",
+            "kokorog2p-de-thorsten-v1", False, voice_names=("thorsten",),
+        ),
+        ("github", "kk-anuarsv"): RuntimeProfile(
+            "github", "kk-anuarsv", ("kk",), "km_m1", "downloaded-config", "1.0",
+            "kokorog2p-kk-v1", False, voice_names=("km_m1",),
+        ),
+        ("github", "th-wayu"): RuntimeProfile(
+            "github", "th-wayu", ("th",), "f_young_clear", "downloaded-config", "1.0",
+            "kokorog2p-th-wayu-v1", False, layout="split-onnx-v1",
+            voice_names=("f_teen_bright", "f_young_bright", "f_young_clear", "f_young_warm", "f_mid_clear", "f_mid_warm", "f_elderly_soft", "f_elderly_low", "m_teen_bright", "m_young_clear", "m_mid_warm", "m_elderly_deep"),
+        ),
+        ("huggingface", "ru-zaakirio-base"): RuntimeProfile(
+            "huggingface", "ru-zaakirio-base", ("ru",), "sveta", "downloaded-config", "1.0",
+            "kokorog2p-ru-v1", False, voice_names=("sveta", "masha"),
+        ),
+        ("huggingface", "ru-zaakirio-dima"): RuntimeProfile(
+            "huggingface", "ru-zaakirio-dima", ("ru",), "dima", "downloaded-config", "1.0",
+            "kokorog2p-ru-v1", False, voice_names=("dima",),
+        ),
+    }
+)
 
 GERMAN_MARTIN_V1_2 = MODEL_PROFILES[("github", "v1.2-de-martin")]
 
@@ -200,3 +240,111 @@ def profile_for_voice(voice: str) -> RuntimeProfile | None:
         return get_model_profile(variant, "github")
     matches = [profile for profile in MODEL_PROFILES.values() if voice in profile.voice_names]
     return matches[0] if len(matches) == 1 else None
+
+
+def model_id_for_voice(voice: str) -> str | None:
+    """Return a registry model ID for voices that select their own checkpoint."""
+    return {
+        "sveta": "ru-zaakirio-base",
+        "masha": "ru-zaakirio-base",
+        "dima": "ru-zaakirio-dima",
+    }.get(voice)
+
+
+VOICE_ALIASES: dict[tuple[str, str], str] = {
+    ("de-crane", "df_kerstin"): "default",
+    ("de-thorsten", "thorsten"): "thorsten",
+}
+
+IMPLEMENTED_FRONTENDS = {
+    "pykokoro-native-v1",
+    "german-ipa-v1",
+    "vig2p-v1",
+    "nabra-arabic-v1",
+    "kokorog2p-sv-v1",
+    "kokorog2p-de-thorsten-v1",
+    "kokorog2p-kk-v1",
+    "kokorog2p-ru-v1",
+    "kokorog2p-th-wayu-v1",
+}
+IMPLEMENTED_LAYOUTS = {"single-onnx-v1", "split-onnx-v1"}
+
+
+def canonical_voice_name(model_id: str, voice: str) -> str:
+    """Return a user alias's canonical registry voice name."""
+    return VOICE_ALIASES.get((model_id, voice), voice)
+
+
+def registry_support_status(model: Any) -> str:
+    """Classify registry metadata against PyKokoro implementation capabilities."""
+    if not model.runtime_available:
+        return "registry-unavailable"
+    if model.layout not in IMPLEMENTED_LAYOUTS:
+        return "unsupported-layout"
+    if model.frontend not in IMPLEMENTED_FRONTENDS:
+        return "unsupported-frontend"
+    if not model.redistribution_allowed:
+        return "restricted"
+    return "ready"
+
+
+def get_registry_model_profile(
+    model_id: str,
+    *,
+    preference: Literal["auto", "github", "huggingface", "upstream"] = "auto",
+    offline: bool = False,
+    registry: Any | None = None,
+ ) -> RuntimeProfile:
+    """Build a profile from canonical registry metadata and local capabilities."""
+    from .model_registry import ModelRegistryError, RegistryClient
+
+    if registry is None:
+        registry = RegistryClient().load(offline=offline)
+    model = registry.model(model_id)
+    distribution = model.distribution(preference) if model.runtime_available else None
+    source: ModelSource = (
+        "github" if distribution is not None and distribution.provider == "github-release" else "huggingface"
+    )
+    local = MODEL_PROFILES.get((source, model_id))
+    qualities = (
+        {
+            artifact.quality: artifact.local_name
+            for artifact in distribution.artifacts
+            if artifact.role == "model" and artifact.quality is not None
+        }
+        if distribution is not None
+        else {}
+    )
+    if not model.runtime_available:
+        raise ModelRegistryError(f"Model profile {model_id!r} has no runtime-ready distribution")
+    assert distribution is not None
+    vocabulary_source: VocabularySource = (
+        "downloaded-release"
+        if any(artifact.role == "vocab" for artifact in distribution.artifacts)
+        else "downloaded-config"
+        if any(artifact.role == "config" for artifact in distribution.artifacts)
+        else "builtin-v1.0"
+    )
+    tokenizer_version = (
+        local.tokenizer_vocab_version if local is not None else str(model.data.get("model_version", "1.0"))
+    )
+    onnx_inputs = local.onnx_inputs if local is not None else model.onnx_contract.get("inputs", {})
+    return RuntimeProfile(
+        source=source,
+        variant=model_id,
+        language_codes=model.language_codes,
+        default_voice=model.default_voice,
+        vocabulary_source=vocabulary_source,
+        tokenizer_vocab_version=tokenizer_version,
+        frontend=model.frontend,
+        frontend_experimental=local.frontend_experimental if local is not None else False,
+        onnx_inputs=onnx_inputs if isinstance(onnx_inputs, Mapping) else {},
+        sample_rate=model.sample_rate,
+        max_tokens=model.max_tokens,
+        quality_files=qualities,
+        voice_names=model.voices,
+        layout=model.layout,
+        runtime_available=model.runtime_available,
+        redistribution_allowed=model.redistribution_allowed,
+        support_status=registry_support_status(model),
+    )

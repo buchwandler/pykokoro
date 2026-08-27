@@ -97,6 +97,49 @@ class RuntimeModel:
     def default_voice(self) -> str:
         return str(self.runtime["default_voice"])
 
+    @property
+    def runtime_available(self) -> bool:
+        return bool(self.data.get("runtime_available", True))
+
+    @property
+    def language_codes(self) -> tuple[str, ...]:
+        values = self.data.get("language_codes", self.runtime.get("language_codes", []))
+        return tuple(str(value) for value in values)
+
+    @property
+    def frontend(self) -> str:
+        return str(self.data.get("frontend", self.runtime.get("frontend", "")))
+
+    @property
+    def layout(self) -> str:
+        return str(self.runtime.get("layout", ""))
+
+    @property
+    def sample_rate(self) -> int:
+        return int(self.data.get("sample_rate", self.runtime.get("sample_rate", 24000)))
+
+    @property
+    def max_tokens(self) -> int:
+        return int(self.runtime.get("max_tokens", self.data.get("max_tokens", 510)))
+
+    @property
+    def onnx_contract(self) -> Mapping[str, Any]:
+        contract = self.data.get("onnx_contract", self.runtime.get("onnx", self.data.get("onnx", {})))
+        return contract if isinstance(contract, Mapping) else {}
+
+    @property
+    def redistribution_allowed(self) -> bool:
+        license_data = self.data.get("license")
+        if isinstance(license_data, Mapping):
+            redistribution = str(license_data.get("redistribution", "allowed"))
+            if redistribution.lower().startswith("restrict") or redistribution.lower() == "forbidden":
+                return False
+        policy = self.data.get("redistribution", self.data.get("redistribution_allowed", True))
+        if isinstance(policy, Mapping):
+            return bool(policy.get("allowed", True))
+        return bool(policy)
+
+
     def distribution(self, preference: DownloadPreference = "auto") -> RuntimeDistribution:
         return select_distribution(self.distributions, preference)
 

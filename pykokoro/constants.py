@@ -36,6 +36,12 @@ SUPPORTED_LANGUAGES = {
     "ja": "ja",
     "zh": "zh",  # Mandarin Chinese
     "cmn": "cmn",  # Accept both zh and cmn
+    "ar": "ar",
+    "he": "he",
+    "kk": "kk",
+    "sv": "sv",
+    "th": "th",
+    "vi": "vi",
 }
 
 # These languages require an explicit ``backend="espeak"`` or ``"goruut"``

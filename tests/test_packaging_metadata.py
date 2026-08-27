@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 try:
@@ -17,7 +18,7 @@ def test_license_and_release_fallback_version_are_present() -> None:
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
     assert "Apache License" in license_text
-    assert pyproject["tool"]["setuptools_scm"]["fallback_version"] == "0.8.6"
+    assert pyproject["tool"]["setuptools_scm"]["fallback_version"] == "0.8.7"
 
 
 def test_companion_dependency_floors_match_current_integration_contract() -> None:
@@ -123,3 +124,45 @@ def test_playback_extra_is_optional_and_keeps_compatibility_alias() -> None:
     assert optional["playback"] == ["sounddevice"]
     assert optional["sounddevice"] == ["sounddevice"]
     assert "sounddevice" not in dependencies
+
+def test_version_fallbacks_target_release() -> None:
+    source = (ROOT / "pykokoro" / "__init__.py").read_text(encoding="utf-8")
+
+    assert re.search(r'__version__ = "0\.8\.7"', source)
+    assert re.search(r"__version_tuple__ = \(0, 8, 7\)", source)
+
+
+def test_lower_bound_workflow_pins_match_project_floors() -> None:
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    dependencies = pyproject["project"]["dependencies"]
+
+    floors = {}
+    for requirement in dependencies:
+        match = re.match(
+            r"([A-Za-z0-9_.-]+)(?:\[[^]]+\])?>=([^,<;]+)", requirement
+        )
+        if match:
+            floors[match.group(1).lower()] = match.group(2)
+
+    workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
+    pins = {
+        name.lower(): version
+        for name, version in re.findall(
+            r'"([A-Za-z0-9_.-]+)(?:\[[^]]+\])?==([^\"]+)"', workflow
+        )
+            if version and version[0].isdigit()
+    }
+    expected_packages = {"kokorog2p", "phrasplit", "ssmd", "audiosig", "babel"}
+
+    assert {package: pins[package] for package in expected_packages} == {
+        package: floors[package] for package in expected_packages
+    }
+    assert "python -m pip install -e . --no-deps" not in workflow
+
+
+def test_package_resource_workflow_covers_kokorog2p_window() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
+
+    assert 'kokorog2p-version: ["0.8.1", "0.8.2"]' in workflow
+    assert "working-directory: ${{ runner.temp }}" in workflow
+    assert "pykokoro-*.whl" in workflow

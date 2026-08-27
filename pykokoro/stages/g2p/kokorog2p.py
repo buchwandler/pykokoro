@@ -128,6 +128,8 @@ class KokoroG2PAdapter(G2PAdapter):
                     phonemes = str(
                         getattr(result, "phonemes", None) or getattr(result, "phoneme", "")
                     )
+                    if cfg.model_variant == "de-thorsten":
+                        phonemes = phonemes.replace("ʏ", "y")
                     tokens = getattr(result, "ids", None) or getattr(result, "token_ids", [])
                     alignment_tokens = self._normalize_alignment_tokens(
                         getattr(result, "tokens", []), segment, g2p, model_version

@@ -30,6 +30,21 @@ A Python library for Kokoro TTS (Text-to-Speech) using ONNX runtime.
 - **Maintainer Benchmarking**: PolyNorm-based phoneme regression tooling for the
   PyKokoro frontend path
 
+
+## Runtime model support
+
+Runtime model selection uses the canonical `catalog/models.json` registry. Model metadata, voices, frontend IDs, runtime layouts, artifact hashes, provider, and redistribution policy are not inferred from GitHub release names.
+
+| Status | Meaning | Examples |
+| --- | --- | --- |
+| ready | Registry distribution and PyKokoro frontend/layout are usable | `v1.0`, `v1.1-zh`, `v1.2-de-martin`, `sv-joakim`, `kk-anuarsv`, Zaakirio Russian |
+| experimental | Usable only when explicitly enabled for an experimental frontend | Profiles marked experimental by the local compatibility policy |
+| restricted | Runtime is visible but redistribution policy is not ordinary | `he-hebrew-nc` |
+| registry-unavailable | Registry has no runtime-ready distribution | `vi-anphunl` |
+| unsupported-layout/frontend | Registry metadata is valid but the local implementation cannot serve it | A future registry layout or frontend |
+
+Thai Wayu uses the registry's `split-onnx-v1` layout and selects its prosody, curves, and decoder components as one distribution. Russian Zaakirio uses pinned upstream-only distributions and validates raw float32 voice artifacts locally; those bytes are not mirrored to GitHub.
+
 ## Installation
 
 ### Basic Installation (CPU only)

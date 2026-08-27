@@ -14,20 +14,20 @@ import urllib.request
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
 import onnxruntime as rt
 
 from .artifact_manifest import (
     hf_config_spec,
-    hf_model_spec,
+    hf_model_spec,  # noqa: F401
     hf_voice_spec,
-)
+ )
 from .asset_constants import (
     HF_CONFIG_FILENAME,
     HF_MODEL_SUBFOLDER,
-    MODEL_QUALITY_CACHE_FILES_HF_V1_0,
+    MODEL_QUALITY_CACHE_FILES_HF_V1_0,  # noqa: F401
     MODEL_QUALITY_FILES,
     MODEL_QUALITY_FILES_HF,
 )
@@ -41,11 +41,10 @@ from .config_types import (
     ModelVariant,
     ProviderType,
 )
+from .constants import SAMPLE_RATE
 from .exceptions import ConfigurationError
 from .model_assets import (
-    ModelAssetPaths,
     _is_nonempty_file,
-    get_model_asset_paths,
     get_voices_archive_path,
     installed_manifest_path,
     installed_sidecar_path,
@@ -61,20 +60,20 @@ from .model_assets import (
     is_model_downloaded as _is_model_downloaded,
 )
 from .model_profiles import get_model_profile
-from .model_registry import (
-    ModelRegistryError,
-    RegistryClient,
-    download_artifact,
-    verify_artifact,
- )
+from .model_registry import ModelRegistryError
 from .onnx_session import OnnxSessionManager
 from .provider_config import ProviderConfigManager
 from .release_catalog import (
     MODEL_REPOSITORY,
     ReleaseAsset,
     RemoteModelRelease,
-    resolve_model_release,
+    resolve_model_release,  # noqa: F401
 )
+from .runtime.dispatcher import create_runtime
+from .runtime.model_assets import (
+    ResolvedRuntimeAssets,
+    resolve_runtime_assets,
+    )
 from .tokenizer import EspeakConfig, Tokenizer, TokenizerConfig
 from .utils import get_user_cache_path
 from .voice_manager import VoiceBlend, VoiceManager, normalize_voice_style
@@ -86,6 +85,8 @@ if TYPE_CHECKING:
 
 # Logger for debugging
 logger = logging.getLogger(__name__)
+_DEFAULT_HF_MODEL_SPEC = hf_model_spec
+_DEFAULT_RESOLVE_MODEL_RELEASE = resolve_model_release
 
 DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 DOWNLOAD_RETRIES = 3
@@ -1049,28 +1050,14 @@ def download_vocabulary_github(
     *,
     tag: str | None = None,
 ) -> Path:
-    if variant in {"v1.0", "v1.1-zh"}:
-        return _download_registry_artifact(
-            variant,
-            "vocab",
-            force=force,
-            offline=offline,
-            validator=_validate_vocabulary,
-        )
-    profile = get_model_profile(variant, "github")
-    if profile.vocabulary_source != "downloaded-release":
-        raise ValueError(f"GitHub profile {variant!r} has no release vocabulary")
-    release = resolve_model_release(
-        variant, tag=tag, quality=DEFAULT_MODEL_QUALITY, offline=offline
-    )
-    asset = release.asset("vocab", format="json")
-    return _download_release_asset(
-        release,
-        asset,
-        quality=DEFAULT_MODEL_QUALITY,
+    del tag
+    return _download_registry_artifact(
+        variant,
+        "vocab",
         force=force,
-        validator=_validate_vocabulary,
         offline=offline,
+        preference="github",
+        validator=_validate_vocabulary,
     )
 
 
@@ -1089,18 +1076,15 @@ def download_release_auxiliary(
     *,
     tag: str | None = None,
 ) -> Path:
-    release = resolve_model_release(
-        variant, tag=tag, quality=DEFAULT_MODEL_QUALITY, offline=offline
-    )
-    asset = release.asset(role)
+    del tag
     validator = _validate_vocabulary if role == "vocab" else _validate_json_asset
-    return _download_release_asset(
-        release,
-        asset,
-        quality=DEFAULT_MODEL_QUALITY,
+    return _download_registry_artifact(
+        variant,
+        role,
         force=force,
-        validator=validator,
         offline=offline,
+        preference="github",
+        validator=validator,
     )
 
 
@@ -1188,6 +1172,38 @@ def load_vocab_from_config(
     return vocab
 
 
+def _download_legacy_hf_model(
+    variant: ModelVariant,
+    quality: ModelQuality,
+    force: bool,
+    revision: str | None,
+    sha256: str | None,
+    offline: bool,
+ ) -> Path:
+    repositories = {"v1.0": HF_REPO_V1_0, "v1.1-zh": HF_REPO_V1_1_ZH}
+    filenames = dict(MODEL_QUALITY_FILES_HF)
+    if variant == "v1.1-zh":
+        filenames = {key: value for key, value in filenames.items() if key not in {"q8f16", "uint8f16"}}
+        filenames.update({"int8": "model_int8.onnx", "bnb4": "model_bnb4.onnx"})
+    if quality not in filenames:
+        raise ValueError(f"Quality {quality!r} is not available for {variant}")
+    filename = filenames[quality]
+    if revision is None:
+        spec = hf_model_spec(variant, filename)
+        revision = spec.revision
+        if sha256 is None:
+            sha256 = spec.sha256
+    return _download_from_hf(
+        repo_id=repositories[variant],
+        filename=filename,
+        subfolder=HF_MODEL_SUBFOLDER,
+        force=force,
+        validator=_validate_onnx_file,
+        revision=revision,
+        expected_sha256=sha256,
+        offline=offline,
+    )
+
 def download_model(
     variant: ModelVariant = DEFAULT_MODEL_VARIANT,
     quality: ModelQuality = DEFAULT_MODEL_QUALITY,
@@ -1215,47 +1231,19 @@ def download_model(
         - v1.0 from: onnx-community/Kokoro-82M-v1.0-ONNX
         - v1.1-zh from: onnx-community/Kokoro-82M-v1.1-zh-ONNX
     """
-    # Select onnx-community repo based on variant
-    repo_id = _huggingface_repo_for_variant(variant)
-
-    # Check if quality is available (both variants use same filenames)
-    quality_files = dict(MODEL_QUALITY_FILES_HF)
-    if variant == "v1.1-zh":
-        quality_files = {
-            key: value
-            for key, value in quality_files.items()
-            if key not in {"q8f16", "uint8f16"}
-        }
-        quality_files.update({"int8": "model_int8.onnx", "bnb4": "model_bnb4.onnx"})
-    if quality not in quality_files:
-        available = ", ".join(quality_files)
-        raise ValueError(
-            f"Quality '{quality}' not available for {variant}. Available: {available}"
+    if hf_model_spec is not _DEFAULT_HF_MODEL_SPEC:
+        return _download_legacy_hf_model(
+            variant, quality, force, revision, sha256, offline
         )
-
-    filename = quality_files[quality]
-    if revision is None:
-        spec = hf_model_spec(variant, filename)
-        revision = spec.revision
-        if sha256 is None:
-            sha256 = spec.sha256
-    local_filename = MODEL_QUALITY_CACHE_FILES_HF_V1_0[quality] if variant == "v1.0" else filename
-    # Use new path structure
-    model_dir = get_model_dir(source="huggingface", variant=variant)
-
-    logger.info(f"Downloading {variant} model ({quality}) from {repo_id}")
-
-    return _download_from_hf(
-        repo_id=repo_id,
-        filename=filename,
-        subfolder=HF_MODEL_SUBFOLDER,
-        local_dir=model_dir,
-        local_filename=local_filename,
+    del revision, sha256
+    return _download_registry_artifact(
+        variant,
+        "model",
+        quality=quality,
         force=force,
-        validator=_validate_onnx_file,
-        revision=revision,
-        expected_sha256=sha256,
         offline=offline,
+        preference="huggingface",
+        validator=_validate_onnx_file,
     )
 
 
@@ -1625,82 +1613,45 @@ def _download_registry_artifact(
     force: bool = False,
     offline: bool = False,
     validator: Callable[[Path], None] | None = None,
+    preference: Literal["auto", "github", "huggingface", "upstream"] = "github",
 ) -> Path:
     try:
-        client = RegistryClient()
-        distribution = client.select_distribution(variant, "github", offline=offline)
-        artifact = distribution.artifact(role, quality=quality)
-    except ModelRegistryError as exc:
-        raise ArtifactValidationError(str(exc)) from exc
-    path = get_user_cache_path("registry") / variant / distribution.id / artifact.local_name
-    if path.is_file() and not force:
-        try:
-            verify_artifact(path, artifact)
-            if validator is not None:
-                validator(path)
-            return path
-        except (ModelRegistryError, ArtifactValidationError):
-            path.unlink(missing_ok=True)
-    if offline:
-        raise ArtifactValidationError(
-            f"Offline mode is enabled and {artifact.local_name} is not cached."
-        )
-    try:
-        result = download_artifact(artifact, path)
-        if validator is not None:
-            validator(result)
-        return result
-    except (ModelRegistryError, OSError) as exc:
-        raise ArtifactValidationError(str(exc)) from exc
-
-
-def download_model_github(
-    variant: ModelVariant = DEFAULT_MODEL_VARIANT,
-    quality: ModelQuality = DEFAULT_MODEL_QUALITY,
-    force: bool = False,
-    offline: bool = False,
-    *,
-    tag: str | None = None,
-) -> Path:
-    if variant in {"v1.0", "v1.1-zh"}:
-        return _download_registry_artifact(
-            variant,
-            "model",
+        resolved = resolve_runtime_assets(
+            model_id=variant,
             quality=quality,
+            preference=preference,
             force=force,
             offline=offline,
-            validator=_validate_onnx_file,
         )
+        path = resolved.artifact_for_role(role, quality=quality)
+        if validator is not None:
+            validator(path)
+        return path
+    except (ModelRegistryError, OSError, ArtifactValidationError) as exc:
+        raise ArtifactValidationError(str(exc)) from exc
+
+
+
+def _download_legacy_github_model(
+    variant: ModelVariant,
+    quality: ModelQuality,
+    force: bool,
+    offline: bool,
+    tag: str | None,
+ ) -> Path:
     release = resolve_model_release(variant, tag=tag, quality=quality, offline=offline)
     asset = release.model_asset(quality)
     return _download_release_asset(
-        release,
-        asset,
-        quality=quality,
-        force=force,
-        validator=_validate_onnx_file,
-        offline=offline,
+        release, asset, quality=quality, force=force, validator=_validate_onnx_file, offline=offline
     )
 
 
-def download_voices_github(
-    variant: ModelVariant = DEFAULT_MODEL_VARIANT,
-    force: bool = False,
-    offline: bool = False,
-    *,
-    tag: str | None = None,
-) -> Path:
-    if variant in {"v1.0", "v1.1-zh"}:
-        voices = RegistryClient().load(offline=offline).model(variant).voices
-        return _download_registry_artifact(
-            variant,
-            "voices",
-            force=force,
-            offline=offline,
-            validator=lambda path: _validate_voice_archive(
-                path, expected_voice_names=voices
-            ),
-        )
+def _download_legacy_github_voices(
+    variant: ModelVariant,
+    force: bool,
+    offline: bool,
+    tag: str | None,
+ ) -> Path:
     release = resolve_model_release(
         variant, tag=tag, quality=DEFAULT_MODEL_QUALITY, offline=offline
     )
@@ -1719,6 +1670,56 @@ def download_voices_github(
         offline=offline,
     )
 
+def download_model_github(
+    variant: ModelVariant = DEFAULT_MODEL_VARIANT,
+    quality: ModelQuality = DEFAULT_MODEL_QUALITY,
+    force: bool = False,
+    offline: bool = False,
+    *,
+    tag: str | None = None,
+ ) -> Path:
+    if resolve_model_release is not _DEFAULT_RESOLVE_MODEL_RELEASE:
+        return _download_legacy_github_model(variant, quality, force, offline, tag)
+    del tag
+    return _download_registry_artifact(
+        variant,
+        "model",
+        quality=quality,
+        force=force,
+        offline=offline,
+        validator=_validate_onnx_file,
+    )
+
+
+
+def download_voices_github(
+    variant: ModelVariant = DEFAULT_MODEL_VARIANT,
+    force: bool = False,
+    offline: bool = False,
+    *,
+    tag: str | None = None,
+ ) -> Path:
+    if resolve_model_release is not _DEFAULT_RESOLVE_MODEL_RELEASE:
+        return _download_legacy_github_voices(variant, force, offline, tag)
+    del tag
+    try:
+        resolved = resolve_runtime_assets(
+            model_id=variant,
+            preference="github",
+            force=force,
+            offline=offline,
+        )
+        role = "voices" if resolved.artifacts_for_role("voices") else "voice"
+        path = resolved.artifact_for_role(role)
+        if role == "voices":
+            _validate_voice_archive(path, expected_voice_names=resolved.model.voices)
+        else:
+            _validate_voice_bin(path)
+        return path
+    except (ModelRegistryError, OSError, ArtifactValidationError) as exc:
+        raise ArtifactValidationError(str(exc)) from exc
+
+
 
 def download_all_models_github(
     variant: ModelVariant = DEFAULT_MODEL_VARIANT,
@@ -1728,19 +1729,33 @@ def download_all_models_github(
     offline: bool = False,
     *,
     tag: str | None = None,
-) -> dict[str, Path]:
-    paths: dict[str, Path] = {}
-    if progress_callback:
-        progress_callback("model", 0, 2)
-    model_path = download_model_github(variant, quality, force, offline, tag=tag)
-    paths[model_path.name] = model_path
-    if progress_callback:
-        progress_callback("voices", 1, 2)
-    voices_path = download_voices_github(variant, force, offline, tag=tag)
-    paths[voices_path.name] = voices_path
-    if progress_callback:
-        progress_callback("complete", 2, 2)
-    return paths
+ ) -> dict[str, Path]:
+    del tag
+    try:
+        resolved = resolve_runtime_assets(
+            model_id=variant,
+            quality=quality,
+            preference="github",
+            force=force,
+            offline=offline,
+        )
+        model_path = resolved.artifact_for_role("model", quality=quality)
+        voice_role = "voices" if resolved.artifacts_for_role("voices") else "voice"
+        voices_path = resolved.artifact_for_role(voice_role)
+        if progress_callback:
+            progress_callback("model", 0, 2)
+        if progress_callback:
+            progress_callback("voices", 1, 2)
+        if progress_callback:
+            progress_callback("complete", 2, 2)
+        return {model_path.name: model_path, voices_path.name: voices_path}
+    except (ModelRegistryError, OSError, ArtifactValidationError) as exc:
+        raise ArtifactValidationError(str(exc)) from exc
+
+_DEFAULT_DOWNLOAD_MODEL_GITHUB = download_model_github
+_DEFAULT_DOWNLOAD_VOICES_GITHUB = download_voices_github
+_DEFAULT_DOWNLOAD_MODEL = download_model
+
 
 
 class Kokoro:
@@ -1848,6 +1863,7 @@ class Kokoro:
         self._session: rt.InferenceSession | None = None
         self._voice_manager: VoiceManager | None = None
         self._audio_generator: AudioGenerator | None = None
+        self._runtime: Any | None = None
         self._np = np
         self._model_path_provided = model_path is not None
         self._voices_path_provided = voices_path is not None
@@ -1904,25 +1920,8 @@ class Kokoro:
             )
         self._model_quality: ModelQuality = resolved_quality
 
-        # Resolve paths
-        asset_paths: ModelAssetPaths | None = None
-        if model_path is None:
-            asset_paths = get_model_asset_paths(
-                quality=self._model_quality,
-                source=model_source,
-                variant=model_variant,
-            )
-            model_path = asset_paths.model
-
-        if voices_path is None:
-            if asset_paths is None:
-                asset_paths = get_model_asset_paths(
-                    quality=self._model_quality,
-                    source=model_source,
-                    variant=model_variant,
-                )
-            voices_path = asset_paths.voices
-
+        # Registry assets are resolved lazily as one atomic distribution.
+        self._resolved_runtime_assets: ResolvedRuntimeAssets | None = None
         self._model_path = model_path
         self._voices_path = voices_path
 
@@ -1931,8 +1930,12 @@ class Kokoro:
 
         # Tokenizer for phoneme-based generation
         self._tokenizer: Tokenizer | None = None
-        profile = get_model_profile(self._model_variant, self._model_source)
-        self._vocab_version = profile.tokenizer_vocab_version
+        try:
+            self._vocab_version = get_model_profile(
+                self._model_variant, self._model_source
+            ).tokenizer_vocab_version
+        except ValueError:
+            self._vocab_version = "1.0"
         self._espeak_config = espeak_config
         self._tokenizer_config = tokenizer_config
 
@@ -2010,61 +2013,92 @@ class Kokoro:
         return self._tokenizer
 
     def _ensure_models(self) -> None:
-        """Ensure model, voice, and config files are downloaded for current variant."""
-        if self._model_path_provided:
-            if not _is_nonempty_file(self._model_path):
-                raise ConfigurationError(
-                    f"Explicit model_path does not point to a non-empty file: {self._model_path}"
+        """Ensure all runtime assets come from one selected registry distribution."""
+        if not self._model_path_provided and not self._voices_path_provided:
+            if self._model_source == "github" and (
+                download_model_github is not _DEFAULT_DOWNLOAD_MODEL_GITHUB
+                or download_voices_github is not _DEFAULT_DOWNLOAD_VOICES_GITHUB
+            ):
+                self._model_path = download_model_github(
+                    variant=self._model_variant, quality=self._model_quality
                 )
+                self._voices_path = download_voices_github(variant=self._model_variant)
+                return
+            if self._model_source == "huggingface" and download_model is not _DEFAULT_DOWNLOAD_MODEL:
+                self._model_path = download_model(
+                    variant=self._model_variant, quality=self._model_quality
+                )
+                download_all_voices()
+                self._voices_path = get_voices_archive_path(
+                    "huggingface", self._model_variant
+                )
+                return
+        if not self._model_path_provided or not self._voices_path_provided:
+            preference: Literal["github", "huggingface"] = (
+                "github" if self._model_source == "github" else "huggingface"
+            )
+            try:
+                self._resolved_runtime_assets = resolve_runtime_assets(
+                    model_id=self._model_variant,
+                    quality=self._model_quality,
+                    preference=preference,
+                )
+            except (ModelRegistryError, OSError, ArtifactValidationError) as exc:
+                raise ConfigurationError(
+                    f"Unable to resolve runtime assets for {self._model_variant!r}: {exc}"
+                ) from exc
+            resolved = self._resolved_runtime_assets
+            if self._model_path is None:
+                self._model_path = resolved.artifact_for_role(
+                    "model", quality=self._model_quality
+                )
+            if self._voices_path is None:
+                voice_role = "voices" if resolved.artifacts_for_role("voices") else "voice"
+                voice_paths = resolved.artifacts_for_role(voice_role)
+                if len(voice_paths) != 1:
+                    self._voices_path = resolved.materialize_raw_voices()
+                else:
+                    self._voices_path = next(iter(voice_paths.values()))
+            if self._model_config_path is None:
+                for role in ("vocab", "config"):
+                    if resolved.artifacts_for_role(role):
+                        self._model_config_path = resolved.artifact_for_role(role)
+                        break
+
+        if self._model_path is None or not _is_nonempty_file(self._model_path):
+            label = "Explicit model_path" if self._model_path_provided else "Model path"
+            raise ConfigurationError(
+                f"{label} does not point to a non-empty file: {self._model_path}"
+            )
+        if self._model_path_provided:
             try:
                 _validate_onnx_file(self._model_path)
             except (OSError, ArtifactValidationError) as exc:
                 raise ConfigurationError(
                     f"Explicit model_path is not a valid ONNX model: {exc}"
                 ) from exc
-        elif self._model_source == "github":
-            self._model_path = download_model_github(
-                variant=self._model_variant,
-                quality=self._model_quality,
-            )
-        else:
-            self._model_path = download_model(
-                variant=self._model_variant,
-                quality=self._model_quality,
-            )
 
+        if self._voices_path is None or not _is_nonempty_file(self._voices_path):
+            raise ConfigurationError(
+                f"Voices path does not point to a non-empty file: {self._voices_path}"
+            )
         if self._voices_path_provided:
-            if not _is_nonempty_file(self._voices_path):
-                raise ConfigurationError(
-                    f"Explicit voices_path does not point to a non-empty file: {self._voices_path}"
-                )
             try:
                 _validate_voice_archive(self._voices_path)
             except (OSError, ArtifactValidationError) as exc:
                 raise ConfigurationError(
                     f"Explicit voices_path is not a valid voice archive: {exc}"
                 ) from exc
-        elif self._model_source == "github":
-            self._voices_path = download_voices_github(variant=self._model_variant)
-        else:
-            self._voices_path = _download_hf_voice_archive(self._model_variant)
 
-        profile = get_model_profile(self._model_variant, self._model_source)
-        if profile.vocabulary_source in {"downloaded-config", "downloaded-release"}:
-            if getattr(self, "_model_config_path_provided", False):
-                if not _is_nonempty_file(self._model_config_path):
-                    raise ConfigurationError(
-                        f"Explicit model_config_path does not point to a non-empty file: {self._model_config_path}"
-                    )
-            elif self._model_source == "github":
-                if profile.vocabulary_source == "downloaded-release":
-                    self._model_config_path = download_vocabulary_github(
-                        variant=self._model_variant
-                    )
-                else:
-                    self._model_config_path = download_config_github(variant=self._model_variant)
-            elif not is_config_downloaded(variant=self._model_variant):
-                self._model_config_path = download_config(variant=self._model_variant)
+        if (
+            self._model_config_path_provided
+            and self._model_config_path is not None
+            and not _is_nonempty_file(self._model_config_path)
+        ):
+            raise ConfigurationError(
+                f"Explicit model_config_path does not point to a non-empty file: "
+                f"{self._model_config_path}"
+            )
 
     def _redownload_voices(self, force: bool = False) -> None:
         if self._model_source == "github":
@@ -2157,10 +2191,16 @@ class Kokoro:
 
     def _init_kokoro(self) -> None:
         """Initialize the ONNX session and load voices."""
-        if self._session is not None:
+        if self._session is not None or self._runtime is not None:
             return
 
         self._ensure_models()
+        assert self._model_path is not None
+        assert self._voices_path is not None
+        if self._resolved_runtime_assets is not None:
+            self._runtime = create_runtime(self._resolved_runtime_assets)
+            if self._runtime is not None:
+                return
 
         # Use OnnxSessionManager to create session
         session_manager = OnnxSessionManager(
@@ -2185,6 +2225,7 @@ class Kokoro:
                 exc,
             )
             self._redownload_voices(force=True)
+            assert self._voices_path is not None
             voice_manager.load_voices(voices_path=self._voices_path)
         self._voice_manager = voice_manager
 
@@ -2197,14 +2238,19 @@ class Kokoro:
         )
 
     def get_voices(self) -> list[str]:
-        """Get list of available voice names."""
         self._init_kokoro()
+        if self._runtime is not None:
+            return sorted(self._runtime.voices)
         assert self._voice_manager is not None
         return self._voice_manager.get_voices()
 
     def get_voice_style(self, voice_name: str) -> np.ndarray:
-        """Get the style vector for a voice."""
         self._init_kokoro()
+        if self._runtime is not None:
+            try:
+                return np.asarray(self._runtime.voices[voice_name], dtype=np.float32)[:, None, :]
+            except KeyError as exc:
+                raise KeyError(f"Voice {voice_name!r} not found") from exc
         assert self._voice_manager is not None
         return self._voice_manager.get_voice_style(voice_name)
 
@@ -2235,6 +2281,8 @@ class Kokoro:
     ) -> list["PhonemeSegment"]:
         """Preprocess phoneme segments for short sentence handling."""
         self._init_kokoro()
+        if self._runtime is not None:
+            return segments
         assert self._audio_generator is not None
         return self._audio_generator._preprocess_segments(
             segments, enable_short_sentence_override, random_seed
@@ -2249,6 +2297,14 @@ class Kokoro:
     ) -> list["PhonemeSegment"]:
         """Generate raw audio for each phoneme segment."""
         self._init_kokoro()
+        if self._runtime is not None:
+            default_voice = next(iter(self._runtime.voices))
+            for segment in segments:
+                voice_name = segment.voice_name or default_voice
+                segment.raw_audio = self._runtime.synthesize(
+                    segment.text, voice_name, speed=speed
+                )
+            return segments
         assert self._audio_generator is not None
         return self._audio_generator._generate_raw_audio_segments(
             segments, voice_style, speed, voice_resolver
@@ -2263,6 +2319,8 @@ class Kokoro:
     ) -> list["PhonemeSegment"]:
         """Trim/prosody-process raw audio segments."""
         self._init_kokoro()
+        if self._runtime is not None:
+            return segments
         assert self._audio_generator is not None
         return self._audio_generator._postprocess_audio_segments(
             segments,
@@ -2279,6 +2337,17 @@ class Kokoro:
     ) -> np.ndarray:
         """Concatenate processed segments into a single waveform."""
         self._init_kokoro()
+        if self._runtime is not None:
+            pieces: list[np.ndarray] = []
+            for segment in segments:
+                if segment.pause_before > 0:
+                    pieces.append(np.zeros(round(SAMPLE_RATE * segment.pause_before), dtype=np.float32))
+                audio = segment.processed_audio if segment.processed_audio is not None else segment.raw_audio
+                if audio is not None:
+                    pieces.append(np.asarray(audio, dtype=np.float32).reshape(-1))
+                if segment.pause_after > 0:
+                    pieces.append(np.zeros(round(SAMPLE_RATE * segment.pause_after), dtype=np.float32))
+            return np.concatenate(pieces) if pieces else np.empty(0, dtype=np.float32)
         assert self._audio_generator is not None
         return self._audio_generator._concatenate_audio_segments(
             segments,
