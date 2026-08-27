@@ -66,7 +66,15 @@ class CountingKokoro:
         _ = voice
         return np.zeros(1, dtype=np.float32)
 
-    def generate_raw_audio_segments(self, phoneme_segments, voice_style, speed, voice_resolver):
+    def generate_raw_audio_segments(
+        self,
+        phoneme_segments,
+        voice_style,
+        speed,
+        voice_resolver,
+        *,
+        default_voice_name=None,
+    ):
         _ = voice_style, speed, voice_resolver
         for index, segment in enumerate(phoneme_segments):
             segment.raw_audio = np.full(2 + index, index + 1, dtype=np.float32)

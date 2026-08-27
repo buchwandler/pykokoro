@@ -5,7 +5,10 @@ scripts below use the current pipeline-first API.
 
 ## Basic pipeline
 
-- `german.py` — short German synthesis example; requires ONNX Runtime and model assets.
+- `german.py` — German Martin v1.2; demonstrates automatic German model selection and requires ONNX Runtime/model assets.
+- `german2.py` — German Kerstin/Crane; explicitly selects `de-crane` and opts into its experimental frontend.
+- `german3.py` — German Thorsten; explicitly selects the ready `de-thorsten` model.
+- `models_and_languages.py` — inspect the canonical runtime registry and display models, languages, providers, voices, qualities, frontend/layout status, and optionally synthesize one selected model. The default listing never downloads model weights.
 - `play_audio.py` — generate a short waveform completely, then play it; install
   `pykokoro[cpu,playback]`.
 - `play_streaming.py` — preferred low-startup-latency long-form sentence playback

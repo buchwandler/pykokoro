@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate German speech with the Martin v1.2 model."""
+"""Generate German speech with the Thorsten model."""
 
 from __future__ import annotations
 
@@ -18,13 +18,17 @@ TEXT = (
     '2 Min. ruhen." Die Kosten liegen bei ca. 12,80 EUR zzgl. Pfand.'
 )
 
-OUTPUT_FILE = "german_martin_v1_2.wav"
+OUTPUT_FILE = "german_thorsten.wav"
 
 
 def make_config() -> PipelineConfig:
-    """Return the automatic German Martin configuration."""
+    """Return the explicitly selected ready Thorsten configuration."""
     return PipelineConfig(
-        generation=GenerationConfig(lang="de", speed=1.125),
+        voice="thorsten",
+        model_source="github",
+        model_variant="de-thorsten",
+        model_quality="fp32",
+        generation=GenerationConfig(lang="de", speed=1.0),
         return_trace=True,
     )
 
@@ -38,14 +42,13 @@ def main() -> None:
     sf.write(OUTPUT_FILE, result.audio, result.sample_rate)
     duration = len(result.audio) / result.sample_rate
     print(f"Created {OUTPUT_FILE}")
+    print("Model: de-thorsten")
     print(f"Sample rate: {result.sample_rate} Hz")
     print(f"Duration: {duration:.2f} seconds")
     print("\nPhoneme segments:")
     for index, segment in enumerate(result.phoneme_segments, start=1):
         print(f"  [{index}] {segment.text!r}")
         print(f"      {segment.phonemes}")
-    print("\nFull phoneme stream:")
-    print(" ".join(segment.phonemes for segment in result.phoneme_segments))
     if result.trace and result.trace.warnings:
         print("Warnings:")
         for warning in result.trace.warnings:

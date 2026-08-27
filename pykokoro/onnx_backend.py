@@ -59,7 +59,7 @@ from .model_assets import (
 from .model_assets import (
     is_model_downloaded as _is_model_downloaded,
 )
-from .model_profiles import get_model_profile
+from .model_profiles import VOICE_ALIASES, get_model_profile
 from .model_registry import ModelRegistryError
 from .onnx_session import OnnxSessionManager
 from .provider_config import ProviderConfigManager
@@ -2244,6 +2244,17 @@ class Kokoro:
         assert self._voice_manager is not None
         return self._voice_manager.get_voices()
 
+    def _voice_manager_voice_name(self, voice_name: str) -> str:
+        """Map a registry voice alias to the name stored in a voice archive."""
+        return next(
+            (
+                archive_name
+                for (variant, archive_name), registry_name in VOICE_ALIASES.items()
+                if variant == self._model_variant and registry_name == voice_name
+            ),
+            voice_name,
+        )
+
     def get_voice_style(self, voice_name: str) -> np.ndarray:
         self._init_kokoro()
         if self._runtime is not None:
@@ -2252,7 +2263,7 @@ class Kokoro:
             except KeyError as exc:
                 raise KeyError(f"Voice {voice_name!r} not found") from exc
         assert self._voice_manager is not None
-        return self._voice_manager.get_voice_style(voice_name)
+        return self._voice_manager.get_voice_style(self._voice_manager_voice_name(voice_name))
 
     def create_blended_voice(self, blend: VoiceBlend) -> np.ndarray:
         """Create a blended voice style vector from a VoiceBlend."""
@@ -2263,7 +2274,15 @@ class Kokoro:
     def _resolve_voice_style(self, voice: str | np.ndarray | VoiceBlend) -> np.ndarray:
         """Resolve voice parameter to a voice style array."""
         self._init_kokoro()
+        if self._runtime is not None:
+            if not isinstance(voice, str):
+                raise ConfigurationError(
+                    "Voice blending/arrays are not supported by this runtime layout"
+                )
+            return self.get_voice_style(voice)
         assert self._voice_manager is not None
+        if isinstance(voice, str):
+            voice = self._voice_manager_voice_name(voice)
         return self._voice_manager.resolve_voice(
             voice,
             voice_db_lookup=self.get_voice_from_database,
@@ -2294,11 +2313,13 @@ class Kokoro:
         voice_style: np.ndarray,
         speed: float,
         voice_resolver: Callable[[str], np.ndarray] | None,
+        *,
+        default_voice_name: str | None = None,
     ) -> list["PhonemeSegment"]:
         """Generate raw audio for each phoneme segment."""
         self._init_kokoro()
         if self._runtime is not None:
-            default_voice = next(iter(self._runtime.voices))
+            default_voice = default_voice_name or next(iter(self._runtime.voices))
             for segment in segments:
                 voice_name = segment.voice_name or default_voice
                 segment.raw_audio = self._runtime.synthesize(

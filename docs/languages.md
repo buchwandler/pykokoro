@@ -14,6 +14,14 @@ default; Chinese automatic selection retains the GitHub v1.1-zh policy.
 - voice: `martin`
 - vocabulary: built-in Kokoro v1.0
 
+| Model | Variant | Voice | Status | Selection |
+| --- | --- | --- | --- | --- |
+| Martin | `v1.2-de-martin` | `martin` | ready/default | automatic for `lang="de"` |
+| Kerstin / Crane | `de-crane` | `default` | experimental | explicit + `allow_experimental_frontend=True` |
+| Thorsten | `de-thorsten` | `thorsten` | ready | explicit |
+
+Martin is the automatic German default. Kerstin/Crane and Thorsten are explicit alternative acoustic models; Crane currently requires experimental frontend opt-in. Compare them with the maintained examples `examples/german.py`, `examples/german2.py`, and `examples/german3.py`.
+
 The Martin profile is a single-speaker model. Its ONNX file is
 `kokoro-german-martin-v1.2.onnx`; its voice archive is `voices-german-martin-v1.2.bin`.
 Both downloads are checked with SHA-256 and the voice archive must contain `martin`. No

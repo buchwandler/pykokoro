@@ -60,7 +60,15 @@ class DummyKokoro:
         _ = voice_name
         return np.zeros((1, 1), dtype=np.float32)
 
-    def generate_raw_audio_segments(self, phoneme_segments, voice_style, speed, voice_resolver):
+    def generate_raw_audio_segments(
+        self,
+        phoneme_segments,
+        voice_style,
+        speed,
+        voice_resolver,
+        *,
+        default_voice_name=None,
+    ):
         _ = voice_style
         _ = speed
         _ = voice_resolver

@@ -63,3 +63,35 @@ def test_resolved_profile_is_in_cache_key():
     key = pipeline._kokoro_key(resolved)
     assert "v1.2-de-martin" in key
     assert "github" in key
+
+
+@pytest.mark.parametrize(
+    ("variant", "voice"),
+    [
+        ("ru-zaakirio-base", "sveta"),
+        ("ru-zaakirio-dima", "dima"),
+    ],
+)
+def test_registry_huggingface_profiles_defer_quality_validation(variant, voice):
+    cfg = PipelineConfig(
+        model_source="huggingface",
+        model_variant=variant,
+        model_quality="fp32",
+        generation=GenerationConfig(lang="ru"),
+    )
+
+    resolved = resolve_model_defaults(cfg)
+
+    assert resolved.model_source == "huggingface"
+    assert resolved.model_variant == variant
+    assert resolved.model_quality == "fp32"
+    assert resolved.voice == voice
+
+
+def test_dima_voice_selects_dima_registry_profile():
+    resolved = resolve_model_defaults(PipelineConfig(voice="dima"))
+
+    assert resolved.model_source == "huggingface"
+    assert resolved.model_variant == "ru-zaakirio-dima"
+    assert resolved.generation.lang == "ru"
+    assert resolved.model_quality == "fp32"

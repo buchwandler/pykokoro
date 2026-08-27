@@ -60,4 +60,5 @@ class OnnxAudioGenerationAdapter:
             voice_style,
             cfg.generation.speed,
             voice_resolver,
+            default_voice_name=cfg.voice if isinstance(cfg.voice, str) else None,
         )

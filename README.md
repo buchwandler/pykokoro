@@ -37,13 +37,15 @@ Runtime model selection uses the canonical `catalog/models.json` registry. Model
 
 | Status | Meaning | Examples |
 | --- | --- | --- |
-| ready | Registry distribution and PyKokoro frontend/layout are usable | `v1.0`, `v1.1-zh`, `v1.2-de-martin`, `sv-joakim`, `kk-anuarsv`, Zaakirio Russian |
+| ready | Registry distribution and PyKokoro frontend/layout are usable | `v1.0`, `v1.1-zh`, `v1.2-de-martin`, `de-thorsten`, `th-wayu`, `sv-joakim`, `kk-anuarsv`, Zaakirio Russian |
 | experimental | Usable only when explicitly enabled for an experimental frontend | Profiles marked experimental by the local compatibility policy |
 | restricted | Runtime is visible but redistribution policy is not ordinary | `he-hebrew-nc` |
 | registry-unavailable | Registry has no runtime-ready distribution | `vi-anphunl` |
 | unsupported-layout/frontend | Registry metadata is valid but the local implementation cannot serve it | A future registry layout or frontend |
 
 Thai Wayu uses the registry's `split-onnx-v1` layout and selects its prosody, curves, and decoder components as one distribution. Russian Zaakirio uses pinned upstream-only distributions and validates raw float32 voice artifacts locally; those bytes are not mirrored to GitHub.
+
+Use `python examples/models_and_languages.py` to inspect every registry model, language, provider, voice, quality, frontend, layout, and support status without downloading model weights. Pass `--model MODEL_ID` to synthesize only one selected model; experimental frontends additionally require `--include-experimental`.
 
 ## Installation
 
