@@ -121,38 +121,52 @@ GERMAN_MARTIN_V1_2 = MODEL_PROFILES[("github", "v1.2-de-martin")]
 
 
 def _legacy_profile(variant: ModelVariant, source: ModelSource) -> RuntimeProfile:
-    from .asset_constants import MODEL_QUALITY_CACHE_FILES_HF_V1_0, MODEL_QUALITY_FILES_HF
+    from .asset_constants import (
+        MODEL_QUALITY_CACHE_FILES_HF_V1_0,
+        MODEL_QUALITY_FILES_GITHUB_V1_0,
+        MODEL_QUALITY_FILES_GITHUB_V1_1_ZH,
+        MODEL_QUALITY_FILES_HF,
+    )
 
+    if variant not in {"v1.0", "v1.1-zh"}:
+        raise ValueError(f"Unknown model profile: {source}/{variant}")
     if source == "github":
-        language_codes = ("zh",) if variant == "v1.1-zh" else ()
-        frontend = "pykokoro-native-v1"
-        return RuntimeProfile(
-            source=source,
-            variant=variant,
-            language_codes=language_codes,
-            default_voice="af_maple" if variant == "v1.1-zh" else "af",
-            vocabulary_source="downloaded-config" if variant == "v1.1-zh" else "builtin-v1.0",
-            tokenizer_vocab_version="1.1" if variant == "v1.1-zh" else "1.0",
-            frontend=frontend,
-            frontend_experimental=False,
-            quality_files={},
+        qualities = (
+            MODEL_QUALITY_FILES_GITHUB_V1_0
+            if variant == "v1.0"
+            else MODEL_QUALITY_FILES_GITHUB_V1_1_ZH
         )
-    if variant in {"v1.0", "v1.1-zh"}:
         return RuntimeProfile(
             source=source,
             variant=variant,
-            language_codes=(),
-            default_voice="af",
-            vocabulary_source="downloaded-config",
+            language_codes=("en", "es", "fr", "hi", "it", "ja", "pt", "zh")
+            if variant == "v1.0"
+            else ("zh",),
+            default_voice="af_heart" if variant == "v1.0" else "af_maple",
+            vocabulary_source="downloaded-release",
             tokenizer_vocab_version="1.1" if variant == "v1.1-zh" else "1.0",
             frontend="pykokoro-native-v1",
             frontend_experimental=False,
-            quality_files=(
-                MODEL_QUALITY_CACHE_FILES_HF_V1_0 if variant == "v1.0" else MODEL_QUALITY_FILES_HF
-            ),
-            voice_names=(),
+            quality_files=qualities,
         )
-    raise ValueError(f"Unknown model profile: {source}/{variant}")
+    qualities = (
+        MODEL_QUALITY_CACHE_FILES_HF_V1_0
+        if variant == "v1.0"
+        else {key: value for key, value in MODEL_QUALITY_FILES_HF.items() if key not in {"q8f16", "uint8f16"}}
+    )
+    if variant == "v1.1-zh":
+        qualities.update({"int8": "model_int8.onnx", "bnb4": "model_bnb4.onnx"})
+    return RuntimeProfile(
+        source=source,
+        variant=variant,
+        language_codes=(),
+        default_voice="af_heart" if variant == "v1.0" else "af_maple",
+        vocabulary_source="downloaded-config",
+        tokenizer_vocab_version="1.1" if variant == "v1.1-zh" else "1.0",
+        frontend="pykokoro-native-v1",
+        frontend_experimental=False,
+        quality_files=qualities,
+    )
 
 
 def get_model_profile(variant: ModelVariant, source: ModelSource = "github") -> RuntimeProfile:

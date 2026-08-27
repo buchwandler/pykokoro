@@ -8,9 +8,8 @@ This example demonstrates how to generate audio using all 4 combinations:
 2. HuggingFace v1.1-zh - English + Chinese, 103 voices, 8 quality options
    from onnx-community/Kokoro-82M-v1.1-zh-ONNX
 3. GitHub v1.0 - Multi-language, 54 voices, 4 quality options
-   from thewh1teagle/kokoro-onnx
-4. GitHub v1.1-zh - English + Chinese, 103 voices, fp32 only
-   from thewh1teagle/kokoro-onnx
+   from the central catalog GitHub release
+4. Upstream-only profiles use the pinned catalog HTTPS distribution
 
 Usage:
     python examples/model_source_comparison.py
@@ -155,7 +154,7 @@ def main():
     print("\n" + "=" * 70)
     print("Example 3: GitHub v1.0 Model Source")
     print("=" * 70)
-    print("Source: github.com/thewh1teagle/kokoro-onnx (v1.0)")
+    print("Source: buchwandler/kokoro-onnx-models catalog (v1.0)")
     print(f"Text: {ENGLISH_TEXT[:50]}...")
 
     print("\nInitializing TTS engine with GitHub v1.0 model...")
@@ -199,7 +198,7 @@ def main():
     print("\n" + "=" * 70)
     print("Example 4: GitHub v1.1-zh Model Source")
     print("=" * 70)
-    print("Source: github.com/thewh1teagle/kokoro-onnx (v1.1-zh)")
+    print("Source: buchwandler/kokoro-onnx-models catalog (v1.1-zh)")
     print("Note: Testing with English text and English voice from v1.1-zh model")
     print(f"Text: {ENGLISH_TEXT[:50]}...")
 

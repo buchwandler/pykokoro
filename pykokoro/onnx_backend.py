@@ -61,6 +61,12 @@ from .model_assets import (
     is_model_downloaded as _is_model_downloaded,
 )
 from .model_profiles import get_model_profile
+from .model_registry import (
+    ModelRegistryError,
+    RegistryClient,
+    download_artifact,
+    verify_artifact,
+ )
 from .onnx_session import OnnxSessionManager
 from .provider_config import ProviderConfigManager
 from .release_catalog import (
@@ -103,7 +109,8 @@ class ArtifactValidationError(RuntimeError):
 
 
 # GitHub release discovery is centralized in release_catalog.py.
-HF_REPO_V1_0 = "onnx-community/Kokoro-82M-v1.0-ONNX-timestamped"
+# Direct Hugging Face compatibility downloads use the same pinned sources as the registry.
+HF_REPO_V1_0 = "onnx-community/Kokoro-82M-v1.0-ONNX"
 HF_REPO_V1_1_ZH = "onnx-community/Kokoro-82M-v1.1-zh-ONNX"
 HF_CONFIG_REPO_V1_0 = "hexgrad/Kokoro-82M"
 HF_CONFIG_REPO_V1_1_ZH = "hexgrad/Kokoro-82M-v1.1-zh"
@@ -112,7 +119,6 @@ HF_VOICES_SUBFOLDER = "voices"
 # Used by both HuggingFace and GitHub sources
 # These are used for downloading individual voice files from HuggingFace
 VOICE_NAMES_V1_0 = [
-    "af",
     "af_alloy",
     "af_aoede",
     "af_bella",
@@ -1043,6 +1049,14 @@ def download_vocabulary_github(
     *,
     tag: str | None = None,
 ) -> Path:
+    if variant in {"v1.0", "v1.1-zh"}:
+        return _download_registry_artifact(
+            variant,
+            "vocab",
+            force=force,
+            offline=offline,
+            validator=_validate_vocabulary,
+        )
     profile = get_model_profile(variant, "github")
     if profile.vocabulary_source != "downloaded-release":
         raise ValueError(f"GitHub profile {variant!r} has no release vocabulary")
@@ -1205,11 +1219,21 @@ def download_model(
     repo_id = _huggingface_repo_for_variant(variant)
 
     # Check if quality is available (both variants use same filenames)
-    if quality not in MODEL_QUALITY_FILES_HF:
-        available = ", ".join(MODEL_QUALITY_FILES_HF.keys())
-        raise ValueError(f"Quality '{quality}' not available. Available: {available}")
+    quality_files = dict(MODEL_QUALITY_FILES_HF)
+    if variant == "v1.1-zh":
+        quality_files = {
+            key: value
+            for key, value in quality_files.items()
+            if key not in {"q8f16", "uint8f16"}
+        }
+        quality_files.update({"int8": "model_int8.onnx", "bnb4": "model_bnb4.onnx"})
+    if quality not in quality_files:
+        available = ", ".join(quality_files)
+        raise ValueError(
+            f"Quality '{quality}' not available for {variant}. Available: {available}"
+        )
 
-    filename = MODEL_QUALITY_FILES_HF[quality]
+    filename = quality_files[quality]
     if revision is None:
         spec = hf_model_spec(variant, filename)
         revision = spec.revision
@@ -1593,6 +1617,43 @@ def _download_from_github(
         )
 
 
+def _download_registry_artifact(
+    variant: ModelVariant,
+    role: str,
+    *,
+    quality: ModelQuality | None = None,
+    force: bool = False,
+    offline: bool = False,
+    validator: Callable[[Path], None] | None = None,
+) -> Path:
+    try:
+        client = RegistryClient()
+        distribution = client.select_distribution(variant, "github", offline=offline)
+        artifact = distribution.artifact(role, quality=quality)
+    except ModelRegistryError as exc:
+        raise ArtifactValidationError(str(exc)) from exc
+    path = get_user_cache_path("registry") / variant / distribution.id / artifact.local_name
+    if path.is_file() and not force:
+        try:
+            verify_artifact(path, artifact)
+            if validator is not None:
+                validator(path)
+            return path
+        except (ModelRegistryError, ArtifactValidationError):
+            path.unlink(missing_ok=True)
+    if offline:
+        raise ArtifactValidationError(
+            f"Offline mode is enabled and {artifact.local_name} is not cached."
+        )
+    try:
+        result = download_artifact(artifact, path)
+        if validator is not None:
+            validator(result)
+        return result
+    except (ModelRegistryError, OSError) as exc:
+        raise ArtifactValidationError(str(exc)) from exc
+
+
 def download_model_github(
     variant: ModelVariant = DEFAULT_MODEL_VARIANT,
     quality: ModelQuality = DEFAULT_MODEL_QUALITY,
@@ -1601,6 +1662,15 @@ def download_model_github(
     *,
     tag: str | None = None,
 ) -> Path:
+    if variant in {"v1.0", "v1.1-zh"}:
+        return _download_registry_artifact(
+            variant,
+            "model",
+            quality=quality,
+            force=force,
+            offline=offline,
+            validator=_validate_onnx_file,
+        )
     release = resolve_model_release(variant, tag=tag, quality=quality, offline=offline)
     asset = release.model_asset(quality)
     return _download_release_asset(
@@ -1620,6 +1690,17 @@ def download_voices_github(
     *,
     tag: str | None = None,
 ) -> Path:
+    if variant in {"v1.0", "v1.1-zh"}:
+        voices = RegistryClient().load(offline=offline).model(variant).voices
+        return _download_registry_artifact(
+            variant,
+            "voices",
+            force=force,
+            offline=offline,
+            validator=lambda path: _validate_voice_archive(
+                path, expected_voice_names=voices
+            ),
+        )
     release = resolve_model_release(
         variant, tag=tag, quality=DEFAULT_MODEL_QUALITY, offline=offline
     )

@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import Literal, TypeAlias
 
 ModelQuality = Literal[
-    "fp32", "fp16", "fp16-gpu", "q8", "q8f16", "q4", "q4f16", "uint8", "uint8f16"
+    "fp32", "fp16", "fp16-gpu", "q8", "q8f16", "q4", "q4f16", "uint8", "uint8f16",
+    "int8", "bnb4",
 ]
 ModelSource = Literal["huggingface", "github"]
 ModelVariant: TypeAlias = str
@@ -23,7 +24,7 @@ ProviderAlias: TypeAlias = Literal[
 ProviderType: TypeAlias = str
 
 DEFAULT_MODEL_QUALITY: ModelQuality = "fp32"
-DEFAULT_MODEL_SOURCE: ModelSource = "huggingface"
+DEFAULT_MODEL_SOURCE: ModelSource = "github"
 DEFAULT_MODEL_VARIANT: ModelVariant = "v1.0"
 
 LANG_CODE_TO_ONNX: dict[str, str] = {

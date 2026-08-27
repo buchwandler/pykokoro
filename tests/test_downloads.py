@@ -159,17 +159,17 @@ def test_download_lock_timeout(tmp_path, monkeypatch):
         )
 
 
-def test_hf_v1_model_cache_path_uses_timestamped_suffix(tmp_path, monkeypatch):
+def test_hf_v1_model_cache_path_uses_canonical_name(tmp_path, monkeypatch):
     monkeypatch.setattr(backend, "get_user_cache_path", lambda folder=None: tmp_path / folder)
 
     model_path = backend.get_model_path(quality="fp32", source="huggingface", variant="v1.0")
 
     assert model_path == (
-        tmp_path / "models" / "huggingface" / "v1.0" / "onnx" / "model-timestamped.onnx"
+        tmp_path / "models" / "huggingface" / "v1.0" / "onnx" / "model.onnx"
     )
 
 
-def test_hf_v1_download_ignores_old_non_timestamped_cache(tmp_path, monkeypatch):
+def test_hf_v1_download_uses_canonical_source(tmp_path, monkeypatch):
     monkeypatch.setattr(backend, "get_user_cache_path", lambda folder=None: tmp_path / folder)
     monkeypatch.setattr(backend, "_validate_onnx_file", lambda path: None)
     monkeypatch.setattr(
@@ -178,13 +178,9 @@ def test_hf_v1_download_ignores_old_non_timestamped_cache(tmp_path, monkeypatch)
         lambda variant, filename: SimpleNamespace(revision="test", sha256=None),
     )
 
-    old_path = tmp_path / "models" / "huggingface" / "v1.0" / "onnx" / "model.onnx"
-    old_path.parent.mkdir(parents=True)
-    old_path.write_bytes(b"old non timestamped model")
-
     hub_path = tmp_path / "hub" / "model.onnx"
     hub_path.parent.mkdir()
-    hub_path.write_bytes(b"new timestamped model")
+    hub_path.write_bytes(b"new canonical model")
 
     calls = []
 
@@ -199,9 +195,8 @@ def test_hf_v1_download_ignores_old_non_timestamped_cache(tmp_path, monkeypatch)
 
     result = backend.download_model(variant="v1.0", quality="fp32")
 
-    assert result == old_path.with_name("model-timestamped.onnx")
-    assert result.read_bytes() == b"new timestamped model"
-    assert old_path.read_bytes() == b"old non timestamped model"
+    assert result.name == "model.onnx"
+    assert result.read_bytes() == b"new canonical model"
     assert len(calls) == 1
 
 
@@ -210,8 +205,8 @@ def test_hf_v1_download_ignores_old_non_timestamped_cache(tmp_path, monkeypatch)
     [
         ("huggingface", "v1.0", "voices.bin.npz"),
         ("huggingface", "v1.1-zh", "voices.bin.npz"),
-        ("github", "v1.0", "voices-v1.0.bin"),
-        ("github", "v1.1-zh", "voices-v1.1-zh.bin"),
+        ("github", "v1.0", "voices-v1.0.npz"),
+        ("github", "v1.1-zh", "voices-v1.1-zh.npz"),
     ],
 )
 def test_voice_archive_paths_are_source_and_variant_aware(
@@ -228,7 +223,7 @@ def test_model_asset_paths_are_source_variant_and_quality_aware(tmp_path, monkey
     assets = get_model_asset_paths(quality="fp32", source="github", variant="v1.0")
     assert assets.config is None
     assert assets.model == tmp_path / "models" / "github" / "v1.0" / "kokoro-v1.0.onnx"
-    assert assets.voices == tmp_path / "voices" / "github" / "v1.0" / "voices-v1.0.bin"
+    assert assets.voices == tmp_path / "voices" / "github" / "v1.0" / "voices-v1.0.npz"
     assert not (tmp_path / "models" / "github" / "v1.0").exists()
 
 
@@ -466,6 +461,11 @@ def test_github_v1_model_setup_does_not_download_config_or_call_hf_client(tmp_pa
     monkeypatch.setattr(backend, "download_voices_github", lambda **kwargs: managed_voices)
     monkeypatch.setattr(
         backend,
+        "download_vocabulary_github",
+        lambda **kwargs: tmp_path / "vocab.json",
+    )
+    monkeypatch.setattr(
+        backend,
         "download_config",
         lambda **kwargs: pytest.fail("GitHub v1.0 must not download config.json"),
     )
@@ -480,21 +480,22 @@ def test_github_v1_model_setup_does_not_download_config_or_call_hf_client(tmp_pa
     assert kokoro._model_path == managed_model
     assert kokoro._voices_path == managed_voices
 
-
-def test_github_v1_uses_embedded_vocabulary(tmp_path, monkeypatch):
+def test_github_v1_uses_registry_vocabulary(tmp_path, monkeypatch):
     kokoro = object.__new__(backend.Kokoro)
     kokoro._model_source = "github"
     kokoro._model_variant = "v1.0"
+    vocab_path = tmp_path / "vocab.json"
+    vocab_path.write_text('{"a": 1}', encoding="utf-8")
+    monkeypatch.setattr(backend, "download_vocabulary_github", lambda *args, **kwargs: vocab_path)
     monkeypatch.setattr(
         backend,
         "load_vocab_from_config",
-        lambda variant: pytest.fail("GitHub v1.0 must use embedded vocabulary"),
+        lambda variant, path: {"a": 1},
     )
 
     vocabulary = kokoro._get_vocabulary()
 
-    assert vocabulary
-
+    assert vocabulary == {"a": 1}
 
 def test_ensure_models_does_not_download_for_missing_custom_paths(tmp_path, monkeypatch):
     kokoro = object.__new__(backend.Kokoro)

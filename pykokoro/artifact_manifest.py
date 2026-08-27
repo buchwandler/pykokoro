@@ -1,10 +1,4 @@
-"""Immutable upstream artifact coordinates used by the download backend.
-
-The revisions below are repository commits, rather than moving ``main`` or a
-release tag.  The SHA-256 values are the Git-LFS object digests reported by
-Hugging Face for the model files.  Callers may override both fields explicitly
-for a separately audited mirror.
-"""
+"""Immutable upstream artifact coordinates used by the download backend."""
 
 from __future__ import annotations
 
@@ -20,7 +14,7 @@ class ArtifactSpec:
 
 
 HF_MODEL_REVISIONS: dict[str, str] = {
-    "v1.0": "dd4401a9add81ac692d20e240d22ec9dda82cc29",
+    "v1.0": "1939ad2a8e416c0acfeecc08a694d14ef25f2231",
     "v1.1-zh": "6cc0f0d2ebe369a68b0df87c2b65c1af8c0ac3e3",
 }
 
@@ -29,56 +23,23 @@ HF_CONFIG_REVISIONS: dict[str, str] = {
     "v1.1-zh": "01e7505bd6a7a2ac4975463114c3a7650a9f7218",
 }
 
-# The model digest table covers every model quality exposed by the HF maps.
 HF_MODEL_SHA256: dict[tuple[str, str], str] = {
-    ("v1.0", "model.onnx"): "651ea8291843a92276a4a003581a215cb07d15e47dde6fcfb1b768f9a1682054",
-    ("v1.0", "model_fp16.onnx"): "220724d5c5e0cc01be30f38faa6cf0c895a7cde6e7773e91db2973c8c7e5123c",
-    ("v1.0", "model_q4.onnx"): "08dfea732b1c159378be5711f9f366c1bf99d35f9feade2504c8814117b7211a",
-    (
-        "v1.0",
-        "model_q4f16.onnx",
-    ): "cc96fd126a19f87b06cf19c206a7e1d7599e5f63bd1b0151c9929e523083596b",
-    (
-        "v1.0",
-        "model_q8f16.onnx",
-    ): "db06e3f12daac36b13638ff6f6c4541241705405dac6d23126a7827dadf4c677",
-    (
-        "v1.0",
-        "model_quantized.onnx",
-    ): "c0c02b3299fd97c34ea92a98e6d41eaa1a739c8f77bf685aac34bd7b34c1132c",
-    (
-        "v1.0",
-        "model_uint8.onnx",
-    ): "b44c5c0d90458a8d9175cea933ff6d8a6351b74f1e651060df48672f5a167e4f",
-    (
-        "v1.0",
-        "model_uint8f16.onnx",
-    ): "191cab6b6d0a8d12801a3f8d28ee4429d81200b627d17cd08f9976db65630e2c",
+    ("v1.0", "model.onnx"): "8fbea51ea711f2af382e88c833d9e288c6dc82ce5e98421ea61c058ce21a34cb",
+    ("v1.0", "model_fp16.onnx"): "ba4527a874b42b21e35f468c10d326fdff3c7fc8cac1f85e9eb6c0dfc35c334a",
+    ("v1.0", "model_quantized.onnx"): "fbae9257e1e05ffc727e951ef9b9c98418e6d79f1c9b6b13bd59f5c9028a1478",
+    ("v1.0", "model_q8f16.onnx"): "04c658aec1b6008857c2ad10f8c589d4180d0ec427e7e6118ceb487e215c3cd0",
+    ("v1.0", "model_q4.onnx"): "04cf570cf9c4153694f76347ed4b9a48c1b59ff1de0999e6605d123966b197c7",
+    ("v1.0", "model_q4f16.onnx"): "d1a508a6a29671ead84fac99c7401fbd3c21a583fc6ed1406d1ec974d53bf45f",
+    ("v1.0", "model_uint8.onnx"): "6607a397d77b8514065420b7c1e7320117f7aabfdb45ce15f0050c5b0fe75aea",
+    ("v1.0", "model_uint8f16.onnx"): "883333e03c597584b532eebea0f8310f25f0c9ade58fe864792c12d969944a9a",
     ("v1.1-zh", "model.onnx"): "94b973941b1852754f979be5d5e20be666d5c81d9bb886b88ae1dc85c9b895ca",
-    (
-        "v1.1-zh",
-        "model_fp16.onnx",
-    ): "d59cb626c885c91acb7ecf7250f26f9915ad0af99b770572000d90b598c3dfbc",
-    (
-        "v1.1-zh",
-        "model_q4.onnx",
-    ): "dbf3e5a505c4e453303de84d941d51271f5b460956d9b911dea310a90c88b7c2",
-    (
-        "v1.1-zh",
-        "model_q4f16.onnx",
-    ): "9ee7ca1ace506c7dc983d0c9a20c7edfcb08c2027645ae4450afa3dbbd8a57ef",
-    (
-        "v1.1-zh",
-        "model_q8f16.onnx",
-    ): "d59cb626c885c91acb7ecf7250f26f9915ad0af99b770572000d90b598c3dfbc",
-    (
-        "v1.1-zh",
-        "model_quantized.onnx",
-    ): "a39469be791eeaa3089c1ed5e58b8731d1f2462ea0e7dae2bc44388e58f973d8",
-    (
-        "v1.1-zh",
-        "model_uint8.onnx",
-    ): "a39469be791eeaa3089c1ed5e58b8731d1f2462ea0e7dae2bc44388e58f973d8",
+    ("v1.1-zh", "model_fp16.onnx"): "d59cb626c885c91acb7ecf7250f26f9915ad0af99b770572000d90b598c3dfbc",
+    ("v1.1-zh", "model_int8.onnx"): "58b9b997faeaf42b427bac24c8a6246b236b0561311f6b118318cd9d2f47acb1",
+    ("v1.1-zh", "model_quantized.onnx"): "a39469be791eeaa3089c1ed5e58b8731d1f2462ea0e7dae2bc44388e58f973d8",
+    ("v1.1-zh", "model_q4.onnx"): "dbf3e5a505c4e453303de84d941d51271f5b460956d9b911dea310a90c88b7c2",
+    ("v1.1-zh", "model_q4f16.onnx"): "9ee7ca1ace506c7dc983d0c9a20c7edfcb08c2027645ae4450afa3dbbd8a57ef",
+    ("v1.1-zh", "model_uint8.onnx"): "a39469be791eeaa3089c1ed5e58b8731d1f2462ea0e7dae2bc44388e58f973d8",
+    ("v1.1-zh", "model_bnb4.onnx"): "71d417643add4820933a7ae552074eb3dc646e622cf022bcd69dbbfea4332338",
 }
 
 HF_CONFIG_SHA256: dict[str, str] = {
@@ -88,7 +49,6 @@ HF_CONFIG_SHA256: dict[str, str] = {
 
 
 def hf_model_spec(variant: str, filename: str) -> ArtifactSpec:
-    """Return the pinned model coordinates for ``variant`` and ``filename``."""
     return ArtifactSpec(
         revision=HF_MODEL_REVISIONS[variant],
         sha256=HF_MODEL_SHA256.get((variant, filename)),
@@ -96,7 +56,6 @@ def hf_model_spec(variant: str, filename: str) -> ArtifactSpec:
 
 
 def hf_config_spec(variant: str) -> ArtifactSpec:
-    """Return the pinned config coordinates for ``variant``."""
     return ArtifactSpec(
         revision=HF_CONFIG_REVISIONS[variant],
         sha256=HF_CONFIG_SHA256.get(variant),
@@ -104,6 +63,5 @@ def hf_config_spec(variant: str) -> ArtifactSpec:
 
 
 def hf_voice_spec(variant: str, filename: str) -> ArtifactSpec:
-    """Return the pinned voice revision; per-voice digests may be supplied by callers."""
     del filename
     return ArtifactSpec(revision=HF_MODEL_REVISIONS[variant])

@@ -138,9 +138,9 @@ def resolve_model_defaults(cfg: PipelineConfig) -> PipelineConfig:
             source = "github" if source is None else source
         else:
             variant = "v1.0"
-            source = "huggingface" if source is None else source
+            source = "github" if source is None else source
     elif source is None:
-        source = "github" if variant != "v1.0" else "huggingface"
+        source = "github"
 
     assert source is not None
     assert variant is not None
