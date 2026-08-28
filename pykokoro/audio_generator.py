@@ -257,7 +257,7 @@ class AudioGenerator:
         try:
             for index, output in enumerate(outputs):
                 name = str(getattr(output, "name", "")).lower()
-                if name in {"pred_dur", "pred_duration", "durations"}:
+                if name in {"pred_dur", "pred_duration", "durations", "duration"}:
                     self._timestamp_output_index = index
                     break
             self._has_timestamp_output = self._timestamp_output_index is not None

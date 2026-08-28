@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from pykokoro.model_registry import (
+    ArtifactIntegrityError,
     ModelRegistryError,
     RegistryClient,
     RuntimeArtifact,
@@ -118,10 +119,11 @@ def test_registry_fetches_and_caches_valid_data(
 
     assert registry.model("v1.0").distribution().provider == "github-release"
     assert cache.is_file()
+    assert registry.cache_fallback is False
 
 
 def test_registry_uses_last_valid_cache_after_bad_remote(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     cache = tmp_path / "models.json"
     cache.write_text(json.dumps(_registry()), encoding="utf-8")
@@ -129,7 +131,9 @@ def test_registry_uses_last_valid_cache_after_bad_remote(
 
     registry = RegistryClient(cache_path=cache).load()
 
+    assert registry.cache_fallback is True
     assert registry.source == str(cache)
+    assert "using cached registry" in caplog.text
     assert cache.read_text(encoding="utf-8") == json.dumps(_registry())
 
 
@@ -171,3 +175,85 @@ def test_failed_artifact_download_does_not_replace_target(
     with pytest.raises(ModelRegistryError, match="mismatch"):
         download_artifact(artifact, target)
     assert target.read_bytes() == b"known-good"
+
+def test_registry_forced_refresh_does_not_fall_back_to_stale_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache = tmp_path / "models.json"
+    cache.write_text(json.dumps(_registry()), encoding="utf-8")
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("offline")),
+    )
+
+    with pytest.raises(ModelRegistryError, match="fresh model registry"):
+        RegistryClient(cache_path=cache).load(refresh=True, allow_cache_fallback=False)
+
+
+def test_registry_forced_refresh_requests_cache_revalidation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    requests = []
+    payload = json.dumps(_registry()).encode()
+
+    def open_url(request, **kwargs):
+        requests.append(request)
+        return Response(payload)
+
+    monkeypatch.setattr("urllib.request.urlopen", open_url)
+    registry = RegistryClient(
+        url="https://registry.test/models.json?existing=1", cache_path=tmp_path / "models.json"
+    ).load(refresh=True, allow_cache_fallback=False)
+
+    assert registry.cache_fallback is False
+    headers = {key.lower(): value for key, value in requests[0].header_items()}
+    assert headers["cache-control"] == "no-cache"
+    assert headers["pragma"] == "no-cache"
+    assert "existing=1" in requests[0].full_url
+    assert "pykokoro_refresh=" in requests[0].full_url
+
+
+def test_verify_artifact_reports_expected_and_actual_size(tmp_path: Path) -> None:
+    path = tmp_path / "artifact.bin"
+    path.write_bytes(b"new")
+    artifact = RuntimeArtifact(
+        "artifact",
+        "model",
+        "bin",
+        "https://example.test/artifact",
+        "artifact.bin",
+        5,
+        hashlib.sha256(b"old!!").hexdigest(),
+    )
+
+    with pytest.raises(ArtifactIntegrityError) as exc_info:
+        from pykokoro.model_registry import verify_artifact
+
+        verify_artifact(path, artifact)
+
+    assert exc_info.value.expected == 5
+    assert exc_info.value.actual == 3
+    assert "expected 5" in str(exc_info.value)
+    assert "got 3" in str(exc_info.value)
+
+
+def test_verify_artifact_detects_same_size_sha_change(tmp_path: Path) -> None:
+    path = tmp_path / "artifact.bin"
+    path.write_bytes(b"new!!")
+    artifact = RuntimeArtifact(
+        "artifact",
+        "model",
+        "bin",
+        "https://example.test/artifact",
+        "artifact.bin",
+        5,
+        hashlib.sha256(b"old!!").hexdigest(),
+    )
+
+    with pytest.raises(ArtifactIntegrityError, match="SHA-256 mismatch") as exc_info:
+        from pykokoro.model_registry import verify_artifact
+
+        verify_artifact(path, artifact)
+
+    assert exc_info.value.expected == hashlib.sha256(b"old!!").hexdigest()
+    assert exc_info.value.actual == hashlib.sha256(b"new!!").hexdigest()

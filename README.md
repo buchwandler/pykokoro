@@ -1198,6 +1198,14 @@ print(are_models_downloaded(source="github", variant="v1.0", quality="fp32"))
 Inspection does not download assets or consult another source, variant, or quality.
 Runtime startup performs checksum and structural validation for managed assets.
 
+### Registry and model-cache updates
+
+Managed registry metadata is cached at `~/.cache/pykokoro/registry/models.json`; runtime artifacts are stored in model and distribution-specific subdirectories below the same registry cache. Every cached and downloaded artifact is checked against its recorded size and SHA-256 digest.
+
+When an online load must use the last valid local registry because the remote catalog is temporarily unavailable, PyKokoro records that fallback and logs a warning. If a newly downloaded artifact proves that the selected catalog metadata is stale, PyKokoro bypasses the catalog cache, refreshes the registry once, and retries resolution using the fresh distribution metadata. Only artifacts that fail validation are replaced. Integrity verification is never disabled.
+
+Offline mode reads and validates the cached registry and artifacts without network access. Missing or invalid offline assets fail clearly. Users do not need to delete `models.json` or an entire model directory after a catalog or model update.
+
 ## Configuration
 
 Configuration is stored in a platform-specific directory:

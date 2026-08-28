@@ -4,25 +4,49 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import tempfile
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from .utils import get_user_cache_path
 
 MODEL_REGISTRY_URL = (
     "https://raw.githubusercontent.com/buchwandler/kokoro-onnx-models/main/catalog/models.json"
 )
+logger = logging.getLogger(__name__)
+
 DownloadPreference = Literal["auto", "github", "huggingface", "upstream"]
 
 
 class ModelRegistryError(RuntimeError):
     """Raised when the model registry or an artifact is unusable."""
+
+class ArtifactIntegrityError(ModelRegistryError):
+    """Artifact bytes do not match the selected registry metadata."""
+
+    def __init__(
+        self,
+        artifact_id: str,
+        *,
+        reason: str,
+        expected: str | int | None = None,
+        actual: str | int | None = None,
+    ) -> None:
+        self.artifact_id = artifact_id
+        self.reason = reason
+        self.expected = expected
+        self.actual = actual
+        detail = f"expected {expected!r}, got {actual!r}" if expected is not None else ""
+        super().__init__(f"{reason} for artifact {artifact_id!r}: {detail}".rstrip(": "))
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,7 +176,7 @@ class RuntimeModel:
 class ModelRegistry:
     data: Mapping[str, Any]
     source: str
-
+    cache_fallback: bool = False
     @property
     def models(self) -> Mapping[str, RuntimeModel]:
         return {
@@ -186,7 +210,13 @@ class RegistryClient:
         self.path = path or (Path(configured_path) if configured_path else None)
         self.cache_path = cache_path or get_user_cache_path("registry") / "models.json"
 
-    def load(self, *, offline: bool = False) -> ModelRegistry:
+    def load(
+        self,
+        *,
+        offline: bool = False,
+        refresh: bool = False,
+        allow_cache_fallback: bool = True,
+    ) -> ModelRegistry:
         if self.path is not None:
             data = _read_json(self.path)
             _validate_registry(data)
@@ -195,16 +225,20 @@ class RegistryClient:
             data = _read_json(self.cache_path)
             _validate_registry(data)
             return ModelRegistry(data, str(self.cache_path))
+        request_url = _cache_busted_url(self.url) if refresh else self.url
+        headers = {"User-Agent": "pykokoro-model-registry/1"}
+        if refresh:
+            headers.update({"Cache-Control": "no-cache", "Pragma": "no-cache"})
         try:
             with urllib.request.urlopen(
-                urllib.request.Request(
-                    self.url, headers={"User-Agent": "pykokoro-model-registry/1"}
-                ),
+                urllib.request.Request(request_url, headers=headers),
                 timeout=60,
             ) as response:
                 data = json.loads(response.read())
             _validate_registry(data)
         except (OSError, urllib.error.URLError, json.JSONDecodeError, ModelRegistryError) as exc:
+            if not allow_cache_fallback:
+                raise ModelRegistryError(f"Cannot load fresh model registry: {exc}") from exc
             if not self.cache_path.is_file():
                 raise ModelRegistryError(f"Cannot load model registry: {exc}") from exc
             try:
@@ -214,7 +248,12 @@ class RegistryClient:
                 raise ModelRegistryError(
                     f"Cannot load model registry or valid cache: {cache_exc}"
                 ) from exc
-            return ModelRegistry(data, str(self.cache_path))
+            logger.warning(
+                "Unable to refresh model registry (%s); using cached registry %s",
+                exc,
+                self.cache_path,
+            )
+            return ModelRegistry(data, str(self.cache_path), cache_fallback=True)
         _write_json_atomically(self.cache_path, data)
         return ModelRegistry(data, self.url)
 
@@ -235,6 +274,12 @@ class RegistryClient:
         distribution = self.select_distribution(model_id, preference, offline=offline)
         return distribution.artifact(role, quality=quality)
 
+
+def _cache_busted_url(url: str) -> str:
+    parsed = urlsplit(url)
+    query = parse_qsl(parsed.query, keep_blank_values=True)
+    query.append(("pykokoro_refresh", str(time.time_ns())))
+    return urlunsplit(parsed._replace(query=urlencode(query)))
 
 def _read_json(path: Path) -> dict[str, Any]:
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -362,12 +407,32 @@ def select_distribution(
     raise ModelRegistryError(f"No runtime distribution matches download preference {preference!r}")
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        while chunk := file.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
 def verify_artifact(path: Path, artifact: RuntimeArtifact) -> None:
-    if not path.is_file() or path.stat().st_size != artifact.size:
-        raise ModelRegistryError(f"Size mismatch for artifact {artifact.id}")
-    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if not path.is_file():
+        raise ModelRegistryError(f"Artifact {artifact.id!r} is missing")
+    actual_size = path.stat().st_size
+    if actual_size != artifact.size:
+        raise ArtifactIntegrityError(
+            artifact.id,
+            reason="Size mismatch",
+            expected=artifact.size,
+            actual=actual_size,
+        )
+    digest = _sha256_file(path)
     if digest != artifact.sha256:
-        raise ModelRegistryError(f"SHA-256 mismatch for artifact {artifact.id}")
+        raise ArtifactIntegrityError(
+            artifact.id,
+            reason="SHA-256 mismatch",
+            expected=artifact.sha256,
+            actual=digest,
+        )
 
 
 def download_artifact(artifact: RuntimeArtifact, target: Path) -> Path:
@@ -400,5 +465,9 @@ def load_registry(
     path: Path | None = None,
     cache_path: Path | None = None,
     offline: bool = False,
+    refresh: bool = False,
+    allow_cache_fallback: bool = True,
 ) -> ModelRegistry:
-    return RegistryClient(url=url, path=path, cache_path=cache_path).load(offline=offline)
+    return RegistryClient(url=url, path=path, cache_path=cache_path).load(
+        offline=offline, refresh=refresh, allow_cache_fallback=allow_cache_fallback
+    )

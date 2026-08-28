@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ from typing import Any
 import numpy as np
 
 from ..model_registry import (
+    ArtifactIntegrityError,
     DownloadPreference,
     ModelRegistry,
     ModelRegistryError,
@@ -24,6 +26,7 @@ from ..model_registry import (
 )
 from ..utils import get_user_cache_path
 
+logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class ResolvedRuntimeAssets:
@@ -155,7 +158,7 @@ def _materialize_artifact(
         try:
             verify_artifact(target, artifact)
             return target
-        except ModelRegistryError:
+        except ArtifactIntegrityError:
             target.unlink(missing_ok=True)
 
     if offline:
@@ -167,26 +170,16 @@ def _materialize_artifact(
     return download_artifact(artifact, target)
 
 
-def resolve_runtime_assets(
+def _resolve_runtime_assets_once(
     *,
     model_id: str,
-    quality: str | None = None,
-    preference: DownloadPreference = "auto",
-    offline: bool = False,
-    force: bool = False,
-    registry: ModelRegistry | None = None,
-    registry_client: RegistryClient | None = None,
-    cache_dir: Path | None = None,
-) -> ResolvedRuntimeAssets:
-    """Select and materialize every runtime artifact from one distribution.
-
-    ``registry`` and ``registry_client`` are injectable for deterministic callers and
-    tests. A normal caller only needs to provide ``model_id``.
-    """
-    if registry is None:
-        client = registry_client or RegistryClient()
-        registry = client.load(offline=offline)
-
+    quality: str | None,
+    preference: DownloadPreference,
+    offline: bool,
+    force: bool,
+    registry: ModelRegistry,
+    cache_dir: Path | None,
+ ) -> ResolvedRuntimeAssets:
     model = registry.model(model_id)
     if model.data.get("runtime_available", True) is False:
         raise ModelRegistryError(
@@ -240,3 +233,75 @@ def resolve_runtime_assets(
         model=model,
         distribution=distribution,
     )
+
+
+def resolve_runtime_assets(
+    *,
+    model_id: str,
+    quality: str | None = None,
+    preference: DownloadPreference = "auto",
+    offline: bool = False,
+    force: bool = False,
+    registry: ModelRegistry | None = None,
+    registry_client: RegistryClient | None = None,
+    cache_dir: Path | None = None,
+ ) -> ResolvedRuntimeAssets:
+    """Select and materialize every runtime artifact from one distribution."""
+    if registry is not None:
+        return _resolve_runtime_assets_once(
+            model_id=model_id,
+            quality=quality,
+            preference=preference,
+            offline=offline,
+            force=force,
+            registry=registry,
+            cache_dir=cache_dir,
+        )
+
+    client = registry_client or RegistryClient()
+    selected_registry = client.load(offline=offline)
+    try:
+        return _resolve_runtime_assets_once(
+            model_id=model_id,
+            quality=quality,
+            preference=preference,
+            offline=offline,
+            force=force,
+            registry=selected_registry,
+            cache_dir=cache_dir,
+        )
+    except ArtifactIntegrityError:
+        if offline:
+            raise
+        logger.warning(
+            "Artifact integrity mismatch using registry %s; forcing one registry refresh and retry",
+            selected_registry.source,
+        )
+        try:
+            fresh_registry = client.load(refresh=True, allow_cache_fallback=False)
+        except ModelRegistryError as refresh_error:
+            raise ModelRegistryError(
+                "Artifact integrity mismatch was detected while using registry "
+                f"{selected_registry.source}, and a fresh registry could not be obtained: "
+                f"{refresh_error}"
+            ) from refresh_error
+        logger.info(
+            "Refreshed model registry; retrying runtime asset resolution for %r",
+            model_id,
+        )
+        try:
+            return _resolve_runtime_assets_once(
+                model_id=model_id,
+                quality=quality,
+                preference=preference,
+                offline=offline,
+                force=force,
+                registry=fresh_registry,
+                cache_dir=cache_dir,
+            )
+        except ArtifactIntegrityError as second_error:
+            raise ModelRegistryError(
+                f"Artifact {second_error.artifact_id!r} still does not match the model registry "
+                "after a forced registry refresh. The published release and catalog are "
+                f"inconsistent. Registry source: {fresh_registry.source}"
+            ) from second_error
