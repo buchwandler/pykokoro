@@ -35,9 +35,11 @@ class OnnxSynthesizerAdapter:
             tokenizer_config=cfg.tokenizer_config,
             espeak_config=cfg.espeak_config,
             short_sentence_config=cfg.short_sentence_config,
+            waveform_validation=cfg.waveform_validation,
         )
         self._kokoro = kokoro
 
+        trace.model.update(getattr(kokoro, "runtime_metadata", {}))
         generation = cfg.generation
         voice_style = kokoro._resolve_voice_style(cfg.voice)
         trim_silence = generation.pause_mode in {"manual", "auto"}

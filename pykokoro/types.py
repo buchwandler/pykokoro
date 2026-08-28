@@ -197,6 +197,7 @@ class Trace:
     events: list[TraceEvent] = field(default_factory=list)
     prosody: list[dict[str, Any]] = field(default_factory=list)
     inference: list[dict[str, Any]] = field(default_factory=list)
+    model: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

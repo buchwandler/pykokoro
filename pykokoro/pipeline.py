@@ -710,6 +710,7 @@ class KokoroPipeline:
             tokenizer_config=cfg.tokenizer_config,
             espeak_config=cfg.espeak_config,
             short_sentence_config=cfg.short_sentence_config,
+            waveform_validation=cfg.waveform_validation,
         )
         self._kokoro = new_kokoro
         self._kokoro_config_key = kokoro_key

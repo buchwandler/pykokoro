@@ -60,6 +60,56 @@ def _waveform_metrics(audio: np.ndarray) -> dict[str, float | int | bool]:
         "clipped_samples": int(np.count_nonzero(finite & (np.abs(values) >= 1.0))),
     }
 
+def _stationary_noise_metrics(audio: np.ndarray) -> dict[str, float]:
+    values = np.asarray(audio, dtype=np.float64).reshape(-1)
+    frame_size = round(SAMPLE_RATE * 0.05)
+    hop_size = round(SAMPLE_RATE * 0.025)
+    if values.size < frame_size:
+        return {
+            "zcr": 0.0,
+            "centroid": 0.0,
+            "centroid_cv": 0.0,
+            "high_band": 0.0,
+            "flux": 0.0,
+            "frame_rms_cv": 0.0,
+        }
+    frames = np.asarray(
+        [values[start : start + frame_size] for start in range(0, values.size - frame_size + 1, hop_size)]
+    )
+    spectra = np.square(np.abs(np.fft.rfft(frames * np.hanning(frame_size), axis=1)))
+    spectra[:, 0] = 0.0
+    frequencies = np.fft.rfftfreq(frame_size, 1.0 / SAMPLE_RATE)
+    totals = np.maximum(np.sum(spectra, axis=1), np.finfo(np.float64).eps)
+    normalized = spectra / totals[:, None]
+    centroid = np.sum(normalized * frequencies[None, :], axis=1)
+    flux = 0.5 * np.linalg.norm(np.diff(normalized, axis=0), axis=1)
+    return {
+        "zcr": float(np.mean(np.mean(np.diff(np.signbit(frames), axis=1), axis=1))),
+        "centroid": float(np.mean(centroid)),
+        "centroid_cv": float(np.std(centroid) / max(float(np.mean(centroid)), 1e-12)),
+        "high_band": float(np.sum(spectra[:, frequencies >= 4000]) / np.sum(spectra)),
+        "flux": float(np.mean(flux)),
+        "frame_rms_cv": float(
+            np.std(np.sqrt(np.mean(np.square(frames), axis=1)))
+            / max(float(np.mean(np.sqrt(np.mean(np.square(frames), axis=1)))), 1e-12)
+        ),
+    }
+
+
+def _is_stationary_broadband_noise(audio: np.ndarray) -> tuple[bool, dict[str, float]]:
+    metrics = _stationary_noise_metrics(audio)
+    is_noise = np.asarray(audio).size / SAMPLE_RATE >= 1.0 and all(
+        (
+            metrics["zcr"] > 0.45,
+            metrics["centroid"] > 0.23 * SAMPLE_RATE,
+            metrics["centroid_cv"] < 0.05,
+            metrics["high_band"] > 0.65,
+            metrics["frame_rms_cv"] < 0.08,
+            metrics["flux"] < 0.05,
+        )
+    )
+    return is_noise, metrics
+
 
 def _has_prosody_metadata(segment: PhonemeSegment) -> bool:
     metadata = segment.ssmd_metadata or {}
@@ -241,12 +291,16 @@ class AudioGenerator:
         tokenizer: Tokenizer,
         model_source: ModelSource = "huggingface",
         short_sentence_config: ShortSentenceConfig | None = None,
+        waveform_validation: Literal["off", "warn", "strict"] = "off",
     ):
         """Initialize the audio generator."""
         self._session = session
         self._tokenizer = tokenizer
         self._model_source = model_source
         self._short_sentence_config = short_sentence_config
+        if waveform_validation not in {"off", "warn", "strict"}:
+            raise ValueError(f"Unsupported waveform validation mode: {waveform_validation!r}")
+        self._waveform_validation = waveform_validation
         self._input_metas = {
             str(input_meta.name): input_meta for input_meta in session.get_inputs()
         }
@@ -358,6 +412,14 @@ class AudioGenerator:
             if timestamp_index is not None and timestamp_index < len(results)
             else None
         )
+        noise_detected, noise_metrics = _is_stationary_broadband_noise(audio)
+        audio_metrics = _waveform_metrics(audio)
+        audio_metrics.update(
+            {
+                "stationary_broadband_noise": noise_detected,
+                "stationary_broadband_noise_metrics": noise_metrics,
+            }
+        )
         if trace is not None:
             style_values = np.asarray(voice_style_indexed, dtype=np.float64)
             trace.inference.append(
@@ -385,7 +447,7 @@ class AudioGenerator:
                         "value": float(speed),
                         "dtype": str(np.asarray(inputs["speed"]).dtype),
                     },
-                    "audio": _waveform_metrics(audio),
+                    "audio": audio_metrics,
                 }
             )
         return audio, pred_dur
@@ -753,6 +815,7 @@ class AudioGenerator:
         voice_resolver: Callable[[str], np.ndarray] | None,
         trace: Trace | None = None,
     ) -> list[PhonemeSegment]:
+        noise_flags: list[bool] = []
         for segment in segments:
             if not segment.phonemes.strip():
                 segment.raw_audio = None
@@ -771,6 +834,18 @@ class AudioGenerator:
                 speed,
             )
 
+            noise_detected, _ = _is_stationary_broadband_noise(audio)
+            noise_flags.append(noise_detected)
+        if noise_flags and all(noise_flags) and self._waveform_validation != "off":
+            message = (
+                "All raw ONNX segments resemble stationary broadband noise; "
+                "model output is likely invalid"
+            )
+            if trace is not None:
+                trace.warnings.append(message)
+            if self._waveform_validation == "strict":
+                raise ConfigurationError(message)
+            logger.warning(message)
         return segments
 
     def _map_pred_dur_to_word_timings(

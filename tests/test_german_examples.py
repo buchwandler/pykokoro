@@ -30,6 +30,11 @@ def test_german_model_configurations() -> None:
     assert thorsten.generation.speed == 1.0
     assert thorsten.allow_experimental_frontend is False
     assert german3.OUTPUT_FILE == "german_thorsten.wav"
+    assert thorsten.short_sentence_config is not None
+    assert thorsten.short_sentence_config.enabled is True
+    no_short = german3.make_config(short_sentence=False)
+    assert no_short.short_sentence_config is not None
+    assert no_short.short_sentence_config.enabled is False
 
 
 def test_german_examples_share_normalization_comparison_text() -> None:

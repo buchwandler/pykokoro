@@ -45,6 +45,7 @@ class PipelineConfig:
     tokenizer_config: TokenizerConfig | None = None
     espeak_config: EspeakConfig | None = None
     short_sentence_config: ShortSentenceConfig | None = None
+    waveform_validation: Literal["off", "warn", "strict"] = "off"
     allow_experimental_frontend: bool = False
 
     # Span slicing

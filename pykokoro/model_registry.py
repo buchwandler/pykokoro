@@ -169,7 +169,12 @@ class RuntimeModel:
         return bool(policy)
 
     def distribution(self, preference: DownloadPreference = "auto") -> RuntimeDistribution:
-        return select_distribution(self.distributions, preference)
+        available = tuple(item for item in self.distributions if item.runtime_ready)
+        if not available:
+            raise ModelRegistryError(
+                f"Model {self.model_id!r} has no runtime-ready distribution"
+            )
+        return select_distribution(available, preference)
 
 
 @dataclass(frozen=True, slots=True)

@@ -1781,6 +1781,7 @@ class Kokoro:
         model_source: ModelSource = DEFAULT_MODEL_SOURCE,
         model_variant: ModelVariant = DEFAULT_MODEL_VARIANT,
         short_sentence_config: "ShortSentenceConfig | None" = None,
+        waveform_validation: Literal["off", "warn", "strict"] = "off",
     ) -> None:
         """
         Initialize the Kokoro ONNX backend.
@@ -1940,6 +1941,9 @@ class Kokoro:
 
         # Short sentence handling configuration
         self._short_sentence_config = short_sentence_config
+        if waveform_validation not in {"off", "warn", "strict"}:
+            raise ValueError(f"Unsupported waveform validation mode: {waveform_validation!r}")
+        self._waveform_validation = waveform_validation
 
     def _get_vocabulary(self) -> dict[str, int]:
         """Get vocabulary for the current model variant.
@@ -2233,6 +2237,7 @@ class Kokoro:
             tokenizer=self.tokenizer,
             model_source=self._model_source,
             short_sentence_config=self._short_sentence_config,
+            waveform_validation=self._waveform_validation,
         )
 
     def get_voices(self) -> list[str]:
@@ -2534,6 +2539,39 @@ class Kokoro:
             random_seed=random_seed,
             prosody_config=prosody_config,
         )
+
+    @property
+    def runtime_metadata(self) -> dict[str, Any]:
+        """Return selected distribution and local artifact identity."""
+        if self._resolved_runtime_assets is not None:
+            distribution = self._resolved_runtime_assets.distribution
+            artifacts = [
+                {
+                    "id": artifact.id,
+                    "role": artifact.role,
+                    "path": str(self._resolved_runtime_assets.artifacts[artifact.id]),
+                    "size": artifact.size,
+                    "sha256": artifact.sha256,
+                }
+                for artifact in distribution.artifacts
+            ]
+            return {
+                "model_id": self._resolved_runtime_assets.model_id,
+                "distribution_id": distribution.id,
+                "release_tag": distribution.release_tag,
+                "artifacts": artifacts,
+            }
+        paths = [path for path in (self._model_path, self._voices_path) if path is not None]
+        return {
+            "model_id": self._model_variant,
+            "distribution_id": None,
+            "release_tag": None,
+            "artifacts": [
+                {"path": str(path), "size": path.stat().st_size}
+                for path in paths
+                if path.is_file()
+            ],
+        }
 
     def close(self) -> None:
         """Release database, tokenizer, voice, generator, and ONNX resources."""

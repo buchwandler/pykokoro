@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import argparse
 import logging
+from pathlib import Path
 
 import soundfile as sf
 
@@ -21,22 +23,37 @@ TEXT = (
 OUTPUT_FILE = "german_thorsten.wav"
 
 
-def make_config() -> PipelineConfig:
+def make_config(*, short_sentence: bool = True) -> PipelineConfig:
     """Return the explicitly selected ready Thorsten configuration."""
+    from pykokoro.short_sentence_handler import ShortSentenceConfig
+
     return PipelineConfig(
         voice="thorsten",
         model_source="github",
         model_variant="de-thorsten",
         model_quality="fp32",
         generation=GenerationConfig(lang="de", speed=1.0),
+        short_sentence_config=ShortSentenceConfig(enabled=short_sentence),
         return_trace=True,
     )
 
 
 def main() -> None:
     """Generate the normalization-heavy German demonstration."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--no-short-sentence",
+        action="store_true",
+        help="Disable short-sentence handling for exporter diagnostics.",
+    )
+    parser.add_argument(
+        "--raw-segments-dir",
+        type=str,
+        help="Write each raw ONNX segment to this directory.",
+    )
+    args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s")
-    with KokoroPipeline(make_config()) as pipeline:
+    with KokoroPipeline(make_config(short_sentence=not args.no_short_sentence)) as pipeline:
         result = pipeline.run(TEXT)
 
     sf.write(OUTPUT_FILE, result.audio, result.sample_rate)
@@ -49,11 +66,15 @@ def main() -> None:
     for index, segment in enumerate(result.phoneme_segments, start=1):
         print(f"  [{index}] {segment.text!r}")
         print(f"      {segment.phonemes}")
+        if args.raw_segments_dir and segment.raw_audio is not None:
+            raw_path = Path(args.raw_segments_dir) / f"segment-{index:03d}.wav"
+            raw_path.parent.mkdir(parents=True, exist_ok=True)
+            sf.write(raw_path, segment.raw_audio, result.sample_rate)
+            print(f"      raw: {raw_path}")
     if result.trace and result.trace.warnings:
         print("Warnings:")
         for warning in result.trace.warnings:
             print(f"  - {warning}")
-
 
 if __name__ == "__main__":
     main()
