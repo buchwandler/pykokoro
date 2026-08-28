@@ -36,6 +36,7 @@ class RuntimeProfile:
     runtime_available: bool = True
     redistribution_allowed: bool = True
     support_status: str = "ready"
+
     @property
     def available_qualities(self) -> tuple[str, ...]:
         return tuple(self.quality_files)
@@ -61,7 +62,7 @@ def _github_profile(
         "vi-anphunl": "default",
         "ar-nabra": "default",
         "de-crane": "default",
-        "he-hebrew-nc": "default"
+        "he-hebrew-nc": "default",
     }
     return RuntimeProfile(
         source="github",
@@ -125,34 +126,100 @@ MODEL_PROFILES[("github", "vi-anphunl")] = replace(
     MODEL_PROFILES[("github", "vi-anphunl")],
     runtime_available=False,
     support_status="registry-unavailable",
- )
+)
 
 MODEL_PROFILES.update(
     {
         ("github", "sv-joakim"): RuntimeProfile(
-            "github", "sv-joakim", ("sv",), "Alice", "builtin-v1.0", "1.0",
-            "kokorog2p-sv-v1", False, voice_names=("Alice", "Anton", "Björn", "Ebba", "Elsa", "Greta", "Lars", "Nils", "Oskar", "Stina"),
+            "github",
+            "sv-joakim",
+            ("sv",),
+            "Alice",
+            "builtin-v1.0",
+            "1.0",
+            "kokorog2p-sv-v1",
+            False,
+            voice_names=(
+                "Alice",
+                "Anton",
+                "Björn",
+                "Ebba",
+                "Elsa",
+                "Greta",
+                "Lars",
+                "Nils",
+                "Oskar",
+                "Stina",
+            ),
         ),
         ("github", "de-thorsten"): RuntimeProfile(
-            "github", "de-thorsten", ("de",), "thorsten", "downloaded-config", "1.0",
-            "kokorog2p-de-thorsten-v1", False, voice_names=("thorsten",),
+            "github",
+            "de-thorsten",
+            ("de",),
+            "thorsten",
+            "downloaded-config",
+            "1.0",
+            "kokorog2p-de-thorsten-v1",
+            False,
+            voice_names=("thorsten",),
         ),
         ("github", "kk-anuarsv"): RuntimeProfile(
-            "github", "kk-anuarsv", ("kk",), "km_m1", "downloaded-config", "1.0",
-            "kokorog2p-kk-v1", False, voice_names=("km_m1",),
+            "github",
+            "kk-anuarsv",
+            ("kk",),
+            "km_m1",
+            "downloaded-config",
+            "1.0",
+            "kokorog2p-kk-v1",
+            False,
+            voice_names=("km_m1",),
         ),
         ("github", "th-wayu"): RuntimeProfile(
-            "github", "th-wayu", ("th",), "f_young_clear", "downloaded-config", "1.0",
-            "kokorog2p-th-wayu-v1", False, layout="split-onnx-v1",
-            voice_names=("f_teen_bright", "f_young_bright", "f_young_clear", "f_young_warm", "f_mid_clear", "f_mid_warm", "f_elderly_soft", "f_elderly_low", "m_teen_bright", "m_young_clear", "m_mid_warm", "m_elderly_deep"),
+            "github",
+            "th-wayu",
+            ("th",),
+            "f_young_clear",
+            "downloaded-config",
+            "1.0",
+            "kokorog2p-th-wayu-v1",
+            False,
+            layout="split-onnx-v1",
+            voice_names=(
+                "f_teen_bright",
+                "f_young_bright",
+                "f_young_clear",
+                "f_young_warm",
+                "f_mid_clear",
+                "f_mid_warm",
+                "f_elderly_soft",
+                "f_elderly_low",
+                "m_teen_bright",
+                "m_young_clear",
+                "m_mid_warm",
+                "m_elderly_deep",
+            ),
         ),
         ("huggingface", "ru-zaakirio-base"): RuntimeProfile(
-            "huggingface", "ru-zaakirio-base", ("ru",), "sveta", "downloaded-config", "1.0",
-            "kokorog2p-ru-v1", False, voice_names=("sveta", "masha"),
+            "huggingface",
+            "ru-zaakirio-base",
+            ("ru",),
+            "sveta",
+            "downloaded-config",
+            "1.0",
+            "kokorog2p-ru-v1",
+            False,
+            voice_names=("sveta", "masha"),
         ),
         ("huggingface", "ru-zaakirio-dima"): RuntimeProfile(
-            "huggingface", "ru-zaakirio-dima", ("ru",), "dima", "downloaded-config", "1.0",
-            "kokorog2p-ru-v1", False, voice_names=("dima",),
+            "huggingface",
+            "ru-zaakirio-dima",
+            ("ru",),
+            "dima",
+            "downloaded-config",
+            "1.0",
+            "kokorog2p-ru-v1",
+            False,
+            voice_names=("dima",),
         ),
     }
 )
@@ -192,7 +259,11 @@ def _legacy_profile(variant: ModelVariant, source: ModelSource) -> RuntimeProfil
     qualities = (
         MODEL_QUALITY_CACHE_FILES_HF_V1_0
         if variant == "v1.0"
-        else {key: value for key, value in MODEL_QUALITY_FILES_HF.items() if key not in {"q8f16", "uint8f16"}}
+        else {
+            key: value
+            for key, value in MODEL_QUALITY_FILES_HF.items()
+            if key not in {"q8f16", "uint8f16"}
+        }
     )
     if variant == "v1.1-zh":
         qualities.update({"int8": "model_int8.onnx", "bnb4": "model_bnb4.onnx"})
@@ -294,7 +365,7 @@ def get_registry_model_profile(
     preference: Literal["auto", "github", "huggingface", "upstream"] = "auto",
     offline: bool = False,
     registry: Any | None = None,
- ) -> RuntimeProfile:
+) -> RuntimeProfile:
     """Build a profile from canonical registry metadata and local capabilities."""
     from .model_registry import ModelRegistryError, RegistryClient
 
@@ -303,7 +374,9 @@ def get_registry_model_profile(
     model = registry.model(model_id)
     distribution = model.distribution(preference) if model.runtime_available else None
     source: ModelSource = (
-        "github" if distribution is not None and distribution.provider == "github-release" else "huggingface"
+        "github"
+        if distribution is not None and distribution.provider == "github-release"
+        else "huggingface"
     )
     local = MODEL_PROFILES.get((source, model_id))
     qualities = (
@@ -326,7 +399,9 @@ def get_registry_model_profile(
         else "builtin-v1.0"
     )
     tokenizer_version = (
-        local.tokenizer_vocab_version if local is not None else str(model.data.get("model_version", "1.0"))
+        local.tokenizer_vocab_version
+        if local is not None
+        else str(model.data.get("model_version", "1.0"))
     )
     onnx_inputs = local.onnx_inputs if local is not None else model.onnx_contract.get("inputs", {})
     return RuntimeProfile(

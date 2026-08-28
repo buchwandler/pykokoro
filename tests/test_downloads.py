@@ -164,9 +164,7 @@ def test_hf_v1_model_cache_path_uses_canonical_name(tmp_path, monkeypatch):
 
     model_path = backend.get_model_path(quality="fp32", source="huggingface", variant="v1.0")
 
-    assert model_path == (
-        tmp_path / "models" / "huggingface" / "v1.0" / "onnx" / "model.onnx"
-    )
+    assert model_path == (tmp_path / "models" / "huggingface" / "v1.0" / "onnx" / "model.onnx")
 
 
 def test_hf_v1_download_uses_canonical_source(tmp_path, monkeypatch):
@@ -480,6 +478,7 @@ def test_github_v1_model_setup_does_not_download_config_or_call_hf_client(tmp_pa
     assert kokoro._model_path == managed_model
     assert kokoro._voices_path == managed_voices
 
+
 def test_github_v1_uses_registry_vocabulary(tmp_path, monkeypatch):
     kokoro = object.__new__(backend.Kokoro)
     kokoro._model_source = "github"
@@ -496,6 +495,7 @@ def test_github_v1_uses_registry_vocabulary(tmp_path, monkeypatch):
     vocabulary = kokoro._get_vocabulary()
 
     assert vocabulary == {"a": 1}
+
 
 def test_ensure_models_does_not_download_for_missing_custom_paths(tmp_path, monkeypatch):
     kokoro = object.__new__(backend.Kokoro)

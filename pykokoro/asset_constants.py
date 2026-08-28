@@ -1,7 +1,5 @@
 """Dependency-light model and voice artifact filenames."""
 
-
-
 HF_MODEL_SUBFOLDER = "onnx"
 HF_CONFIG_FILENAME = "config.json"
 

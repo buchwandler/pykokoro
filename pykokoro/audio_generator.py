@@ -40,15 +40,24 @@ logger = logging.getLogger(__name__)
 
 def _waveform_metrics(audio: np.ndarray) -> dict[str, float | int | bool]:
     """Return compact, JSON-friendly metrics for a segment waveform."""
-
     values = np.asarray(audio, dtype=np.float64).reshape(-1)
-    differences = np.diff(values)
+    finite = np.isfinite(values)
+    finite_values = values[finite]
+    differences = np.diff(finite_values) if finite_values.size else np.array([], dtype=np.float64)
+    peak = float(np.max(np.abs(finite_values))) if finite_values.size else 0.0
     return {
         "samples": int(values.size),
-        "finite": bool(np.isfinite(values).all()),
-        "peak": float(np.max(np.abs(values))) if values.size else 0.0,
-        "rms": float(np.sqrt(np.mean(np.square(values)))) if values.size else 0.0,
+        "finite": bool(finite.all()),
+        "min": float(np.min(finite_values)) if finite_values.size else 0.0,
+        "max": float(np.max(finite_values)) if finite_values.size else 0.0,
+        "peak": peak,
+        "mean": float(np.mean(finite_values)) if finite_values.size else 0.0,
+        "dc_mean": float(np.mean(finite_values)) if finite_values.size else 0.0,
+        "rms": float(np.sqrt(np.mean(np.square(finite_values)))) if finite_values.size else 0.0,
+        "std": float(np.std(finite_values)) if finite_values.size else 0.0,
         "max_adjacent_jump": (float(np.max(np.abs(differences))) if differences.size else 0.0),
+        "non_finite_samples": int((~finite).sum()),
+        "clipped_samples": int(np.count_nonzero(finite & (np.abs(values) >= 1.0))),
     }
 
 
@@ -261,10 +270,18 @@ class AudioGenerator:
         trimmed = phonemes[:MAX_PHONEME_LENGTH]
         return self._tokenizer.tokenize(trimmed)
 
-    def _select_voice_style(self, voice_style: np.ndarray, token_count: int) -> np.ndarray:
+    @staticmethod
+    def _voice_style_index(voicepack_length: int, phoneme_count: int) -> int:
+        """Return the Kokoro voicepack row for an effective phoneme length."""
+        return min(
+            max(phoneme_count - 1, 0),
+            MAX_PHONEME_LENGTH - 1,
+            max(voicepack_length - 1, 0),
+        )
+
+    def _select_voice_style(self, voice_style: np.ndarray, phoneme_count: int) -> np.ndarray:
         voice_style = normalize_voice_style(voice_style, expected_length=None)
-        max_style_idx = voice_style.shape[0] - 1 if len(voice_style.shape) > 0 else 0
-        style_idx = min(token_count, MAX_PHONEME_LENGTH - 1, max_style_idx)
+        style_idx = self._voice_style_index(voice_style.shape[0], phoneme_count)
         voice_style_indexed = voice_style[style_idx]
         if voice_style_indexed.ndim == 1:
             voice_style_indexed = voice_style_indexed[None, :]
@@ -319,9 +336,17 @@ class AudioGenerator:
         phonemes: str,
         voice_style: np.ndarray,
         speed: float,
+        trace: Trace | None = None,
     ) -> tuple[np.ndarray, np.ndarray | None]:
-        tokens = self._tokenize_phonemes(phonemes)
-        voice_style_indexed = self._select_voice_style(voice_style, len(tokens))
+        effective_phonemes = phonemes[:MAX_PHONEME_LENGTH]
+        tokens = self._tokenizer.tokenize(effective_phonemes)
+        normalized_voice_style = normalize_voice_style(voice_style, expected_length=None)
+        style_idx = self._voice_style_index(
+            normalized_voice_style.shape[0], len(effective_phonemes)
+        )
+        voice_style_indexed = normalized_voice_style[style_idx]
+        if voice_style_indexed.ndim == 1:
+            voice_style_indexed = voice_style_indexed[None, :]
         tokens_padded = self._pad_tokens(tokens)
         inputs = self._build_onnx_inputs(tokens_padded, voice_style_indexed, speed)
         results = self._session.run(None, inputs)
@@ -333,6 +358,36 @@ class AudioGenerator:
             if timestamp_index is not None and timestamp_index < len(results)
             else None
         )
+        if trace is not None:
+            style_values = np.asarray(voice_style_indexed, dtype=np.float64)
+            trace.inference.append(
+                {
+                    "effective_phonemes": effective_phonemes,
+                    "phoneme_count": len(effective_phonemes),
+                    "token_ids": list(tokens),
+                    "token_count": len(tokens),
+                    "style_row": style_idx,
+                    "style": {
+                        "shape": list(voice_style_indexed.shape),
+                        "min": float(np.min(style_values)) if style_values.size else 0.0,
+                        "max": float(np.max(style_values)) if style_values.size else 0.0,
+                        "mean": float(np.mean(style_values)) if style_values.size else 0.0,
+                        "std": float(np.std(style_values)) if style_values.size else 0.0,
+                    },
+                    "inputs": {
+                        name: {
+                            "dtype": str(np.asarray(value).dtype),
+                            "shape": list(np.asarray(value).shape),
+                        }
+                        for name, value in inputs.items()
+                    },
+                    "speed": {
+                        "value": float(speed),
+                        "dtype": str(np.asarray(inputs["speed"]).dtype),
+                    },
+                    "audio": _waveform_metrics(audio),
+                }
+            )
         return audio, pred_dur
 
     def generate_from_phonemes(
@@ -340,20 +395,24 @@ class AudioGenerator:
         phonemes: str,
         voice_style: np.ndarray,
         speed: float,
+        *,
+        trace: Trace | None = None,
     ) -> tuple[np.ndarray, int]:
         """Generate audio from a single phoneme batch.
 
-        Core ONNX inference for a single phoneme batch.
+        This is the lowest-level phoneme diagnostic path; it does not apply
+        segment preprocessing or short-sentence handling.
 
         Args:
             phonemes: Phoneme string (will be truncated if > MAX_PHONEME_LENGTH)
             voice_style: Voice style vector
             speed: Speech speed multiplier
+            trace: Optional trace collector for inference diagnostics
 
         Returns:
             Tuple of (audio samples, sample rate)
         """
-        audio, _ = self._run_onnx(phonemes, voice_style, speed)
+        audio, _ = self._run_onnx(phonemes, voice_style, speed, trace=trace)
         return audio, SAMPLE_RATE
 
     def split_phonemes(self, phonemes: str) -> list[str]:  # noqa: C901
@@ -459,6 +518,8 @@ class AudioGenerator:
         voice_style: np.ndarray,
         speed: float,
         trim_silence: bool,
+        *,
+        trace: Trace | None = None,
     ) -> np.ndarray:
         """Generate and concatenate audio from phoneme batches.
 
@@ -467,6 +528,7 @@ class AudioGenerator:
             voice_style: Voice style vector
             speed: Speech speed
             trim_silence: Whether to trim silence from each batch
+            trace: Optional trace collector for inference diagnostics
 
         Returns:
             Concatenated audio array
@@ -474,7 +536,7 @@ class AudioGenerator:
         audio_parts = []
 
         for batch in batches:
-            audio, _ = self.generate_from_phonemes(batch, voice_style, speed)
+            audio, _ = self.generate_from_phonemes(batch, voice_style, speed, trace=trace)
             if trim_silence:
                 audio, _ = trim_audio(audio)
             audio_parts.append(audio)
@@ -689,6 +751,7 @@ class AudioGenerator:
         voice_style: np.ndarray,
         speed: float,
         voice_resolver: Callable[[str], np.ndarray] | None,
+        trace: Trace | None = None,
     ) -> list[PhonemeSegment]:
         for segment in segments:
             if not segment.phonemes.strip():
@@ -696,7 +759,9 @@ class AudioGenerator:
                 continue
 
             segment_voice_style = self._resolve_segment_voice(segment, voice_style, voice_resolver)
-            audio, pred_dur = self._run_onnx(segment.phonemes, segment_voice_style, speed)
+            audio, pred_dur = self._run_onnx(
+                segment.phonemes, segment_voice_style, speed, trace=trace
+            )
             segment.word_timings = self._map_pred_dur_to_word_timings(segment, pred_dur, len(audio))
             self._log_short_sentence_timestamps(segment, pred_dur)
             segment.raw_audio = self._prepare_short_sentence_phrase_audio(
@@ -1114,6 +1179,7 @@ class AudioGenerator:
         enable_short_sentence_override: bool | None = None,
         random_seed: int | None = None,
         prosody_config: ProsodyConfig | None = None,
+        trace: Trace | None = None,
     ) -> np.ndarray:
         """Generate audio from list of PhonemeSegment instances.
 
@@ -1147,7 +1213,7 @@ class AudioGenerator:
             segments, enable_short_sentence_override, random_seed
         )
         generated = self._generate_raw_audio_segments(
-            preprocessed, voice_style, speed, voice_resolver
+            preprocessed, voice_style, speed, voice_resolver, trace
         )
         processed = self._postprocess_audio_segments(generated, trim_silence, prosody_config)
         return self._concatenate_audio_segments(processed, prosody_config)
@@ -1235,6 +1301,8 @@ class AudioGenerator:
         tokens: list[int],
         voice_style: np.ndarray,
         speed: float,
+        *,
+        trace: Trace | None = None,
     ) -> tuple[np.ndarray, int]:
         """Generate audio from token IDs directly.
 
@@ -1245,16 +1313,16 @@ class AudioGenerator:
             tokens: List of token IDs
             voice_style: Voice style vector
             speed: Speech speed
+            trace: Optional trace collector for inference diagnostics
 
         Returns:
             Tuple of (audio samples as numpy array, sample rate)
         """
-        # Detokenize to phonemes and generate audio
         phonemes = self._tokenizer.detokenize(tokens)
-
-        # Split phonemes into batches and generate audio
         batches = self.split_phonemes(phonemes)
-        audio = self.generate_from_phoneme_batches(batches, voice_style, speed, trim_silence=False)
+        audio = self.generate_from_phoneme_batches(
+            batches, voice_style, speed, trim_silence=False, trace=trace
+        )
 
         return audio, SAMPLE_RATE
 

@@ -124,7 +124,9 @@ class RuntimeModel:
 
     @property
     def onnx_contract(self) -> Mapping[str, Any]:
-        contract = self.data.get("onnx_contract", self.runtime.get("onnx", self.data.get("onnx", {})))
+        contract = self.data.get(
+            "onnx_contract", self.runtime.get("onnx", self.data.get("onnx", {}))
+        )
         return contract if isinstance(contract, Mapping) else {}
 
     @property
@@ -132,13 +134,15 @@ class RuntimeModel:
         license_data = self.data.get("license")
         if isinstance(license_data, Mapping):
             redistribution = str(license_data.get("redistribution", "allowed"))
-            if redistribution.lower().startswith("restrict") or redistribution.lower() == "forbidden":
+            if (
+                redistribution.lower().startswith("restrict")
+                or redistribution.lower() == "forbidden"
+            ):
                 return False
         policy = self.data.get("redistribution", self.data.get("redistribution_allowed", True))
         if isinstance(policy, Mapping):
             return bool(policy.get("allowed", True))
         return bool(policy)
-
 
     def distribution(self, preference: DownloadPreference = "auto") -> RuntimeDistribution:
         return select_distribution(self.distributions, preference)
@@ -193,7 +197,9 @@ class RegistryClient:
             return ModelRegistry(data, str(self.cache_path))
         try:
             with urllib.request.urlopen(
-                urllib.request.Request(self.url, headers={"User-Agent": "pykokoro-model-registry/1"}),
+                urllib.request.Request(
+                    self.url, headers={"User-Agent": "pykokoro-model-registry/1"}
+                ),
                 timeout=60,
             ) as response:
                 data = json.loads(response.read())
@@ -205,7 +211,9 @@ class RegistryClient:
                 data = _read_json(self.cache_path)
                 _validate_registry(data)
             except (OSError, json.JSONDecodeError, ModelRegistryError) as cache_exc:
-                raise ModelRegistryError(f"Cannot load model registry or valid cache: {cache_exc}") from exc
+                raise ModelRegistryError(
+                    f"Cannot load model registry or valid cache: {cache_exc}"
+                ) from exc
             return ModelRegistry(data, str(self.cache_path))
         _write_json_atomically(self.cache_path, data)
         return ModelRegistry(data, self.url)
@@ -369,7 +377,10 @@ def download_artifact(artifact: RuntimeArtifact, target: Path) -> Path:
         temporary = Path(file.name)
     try:
         request = urllib.request.Request(artifact.url, headers={"User-Agent": "pykokoro/registry"})
-        with urllib.request.urlopen(request, timeout=120) as response, temporary.open("wb") as output:
+        with (
+            urllib.request.urlopen(request, timeout=120) as response,
+            temporary.open("wb") as output,
+        ):
             while chunk := response.read(1024 * 1024):
                 output.write(chunk)
         verify_artifact(temporary, artifact)

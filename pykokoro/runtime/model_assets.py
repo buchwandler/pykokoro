@@ -51,7 +51,9 @@ class ResolvedRuntimeAssets:
 
     def artifacts_for_role(self, role: str) -> Mapping[str, Path]:
         ids = {artifact.id for artifact in self.distribution.artifacts if artifact.role == role}
-        return {artifact_id: path for artifact_id, path in self.artifacts.items() if artifact_id in ids}
+        return {
+            artifact_id: path for artifact_id, path in self.artifacts.items() if artifact_id in ids
+        }
 
     def artifact_for_role(
         self, role: str, *, quality: str | None = None, component: str | None = None
@@ -68,7 +70,6 @@ class ResolvedRuntimeAssets:
                 f"Distribution {self.distribution_id!r} has no matching {role} artifact"
             )
         return self.artifacts[candidates[0].id]
-
 
     def materialize_raw_voices(self, *, force: bool = False) -> Path:
         """Convert validated individual raw voice artifacts into a cache-only NPZ."""
@@ -105,7 +106,9 @@ class ResolvedRuntimeAssets:
                 )
             endianness = handling.get("endianness", "little")
             if endianness not in {"little", "big"}:
-                raise ModelRegistryError(f"Raw voice artifact {artifact.id!r} has invalid endianness")
+                raise ModelRegistryError(
+                    f"Raw voice artifact {artifact.id!r} has invalid endianness"
+                )
             dtype = np.dtype((">" if endianness == "big" else "<") + "f4")
             values = np.fromfile(self.artifacts[artifact.id], dtype=dtype)
             expected = int(shape[0]) * int(shape[1])
@@ -116,7 +119,9 @@ class ResolvedRuntimeAssets:
             name = artifact.voice or Path(artifact.local_name).stem
             voices[name] = values.reshape(int(shape[0]), 1, int(shape[1])).astype(np.float32)
         target.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(suffix=".npz", dir=target.parent, delete=False) as temporary:
+        with tempfile.NamedTemporaryFile(
+            suffix=".npz", dir=target.parent, delete=False
+        ) as temporary:
             temporary_path = Path(temporary.name)
         try:
             np.savez(temporary_path, **voices)  # type: ignore[arg-type]
@@ -196,7 +201,9 @@ def resolve_runtime_assets(
     artifacts = list(distribution.artifacts)
     if quality is not None:
         model_artifacts = [
-            artifact for artifact in artifacts if artifact.role == "model" and artifact.quality == quality
+            artifact
+            for artifact in artifacts
+            if artifact.role == "model" and artifact.quality == quality
         ]
         if not model_artifacts:
             raise ModelRegistryError(

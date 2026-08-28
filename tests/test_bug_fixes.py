@@ -13,8 +13,10 @@ import numpy as np
 import pytest
 
 from pykokoro.audio_generator import AudioGenerator
+from pykokoro.constants import MAX_PHONEME_LENGTH
 from pykokoro.provider_config import ProviderConfigManager
 from pykokoro.tokenizer import Tokenizer, TokenizerConfig
+from pykokoro.types import Trace
 
 
 class TestBugFix1_DuplicatePhonemeDictionaryLoading:
@@ -182,6 +184,57 @@ class TestBugFix2_VoiceStyleBoundsChecking:
         style_input = np.asarray(captured_inputs["style"])
         assert style_input.shape == (1, 256)
         assert style_input.dtype == np.float32
+
+
+@pytest.mark.parametrize("phoneme_length", [1, 2, 8, MAX_PHONEME_LENGTH])
+def test_voice_style_index_uses_phoneme_length_not_token_count(phoneme_length):
+    session = Mock()
+    session.get_inputs.return_value = [
+        Mock(name="tokens", type="tensor(int64)"),
+        Mock(name="style", type="tensor(float)"),
+        Mock(name="speed", type="tensor(float)"),
+    ]
+    captured_inputs = {}
+
+    def _run(_, inputs):
+        captured_inputs.update(inputs)
+        return [np.zeros((1, 4), dtype=np.float32)]
+
+    session.run.side_effect = _run
+    tokenizer = Mock()
+    tokenizer.tokenize.side_effect = lambda text: list(range(len(text) + 3))
+    generator = AudioGenerator(session=session, tokenizer=tokenizer, model_source="github")
+    voice_style = np.repeat(np.arange(512, dtype=np.float32)[:, None, None], 256, axis=2)
+    trace = Trace()
+
+    generator.generate_from_phonemes("a" * phoneme_length, voice_style, 1.0, trace=trace)
+
+    expected_row = phoneme_length - 1
+    np.testing.assert_array_equal(captured_inputs["style"], voice_style[expected_row])
+    assert len(tokenizer.tokenize.call_args.args[0]) == phoneme_length
+    assert len(trace.inference) == 1
+    diagnostic = trace.inference[0]
+    assert diagnostic["style_row"] == expected_row
+    assert diagnostic["phoneme_count"] == phoneme_length
+    assert diagnostic["token_count"] == phoneme_length + 3
+    assert diagnostic["inputs"]["style"] == {"dtype": "float32", "shape": [1, 256]}
+    assert diagnostic["audio"]["samples"] == 4
+    assert "vector" not in diagnostic["style"]
+
+
+def test_voice_style_index_clamps_custom_voicepack_after_phoneme_length():
+    session = Mock()
+    session.get_inputs.return_value = [Mock(name="tokens"), Mock(name="style"), Mock(name="speed")]
+    session.run.return_value = [np.zeros((1, 1), dtype=np.float32)]
+    tokenizer = Mock()
+    tokenizer.tokenize.return_value = list(range(20))
+    generator = AudioGenerator(session=session, tokenizer=tokenizer, model_source="github")
+    voice_style = np.repeat(np.arange(3, dtype=np.float32)[:, None, None], 256, axis=2)
+
+    generator.generate_from_phonemes("abcdefgh", voice_style, 1.0)
+
+    style_input = session.run.call_args.args[1]["style"]
+    np.testing.assert_array_equal(style_input, voice_style[2])
 
 
 class TestBugFix3_ProviderConfigExtraction:

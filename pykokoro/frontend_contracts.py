@@ -57,7 +57,7 @@ def require_registry_frontend(
     allow_experimental: bool,
     registry: object | None = None,
     offline: bool = False,
- ) -> str:
+) -> str:
     """Resolve a frontend from canonical registry metadata."""
     from .model_profiles import get_registry_model_profile
 
@@ -65,9 +65,7 @@ def require_registry_frontend(
     if profile.support_status == "restricted" and not allow_experimental:
         raise ValueError(f"Model profile {variant!r} is restricted by its redistribution policy")
     if profile.support_status != "ready":
-        raise ValueError(
-            f"Model profile {variant!r} cannot be used: {profile.support_status}"
-        )
+        raise ValueError(f"Model profile {variant!r} cannot be used: {profile.support_status}")
     if profile.frontend_experimental and not allow_experimental:
         raise ValueError(
             f"Model profile {variant!r} requires {profile.frontend}; "

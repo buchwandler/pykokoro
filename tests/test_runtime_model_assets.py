@@ -71,7 +71,11 @@ def _registry() -> ModelRegistry:
                 },
                 "unavailable": {
                     "runtime_available": False,
-                    "runtime": {"layout": "single-onnx-v1", "default_voice": "default", "voices": ["default"]},
+                    "runtime": {
+                        "layout": "single-onnx-v1",
+                        "default_voice": "default",
+                        "voices": ["default"],
+                    },
                     "distributions": [],
                 },
             },
@@ -80,7 +84,9 @@ def _registry() -> ModelRegistry:
     )
 
 
-def test_resolver_materializes_one_atomic_distribution(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolver_materializes_one_atomic_distribution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     calls: list[str] = []
 
     def materialize(artifact, target):
@@ -146,7 +152,13 @@ def test_raw_voice_materialization_preserves_shape_and_provenance(tmp_path: Path
         (distribution,),
     )
     assets = ResolvedRuntimeAssets(
-        "ru", "upstream", "huggingface", "single-onnx-v1", {artifact.id: raw_path}, model, distribution
+        "ru",
+        "upstream",
+        "huggingface",
+        "single-onnx-v1",
+        {artifact.id: raw_path},
+        model,
+        distribution,
     )
 
     materialized = assets.materialize_raw_voices()

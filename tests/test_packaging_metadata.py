@@ -125,6 +125,7 @@ def test_playback_extra_is_optional_and_keeps_compatibility_alias() -> None:
     assert optional["sounddevice"] == ["sounddevice"]
     assert "sounddevice" not in dependencies
 
+
 def test_version_fallbacks_target_release() -> None:
     source = (ROOT / "pykokoro" / "__init__.py").read_text(encoding="utf-8")
 
@@ -138,19 +139,15 @@ def test_lower_bound_workflow_pins_match_project_floors() -> None:
 
     floors = {}
     for requirement in dependencies:
-        match = re.match(
-            r"([A-Za-z0-9_.-]+)(?:\[[^]]+\])?>=([^,<;]+)", requirement
-        )
+        match = re.match(r"([A-Za-z0-9_.-]+)(?:\[[^]]+\])?>=([^,<;]+)", requirement)
         if match:
             floors[match.group(1).lower()] = match.group(2)
 
     workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
     pins = {
         name.lower(): version
-        for name, version in re.findall(
-            r'"([A-Za-z0-9_.-]+)(?:\[[^]]+\])?==([^\"]+)"', workflow
-        )
-            if version and version[0].isdigit()
+        for name, version in re.findall(r'"([A-Za-z0-9_.-]+)(?:\[[^]]+\])?==([^\"]+)"', workflow)
+        if version and version[0].isdigit()
     }
     expected_packages = {"kokorog2p", "phrasplit", "ssmd", "audiosig", "babel"}
 

@@ -42,7 +42,13 @@ def _assets(tmp_path: Path, layout: str = "split-onnx-v1") -> ResolvedRuntimeAss
                 "manifest", "config", "json", "https://example/manifest", manifest.name, 1, "0" * 64
             ),
             RuntimeArtifact(
-                "source", "metadata", "numpy-npz", "https://example/source", source.name, 1, "0" * 64
+                "source",
+                "metadata",
+                "numpy-npz",
+                "https://example/source",
+                source.name,
+                1,
+                "0" * 64,
             ),
             RuntimeArtifact(
                 "voices", "voices", "numpy-npz", "https://example/voices", voices.name, 1, "0" * 64
@@ -59,7 +65,14 @@ def _assets(tmp_path: Path, layout: str = "split-onnx-v1") -> ResolvedRuntimeAss
         materialized[artifact.id] = path
     model = RuntimeModel(
         "thai",
-        {"runtime": {"layout": layout, "max_tokens": 510, "default_voice": "default", "voices": ["default"]}},
+        {
+            "runtime": {
+                "layout": layout,
+                "max_tokens": 510,
+                "default_voice": "default",
+                "voices": ["default"],
+            }
+        },
         (RuntimeDistribution("dist", "github-release", "https", True, tuple(artifacts)),),
     )
     return ResolvedRuntimeAssets(

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, cast
 
@@ -102,13 +102,13 @@ class KokoroG2PAdapter(G2PAdapter):
             cached = cache.get(cache_key)
             cached_payload = self._read_cache_payload(cached)
             alignment_tokens: list[G2PAlignmentToken] = []
+            result_warnings: list[str] = []
             if cached_payload is not None:
-                phonemes, tokens, alignment_tokens, cached_warnings = cached_payload
-                trace.warnings.extend(cached_warnings)
+                phonemes, tokens, alignment_tokens, result_warnings = cached_payload
+                trace.warnings.extend(result_warnings)
             else:
                 if cached is not None:
                     cache.delete(cache_key)
-                result_warnings: list[str] = []
                 if generation.is_phonemes:
                     phonemes = segment.text
                     tokens = g2p.phonemes_to_ids(phonemes, model=model_version)
@@ -128,8 +128,6 @@ class KokoroG2PAdapter(G2PAdapter):
                     phonemes = str(
                         getattr(result, "phonemes", None) or getattr(result, "phoneme", "")
                     )
-                    if cfg.model_variant == "de-thorsten":
-                        phonemes = phonemes.replace("ʏ", "y")
                     tokens = getattr(result, "ids", None) or getattr(result, "token_ids", [])
                     alignment_tokens = self._normalize_alignment_tokens(
                         getattr(result, "tokens", []), segment, g2p, model_version
@@ -137,16 +135,22 @@ class KokoroG2PAdapter(G2PAdapter):
                     result_warnings = [str(warning) for warning in getattr(result, "warnings", [])]
                     if result_warnings:
                         trace.warnings.extend(result_warnings)
-                cache.set(
-                    cache_key,
-                    {
-                        "schema": self._cache_schema,
-                        "phonemes": str(phonemes),
-                        "tokens": list(tokens),
-                        "alignment_tokens": [token.to_dict() for token in alignment_tokens],
-                        "warnings": result_warnings,
-                    },
+
+            if cfg.model_variant == "de-thorsten":
+                phonemes, tokens, alignment_tokens = self._normalize_thorsten_payload(
+                    str(phonemes), alignment_tokens, g2p, model_version
                 )
+            tokens = list(tokens)
+            cache.set(
+                cache_key,
+                {
+                    "schema": self._cache_schema,
+                    "phonemes": str(phonemes),
+                    "tokens": tokens,
+                    "alignment_tokens": [token.to_dict() for token in alignment_tokens],
+                    "warnings": result_warnings,
+                },
+            )
 
             pause_before, pause_after = self._resolve_pauses(seg_boundaries, generation)
             if any(
@@ -233,6 +237,28 @@ class KokoroG2PAdapter(G2PAdapter):
                 )
             )
         return phonemes, tokens, alignment, warnings
+
+    @staticmethod
+    def _normalize_thorsten_payload(
+        phonemes: str,
+        alignment_tokens: list[G2PAlignmentToken],
+        g2p: Any,
+        model_version: str,
+    ) -> tuple[str, list[int], list[G2PAlignmentToken]]:
+        """Keep Thorsten phonemes, model IDs, and alignment spans consistent."""
+        cleaned_phonemes = phonemes.replace("ʏ", "y")
+        tokens = list(g2p.phonemes_to_ids(cleaned_phonemes, model=model_version))
+        cleaned_alignment = [
+            replace(
+                token,
+                phonemes=token.phonemes.replace("ʏ", "y"),
+                model_token_count=len(
+                    g2p.phonemes_to_ids(token.phonemes.replace("ʏ", "y"), model=model_version)
+                ),
+            )
+            for token in alignment_tokens
+        ]
+        return cleaned_phonemes, tokens, cleaned_alignment
 
     @staticmethod
     def _normalize_alignment_tokens(

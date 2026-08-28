@@ -60,7 +60,9 @@ class ThaiWayuRuntime:
         source_path = paths.get("source_params")
         voices_path = paths.get("voices")
         if source_path is None or voices_path is None:
-            raise ModelRegistryError("Thai Wayu distribution is missing source parameters or voices")
+            raise ModelRegistryError(
+                "Thai Wayu distribution is missing source parameters or voices"
+            )
         with np.load(source_path, allow_pickle=False) as source:
             self.source_weight = np.asarray(source["weight"])
             self.source_bias = np.asarray(source["bias"])
@@ -106,13 +108,20 @@ class ThaiWayuRuntime:
                 continue
             names = {str(getattr(item, "name", "")) for item in inputs}
             if name == "prosody" and not {"input_ids", "style_dur", "speed"} <= names:
-                raise ModelRegistryError("Thai Wayu prosody session has an incompatible input contract")
+                raise ModelRegistryError(
+                    "Thai Wayu prosody session has an incompatible input contract"
+                )
             if name == "curves" and not {"en", "style_dur"} <= names:
-                raise ModelRegistryError("Thai Wayu curves session has an incompatible input contract")
-            if name == "decoder" and not {
-                "asr", "f0_curve", "n_curve", "style_acou", "har"
-            } <= names:
-                raise ModelRegistryError("Thai Wayu decoder session has an incompatible input contract")
+                raise ModelRegistryError(
+                    "Thai Wayu curves session has an incompatible input contract"
+                )
+            if (
+                name == "decoder"
+                and not {"asr", "f0_curve", "n_curve", "style_acou", "har"} <= names
+            ):
+                raise ModelRegistryError(
+                    "Thai Wayu decoder session has an incompatible input contract"
+                )
 
     def phonemize(self, text: str) -> str:
         import kokorog2p
@@ -128,7 +137,9 @@ class ThaiWayuRuntime:
         if not ids:
             raise RuntimeError("Thai frontend produced no vocabulary symbols")
         if len(ids) > self.max_tokens:
-            raise ValueError(f"Thai frontend produced {len(ids)} tokens, maximum is {self.max_tokens}")
+            raise ValueError(
+                f"Thai frontend produced {len(ids)} tokens, maximum is {self.max_tokens}"
+            )
         if voice not in self.voices:
             raise KeyError(f"Unknown Thai voice: {voice}")
 
@@ -147,9 +158,7 @@ class ThaiWayuRuntime:
         index = np.repeat(np.arange(pred_dur.shape[0], dtype=np.int64), pred_dur)
         en = np.ascontiguousarray(d.transpose(0, 2, 1)[:, :, index])
         asr = np.ascontiguousarray(t_en[:, :, index])
-        f0_curve, n_curve = self.sessions["curves"].run(
-            None, {"en": en, "style_dur": style_dur}
-        )
+        f0_curve, n_curve = self.sessions["curves"].run(None, {"en": en, "style_dur": style_dur})
         har = self._harmonic_source(f0_curve, seed)
         (audio,) = self.sessions["decoder"].run(
             None,

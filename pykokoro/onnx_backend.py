@@ -23,7 +23,7 @@ from .artifact_manifest import (
     hf_config_spec,
     hf_model_spec,  # noqa: F401
     hf_voice_spec,
- )
+)
 from .asset_constants import (
     HF_CONFIG_FILENAME,
     HF_MODEL_SUBFOLDER,
@@ -73,7 +73,7 @@ from .runtime.dispatcher import create_runtime
 from .runtime.model_assets import (
     ResolvedRuntimeAssets,
     resolve_runtime_assets,
-    )
+)
 from .tokenizer import EspeakConfig, Tokenizer, TokenizerConfig
 from .utils import get_user_cache_path
 from .voice_manager import VoiceBlend, VoiceManager, normalize_voice_style
@@ -1179,11 +1179,13 @@ def _download_legacy_hf_model(
     revision: str | None,
     sha256: str | None,
     offline: bool,
- ) -> Path:
+) -> Path:
     repositories = {"v1.0": HF_REPO_V1_0, "v1.1-zh": HF_REPO_V1_1_ZH}
     filenames = dict(MODEL_QUALITY_FILES_HF)
     if variant == "v1.1-zh":
-        filenames = {key: value for key, value in filenames.items() if key not in {"q8f16", "uint8f16"}}
+        filenames = {
+            key: value for key, value in filenames.items() if key not in {"q8f16", "uint8f16"}
+        }
         filenames.update({"int8": "model_int8.onnx", "bnb4": "model_bnb4.onnx"})
     if quality not in filenames:
         raise ValueError(f"Quality {quality!r} is not available for {variant}")
@@ -1203,6 +1205,7 @@ def _download_legacy_hf_model(
         expected_sha256=sha256,
         offline=offline,
     )
+
 
 def download_model(
     variant: ModelVariant = DEFAULT_MODEL_VARIANT,
@@ -1232,9 +1235,7 @@ def download_model(
         - v1.1-zh from: onnx-community/Kokoro-82M-v1.1-zh-ONNX
     """
     if hf_model_spec is not _DEFAULT_HF_MODEL_SPEC:
-        return _download_legacy_hf_model(
-            variant, quality, force, revision, sha256, offline
-        )
+        return _download_legacy_hf_model(variant, quality, force, revision, sha256, offline)
     del revision, sha256
     return _download_registry_artifact(
         variant,
@@ -1631,14 +1632,13 @@ def _download_registry_artifact(
         raise ArtifactValidationError(str(exc)) from exc
 
 
-
 def _download_legacy_github_model(
     variant: ModelVariant,
     quality: ModelQuality,
     force: bool,
     offline: bool,
     tag: str | None,
- ) -> Path:
+) -> Path:
     release = resolve_model_release(variant, tag=tag, quality=quality, offline=offline)
     asset = release.model_asset(quality)
     return _download_release_asset(
@@ -1651,7 +1651,7 @@ def _download_legacy_github_voices(
     force: bool,
     offline: bool,
     tag: str | None,
- ) -> Path:
+) -> Path:
     release = resolve_model_release(
         variant, tag=tag, quality=DEFAULT_MODEL_QUALITY, offline=offline
     )
@@ -1670,6 +1670,7 @@ def _download_legacy_github_voices(
         offline=offline,
     )
 
+
 def download_model_github(
     variant: ModelVariant = DEFAULT_MODEL_VARIANT,
     quality: ModelQuality = DEFAULT_MODEL_QUALITY,
@@ -1677,7 +1678,7 @@ def download_model_github(
     offline: bool = False,
     *,
     tag: str | None = None,
- ) -> Path:
+) -> Path:
     if resolve_model_release is not _DEFAULT_RESOLVE_MODEL_RELEASE:
         return _download_legacy_github_model(variant, quality, force, offline, tag)
     del tag
@@ -1691,14 +1692,13 @@ def download_model_github(
     )
 
 
-
 def download_voices_github(
     variant: ModelVariant = DEFAULT_MODEL_VARIANT,
     force: bool = False,
     offline: bool = False,
     *,
     tag: str | None = None,
- ) -> Path:
+) -> Path:
     if resolve_model_release is not _DEFAULT_RESOLVE_MODEL_RELEASE:
         return _download_legacy_github_voices(variant, force, offline, tag)
     del tag
@@ -1720,7 +1720,6 @@ def download_voices_github(
         raise ArtifactValidationError(str(exc)) from exc
 
 
-
 def download_all_models_github(
     variant: ModelVariant = DEFAULT_MODEL_VARIANT,
     quality: ModelQuality = DEFAULT_MODEL_QUALITY,
@@ -1729,7 +1728,7 @@ def download_all_models_github(
     offline: bool = False,
     *,
     tag: str | None = None,
- ) -> dict[str, Path]:
+) -> dict[str, Path]:
     del tag
     try:
         resolved = resolve_runtime_assets(
@@ -1752,10 +1751,10 @@ def download_all_models_github(
     except (ModelRegistryError, OSError, ArtifactValidationError) as exc:
         raise ArtifactValidationError(str(exc)) from exc
 
+
 _DEFAULT_DOWNLOAD_MODEL_GITHUB = download_model_github
 _DEFAULT_DOWNLOAD_VOICES_GITHUB = download_voices_github
 _DEFAULT_DOWNLOAD_MODEL = download_model
-
 
 
 class Kokoro:
@@ -2024,14 +2023,15 @@ class Kokoro:
                 )
                 self._voices_path = download_voices_github(variant=self._model_variant)
                 return
-            if self._model_source == "huggingface" and download_model is not _DEFAULT_DOWNLOAD_MODEL:
+            if (
+                self._model_source == "huggingface"
+                and download_model is not _DEFAULT_DOWNLOAD_MODEL
+            ):
                 self._model_path = download_model(
                     variant=self._model_variant, quality=self._model_quality
                 )
                 download_all_voices()
-                self._voices_path = get_voices_archive_path(
-                    "huggingface", self._model_variant
-                )
+                self._voices_path = get_voices_archive_path("huggingface", self._model_variant)
                 return
         if not self._model_path_provided or not self._voices_path_provided:
             preference: Literal["github", "huggingface"] = (
@@ -2049,9 +2049,7 @@ class Kokoro:
                 ) from exc
             resolved = self._resolved_runtime_assets
             if self._model_path is None:
-                self._model_path = resolved.artifact_for_role(
-                    "model", quality=self._model_quality
-                )
+                self._model_path = resolved.artifact_for_role("model", quality=self._model_quality)
             if self._voices_path is None:
                 voice_role = "voices" if resolved.artifacts_for_role("voices") else "voice"
                 voice_paths = resolved.artifacts_for_role(voice_role)
@@ -2315,6 +2313,7 @@ class Kokoro:
         voice_resolver: Callable[[str], np.ndarray] | None,
         *,
         default_voice_name: str | None = None,
+        trace: "Trace | None" = None,
     ) -> list["PhonemeSegment"]:
         """Generate raw audio for each phoneme segment."""
         self._init_kokoro()
@@ -2322,13 +2321,11 @@ class Kokoro:
             default_voice = default_voice_name or next(iter(self._runtime.voices))
             for segment in segments:
                 voice_name = segment.voice_name or default_voice
-                segment.raw_audio = self._runtime.synthesize(
-                    segment.text, voice_name, speed=speed
-                )
+                segment.raw_audio = self._runtime.synthesize(segment.text, voice_name, speed=speed)
             return segments
         assert self._audio_generator is not None
         return self._audio_generator._generate_raw_audio_segments(
-            segments, voice_style, speed, voice_resolver
+            segments, voice_style, speed, voice_resolver, trace
         )
 
     def postprocess_audio_segments(
@@ -2362,12 +2359,20 @@ class Kokoro:
             pieces: list[np.ndarray] = []
             for segment in segments:
                 if segment.pause_before > 0:
-                    pieces.append(np.zeros(round(SAMPLE_RATE * segment.pause_before), dtype=np.float32))
-                audio = segment.processed_audio if segment.processed_audio is not None else segment.raw_audio
+                    pieces.append(
+                        np.zeros(round(SAMPLE_RATE * segment.pause_before), dtype=np.float32)
+                    )
+                audio = (
+                    segment.processed_audio
+                    if segment.processed_audio is not None
+                    else segment.raw_audio
+                )
                 if audio is not None:
                     pieces.append(np.asarray(audio, dtype=np.float32).reshape(-1))
                 if segment.pause_after > 0:
-                    pieces.append(np.zeros(round(SAMPLE_RATE * segment.pause_after), dtype=np.float32))
+                    pieces.append(
+                        np.zeros(round(SAMPLE_RATE * segment.pause_after), dtype=np.float32)
+                    )
             return np.concatenate(pieces) if pieces else np.empty(0, dtype=np.float32)
         assert self._audio_generator is not None
         return self._audio_generator._concatenate_audio_segments(

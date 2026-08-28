@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import inspect
+from typing import TYPE_CHECKING, Any
 
 from ...exceptions import ConfigurationError
 from ...types import PhonemeSegment, Trace
@@ -55,10 +56,16 @@ class OnnxAudioGenerationAdapter:
         def voice_resolver(voice_name: str) -> np.ndarray:
             return self._kokoro.get_voice_style(voice_name)
 
-        return self._kokoro.generate_raw_audio_segments(
+        generate_raw = self._kokoro.generate_raw_audio_segments
+        arguments: list[Any] = [
             phoneme_segments,
             voice_style,
             cfg.generation.speed,
             voice_resolver,
-            default_voice_name=cfg.voice if isinstance(cfg.voice, str) else None,
-        )
+        ]
+        kwargs: dict[str, Any] = {
+            "default_voice_name": cfg.voice if isinstance(cfg.voice, str) else None
+        }
+        if "trace" in inspect.signature(generate_raw).parameters:
+            kwargs["trace"] = trace
+        return generate_raw(*arguments, **kwargs)

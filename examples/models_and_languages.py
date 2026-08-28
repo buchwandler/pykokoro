@@ -128,7 +128,9 @@ def _choose_quality(model: Any, quality: str | None) -> str:
 
 def _sample_text(language: str) -> str:
     normalized = normalize_language_code(language)
-    return SAMPLE_TEXTS.get(normalized, SAMPLE_TEXTS.get(normalized.split("-", 1)[0], SAMPLE_TEXTS["en"]))
+    return SAMPLE_TEXTS.get(
+        normalized, SAMPLE_TEXTS.get(normalized.split("-", 1)[0], SAMPLE_TEXTS["en"])
+    )
 
 
 def _safe_filename_part(value: str) -> str:

@@ -31,8 +31,25 @@ def _registry(url: str = "https://github.test/model.onnx") -> dict:
                         "transport": "https",
                         "runtime_ready": True,
                         "artifacts": [
-                            {"id": "model", "role": "model", "quality": "fp32", "url": url, "local_name": "model.onnx", "format": "onnx", "size": 5, "sha256": digest},
-                            {"id": "voices", "role": "voices", "url": "https://github.test/voices.npz", "local_name": "voices.npz", "format": "numpy-npz", "size": 5, "sha256": digest},
+                            {
+                                "id": "model",
+                                "role": "model",
+                                "quality": "fp32",
+                                "url": url,
+                                "local_name": "model.onnx",
+                                "format": "onnx",
+                                "size": 5,
+                                "sha256": digest,
+                            },
+                            {
+                                "id": "voices",
+                                "role": "voices",
+                                "url": "https://github.test/voices.npz",
+                                "local_name": "voices.npz",
+                                "format": "numpy-npz",
+                                "size": 5,
+                                "sha256": digest,
+                            },
                         ],
                     },
                     {
@@ -43,8 +60,25 @@ def _registry(url: str = "https://github.test/model.onnx") -> dict:
                         "repository": "source/repo",
                         "revision": "commit",
                         "artifacts": [
-                            {"id": "model-hf", "role": "model", "quality": "fp32", "url": "https://hf.test/model", "local_name": "model.onnx", "format": "onnx", "size": 5, "sha256": digest},
-                            {"id": "voices-hf", "role": "voices", "url": "https://hf.test/voices", "local_name": "voices.npz", "format": "numpy-npz", "size": 5, "sha256": digest},
+                            {
+                                "id": "model-hf",
+                                "role": "model",
+                                "quality": "fp32",
+                                "url": "https://hf.test/model",
+                                "local_name": "model.onnx",
+                                "format": "onnx",
+                                "size": 5,
+                                "sha256": digest,
+                            },
+                            {
+                                "id": "voices-hf",
+                                "role": "voices",
+                                "url": "https://hf.test/voices",
+                                "local_name": "voices.npz",
+                                "format": "numpy-npz",
+                                "size": 5,
+                                "sha256": digest,
+                            },
                         ],
                     },
                 ],
@@ -73,7 +107,9 @@ class Response:
         return self.payload
 
 
-def test_registry_fetches_and_caches_valid_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_registry_fetches_and_caches_valid_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     payload = json.dumps(_registry()).encode()
     monkeypatch.setattr("urllib.request.urlopen", lambda *args, **kwargs: Response(payload))
     cache = tmp_path / "models.json"
@@ -84,7 +120,9 @@ def test_registry_fetches_and_caches_valid_data(tmp_path: Path, monkeypatch: pyt
     assert cache.is_file()
 
 
-def test_registry_uses_last_valid_cache_after_bad_remote(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_registry_uses_last_valid_cache_after_bad_remote(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     cache = tmp_path / "models.json"
     cache.write_text(json.dumps(_registry()), encoding="utf-8")
     monkeypatch.setattr("urllib.request.urlopen", lambda *args, **kwargs: Response(b"invalid"))
@@ -114,10 +152,20 @@ def test_distribution_preference_and_quality_are_registry_authoritative() -> Non
         parsed[0].artifact("model", quality="q8f16")
 
 
-def test_failed_artifact_download_does_not_replace_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_failed_artifact_download_does_not_replace_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     target = tmp_path / "model.onnx"
     target.write_bytes(b"known-good")
-    artifact = RuntimeArtifact("model", "model", "onnx", "https://example.test/model", "model.onnx", 5, hashlib.sha256(b"model").hexdigest())
+    artifact = RuntimeArtifact(
+        "model",
+        "model",
+        "onnx",
+        "https://example.test/model",
+        "model.onnx",
+        5,
+        hashlib.sha256(b"model").hexdigest(),
+    )
     monkeypatch.setattr("urllib.request.urlopen", lambda *args, **kwargs: Response(b"wrong"))
 
     with pytest.raises(ModelRegistryError, match="mismatch"):

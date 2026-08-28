@@ -162,11 +162,7 @@ def resolve_model_defaults(cfg: PipelineConfig) -> PipelineConfig:
     quality = cfg.model_quality or cast(
         ModelQuality, (profile.available_qualities[0] if profile.available_qualities else "fp32")
     )
-    if (
-        source == "huggingface"
-        and profile.quality_files
-        and quality not in profile.quality_files
-    ):
+    if source == "huggingface" and profile.quality_files and quality not in profile.quality_files:
         available = ", ".join(profile.quality_files) or "none"
         raise ValueError(
             f"Quality {quality!r} is not available for {source}/{variant}. Available: {available}"
