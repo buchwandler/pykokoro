@@ -1,3 +1,5 @@
+import pytest
+
 from pykokoro.pipeline_config import PipelineConfig
 from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
 from pykokoro.tokenizer import TokenizerConfig
@@ -72,3 +74,47 @@ def test_kokorog2p_adapter_forwards_unset_spacy_as_auto(monkeypatch):
     assert captured["use_spacy"] is None
     assert captured["spacy_model"] is None
     assert captured["spacy_model_size"] is None
+
+@pytest.mark.parametrize("variant", ["de-crane", "de-thorsten"])
+def test_german_profiles_use_native_kokorog2p_backend(monkeypatch, variant):
+    captured: dict[str, object] = {}
+
+    class FakeG2PModule:
+        @staticmethod
+        def get_g2p(**kwargs):
+            captured.update(kwargs)
+            return object()
+
+    adapter = KokoroG2PAdapter()
+    monkeypatch.setattr(adapter, "_load", lambda: FakeG2PModule())
+    cfg = PipelineConfig(
+        model_source="github",
+        model_variant=variant,
+        allow_experimental_frontend=True,
+    )
+
+    adapter._get_g2p_instance("de", cfg)
+
+    assert captured["backend"] == "kokorog2p"
+
+
+def test_explicit_espeak_profile_backend_is_preserved(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeG2PModule:
+        @staticmethod
+        def get_g2p(**kwargs):
+            captured.update(kwargs)
+            return object()
+
+    adapter = KokoroG2PAdapter()
+    monkeypatch.setattr(adapter, "_load", lambda: FakeG2PModule())
+    cfg = PipelineConfig(
+        model_source="github",
+        model_variant="he-hebrew-nc",
+        allow_experimental_frontend=True,
+    )
+
+    adapter._get_g2p_instance("he", cfg)
+
+    assert captured["backend"] == "espeak"

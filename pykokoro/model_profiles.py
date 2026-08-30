@@ -13,6 +13,7 @@ from .config_types import ModelSource, ModelVariant
 
 VocabularySource = Literal["builtin-v1.0", "downloaded-config", "downloaded-release"]
 
+G2PBackend = Literal["kokorog2p", "espeak", "goruut"]
 
 @dataclass(frozen=True, slots=True)
 class RuntimeProfile:
@@ -37,6 +38,8 @@ class RuntimeProfile:
     redistribution_allowed: bool = True
     support_status: str = "ready"
 
+    g2p_backend: G2PBackend | None = None
+
     @property
     def available_qualities(self) -> tuple[str, ...]:
         return tuple(self.quality_files)
@@ -55,6 +58,7 @@ def _github_profile(
     tokenizer_vocab_version: str = "1.0",
     frontend_experimental: bool = True,
     max_tokens: int = 510,
+    g2p_backend: G2PBackend | None = None,
 ) -> RuntimeProfile:
     default_voices = {
         "v1.2-de-martin": "martin",
@@ -75,6 +79,7 @@ def _github_profile(
         frontend_experimental=frontend_experimental,
         onnx_inputs=onnx_inputs,
         max_tokens=max_tokens,
+        g2p_backend=g2p_backend,
     )
 
 
@@ -91,12 +96,14 @@ MODEL_PROFILES: dict[tuple[ModelSource, ModelVariant], RuntimeProfile] = {
         ("vi",),
         "vig2p-v1",
         {"tokens": "int64", "style": "float32", "speed": "float32"},
+        g2p_backend="espeak",
     ),
     ("github", "vi-anphunl"): _github_profile(
         "vi-anphunl",
         ("vi",),
         "vig2p-v1",
         {"tokens": "int64", "style": "float32", "speed": "float32"},
+        g2p_backend="espeak",
     ),
     ("github", "ar-nabra"): _github_profile(
         "ar-nabra",
@@ -112,6 +119,7 @@ MODEL_PROFILES: dict[tuple[ModelSource, ModelVariant], RuntimeProfile] = {
         ("de",),
         "german-ipa-v1",
         {"input_ids": "int64", "style": "float32", "speed": "float32"},
+        g2p_backend="kokorog2p",
     ),
     ("github", "he-hebrew-nc"): _github_profile(
         "he-hebrew-nc",
@@ -119,6 +127,7 @@ MODEL_PROFILES: dict[tuple[ModelSource, ModelVariant], RuntimeProfile] = {
         "hebrew-g2p-v1",
         {"tokens": "int64", "style": "float32", "speed": "float32"},
         frontend_experimental=True,
+        g2p_backend="espeak",
     ),
 }
 
@@ -162,6 +171,7 @@ MODEL_PROFILES.update(
             "kokorog2p-de-thorsten-v1",
             False,
             voice_names=("thorsten",),
+            g2p_backend="kokorog2p",
         ),
         ("github", "kk-anuarsv"): RuntimeProfile(
             "github",
@@ -413,6 +423,7 @@ def get_registry_model_profile(
         tokenizer_vocab_version=tokenizer_version,
         frontend=model.frontend,
         frontend_experimental=local.frontend_experimental if local is not None else False,
+        g2p_backend=local.g2p_backend if local is not None else None,
         onnx_inputs=onnx_inputs if isinstance(onnx_inputs, Mapping) else {},
         sample_rate=model.sample_rate,
         max_tokens=model.max_tokens,

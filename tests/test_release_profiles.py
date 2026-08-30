@@ -6,12 +6,20 @@ from pykokoro.pipeline_config import PipelineConfig, resolve_model_defaults
 
 
 def test_runtime_profiles_do_not_duplicate_published_inventory():
+    expected_backends = {
+        "vi-contextbox": "espeak",
+        "vi-anphunl": "espeak",
+        "ar-nabra": None,
+        "de-crane": "kokorog2p",
+        "he-hebrew-nc": "espeak",
+    }
     for variant in ("vi-contextbox", "vi-anphunl", "ar-nabra", "de-crane", "he-hebrew-nc"):
         profile = get_model_profile(variant, "github")
         assert profile.quality_files == {}
         assert profile.voice_names == ()
         assert profile.onnx_inputs["speed"] == "float32"
         assert profile.frontend_experimental is (variant != "ar-nabra")
+        assert profile.g2p_backend == expected_backends[variant]
     nabra = get_model_profile("ar-nabra", "github")
     assert nabra.vocabulary_source == "downloaded-release"
     assert not hasattr(nabra, "vocabulary_filename")

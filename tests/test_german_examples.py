@@ -30,6 +30,9 @@ def test_german_model_configurations() -> None:
     assert thorsten.generation.speed == 1.0
     assert thorsten.allow_experimental_frontend is False
     assert german3.OUTPUT_FILE == "german_thorsten.wav"
+    from pykokoro.model_profiles import get_model_profile
+    assert get_model_profile("de-crane", "github").g2p_backend == "kokorog2p"
+    assert get_model_profile("de-thorsten", "github").g2p_backend == "kokorog2p"
     assert thorsten.short_sentence_config is not None
     assert thorsten.short_sentence_config.enabled is True
     no_short = german3.make_config(short_sentence=False)

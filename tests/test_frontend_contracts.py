@@ -5,17 +5,18 @@ from pykokoro.model_profiles import get_model_profile
 
 
 @pytest.mark.parametrize(
-    ("variant", "frontend"),
+    ("variant", "frontend", "g2p_backend"),
     [
-        ("vi-contextbox", "vig2p-v1"),
-        ("vi-anphunl", "vig2p-v1"),
-        ("de-crane", "german-ipa-v1"),
-        ("he-hebrew-nc", "hebrew-g2p-v1"),
+        ("vi-contextbox", "vig2p-v1", "espeak"),
+        ("vi-anphunl", "vig2p-v1", "espeak"),
+        ("de-crane", "german-ipa-v1", "kokorog2p"),
+        ("he-hebrew-nc", "hebrew-g2p-v1", "espeak"),
     ],
 )
-def test_experimental_frontend_contracts_are_explicit(variant, frontend):
+def test_experimental_frontend_contracts_are_explicit(variant, frontend, g2p_backend):
     profile = get_model_profile(variant, "github")
     assert profile.frontend == frontend
+    assert profile.g2p_backend == g2p_backend
     assert profile.frontend_experimental
     assert profile.sample_rate == 24000
     fixture = FRONTEND_FIXTURES[variant]

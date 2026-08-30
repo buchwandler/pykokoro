@@ -181,6 +181,7 @@ def test_g2p_cache_schema_recomputes_and_preserves_warnings(tmp_path, monkeypatc
         model_quality=cfg.model_quality,
         model_source=cfg.model_source,
         model_variant=cfg.model_variant,
+        g2p_backend="kokorog2p",
     )
     DiskCache(tmp_path).set(key, ["obsolete payload"])
 
@@ -211,7 +212,7 @@ def test_g2p_cache_schema_recomputes_and_preserves_warnings(tmp_path, monkeypatc
     assert second_trace.warnings == ["fallback"]
     cached = DiskCache(tmp_path).get(key)
     assert cached == {
-        "schema": 3,
+        "schema": 4,
         "phonemes": "həˈloʊ",
         "tokens": [1, 2],
         "alignment_tokens": [],

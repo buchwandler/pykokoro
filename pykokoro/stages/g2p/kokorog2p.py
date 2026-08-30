@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 
 class KokoroG2PAdapter(G2PAdapter):
-    _cache_schema = 3
+    _cache_schema = 4
 
     def __init__(self) -> None:
         self._g2p: ModuleType | None = None
@@ -56,6 +56,8 @@ class KokoroG2PAdapter(G2PAdapter):
         cache = cache_from_dir(cfg.cache_dir)
         generation = cfg.generation
         model_version = self._get_model_version(cfg)
+        profile, resolved_backend, phoneme_postprocess = self._resolve_frontend_contract(cfg)
+        frontend = profile.frontend if profile is not None else None
         out: list[PhonemeSegment] = []
 
         for segment in segments:
@@ -98,6 +100,9 @@ class KokoroG2PAdapter(G2PAdapter):
                 model_quality=cfg.model_quality,
                 model_source=cfg.model_source,
                 model_variant=cfg.model_variant,
+                frontend=frontend,
+                g2p_backend=resolved_backend,
+                phoneme_postprocess=phoneme_postprocess,
             )
             cached = cache.get(cache_key)
             cached_payload = self._read_cache_payload(cached)
@@ -136,8 +141,8 @@ class KokoroG2PAdapter(G2PAdapter):
                     if result_warnings:
                         trace.warnings.extend(result_warnings)
 
-            if cfg.model_variant == "de-thorsten":
-                phonemes, tokens, alignment_tokens = self._normalize_thorsten_payload(
+            if cfg.model_variant in {"de-thorsten", "de-crane"}:
+                phonemes, tokens, alignment_tokens = self._normalize_german_short_u_payload(
                     str(phonemes), alignment_tokens, g2p, model_version
                 )
             tokens = list(tokens)
@@ -239,13 +244,13 @@ class KokoroG2PAdapter(G2PAdapter):
         return phonemes, tokens, alignment, warnings
 
     @staticmethod
-    def _normalize_thorsten_payload(
+    def _normalize_german_short_u_payload(
         phonemes: str,
         alignment_tokens: list[G2PAlignmentToken],
         g2p: Any,
         model_version: str,
     ) -> tuple[str, list[int], list[G2PAlignmentToken]]:
-        """Keep Thorsten phonemes, model IDs, and alignment spans consistent."""
+        """Keep German short-u phonemes, model IDs, and alignment spans consistent."""
         cleaned_phonemes = phonemes.replace("ʏ", "y")
         tokens = list(g2p.phonemes_to_ids(cleaned_phonemes, model=model_version))
         cleaned_alignment = [
@@ -348,19 +353,37 @@ class KokoroG2PAdapter(G2PAdapter):
             result.append(current)
         return result if token_index == len(alignment) else [[] for _ in batch_counts]
 
-    def _get_g2p_instance(self, lang: str, cfg: PipelineConfig) -> G2PBase:
+    @staticmethod
+    def _resolve_frontend_contract(
+        cfg: PipelineConfig,
+    ) -> tuple[Any | None, str, str | None]:
+        from ...model_profiles import get_model_profile
         from ...tokenizer import TokenizerConfig
 
         tokenizer_config = cfg.tokenizer_config or TokenizerConfig()
-        kokorog2p_lang = SUPPORTED_LANGUAGES.get(lang, lang)
-        from ...frontend_contracts import require_frontend
-        from ...model_profiles import get_model_profile
-
         profile = (
             get_model_profile(cfg.model_variant, cfg.model_source)
             if cfg.model_variant and cfg.model_source
             else None
         )
+        backend = tokenizer_config.backend
+        if profile is not None and profile.g2p_backend is not None:
+            backend = profile.g2p_backend
+        postprocess = (
+            "german-short-u-to-y"
+            if cfg.model_variant in {"de-thorsten", "de-crane"}
+            else None
+        )
+        return profile, backend, postprocess
+
+
+    def _get_g2p_instance(self, lang: str, cfg: PipelineConfig) -> G2PBase:
+        from ...frontend_contracts import require_frontend
+        from ...tokenizer import TokenizerConfig
+
+        tokenizer_config = cfg.tokenizer_config or TokenizerConfig()
+        kokorog2p_lang = SUPPORTED_LANGUAGES.get(lang, lang)
+        profile, backend, _ = self._resolve_frontend_contract(cfg)
         model_version = self._get_model_version(cfg)
         version = "1.0" if model_version == "nabra-82m-v0.1" else model_version
         if profile is not None:
@@ -370,9 +393,6 @@ class KokoroG2PAdapter(G2PAdapter):
             size=tokenizer_config.spacy_model_size,
         )
 
-        backend = tokenizer_config.backend
-        if profile is not None and profile.frontend_experimental and backend == "kokorog2p":
-            backend = "espeak"
         kwargs: dict[str, Any] = {
             "language": kokorog2p_lang,
             "version": version,

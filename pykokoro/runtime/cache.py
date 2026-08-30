@@ -46,6 +46,9 @@ def make_g2p_key(
     model_quality: str | None = None,
     model_source: str | None = None,
     model_variant: str | None = None,
+    frontend: str | None = None,
+    g2p_backend: str | None = None,
+    phoneme_postprocess: str | None = None,
 ) -> str:
     return make_cache_key(
         {
@@ -58,6 +61,9 @@ def make_g2p_key(
             "model_quality": model_quality,
             "model_source": model_source,
             "model_variant": model_variant,
+            "frontend": frontend,
+            "g2p_backend": g2p_backend,
+            "phoneme_postprocess": phoneme_postprocess,
         }
     )
 

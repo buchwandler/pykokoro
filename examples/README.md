@@ -7,8 +7,8 @@ scripts below use the current pipeline-first API.
 
 - `german.py` — German Martin v1.2; demonstrates automatic German model selection and
   requires ONNX Runtime/model assets.
-- `german2.py` — German Kerstin/Crane; explicitly selects `de-crane` and opts into its
-  experimental frontend.
+- `german2.py` — German Kerstin/Crane; explicitly selects `de-crane`, opts into its
+  experimental readiness status, and uses the shared native German G2P path.
 - `german3.py` — German Thorsten; explicitly selects the ready `de-thorsten` model.
 - `models_and_languages.py` — inspect the canonical runtime registry and display models,
   languages, providers, voices, qualities, frontend/layout status, and optionally

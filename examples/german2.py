@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate German speech with the experimental Kerstin/Crane model."""
+"""Generate German speech with Kerstin/Crane using the shared German Kokoro G2P path."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ OUTPUT_FILE = "german_kerstin_crane.wav"
 
 
 def make_config() -> PipelineConfig:
-    """Return the explicitly selected experimental Crane configuration."""
+    """Return the explicitly selected experimental Crane configuration using native German G2P."""
     return PipelineConfig(
         voice="default",
         model_source="github",
