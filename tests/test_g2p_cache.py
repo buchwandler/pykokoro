@@ -14,7 +14,9 @@ from pykokoro.types import Segment, Trace
 
 @pytest.mark.parametrize("variant", ["de-thorsten", "de-crane"])
 def test_german_short_u_cleanup_retokenizes_uncached_and_cached_results(
-    tmp_path, monkeypatch, variant,
+    tmp_path,
+    monkeypatch,
+    variant,
 ) -> None:
     segment = Segment(
         id="segment-0",
@@ -78,7 +80,7 @@ def test_german_short_u_cleanup_retokenizes_uncached_and_cached_results(
     cache_files = list(tmp_path.glob("*.json"))
     assert len(cache_files) == 1
     payload = DiskCache(tmp_path).get(cache_files[0].stem)
-    assert payload["schema"] == 4
+    assert payload["schema"] == 5
     assert payload["phonemes"] == "bykə"
     assert payload["tokens"] == [ord(char) for char in "bykə"]
 
@@ -150,6 +152,6 @@ def test_schema_three_crane_cache_is_recomputed_with_cleaned_payload(tmp_path, m
 
     assert calls["phonemize"] == 1
     assert result[0].phonemes == "bykə"
-    assert payload["schema"] == 4
+    assert payload["schema"] == 5
     assert payload["phonemes"] == "bykə"
     assert payload["tokens"] == [ord(char) for char in "bykə"]

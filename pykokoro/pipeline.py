@@ -29,12 +29,17 @@ from .stages.protocols import (
     DocumentParser,
     G2PAdapter,
     PhonemeProcessor,
+    SentenceSegmenter,
+    TextPreparer,
 )
+from .stages.segmentation.phrasplit import PhrasplitSentenceSegmenter
+from .stages.text_preparation.spokenform import SpokenformTextPreparer
 from .types import (
     AudioResult,
     AudioUnitDescriptor,
     AudioUnitKind,
     AudioUnitResult,
+    BoundaryEvent,
     PhonemeSegment,
     Segment,
     Trace,
@@ -404,6 +409,8 @@ def build_pipeline(
     eager: bool = False,
     # stage overrides for advanced usage/testing
     doc_parser: DocumentParser | None = None,
+    text_preparer: TextPreparer | None = None,
+    sentence_segmenter: SentenceSegmenter | None = None,
     g2p: G2PAdapter | None = None,
     phoneme_processing: PhonemeProcessor | None = None,
     audio_generation: AudioGeneratorStage | None = None,
@@ -514,6 +521,8 @@ def build_pipeline(
     pipeline = KokoroPipeline(
         cfg,
         doc_parser=doc_parser or SsmdDocumentParser(),
+        text_preparer=text_preparer or SpokenformTextPreparer(),
+        sentence_segmenter=sentence_segmenter or PhrasplitSentenceSegmenter(),
         g2p=g2p or KokoroG2PAdapter(),
         phoneme_processing=phoneme_processing,
         audio_generation=audio_generation,
@@ -590,6 +599,8 @@ class KokoroPipeline:
         config: PipelineConfig,
         *,
         doc_parser: DocumentParser | None = None,
+        text_preparer: TextPreparer | None = None,
+        sentence_segmenter: SentenceSegmenter | None = None,
         g2p: G2PAdapter | None = None,
         phoneme_processing: PhonemeProcessor | None = None,
         audio_generation: AudioGeneratorStage | None = None,
@@ -597,6 +608,8 @@ class KokoroPipeline:
     ) -> None:
         self.config = config
         self.doc_parser = doc_parser or SsmdDocumentParser()
+        self.text_preparer = text_preparer or SpokenformTextPreparer()
+        self.sentence_segmenter = sentence_segmenter or PhrasplitSentenceSegmenter()
         self.g2p = g2p or KokoroG2PAdapter()
         self.phoneme_processing = phoneme_processing
         self.audio_generation = audio_generation
@@ -773,12 +786,17 @@ class KokoroPipeline:
         self, text: str, cfg: PipelineConfig, unit: AudioUnitKind
     ) -> _PreparedDocument:
         trace = Trace()
-
         with trace_timing(trace, "doc", "parse"):
             logger.debug("Parsing document")
             doc = self.doc_parser.parse(text, cfg, trace)
             trace.warnings.extend(doc.warnings)
-        segments = doc.segments
+
+        with trace_timing(trace, "text_preparation", "prepare"):
+            doc = self.text_preparer.prepare(doc, cfg, trace)
+            trace.warnings.extend(doc.preparation.warnings if doc.preparation else ())
+
+        with trace_timing(trace, "segmentation", "split"):
+            segments = self.sentence_segmenter.split(doc, cfg, trace)
         if not segments and doc.clean_text:
             segments = [
                 Segment(
@@ -791,11 +809,12 @@ class KokoroPipeline:
                     clause_idx=0,
                 )
             ]
+        doc.segments = segments
+        self._apply_post_segmentation_pauses(doc, segments, cfg)
 
         with trace_timing(trace, "g2p", "phonemize"):
             logger.debug("Phonemizing %d segments", len(segments))
             phoneme_segments = self.g2p.phonemize(segments, doc, cfg, trace)
-
         phoneme_processor, audio_generator, audio_postprocessor = self._resolve_stages(cfg)
 
         with trace_timing(trace, "phoneme_processing", "preprocess"):
@@ -817,6 +836,115 @@ class KokoroPipeline:
             audio_generator=audio_generator,
             audio_postprocessor=audio_postprocessor,
         )
+
+    @staticmethod
+    def _apply_post_segmentation_pauses(
+        doc: Any, segments: list[Segment], cfg: PipelineConfig
+    ) -> None:
+        defaults = doc.metadata.get("ssmd_pause_defaults")
+        if not isinstance(defaults, dict):
+            defaults = {}
+        existing = {boundary.pos for boundary in doc.boundary_events if boundary.kind == "pause"}
+        sentence_duration = defaults.get("sentence")
+        if sentence_duration is None and cfg.generation.pause_mode == "auto":
+            sentence_duration = cfg.generation.pause_sentence
+        paragraph_duration = defaults.get("paragraph")
+        if paragraph_duration is None:
+            paragraph_duration = cfg.generation.pause_paragraph
+        for index, boundary in enumerate(doc.boundary_events):
+            if boundary.kind != "pause" or boundary.attrs.get("strength") != "p":
+                continue
+            if boundary.duration_s is None and paragraph_duration is not None:
+                doc.boundary_events[index] = replace(
+                    boundary,
+                    duration_s=paragraph_duration,
+                    attrs={
+                        "source": "header_default"
+                        if defaults.get("paragraph") is not None
+                        else "pipeline_default",
+                        **boundary.attrs,
+                    },
+                )
+        previous_paragraph_segment: Segment | None = None
+        for segment in segments:
+            if (
+                previous_paragraph_segment is not None
+                and previous_paragraph_segment.paragraph_idx != segment.paragraph_idx
+            ):
+                position = max(0, previous_paragraph_segment.char_end - 1)
+                if position not in existing and paragraph_duration is not None:
+                    doc.boundary_events.append(
+                        BoundaryEvent(
+                            pos=position,
+                            kind="pause",
+                            duration_s=float(paragraph_duration),
+                            attrs={
+                                "source": "header_default"
+                                if defaults.get("paragraph") is not None
+                                else "pipeline_default",
+                                "strength": "p",
+                            },
+                        )
+                    )
+                    existing.add(position)
+            previous_paragraph_segment = segment
+        voice_duration = defaults.get("voice_change")
+        if voice_duration is not None:
+            previous_voice: str | None = None
+            previous_segment: Segment | None = None
+            for segment in segments:
+                voice = KokoroPipeline._segment_voice(doc, segment)
+                if previous_segment is not None and voice != previous_voice:
+                    position = max(0, previous_segment.char_end - 1)
+                    if position not in existing:
+                        doc.boundary_events.append(
+                            BoundaryEvent(
+                                pos=position,
+                                kind="pause",
+                                duration_s=float(voice_duration),
+                                attrs={"source": "header_default", "kind": "voice_change"},
+                            )
+                        )
+                        existing.add(position)
+                previous_voice = voice
+                previous_segment = segment
+        last: Segment | None = None
+        for segment in segments:
+            if (
+                last is not None
+                and last.paragraph_idx == segment.paragraph_idx
+                and last.sentence_idx != segment.sentence_idx
+                and sentence_duration is not None
+            ):
+                position = max(0, last.char_end - 1)
+                if position not in existing:
+                    doc.boundary_events.append(
+                        BoundaryEvent(
+                            pos=position,
+                            kind="pause",
+                            duration_s=sentence_duration,
+                            attrs={
+                                "source": "header_default"
+                                if defaults.get("sentence") is not None
+                                else "pipeline_default",
+                                "strength": "s",
+                            },
+                        )
+                    )
+                    existing.add(position)
+            last = segment
+
+    @staticmethod
+    def _segment_voice(doc: Any, segment: Segment) -> str | None:
+        candidates = [
+            span
+            for span in doc.annotation_spans
+            if span.char_start <= segment.char_start < span.char_end
+        ]
+        if not candidates:
+            return None
+        selected = min(candidates, key=lambda span: span.char_end - span.char_start)
+        return selected.attrs.get("voice_name") or selected.attrs.get("voice")
 
     def _resolve_stages(
         self, cfg: PipelineConfig

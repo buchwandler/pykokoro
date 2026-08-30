@@ -3,15 +3,15 @@ import kokorog2p
 GERMAN_GOLDEN_CASES = {
     "14.05.2026": (
         "vierzehnte Mai zweitausendsechsundzwanzig",
-        "fiːɾtseːntə maɪ tsvˈaɪtaʊzˌɛndzɛksˌʊnttsvantsˌɪç",
+        "fiːɾʦeːntə mI tsvˈaɪtaʊzˌɛnʣɛksˌʊnttsvantsˌɪç",
     ),
     "18:20 Uhr": (
         "achtzehn Uhr zwanzig",
-        "axtseːn uːɾ tsvantsɪç",
+        "axʦeːn uːɾ ʦvanʦɪç",
     ),
     "1,5 kg": (
         "eins Komma fünf Kilogramm",
-        "aɪns kɔmɑː fynf kiːlɔɡɾam",
+        "Ins kɔmɑː fynf kiːlɔɡɾam",
     ),
     "500 g": (
         "fünfhundert Gramm",
@@ -19,18 +19,18 @@ GERMAN_GOLDEN_CASES = {
     ),
     "1 ltr.": (
         "ein Liter.",
-        "aɪn liːtɜ.",
+        "In liːtɜ.",
     ),
     "45 Min.": (
         "fünfundvierzig Minuten.",
-        "fynfʊndviːɾtsɪç miːnuːtən.",
+        "fynfʊndviːɾʦɪç miːnuːtən.",
     ),
     "12,80 EUR": (
         "zwölf Euro achtzig",
-        "tsvœlf ɔøroː axtsɪç",
+        "ʦvœlf ɔøroː axʦɪç",
     ),
     "Prof.": ("Professor", "pɾoːfɛsoːɾ"),
-    "zzgl.": ("zuzüglich", "tsuːtsyːklɪç"),
+    "zzgl.": ("zuzüglich", "ʦuːʦyːklɪç"),
 }
 
 

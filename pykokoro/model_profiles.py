@@ -15,6 +15,7 @@ VocabularySource = Literal["builtin-v1.0", "downloaded-config", "downloaded-rele
 
 G2PBackend = Literal["kokorog2p", "espeak", "goruut"]
 
+
 @dataclass(frozen=True, slots=True)
 class RuntimeProfile:
     """Runtime behavior owned by pykokoro, independent of release inventory."""

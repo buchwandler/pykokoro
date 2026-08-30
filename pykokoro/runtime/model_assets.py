@@ -28,6 +28,7 @@ from ..utils import get_user_cache_path
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass(frozen=True, slots=True)
 class ResolvedRuntimeAssets:
     """All files selected for one model and one registry distribution."""
@@ -179,7 +180,7 @@ def _resolve_runtime_assets_once(
     force: bool,
     registry: ModelRegistry,
     cache_dir: Path | None,
- ) -> ResolvedRuntimeAssets:
+) -> ResolvedRuntimeAssets:
     model = registry.model(model_id)
     if model.data.get("runtime_available", True) is False:
         raise ModelRegistryError(
@@ -245,7 +246,7 @@ def resolve_runtime_assets(
     registry: ModelRegistry | None = None,
     registry_client: RegistryClient | None = None,
     cache_dir: Path | None = None,
- ) -> ResolvedRuntimeAssets:
+) -> ResolvedRuntimeAssets:
     """Select and materialize every runtime artifact from one distribution."""
     if registry is not None:
         return _resolve_runtime_assets_once(

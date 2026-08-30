@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate German speech with the Thorsten model."""
+"""Generate German speech with Spokenform before sentence splitting."""
 
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ def main() -> None:
     print("Model: de-thorsten")
     print(f"Sample rate: {result.sample_rate} Hz")
     print(f"Duration: {duration:.2f} seconds")
-    print("\nPhoneme segments:")
+    print("\nPrepared spoken segments / phonemes:")
     for index, segment in enumerate(result.phoneme_segments, start=1):
         print(f"  [{index}] {segment.text!r}")
         print(f"      {segment.phonemes}")
@@ -75,6 +75,7 @@ def main() -> None:
         print("Warnings:")
         for warning in result.trace.warnings:
             print(f"  - {warning}")
+
 
 if __name__ == "__main__":
     main()

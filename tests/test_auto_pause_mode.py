@@ -50,21 +50,12 @@ def test_ssmd_parser_auto_sentence_boundaries():
     cfg = PipelineConfig(generation=GenerationConfig(pause_mode="auto"))
     doc = SsmdDocumentParser().parse(text, cfg, Trace())
 
-    sentence_indices = [
-        segment.sentence_idx for segment in doc.segments if segment.sentence_idx is not None
-    ]
-    assert sentence_indices
-    first_sentence = min(sentence_indices)
-    first_end = max(
-        segment.char_end for segment in doc.segments if segment.sentence_idx == first_sentence
-    )
-    expected_pos = max(0, first_end - 1)
-    sentence_boundaries = [
+    assert all(segment.sentence_idx is None for segment in doc.segments)
+    assert not [
         boundary
         for boundary in doc.boundary_events
         if boundary.kind == "pause" and boundary.attrs.get("strength") == "s"
     ]
-    assert any(boundary.pos == expected_pos for boundary in sentence_boundaries)
 
 
 def test_auto_clause_pause_in_g2p(monkeypatch):

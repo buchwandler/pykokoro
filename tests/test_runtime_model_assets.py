@@ -185,7 +185,9 @@ class RefreshingClient:
         self.normal_loads = 0
         self.refresh_loads = 0
 
-    def load(self, *, offline: bool = False, refresh: bool = False, allow_cache_fallback: bool = True):
+    def load(
+        self, *, offline: bool = False, refresh: bool = False, allow_cache_fallback: bool = True
+    ):
         if refresh:
             self.refresh_loads += 1
             return self.refreshed
@@ -216,9 +218,7 @@ def test_resolver_replaces_stale_cached_artifact_without_directory_cleanup(
         return path
 
     monkeypatch.setattr("pykokoro.runtime.model_assets.download_artifact", download)
-    resolved = resolve_runtime_assets(
-        model_id="test-model", registry=registry, cache_dir=tmp_path
-    )
+    resolved = resolve_runtime_assets(model_id="test-model", registry=registry, cache_dir=tmp_path)
 
     assert resolved.artifact("github-model").read_bytes() == b"github-model"
     assert sentinel.read_text(encoding="utf-8") == "keep"
@@ -267,9 +267,7 @@ def test_resolver_does_not_loop_when_refreshed_registry_still_mismatches(
 
     monkeypatch.setattr("pykokoro.runtime.model_assets.download_artifact", download)
     with pytest.raises(ModelRegistryError, match="published release and catalog are inconsistent"):
-        resolve_runtime_assets(
-            model_id="test-model", registry_client=client, cache_dir=tmp_path
-        )
+        resolve_runtime_assets(model_id="test-model", registry_client=client, cache_dir=tmp_path)
 
     assert client.normal_loads == 1
     assert client.refresh_loads == 1

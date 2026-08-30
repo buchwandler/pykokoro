@@ -154,3 +154,76 @@ def test_onnx_smoke():
     cfg = PipelineConfig()
     res = KokoroPipeline(cfg).run("Hello")
     assert res.audio.size > 0
+
+
+def test_pipeline_stage_order_is_explicit() -> None:
+    calls: list[str] = []
+
+    class Parser:
+        def parse(self, text, cfg, trace):
+            calls.append("doc_parser")
+            return DocumentResult(clean_text=text)
+
+    class Preparer:
+        def prepare(self, doc, cfg, trace):
+            calls.append("text_preparer")
+            return doc
+
+    class Segmenter:
+        def split(self, doc, cfg, trace):
+            calls.append("sentence_segmenter")
+            return [Segment("seg", doc.clean_text, 0, len(doc.clean_text), {}, 0, 0, 0)]
+
+    class G2P:
+        def phonemize(self, segments, doc, cfg, trace):
+            calls.append("g2p")
+            return [
+                PhonemeSegment(
+                    "ph",
+                    segments[0].id,
+                    0,
+                    segments[0].text,
+                    "a",
+                    [],
+                    char_start=0,
+                    char_end=len(doc.clean_text),
+                    paragraph_idx=0,
+                    sentence_idx=0,
+                )
+            ]
+
+    class Processor:
+        def process(self, segments, cfg, trace):
+            calls.append("phoneme_processing")
+            return segments
+
+    class Generator:
+        def generate(self, segments, cfg, trace):
+            calls.append("audio_generation")
+            return segments
+
+    class Postprocessor:
+        def postprocess(self, segments, cfg, trace):
+            calls.append("audio_postprocessing")
+            return np.zeros(4, dtype=np.float32)
+
+    pipe = KokoroPipeline(
+        PipelineConfig(),
+        doc_parser=Parser(),
+        text_preparer=Preparer(),
+        sentence_segmenter=Segmenter(),
+        g2p=G2P(),
+        phoneme_processing=Processor(),
+        audio_generation=Generator(),
+        audio_postprocessing=Postprocessor(),
+    )
+    pipe.run("Hello.")
+    assert calls == [
+        "doc_parser",
+        "text_preparer",
+        "sentence_segmenter",
+        "g2p",
+        "phoneme_processing",
+        "audio_generation",
+        "audio_postprocessing",
+    ]

@@ -6,7 +6,14 @@ from typing import TYPE_CHECKING, Protocol
 import numpy as np
 
 from ..ssmd_config import SSMDDiagnostic
-from ..types import AnnotationSpan, BoundaryEvent, PhonemeSegment, Segment, Trace
+from ..types import (
+    AnnotationSpan,
+    BoundaryEvent,
+    PhonemeSegment,
+    Segment,
+    TextPreparationInfo,
+    Trace,
+)
 
 if TYPE_CHECKING:
     from ..pipeline_config import PipelineConfig
@@ -24,9 +31,20 @@ class DocumentResult:
     diagnostics: list[SSMDDiagnostic] = field(default_factory=list)
     metadata: dict[str, object] = field(default_factory=dict)
 
+    structural_clean_text: str | None = None
+    preparation: TextPreparationInfo | None = None
+
 
 class DocumentParser(Protocol):
     def parse(self, text: str, cfg: PipelineConfig, trace: Trace) -> DocumentResult: ...
+
+
+class TextPreparer(Protocol):
+    def prepare(self, doc: DocumentResult, cfg: PipelineConfig, trace: Trace) -> DocumentResult: ...
+
+
+class SentenceSegmenter(Protocol):
+    def split(self, doc: DocumentResult, cfg: PipelineConfig, trace: Trace) -> list[Segment]: ...
 
 
 class G2PAdapter(Protocol):

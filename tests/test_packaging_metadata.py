@@ -26,13 +26,13 @@ def test_companion_dependency_floors_match_current_integration_contract() -> Non
         "dependencies"
     ]
 
-    assert "kokorog2p[espeak,en]>=0.8.1,<0.9" in dependencies
+    assert "kokorog2p[espeak,en]>=0.8.4,<0.9" in dependencies
     assert "phrasplit>=0.3.6,<0.4" in dependencies
 
 
 def test_test_requirements_keep_kokorog2p_in_supported_window() -> None:
     requirements = (ROOT / "requirements-test.txt").read_text(encoding="utf-8")
-    assert "kokorog2p[all]>=0.8.1,<0.9" in requirements
+    assert "kokorog2p[all]>=0.8.4,<0.9" in requirements
 
 
 def test_provider_extras_do_not_install_every_runtime_distribution() -> None:
@@ -60,7 +60,8 @@ def test_ssmd_dependency_targets_current_contract() -> None:
     dependencies = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
         "dependencies"
     ]
-    assert "ssmd>=0.8.4,<0.9" in dependencies
+    assert "ssmd>=0.8.5,<0.9" in dependencies
+    assert "spokenform>=0.3.1,<0.4" in dependencies
 
 
 def test_audiosig_is_the_only_declared_dsp_backend() -> None:
@@ -149,7 +150,7 @@ def test_lower_bound_workflow_pins_match_project_floors() -> None:
         for name, version in re.findall(r'"([A-Za-z0-9_.-]+)(?:\[[^]]+\])?==([^\"]+)"', workflow)
         if version and version[0].isdigit()
     }
-    expected_packages = {"kokorog2p", "phrasplit", "ssmd", "audiosig", "babel"}
+    expected_packages = {"kokorog2p", "phrasplit", "ssmd", "spokenform", "audiosig", "babel"}
 
     assert {package: pins[package] for package in expected_packages} == {
         package: floors[package] for package in expected_packages
@@ -160,6 +161,6 @@ def test_lower_bound_workflow_pins_match_project_floors() -> None:
 def test_package_resource_workflow_covers_kokorog2p_window() -> None:
     workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
 
-    assert 'kokorog2p-version: ["0.8.1", "0.8.2"]' in workflow
+    assert 'kokorog2p-version: ["0.8.4"]' in workflow
     assert "working-directory: ${{ runner.temp }}" in workflow
     assert "pykokoro-*.whl" in workflow

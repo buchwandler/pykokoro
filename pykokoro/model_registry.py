@@ -29,6 +29,7 @@ DownloadPreference = Literal["auto", "github", "huggingface", "upstream"]
 class ModelRegistryError(RuntimeError):
     """Raised when the model registry or an artifact is unusable."""
 
+
 class ArtifactIntegrityError(ModelRegistryError):
     """Artifact bytes do not match the selected registry metadata."""
 
@@ -46,7 +47,6 @@ class ArtifactIntegrityError(ModelRegistryError):
         self.actual = actual
         detail = f"expected {expected!r}, got {actual!r}" if expected is not None else ""
         super().__init__(f"{reason} for artifact {artifact_id!r}: {detail}".rstrip(": "))
-
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,9 +171,7 @@ class RuntimeModel:
     def distribution(self, preference: DownloadPreference = "auto") -> RuntimeDistribution:
         available = tuple(item for item in self.distributions if item.runtime_ready)
         if not available:
-            raise ModelRegistryError(
-                f"Model {self.model_id!r} has no runtime-ready distribution"
-            )
+            raise ModelRegistryError(f"Model {self.model_id!r} has no runtime-ready distribution")
         return select_distribution(available, preference)
 
 
@@ -182,6 +180,7 @@ class ModelRegistry:
     data: Mapping[str, Any]
     source: str
     cache_fallback: bool = False
+
     @property
     def models(self) -> Mapping[str, RuntimeModel]:
         return {
@@ -285,6 +284,7 @@ def _cache_busted_url(url: str) -> str:
     query = parse_qsl(parsed.query, keep_blank_values=True)
     query.append(("pykokoro_refresh", str(time.time_ns())))
     return urlunsplit(parsed._replace(query=urlencode(query)))
+
 
 def _read_json(path: Path) -> dict[str, Any]:
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -418,6 +418,7 @@ def _sha256_file(path: Path) -> str:
         while chunk := file.read(1024 * 1024):
             digest.update(chunk)
     return digest.hexdigest()
+
 
 def verify_artifact(path: Path, artifact: RuntimeArtifact) -> None:
     if not path.is_file():

@@ -5,6 +5,8 @@ from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline_config import PipelineConfig
 from pykokoro.stages.doc_parsers.plain import PhrasplitSentenceSplitter
 from pykokoro.stages.protocols import DocumentResult
+from pykokoro.stages.segmentation.phrasplit import PhrasplitSentenceSegmenter
+from pykokoro.stages.text_preparation.spokenform import SpokenformTextPreparer
 from pykokoro.tokenizer import TokenizerConfig
 from pykokoro.types import Trace
 
@@ -133,3 +135,34 @@ class patch_sys_modules:
             else:
                 sys.modules[key] = original
         return False
+
+
+def test_german_spokenform_prevents_abbreviation_sentence_boundaries() -> None:
+    from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
+
+    text = (
+        "Für den Auflauf brauchen wir 1 ltr. Milch und ggf. 3 cm mehr Backpapier. "
+        'Prof. Klein sagt: "Bitte stelle die Form auf die 2. Schiene, backe alles für 45 Min. '
+        'und lass es danach 1 Min. oder auch 2 Min. ruhen." Die Kosten liegen bei ca. 12,80 EUR zzgl. Pfand.'
+    )
+    cfg = PipelineConfig(
+        generation=GenerationConfig(lang="de"),
+        tokenizer_config=TokenizerConfig(use_spacy=False),
+    )
+    trace = Trace()
+    doc = PlainTextDocumentParser().parse(text, cfg, trace)
+    SpokenformTextPreparer().prepare(doc, cfg, trace)
+    segments = PhrasplitSentenceSegmenter().split(doc, cfg, trace)
+
+    assert len(segments) == 3
+    assert "ein Liter Milch" in segments[0].text
+    assert "Professor Klein" in segments[1].text
+    assert "fünfundvierzig Minuten" in segments[1].text
+    assert "zirka zwölf Euro" in segments[2].text
+
+    from examples.german3 import TEXT as GERMAN_COOKING_TEXT
+
+    full_doc = PlainTextDocumentParser().parse(GERMAN_COOKING_TEXT, cfg, Trace())
+    SpokenformTextPreparer().prepare(full_doc, cfg, Trace())
+    full_segments = PhrasplitSentenceSegmenter().split(full_doc, cfg, Trace())
+    assert len(full_segments) == 4

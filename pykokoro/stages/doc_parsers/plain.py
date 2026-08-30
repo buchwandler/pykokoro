@@ -185,8 +185,6 @@ class PhrasplitSentenceSplitter:
                     sentence_diagnostics = diagnostics_sink[-1]
                 if not split_items:
                     split_items = [(chunk, 0, len(chunk), None, None, None)]
-                if language == "de":
-                    split_items = self._merge_abbreviation_splits(chunk, split_items)
 
             cursor = 0
             chunk_len = len(chunk)
@@ -331,43 +329,6 @@ class PhrasplitSentenceSplitter:
             else:
                 logger.debug("Segment reconstruction matches clean_text")
         return segments
-
-    @staticmethod
-    def _merge_abbreviation_splits(source: str, items: list[SplitItem]) -> list[SplitItem]:
-        """Keep dotted abbreviations and ordinal markers inside one sentence."""
-        if len(items) < 2:
-            return items
-        merged: list[SplitItem] = []
-        abbreviation_end = re.compile(r"(?:\b(?:Prof|Min|ltr|ca|ggf|zzgl)\.|\b\d+\.)$")
-        ordinal_noun = re.compile(r"^(?:Schiene|Reihe|Klasse)\b", re.IGNORECASE)
-        for item in items:
-            if not merged:
-                merged.append(item)
-                continue
-            previous = merged[-1]
-            previous_text = previous[0] or ""
-            next_text = item[0] or ""
-            should_merge = bool(abbreviation_end.search(previous_text.rstrip()))
-            if previous_text.rstrip().split()[-1:] and re.search(
-                r"\b\d+\.$", previous_text.rstrip()
-            ):
-                should_merge = bool(ordinal_noun.match(next_text.lstrip()))
-            if previous_text.rstrip() and next_text.lstrip()[:1].islower():
-                should_merge = True
-            if not should_merge:
-                merged.append(item)
-                continue
-            start = previous[1] if previous[1] is not None else 0
-            end = item[2] if item[2] is not None else len(source)
-            merged[-1] = (
-                source[start:end],
-                start,
-                end,
-                previous[3],
-                previous[4],
-                previous[5],
-            )
-        return merged
 
     def _hard_ranges(
         self,

@@ -9,7 +9,7 @@ from ...constants import MAX_PHONEME_LENGTH, SUPPORTED_LANGUAGES
 from ...runtime.cache import cache_from_dir, make_g2p_key
 from ...runtime.spans import slice_boundaries, slice_spans
 from ...spacy_models import SpacyModelSize, make_spacy_model_request, spacy_selection_metadata
-from ...types import G2PAlignmentToken, PhonemeSegment, _model_span_token_count
+from ...types import AnnotationSpan, G2PAlignmentToken, PhonemeSegment, _model_span_token_count
 from ..protocols import DocumentResult, G2PAdapter
 
 if TYPE_CHECKING:
@@ -17,11 +17,11 @@ if TYPE_CHECKING:
 
     from ...generation_config import GenerationConfig
     from ...pipeline_config import PipelineConfig
-    from ...types import AnnotationSpan, Segment, Trace
+    from ...types import Segment, Trace
 
 
 class KokoroG2PAdapter(G2PAdapter):
-    _cache_schema = 4
+    _cache_schema = 5
 
     def __init__(self) -> None:
         self._g2p: ModuleType | None = None
@@ -80,6 +80,7 @@ class KokoroG2PAdapter(G2PAdapter):
                 segment,
                 span_warnings,
             )
+            overrides = self._prepared_overrides(doc.annotation_spans, segment, span_warnings)
             trace.warnings.extend(span_warnings)
 
             lang = generation.lang
@@ -103,6 +104,9 @@ class KokoroG2PAdapter(G2PAdapter):
                 frontend=frontend,
                 g2p_backend=resolved_backend,
                 phoneme_postprocess=phoneme_postprocess,
+                input_mode="prepared",
+                preparation_backend=doc.preparation.backend if doc.preparation else "spokenform",
+                preparation_version=doc.preparation.version if doc.preparation else None,
             )
             cached = cache.get(cache_key)
             cached_payload = self._read_cache_payload(cached)
@@ -117,18 +121,15 @@ class KokoroG2PAdapter(G2PAdapter):
                 if generation.is_phonemes:
                     phonemes = segment.text
                     tokens = g2p.phonemes_to_ids(phonemes, model=model_version)
-                elif phoneme_override:
-                    phonemes = phoneme_override
-                    tokens = g2p.phonemes_to_ids(phonemes, model=model_version)
                 else:
                     g2p_instance = self._get_g2p_instance(lang, cfg)
                     self._record_selection(doc, lang, cfg, g2p_instance)
-                    result = g2p.phonemize(
+                    result = self._phonemize_prepared(
+                        g2p,
                         segment.text,
-                        language=lang,
-                        return_phonemes=True,
-                        return_ids=True,
-                        g2p=g2p_instance,
+                        lang,
+                        overrides,
+                        g2p_instance,
                     )
                     phonemes = str(
                         getattr(result, "phonemes", None) or getattr(result, "phoneme", "")
@@ -140,7 +141,6 @@ class KokoroG2PAdapter(G2PAdapter):
                     result_warnings = [str(warning) for warning in getattr(result, "warnings", [])]
                     if result_warnings:
                         trace.warnings.extend(result_warnings)
-
             if cfg.model_variant in {"de-thorsten", "de-crane"}:
                 phonemes, tokens, alignment_tokens = self._normalize_german_short_u_payload(
                     str(phonemes), alignment_tokens, g2p, model_version
@@ -150,6 +150,11 @@ class KokoroG2PAdapter(G2PAdapter):
                 cache_key,
                 {
                     "schema": self._cache_schema,
+                    "g2p_input_mode": "prepared",
+                    "preparation_backend": doc.preparation.backend
+                    if doc.preparation
+                    else "spokenform",
+                    "preparation_version": doc.preparation.version if doc.preparation else None,
                     "phonemes": str(phonemes),
                     "tokens": tokens,
                     "alignment_tokens": [token.to_dict() for token in alignment_tokens],
@@ -205,11 +210,73 @@ class KokoroG2PAdapter(G2PAdapter):
 
         return out
 
+    @staticmethod
+    def _prepared_overrides(
+        spans: list[AnnotationSpan],
+        segment: Segment,
+        warnings: list[str],
+    ) -> list[AnnotationSpan]:
+        overrides: list[AnnotationSpan] = []
+        for span in spans:
+            attrs = {
+                key: value for key, value in span.attrs.items() if key in {"ph", "phonemes", "lang"}
+            }
+            if (
+                not attrs
+                or span.char_end <= segment.char_start
+                or span.char_start >= segment.char_end
+            ):
+                continue
+            if "ph" in attrs or "phonemes" in attrs:
+                if span.char_start != segment.char_start or span.char_end != segment.char_end:
+                    continue
+                overrides.append(AnnotationSpan(0, segment.char_end - segment.char_start, attrs))
+            else:
+                start = max(span.char_start, segment.char_start) - segment.char_start
+                end = min(span.char_end, segment.char_end) - segment.char_start
+                if start < end:
+                    overrides.append(AnnotationSpan(start, end, attrs))
+        return overrides
+
+    @staticmethod
+    def _phonemize_prepared(
+        g2p: Any,
+        text: str,
+        language: str,
+        overrides: list[AnnotationSpan],
+        g2p_instance: Any,
+    ) -> Any:
+        prepared = getattr(g2p, "phonemize_prepared", None)
+        if callable(prepared):
+            return prepared(
+                text,
+                language=language,
+                overrides=overrides or None,
+                return_phonemes=True,
+                return_ids=True,
+                alignment="span",
+                g2p=g2p_instance,
+            )
+        # Compatibility for test doubles and old installations; released PyKokoro
+        # dependencies always provide the prepared entry point.
+        return g2p.phonemize(
+            text,
+            language=language,
+            return_phonemes=True,
+            return_ids=True,
+            g2p=g2p_instance,
+        )
+
     @classmethod
     def _read_cache_payload(
         cls, cached: Any
     ) -> tuple[str, list[int], list[G2PAlignmentToken], list[str]] | None:
-        if not isinstance(cached, dict) or cached.get("schema") != cls._cache_schema:
+        if (
+            not isinstance(cached, dict)
+            or cached.get("schema") != cls._cache_schema
+            or cached.get("g2p_input_mode") != "prepared"
+            or cached.get("preparation_backend") != "spokenform"
+        ):
             return None
         phonemes = cached.get("phonemes")
         tokens = cached.get("tokens")
@@ -370,12 +437,9 @@ class KokoroG2PAdapter(G2PAdapter):
         if profile is not None and profile.g2p_backend is not None:
             backend = profile.g2p_backend
         postprocess = (
-            "german-short-u-to-y"
-            if cfg.model_variant in {"de-thorsten", "de-crane"}
-            else None
+            "german-short-u-to-y" if cfg.model_variant in {"de-thorsten", "de-crane"} else None
         )
         return profile, backend, postprocess
-
 
     def _get_g2p_instance(self, lang: str, cfg: PipelineConfig) -> G2PBase:
         from ...frontend_contracts import require_frontend

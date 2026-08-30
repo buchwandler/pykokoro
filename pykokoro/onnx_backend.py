@@ -2567,9 +2567,7 @@ class Kokoro:
             "distribution_id": None,
             "release_tag": None,
             "artifacts": [
-                {"path": str(path), "size": path.stat().st_size}
-                for path in paths
-                if path.is_file()
+                {"path": str(path), "size": path.stat().st_size} for path in paths if path.is_file()
             ],
         }
 

@@ -109,7 +109,12 @@ valid managed cache is required. Interrupted GitHub transfers retain a temporary
 file and resume with HTTP Range requests when the release host supports them; completed
 files are still checked for exact size, SHA-256, and structure before replacement.
 
-The registry catalog is cached at `~/.cache/pykokoro/registry/models.json`, with runtime artifacts kept under model and distribution-specific directories. PyKokoro revalidates cached files and replaces invalid artifacts individually. If a downloaded file reveals stale catalog metadata, the catalog is refreshed once without falling back to the stale cache, then asset resolution is retried. Offline mode never refreshes over the network, and manual deletion of the registry catalog or model directory is not required.
+The registry catalog is cached at `~/.cache/pykokoro/registry/models.json`, with runtime
+artifacts kept under model and distribution-specific directories. PyKokoro revalidates
+cached files and replaces invalid artifacts individually. If a downloaded file reveals
+stale catalog metadata, the catalog is refreshed once without falling back to the stale
+cache, then asset resolution is retried. Offline mode never refreshes over the network,
+and manual deletion of the registry catalog or model directory is not required.
 
 ## System requirements
 

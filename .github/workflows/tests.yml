@@ -80,9 +80,10 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install pytest
         python -m pip install \
-          "kokorog2p[espeak,en]==0.8.1" \
+          "kokorog2p[all]==0.8.4" \
           "phrasplit==0.3.6" \
-          "ssmd==0.8.4" \
+          "ssmd==0.8.5" \
+          "spokenform==0.3.1" \
           "audiosig==0.1.1" \
           "babel==2.12.0" \
           platformdirs
@@ -96,7 +97,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        kokorog2p-version: ["0.8.1", "0.8.2"]
+        kokorog2p-version: ["0.8.4"]
     steps:
     - uses: actions/checkout@v4
     - name: Setup Python

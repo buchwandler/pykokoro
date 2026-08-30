@@ -65,3 +65,31 @@ def test_adapter_accepts_spokenform_rich_source_without_warnings() -> None:
     assert all(segment.phonemes for segment in out)
     assert all(segment.tokens for segment in out)
     assert not [warning for warning in trace.warnings if "[SPOKENFORM]" in warning.upper()]
+
+
+def test_adapter_uses_prepared_entrypoint(monkeypatch) -> None:
+    calls: list[str] = []
+    prepared = kokorog2p.phonemize_prepared
+
+    def spy_prepared(*args, **kwargs):
+        calls.append("prepared")
+        return prepared(*args, **kwargs)
+
+    def forbidden_written(*args, **kwargs):
+        raise AssertionError("written phonemize entrypoint was used")
+
+    monkeypatch.setattr(kokorog2p, "phonemize_prepared", spy_prepared)
+    monkeypatch.setattr(kokorog2p, "phonemize", forbidden_written)
+
+    cfg = PipelineConfig(generation=GenerationConfig(lang="en-us"))
+    doc = DocumentResult(clean_text="Hello world.")
+    segment = Segment(
+        id="seg",
+        text=doc.clean_text,
+        char_start=0,
+        char_end=len(doc.clean_text),
+        paragraph_idx=0,
+        sentence_idx=0,
+    )
+    KokoroG2PAdapter().phonemize([segment], doc, cfg, Trace())
+    assert calls == ["prepared"]

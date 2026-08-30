@@ -48,7 +48,12 @@ def slice_boundaries(
     for boundary in boundaries:
         if boundary.pos < seg_start or boundary.pos > seg_end:
             continue
-        if doc_end is not None and boundary.pos == seg_end and boundary.pos != doc_end:
+        if (
+            doc_end is not None
+            and boundary.pos == seg_end
+            and boundary.pos != doc_end
+            and boundary.attrs.get("anchor", "before") != "after"
+        ):
             continue
         if seg_start <= boundary.pos <= seg_end:
             sliced.append(

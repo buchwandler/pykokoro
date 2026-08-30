@@ -176,6 +176,7 @@ def test_failed_artifact_download_does_not_replace_target(
         download_artifact(artifact, target)
     assert target.read_bytes() == b"known-good"
 
+
 def test_registry_forced_refresh_does_not_fall_back_to_stale_cache(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

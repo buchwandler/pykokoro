@@ -60,6 +60,7 @@ def _waveform_metrics(audio: np.ndarray) -> dict[str, float | int | bool]:
         "clipped_samples": int(np.count_nonzero(finite & (np.abs(values) >= 1.0))),
     }
 
+
 def _stationary_noise_metrics(audio: np.ndarray) -> dict[str, float]:
     values = np.asarray(audio, dtype=np.float64).reshape(-1)
     frame_size = round(SAMPLE_RATE * 0.05)
@@ -74,7 +75,10 @@ def _stationary_noise_metrics(audio: np.ndarray) -> dict[str, float]:
             "frame_rms_cv": 0.0,
         }
     frames = np.asarray(
-        [values[start : start + frame_size] for start in range(0, values.size - frame_size + 1, hop_size)]
+        [
+            values[start : start + frame_size]
+            for start in range(0, values.size - frame_size + 1, hop_size)
+        ]
     )
     spectra = np.square(np.abs(np.fft.rfft(frames * np.hanning(frame_size), axis=1)))
     spectra[:, 0] = 0.0

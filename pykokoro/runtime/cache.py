@@ -49,6 +49,9 @@ def make_g2p_key(
     frontend: str | None = None,
     g2p_backend: str | None = None,
     phoneme_postprocess: str | None = None,
+    input_mode: str = "prepared",
+    preparation_backend: str | None = "spokenform",
+    preparation_version: str | None = None,
 ) -> str:
     return make_cache_key(
         {
@@ -64,6 +67,9 @@ def make_g2p_key(
             "frontend": frontend,
             "g2p_backend": g2p_backend,
             "phoneme_postprocess": phoneme_postprocess,
+            "input_mode": input_mode,
+            "preparation_backend": preparation_backend,
+            "preparation_version": preparation_version,
         }
     )
 

@@ -75,6 +75,7 @@ def test_kokorog2p_adapter_forwards_unset_spacy_as_auto(monkeypatch):
     assert captured["spacy_model"] is None
     assert captured["spacy_model_size"] is None
 
+
 @pytest.mark.parametrize("variant", ["de-crane", "de-thorsten"])
 def test_german_profiles_use_native_kokorog2p_backend(monkeypatch, variant):
     captured: dict[str, object] = {}

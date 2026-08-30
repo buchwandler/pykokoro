@@ -25,6 +25,20 @@ class BoundaryEvent:
     attrs: dict[str, str] = field(default_factory=dict)
 
 
+@dataclass
+class TextPreparationInfo:
+    """Provenance for the structural-to-prepared spoken text transformation."""
+
+    source_text: str
+    spoken_text: str
+    replacements: tuple[dict[str, Any], ...] = ()
+    offset_map: dict[str, Any] | None = None
+    languages: tuple[str, ...] = ()
+    backend: str = "spokenform"
+    version: str | None = None
+    warnings: tuple[str, ...] = ()
+
+
 @dataclass(frozen=True)
 class Segment:
     """A chunk of input text with stable offsets into the document."""

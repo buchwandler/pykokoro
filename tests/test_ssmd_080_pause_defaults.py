@@ -13,8 +13,11 @@ def test_review_fixture_uses_longest_paragraph_voice_change_default():
     text = pathlib.Path("tests/fixtures/ssmd_080_review_podcast.ssmd").read_text()
     doc = SsmdDocumentParser().parse(text, PipelineConfig(), Trace())
     assert doc.clean_text == ("Welcome to the review.\n\nThe proposed change improves authoring.")
-    assert {(s.meta.get("voice_name")) for s in doc.segments} == {"af_sarah", "af_bella"}
-    assert [event.duration_s for event in doc.boundary_events] == [0.7]
+    assert {span.attrs.get("voice_name") for span in doc.annotation_spans} >= {
+        "af_sarah",
+        "af_bella",
+    }
+    assert not doc.boundary_events
 
 
 def test_explicit_break_beats_longer_header_default():

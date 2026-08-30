@@ -205,7 +205,7 @@ waveform before advancing the iterator because advancing releases the previous r
 The pipeline is built from composable stages so you can swap behavior without rewriting
 the whole flow:
 
-`doc_parser (includes segmentation) -> g2p -> phoneme_processing -> audio_generation -> audio_postprocessing`
+`doc_parser (SSMD structure) -> text_preparer (Spokenform) -> sentence_segmenter (Phrasplit) -> g2p (prepared mode) -> phoneme_processing -> audio_generation -> audio_postprocessing`
 
 Stages can be replaced with no-op adapters when you want to disable behavior. See
 `examples/pipeline_stage_showcase.py` for a full wiring example.
@@ -692,10 +692,13 @@ pipeline = KokoroPipeline(
 result = pipeline.run(text)
 ```
 
-The preparation happens inside kokorog2p using its Spokenform and abbreviation layers
-before G2P. PyKokoro retains source-oriented segmentation and offsets. See
-`examples/spokenform_showcase.py` to inspect the prepared text and synthesize the same
-raw source.
+The default pipeline owns this order explicitly: SSMD structure is parsed first,
+Spokenform prepares the written text, Phrasplit detects sentences in the prepared text,
+and kokorog2p receives that prepared text through `phonemize_prepared()`. Segment
+offsets therefore refer to the prepared spoken `clean_text`; structural annotations,
+events, and preparation provenance remain available in the document metadata used by
+downstream stages. Use `examples/german3.py` for a German regression containing dates,
+quantities, abbreviations, ordinals, and currency.
 
 ### Explicit SSMD Say-As Overrides
 
@@ -1200,11 +1203,21 @@ Runtime startup performs checksum and structural validation for managed assets.
 
 ### Registry and model-cache updates
 
-Managed registry metadata is cached at `~/.cache/pykokoro/registry/models.json`; runtime artifacts are stored in model and distribution-specific subdirectories below the same registry cache. Every cached and downloaded artifact is checked against its recorded size and SHA-256 digest.
+Managed registry metadata is cached at `~/.cache/pykokoro/registry/models.json`; runtime
+artifacts are stored in model and distribution-specific subdirectories below the same
+registry cache. Every cached and downloaded artifact is checked against its recorded
+size and SHA-256 digest.
 
-When an online load must use the last valid local registry because the remote catalog is temporarily unavailable, PyKokoro records that fallback and logs a warning. If a newly downloaded artifact proves that the selected catalog metadata is stale, PyKokoro bypasses the catalog cache, refreshes the registry once, and retries resolution using the fresh distribution metadata. Only artifacts that fail validation are replaced. Integrity verification is never disabled.
+When an online load must use the last valid local registry because the remote catalog is
+temporarily unavailable, PyKokoro records that fallback and logs a warning. If a newly
+downloaded artifact proves that the selected catalog metadata is stale, PyKokoro
+bypasses the catalog cache, refreshes the registry once, and retries resolution using
+the fresh distribution metadata. Only artifacts that fail validation are replaced.
+Integrity verification is never disabled.
 
-Offline mode reads and validates the cached registry and artifacts without network access. Missing or invalid offline assets fail clearly. Users do not need to delete `models.json` or an entire model directory after a catalog or model update.
+Offline mode reads and validates the cached registry and artifacts without network
+access. Missing or invalid offline assets fail clearly. Users do not need to delete
+`models.json` or an entire model directory after a catalog or model update.
 
 ## Configuration
 

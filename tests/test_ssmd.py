@@ -287,8 +287,8 @@ def test_ssmd_parser_keeps_ellipsis_text():
     doc = SsmdDocumentParser().parse(text, cfg, Trace())
 
     assert "People like you" in doc.clean_text
-    assert any('"Don\'t I?"' in seg.text for seg in doc.segments)
-    assert any(seg.text.strip().startswith("People like you") for seg in doc.segments)
+    assert not [segment for segment in doc.segments if segment.sentence_idx is not None]
+    assert doc.segments[0].text == doc.clean_text
 
 
 class TestSSMDVoiceSwitching:
