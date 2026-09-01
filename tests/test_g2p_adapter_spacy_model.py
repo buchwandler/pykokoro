@@ -119,3 +119,59 @@ def test_explicit_espeak_profile_backend_is_preserved(monkeypatch):
     adapter._get_g2p_instance("he", cfg)
 
     assert captured["backend"] == "espeak"
+
+
+def test_kokorog2p_adapter_forwards_named_lexicons(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeG2PModule:
+        @staticmethod
+        def get_g2p(**kwargs):
+            captured.update(kwargs)
+            return object()
+
+    adapter = KokoroG2PAdapter()
+    monkeypatch.setattr(adapter, "_load", lambda: FakeG2PModule())
+    cfg = PipelineConfig(tokenizer_config=TokenizerConfig(lexicons=("crane",)))
+
+    adapter._get_g2p_instance("de", cfg)
+
+    assert captured["lexicons"] == ("crane",)
+
+
+def test_g2p_instance_cache_distinguishes_named_lexicons(monkeypatch):
+    created: list[dict[str, object]] = []
+
+    class FakeG2PModule:
+        @staticmethod
+        def get_g2p(**kwargs):
+            created.append(kwargs)
+            return object()
+
+    adapter = KokoroG2PAdapter()
+    monkeypatch.setattr(adapter, "_load", lambda: FakeG2PModule())
+    gold_cfg = PipelineConfig(tokenizer_config=TokenizerConfig(lexicons=("gold",)))
+    crane_cfg = PipelineConfig(tokenizer_config=TokenizerConfig(lexicons=("crane",)))
+
+    gold = adapter._get_g2p_instance("de", gold_cfg)
+    crane = adapter._get_g2p_instance("de", crane_cfg)
+
+    assert gold is not crane
+    assert [entry["lexicons"] for entry in created] == [("gold",), ("crane",)]
+
+
+def test_tokenizer_forwards_named_lexicons(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_get_g2p(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    import pykokoro.tokenizer as tokenizer_module
+
+    monkeypatch.setattr(tokenizer_module, "get_g2p", fake_get_g2p)
+    tokenizer = tokenizer_module.Tokenizer(vocab={}, config=TokenizerConfig(lexicons=("gold",)))
+
+    tokenizer._get_g2p("de")
+
+    assert captured["lexicons"] == ("gold",)

@@ -46,6 +46,27 @@ class TestTokenizerConfig:
         assert config.spacy_model_size is None
         assert config.use_dictionary is True
 
+    def test_named_lexicons_normalize_to_ordered_tuple(self):
+        assert TokenizerConfig(lexicons="gold").lexicons == ("gold",)
+        assert TokenizerConfig(lexicons=["gold", "crane"]).lexicons == (
+            "gold",
+            "crane",
+        )
+        assert TokenizerConfig(lexicons=("crane", "gold")).lexicons == (
+            "crane",
+            "gold",
+        )
+        assert TokenizerConfig().lexicons is None
+
+    @pytest.mark.parametrize("value", ["", ("gold", " ")])
+    def test_named_lexicons_reject_empty_names(self, value):
+        with pytest.raises(ValueError):
+            TokenizerConfig(lexicons=value)
+
+    def test_named_lexicons_reject_non_string_names(self):
+        with pytest.raises(TypeError):
+            TokenizerConfig(lexicons=("gold", 1))
+
     def test_custom_values(self):
         """Test config with custom values."""
         config = TokenizerConfig(

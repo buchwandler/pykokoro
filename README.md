@@ -1347,6 +1347,34 @@ res = pipe.run("Hello")
 **Note**: `use_dictionary` parameter is deprecated. Use `load_gold` and `load_silver`
 instead for finer control.
 
+### Named KokoroG2P Lexicons
+
+The native KokoroG2P backend also supports explicit named lexicon selection through
+`TokenizerConfig.lexicons`:
+
+```python
+from pykokoro.tokenizer import TokenizerConfig
+
+# Compatibility behavior, controlled by KokoroG2P and legacy switches.
+default_config = TokenizerConfig()
+
+# German Gold lexicon only.
+gold_config = TokenizerConfig(lexicons="gold")
+
+# German Crane lexicon only.
+crane_config = TokenizerConfig(lexicons="crane")
+```
+
+`lexicons=None` preserves the compatibility behavior. An explicit selection takes
+precedence over `load_gold` and `load_silver`, because KokoroG2P owns the named-lexicon
+policy. Ordered selections such as `lexicons=("gold", "crane")` are supported for
+layered lookup, where the first matching layer wins. That layered lookup is not a
+Gold-versus-Crane A/B comparison. For an A/B comparison, render separately with
+`("gold",)` and `("crane",)` and combine the results yourself.
+
+The named lexicons are KokoroG2P/G2Lex resources consumed by PyKokoro; they are not
+PyKokoro-owned datasets.
+
 **External G2P Libraries**: You can also use external phonemization libraries like
 [Misaki](https://github.com/hexgrad/misaki):
 

@@ -8,6 +8,7 @@ Spokenform-backed semantic preparation before G2P.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TypeAlias
@@ -33,6 +34,29 @@ validate_for_kokoro = _kokorog2p.validate_for_kokoro
 
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_lexicons(
+    value: str | Sequence[str] | None,
+) -> tuple[str, ...] | None:
+    if value is None:
+        return None
+
+    raw = (value,) if isinstance(value, str) else tuple(value)
+
+    if not raw:
+        raise ValueError("lexicons must contain at least one lexicon name")
+
+    normalized: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            raise TypeError("lexicon names must be strings")
+        name = item.strip()
+        if not name:
+            raise ValueError("lexicon names must not be empty")
+        normalized.append(name)
+
+    return tuple(normalized)
 
 
 @dataclass
@@ -75,6 +99,10 @@ class TokenizerConfig:
             to languages with dictionaries (English, French, German). Default: True.
         load_silver: Load silver-tier dictionary (~100k extra entries). Only applies
             to English. Saves ~22-31 MB memory if False. Default: True.
+        lexicons: Explicit ordered named KokoroG2P lexicon selection. None preserves
+            the compatibility behavior controlled by KokoroG2P and the legacy
+            load_gold/load_silver flags. Explicit named selection takes precedence
+            over those legacy flags.
     """
 
     use_espeak_fallback: bool = True
@@ -94,6 +122,7 @@ class TokenizerConfig:
     backend: BackendType = "kokorog2p"
     load_gold: bool = True
     load_silver: bool = True
+    lexicons: str | Sequence[str] | None = None
 
     def __post_init__(self) -> None:
         request = make_spacy_model_request(
@@ -102,6 +131,7 @@ class TokenizerConfig:
         )
         self.spacy_model = request.model
         self.spacy_model_size = request.size
+        self.lexicons = _normalize_lexicons(self.lexicons)
 
 
 # Backward compatibility alias
@@ -283,6 +313,7 @@ class Tokenizer:
                 backend=self.config.backend,
                 load_gold=self.config.load_gold,
                 load_silver=self.config.load_silver,
+                lexicons=self.config.lexicons,
                 version=self._kokorog2p_model,
                 phoneme_quotes="curly",
             )

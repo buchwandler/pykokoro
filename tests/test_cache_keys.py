@@ -1,6 +1,9 @@
+from dataclasses import asdict
+
 from pykokoro.pipeline import KokoroPipeline
 from pykokoro.pipeline_config import PipelineConfig
 from pykokoro.runtime.cache import make_g2p_key
+from pykokoro.tokenizer import TokenizerConfig
 
 
 def test_make_g2p_key_changes_with_is_phonemes():
@@ -51,3 +54,24 @@ def test_make_g2p_key_changes_with_runtime_frontend_contract():
     espeak = make_g2p_key(**base, g2p_backend="espeak")
 
     assert native != espeak
+
+
+def test_make_g2p_key_changes_with_named_lexicons():
+    base = {
+        "text": "Haus",
+        "lang": "de",
+        "is_phonemes": False,
+        "phoneme_override": None,
+        "kokorog2p_version": "test",
+    }
+
+    gold = make_g2p_key(
+        **base,
+        tokenizer_config=asdict(TokenizerConfig(lexicons=("gold",))),
+    )
+    crane = make_g2p_key(
+        **base,
+        tokenizer_config=asdict(TokenizerConfig(lexicons=("crane",))),
+    )
+
+    assert gold != crane

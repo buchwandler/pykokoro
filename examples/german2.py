@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Generate German speech with Kerstin/Crane using the shared German Kokoro G2P path."""
+"""Generate German Gold-versus-Crane speech with the Kerstin/Crane model."""
 
 from __future__ import annotations
 
 import logging
+from typing import Any
 
+import numpy as np
 import soundfile as sf
 
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
+from pykokoro.tokenizer import TokenizerConfig
 
 TEXT = (
     "Zum 14.05.2026 um 18:20 Uhr ist das Abendessen geplant. "
@@ -19,10 +22,13 @@ TEXT = (
 )
 
 OUTPUT_FILE = "german_kerstin_crane.wav"
+GOLD_LEXICONS = ("gold",)
+CRANE_LEXICONS = ("crane",)
+LEXICON_SEPARATOR_SECONDS = 1.0
 
 
-def make_config() -> PipelineConfig:
-    """Return the explicitly selected experimental Crane configuration using native German G2P."""
+def make_config(*, lexicons: str | tuple[str, ...] | None = None) -> PipelineConfig:
+    """Return the explicitly selected Kerstin/Crane configuration."""
     return PipelineConfig(
         voice="default",
         model_source="github",
@@ -30,30 +36,60 @@ def make_config() -> PipelineConfig:
         model_quality="fp32",
         allow_experimental_frontend=True,
         generation=GenerationConfig(lang="de", speed=1.0),
+        tokenizer_config=TokenizerConfig(lexicons=lexicons),
         return_trace=True,
     )
 
 
-def main() -> None:
-    """Generate the normalization-heavy German demonstration."""
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s")
-    with KokoroPipeline(make_config()) as pipeline:
-        result = pipeline.run(TEXT)
+def combine_lexicon_audio(gold_result: Any, crane_result: Any) -> np.ndarray:
+    """Combine Gold and Crane audio with a one-second silence separator."""
+    if gold_result.sample_rate != crane_result.sample_rate:
+        raise RuntimeError(
+            "Gold and Crane runs returned different sample rates: "
+            f"{gold_result.sample_rate} != {crane_result.sample_rate}"
+        )
+    if gold_result.audio.ndim != crane_result.audio.ndim:
+        raise RuntimeError("Gold and Crane runs returned incompatible audio dimensions")
 
-    sf.write(OUTPUT_FILE, result.audio, result.sample_rate)
-    duration = len(result.audio) / result.sample_rate
-    print(f"Created {OUTPUT_FILE}")
-    print("Model: de-crane (Kerstin)")
-    print(f"Sample rate: {result.sample_rate} Hz")
-    print(f"Duration: {duration:.2f} seconds")
-    print("\nPhoneme segments:")
+    gap_samples = round(gold_result.sample_rate * LEXICON_SEPARATOR_SECONDS)
+    silence_shape = (gap_samples, *gold_result.audio.shape[1:])
+    silence = np.zeros(silence_shape, dtype=gold_result.audio.dtype)
+    crane_audio = crane_result.audio.astype(gold_result.audio.dtype, copy=False)
+    return np.concatenate([gold_result.audio, silence, crane_audio], axis=0)
+
+
+def print_result(label: str, result: Any) -> None:
+    """Print phonemes and warnings for one lexicon run."""
+    print(f"\n[{label}] phonemes:")
     for index, segment in enumerate(result.phoneme_segments, start=1):
         print(f"  [{index}] {segment.text!r}")
         print(f"      {segment.phonemes}")
     if result.trace and result.trace.warnings:
-        print("Warnings:")
+        print(f"[{label}] warnings:")
         for warning in result.trace.warnings:
             print(f"  - {warning}")
+
+
+def main() -> None:
+    """Generate the German Gold-versus-Crane comparison."""
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s")
+    print("Generating German comparison:")
+    print("  acoustic model: de-crane (Kerstin)")
+    print("  first: gold lexicon")
+    print("  second: crane lexicon")
+    print(f"  separator: {LEXICON_SEPARATOR_SECONDS:.1f} s silence")
+
+    with KokoroPipeline(make_config(lexicons=GOLD_LEXICONS)) as pipeline:
+        gold_result = pipeline.run(TEXT)
+    with KokoroPipeline(make_config(lexicons=CRANE_LEXICONS)) as pipeline:
+        crane_result = pipeline.run(TEXT)
+
+    print_result("gold", gold_result)
+    print_result("crane", crane_result)
+    audio = combine_lexicon_audio(gold_result, crane_result)
+    sf.write(OUTPUT_FILE, audio, gold_result.sample_rate)
+    print(f"\nWrote {OUTPUT_FILE}")
+    print(f"Layout: gold -> {LEXICON_SEPARATOR_SECONDS:.1f} s silence -> crane")
 
 
 if __name__ == "__main__":

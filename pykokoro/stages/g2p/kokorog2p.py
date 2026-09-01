@@ -469,6 +469,7 @@ class KokoroG2PAdapter(G2PAdapter):
             "backend": backend,
             "load_gold": tokenizer_config.load_gold,
             "load_silver": tokenizer_config.load_silver,
+            "lexicons": tokenizer_config.lexicons,
         }
 
         if profile is not None and profile.variant == "ar-nabra":

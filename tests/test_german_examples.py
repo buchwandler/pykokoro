@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import numpy as np
+import pytest
+
 from examples import german, german2, german3
 
 
@@ -45,6 +50,45 @@ def test_german_examples_share_normalization_comparison_text() -> None:
     assert german.TEXT == german2.TEXT == german3.TEXT
     for case in ("14.05.2026", "18:20", "1,5 kg", "Prof.", "Min.", "12,80 EUR"):
         assert case in german.TEXT
+
+
+@pytest.mark.parametrize("module", [german, german2, german3])
+def test_german_configs_change_only_lexicon(module) -> None:
+    gold = module.make_config(lexicons=("gold",))
+    crane = module.make_config(lexicons=("crane",))
+
+    assert gold.tokenizer_config is not None
+    assert crane.tokenizer_config is not None
+    assert gold.tokenizer_config.lexicons == ("gold",)
+    assert crane.tokenizer_config.lexicons == ("crane",)
+    assert gold.generation == crane.generation
+    assert gold.voice == crane.voice
+    assert gold.model_source == crane.model_source
+    assert gold.model_variant == crane.model_variant
+    assert gold.model_quality == crane.model_quality
+    assert gold.allow_experimental_frontend == crane.allow_experimental_frontend
+    assert gold.short_sentence_config == crane.short_sentence_config
+
+
+@pytest.mark.parametrize("module", [german, german2, german3])
+def test_german_audio_combination(module) -> None:
+    gold = SimpleNamespace(audio=np.ones(2, dtype=np.float32), sample_rate=4)
+    crane = SimpleNamespace(audio=np.full(3, 2.0, dtype=np.float32), sample_rate=4)
+
+    combined = module.combine_lexicon_audio(gold, crane)
+
+    assert combined.shape == (9,)
+    np.testing.assert_array_equal(combined[:2], [1.0, 1.0])
+    np.testing.assert_array_equal(combined[2:6], np.zeros(4))
+    np.testing.assert_array_equal(combined[6:], [2.0, 2.0, 2.0])
+
+
+def test_german_audio_combination_rejects_mismatched_sample_rates() -> None:
+    gold = SimpleNamespace(audio=np.ones(2, dtype=np.float32), sample_rate=4)
+    crane = SimpleNamespace(audio=np.ones(2, dtype=np.float32), sample_rate=8)
+
+    with pytest.raises(RuntimeError, match="different sample rates"):
+        german.combine_lexicon_audio(gold, crane)
 
 
 def test_crane_registry_voice_alias_resolves_archive_voice(monkeypatch) -> None:
