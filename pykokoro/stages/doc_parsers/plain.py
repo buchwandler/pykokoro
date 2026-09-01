@@ -288,13 +288,19 @@ class PhrasplitSentenceSplitter:
         if not isinstance(spacy_models, dict):
             spacy_models = {}
             doc.metadata["spacy_models"] = spacy_models
-        spacy_models["sentence"] = spacy_selection_metadata(
+        selection = spacy_selection_metadata(
             language=language,
             request=request,
             selected_model=selected_model,
             selected_size=sentence_size,
         )
-
+        existing_selection = spacy_models.get("sentence")
+        if (
+            isinstance(existing_selection, dict)
+            and existing_selection.get("selected_model") is not None
+        ):
+            selection.update(existing_selection)
+        spacy_models["sentence"] = selection
         if not segments and text:
             segments.append(
                 Segment(
