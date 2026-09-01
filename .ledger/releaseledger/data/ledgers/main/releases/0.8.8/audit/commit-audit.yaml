@@ -2,14 +2,14 @@ schema_version: 1
 object_type: commit_audit_sheet
 versioning:
   schema_version: 1
-  revision: 3
+  revision: 6
 release_version: 0.8.8
 git_base_ref: v0.8.7
 git_base_sha: c9e7b992adaf00b8f0f69d59a6d3e7af01b8dadb
 git_head_ref: HEAD
-git_head_sha: 2e9a84bb3b026345a1bdcb99340dd7e40d29d3b0
-git_range: c9e7b992adaf00b8f0f69d59a6d3e7af01b8dadb..2e9a84bb3b026345a1bdcb99340dd7e40d29d3b0
-commit_count: 11
+git_head_sha: f337fb0886cb91f10d480c3965ed91305fd1fcce
+git_range: c9e7b992adaf00b8f0f69d59a6d3e7af01b8dadb..f337fb0886cb91f10d480c3965ed91305fd1fcce
+commit_count: 15
 rows:
   - sha: 7667691555dd0cf79ffb9cc6219518c6e80f1369
     source_ref: git:7667691555dd0cf79ffb9cc6219518c6e80f1369
@@ -489,3 +489,106 @@ rows:
     evidence_subject: "feat: update to select g2p lexicon"
     target_entry_id: entry-0006
     notes: Reviewed lexicon configuration, cache keys, examples, and tokenizer tests.
+  - sha: e85dfcb620776b9cf761120eb3fd64ffb27232b0
+    source_ref: git:e85dfcb620776b9cf761120eb3fd64ffb27232b0
+    short_sha: e85dfcb
+    changed_paths:
+      - .github/workflows/tests.yml
+      - .ledger/releaseledger/data/ledgers/main/events/events.jsonl
+      - .ledger/releaseledger/data/ledgers/main/releases/0.8.8/audit/commit-audit.yaml
+      - .ledger/releaseledger/data/ledgers/main/releases/0.8.8/entries/entry-0001.md
+      - .ledger/releaseledger/data/ledgers/main/releases/0.8.8/entries/entry-0002.md
+      - .ledger/releaseledger/data/ledgers/main/releases/0.8.8/entries/entry-0003.md
+      - .ledger/releaseledger/data/ledgers/main/releases/0.8.8/entries/entry-0004.md
+      - .ledger/releaseledger/data/ledgers/main/releases/0.8.8/entries/entry-0005.md
+      - .ledger/releaseledger/data/ledgers/main/releases/0.8.8/entries/entry-0006.md
+      - .ledger/releaseledger/data/ledgers/main/releases/0.8.8/release.md
+      - pyproject.toml
+      - requirements-test.txt
+      - tests/test_packaging_metadata.py
+      - uv.lock
+    stats:
+      files_changed: 0
+      insertions: 3684
+      deletions: 4
+    inspected: true
+    inspected_paths:
+      - .github/workflows/tests.yml
+      - pyproject.toml
+      - requirements-test.txt
+      - tests/test_packaging_metadata.py
+      - uv.lock
+    observed_behavior:
+      Raised the minimum Spokenform dependency to 0.3.5 across runtime, test, CI, and
+      lockfile requirements.
+    public_impact: public
+    decision: accepted
+    evidence_subject: "chore: pre-commit"
+    target_entry_id: entry-0007
+    notes:
+      Reviewed dependency metadata and packaging regression coverage; releaseledger
+      state files in this commit are provenance-only.
+  - sha: bdaf428c473d44e81e203c04592eda673be0cd81
+    source_ref: git:bdaf428c473d44e81e203c04592eda673be0cd81
+    short_sha: bdaf428
+    changed_paths:
+      - pykokoro/onnx_backend.py
+    stats:
+      files_changed: 0
+      insertions: 2
+      deletions: 2
+    inspected: true
+    inspected_paths:
+      - pykokoro/onnx_backend.py
+    observed_behavior:
+      Used the timezone.utc API for installed-model timestamps, preserving compatibility
+      with the project's supported Python versions.
+    public_impact: public
+    decision: accepted
+    evidence_subject: "fix: timezone"
+    target_entry_id: entry-0008
+    notes: Reviewed the timestamp serialization change.
+  - sha: 8bf11b388e2bfa3c859f2ed877e098edbb91acda
+    source_ref: git:8bf11b388e2bfa3c859f2ed877e098edbb91acda
+    short_sha: 8bf11b3
+    changed_paths:
+      - examples/german.py
+      - tests/test_german_frontend_golden.py
+      - tests/test_german_segmentation.py
+    stats:
+      files_changed: 0
+      insertions: 34
+      deletions: 40
+    inspected: true
+    inspected_paths:
+      - examples/german.py
+      - tests/test_german_frontend_golden.py
+      - tests/test_german_segmentation.py
+    observed_behavior:
+      Updated German examples and golden coverage for optional lexicon audio inputs and
+      current currency normalization that includes cents.
+    public_impact: public
+    decision: accepted
+    evidence_subject: "fix: german tests"
+    target_entry_id: entry-0009
+    notes: Reviewed the example behavior and corresponding regression expectations.
+  - sha: f337fb0886cb91f10d480c3965ed91305fd1fcce
+    source_ref: git:f337fb0886cb91f10d480c3965ed91305fd1fcce
+    short_sha: f337fb0
+    changed_paths:
+      - pykokoro/stages/doc_parsers/plain.py
+    stats:
+      files_changed: 0
+      insertions: 8
+      deletions: 2
+    inspected: true
+    inspected_paths:
+      - pykokoro/stages/doc_parsers/plain.py
+    observed_behavior:
+      Preserved an existing spaCy sentence-model selection when enriching parser
+      metadata, avoiding replacement of a prior explicit selection.
+    public_impact: public
+    decision: accepted
+    evidence_subject: "fix: spacy selection"
+    target_entry_id: entry-0010
+    notes: Reviewed the metadata merge logic in the plain-document parser.
