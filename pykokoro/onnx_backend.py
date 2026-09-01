@@ -12,7 +12,7 @@ import tempfile
 import time
 import urllib.request
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -1012,7 +1012,7 @@ def _record_installed_release(release: RemoteModelRelease, quality: str) -> None
         "model_asset": model_asset.name,
         "voices_asset": voice_asset.name,
         "auxiliary_assets": auxiliary,
-        "installed_at": datetime.now(UTC).isoformat(),
+        "installed_at": datetime.now(timezone.utc).isoformat(),
         "manifest_sha256": hashlib.sha256(manifest_data).hexdigest(),
     }
     installed_sidecar_path(release).write_text(
