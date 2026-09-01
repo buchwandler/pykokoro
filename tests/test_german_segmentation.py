@@ -21,6 +21,9 @@ def test_german_abbreviations_and_ordinals_do_not_create_false_boundaries():
     doc.segments = PhrasplitSentenceSegmenter().split(doc, cfg, trace)
     assert len(doc.segments) == 2
     assert doc.segments[0].text.endswith("eine Minute ruhen.")
-    assert doc.segments[1].text == "Die Kosten liegen bei zirka zwölf Euro achtzig zuzüglich Pfand."
+    assert (
+        doc.segments[1].text
+        == "Die Kosten liegen bei zirka zwölf Euro achtzig Cent zuzüglich Pfand."
+    )
     for segment in doc.segments:
         assert segment.text == doc.clean_text[segment.char_start : segment.char_end]

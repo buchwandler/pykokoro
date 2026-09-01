@@ -39,41 +39,35 @@ def make_config(*, lexicons: str | tuple[str, ...] | None = None) -> PipelineCon
 
 
 def combine_lexicon_audio(
-    gold_result: Any, crane_result: Any, espeak_result: Any, olaph_result: Any
+    gold_result: Any,
+    crane_result: Any,
+    espeak_result: Any | None = None,
+    olaph_result: Any | None = None,
 ) -> np.ndarray:
-    """Combine Gold and Crane audio with a one-second silence separator."""
-    if gold_result.sample_rate != crane_result.sample_rate:
-        raise RuntimeError(
-            "Gold and Crane runs returned different sample rates: "
-            f"{gold_result.sample_rate} != {crane_result.sample_rate}"
-        )
-    if gold_result.audio.ndim != crane_result.audio.ndim:
-        raise RuntimeError("Gold and Crane runs returned incompatible audio dimensions")
-    if gold_result.sample_rate != espeak_result.sample_rate:
-        raise RuntimeError(
-            "Gold and Espeak runs returned different sample rates: "
-            f"{gold_result.sample_rate} != {espeak_result.sample_rate}"
-        )
-    if gold_result.audio.ndim != espeak_result.audio.ndim:
-        raise RuntimeError("Gold and Espeak runs returned incompatible audio dimensions")
-    if gold_result.sample_rate != olaph_result.sample_rate:
-        raise RuntimeError(
-            "Gold and Olaph runs returned different sample rates: "
-            f"{gold_result.sample_rate} != {olaph_result.sample_rate}"
-        )
-    if gold_result.audio.ndim != olaph_result.audio.ndim:
-        raise RuntimeError("Gold and Olaph runs returned incompatible audio dimensions")
+    """Combine lexicon audio with one-second silence separators."""
+    results = [gold_result, crane_result]
+    if espeak_result is not None:
+        results.append(espeak_result)
+    if olaph_result is not None:
+        results.append(olaph_result)
+    for result in results[1:]:
+        if gold_result.sample_rate != result.sample_rate:
+            raise RuntimeError(
+                "German runs returned different sample rates: "
+                f"{gold_result.sample_rate} != {result.sample_rate}"
+            )
+        if gold_result.audio.ndim != result.audio.ndim:
+            raise RuntimeError("German runs returned incompatible audio dimensions")
 
     gap_samples = round(gold_result.sample_rate * LEXICON_SEPARATOR_SECONDS)
     silence_shape = (gap_samples, *gold_result.audio.shape[1:])
     silence = np.zeros(silence_shape, dtype=gold_result.audio.dtype)
-    crane_audio = crane_result.audio.astype(gold_result.audio.dtype, copy=False)
-    espeak_audio = espeak_result.audio.astype(gold_result.audio.dtype, copy=False)
-    olaph_audio = olaph_result.audio.astype(gold_result.audio.dtype, copy=False)
-    return np.concatenate(
-        [gold_result.audio, silence, crane_audio, silence, espeak_audio, silence, olaph_audio],
-        axis=0,
-    )
+    audio_parts: list[np.ndarray] = []
+    for index, result in enumerate(results):
+        if index:
+            audio_parts.append(silence)
+        audio_parts.append(result.audio.astype(gold_result.audio.dtype, copy=False))
+    return np.concatenate(audio_parts, axis=0)
 
 
 def print_result(label: str, result: Any) -> None:
