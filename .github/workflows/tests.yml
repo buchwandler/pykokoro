@@ -83,7 +83,7 @@ jobs:
           "kokorog2p[all]==0.8.4" \
           "phrasplit==0.3.6" \
           "ssmd==0.8.5" \
-          "spokenform==0.3.1" \
+          "spokenform==0.3.5" \
           "audiosig==0.1.1" \
           "babel==2.12.0" \
           platformdirs

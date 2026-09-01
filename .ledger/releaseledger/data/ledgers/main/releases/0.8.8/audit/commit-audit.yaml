@@ -1,0 +1,491 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: 0.8.8
+git_base_ref: v0.8.7
+git_base_sha: c9e7b992adaf00b8f0f69d59a6d3e7af01b8dadb
+git_head_ref: HEAD
+git_head_sha: 2e9a84bb3b026345a1bdcb99340dd7e40d29d3b0
+git_range: c9e7b992adaf00b8f0f69d59a6d3e7af01b8dadb..2e9a84bb3b026345a1bdcb99340dd7e40d29d3b0
+commit_count: 11
+rows:
+  - sha: 7667691555dd0cf79ffb9cc6219518c6e80f1369
+    source_ref: git:7667691555dd0cf79ffb9cc6219518c6e80f1369
+    short_sha: "7667691"
+    changed_paths:
+      - README.md
+      - docs/installation.md
+      - docs/languages.md
+      - pykokoro/artifact_manifest.py
+      - pykokoro/asset_constants.py
+      - pykokoro/audio_generator.py
+      - pykokoro/config_types.py
+      - pykokoro/frontend_contracts.py
+      - pykokoro/model_profiles.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/pipeline.py
+      - pykokoro/pipeline_config.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/stages/synth/onnx.py
+      - tests/test_audio_input_contract.py
+      - tests/test_downloads.py
+      - tests/test_frontend_contracts.py
+      - tests/test_german_frontend_golden.py
+      - tests/test_model_profile_resolution.py
+      - tests/test_release_profiles.py
+    stats:
+      files_changed: 0
+      insertions: 582
+      deletions: 136
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/installation.md
+      - docs/languages.md
+      - pykokoro/frontend_contracts.py
+      - pykokoro/model_profiles.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/pipeline_config.py
+      - tests/test_frontend_contracts.py
+      - tests/test_release_profiles.py
+    observed_behavior:
+      Added frontend contracts and registry-oriented runtime profile metadata, including
+      model input validation and German profile handling documented and covered by
+      contract tests.
+    public_impact: public
+    decision: accepted
+    evidence_subject: "feat: adapt to now github release site"
+    target_entry_id: entry-0001
+    notes: Reviewed the patch and affected documentation and tests.
+  - sha: a53d1802b3cfc5156165a9bc1da715d8970e7e57
+    source_ref: git:a53d1802b3cfc5156165a9bc1da715d8970e7e57
+    short_sha: a53d180
+    changed_paths:
+      - README.md
+      - docs/installation.md
+      - docs/languages.md
+      - pykokoro/__init__.py
+      - pykokoro/artifact_manifest.py
+      - pykokoro/config_types.py
+      - pykokoro/frontend_contracts.py
+      - pykokoro/model_assets.py
+      - pykokoro/model_profiles.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/pipeline.py
+      - pykokoro/pipeline_config.py
+      - pykokoro/release_catalog.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - tests/test_downloads.py
+      - tests/test_frontend_contracts.py
+      - tests/test_model_profile_resolution.py
+      - tests/test_release_catalog.py
+      - tests/test_release_profiles.py
+    stats:
+      files_changed: 0
+      insertions: 1200
+      deletions: 502
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/installation.md
+      - pykokoro/release_catalog.py
+      - pykokoro/model_assets.py
+      - pykokoro/model_profiles.py
+      - pykokoro/onnx_backend.py
+      - tests/test_release_catalog.py
+    observed_behavior:
+      Added published-release manifest discovery, compatibility filtering, asset
+      identity checks, and registry-selected model and voice asset resolution.
+    public_impact: public
+    decision: accepted
+    evidence_subject: "feat: use release catalog for models"
+    target_entry_id: entry-0001
+    notes: Reviewed release catalog implementation, public exports, and catalog tests.
+  - sha: e8fccc98f4d1bc9c6ea4276d30a9767b2ffce2db
+    source_ref: git:e8fccc98f4d1bc9c6ea4276d30a9767b2ffce2db
+    short_sha: e8fccc9
+    changed_paths:
+      - examples/legacy/model_source_comparison.py
+      - pykokoro/artifact_manifest.py
+      - pykokoro/asset_constants.py
+      - pykokoro/config_types.py
+      - pykokoro/model_profiles.py
+      - pykokoro/model_registry.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/pipeline_config.py
+      - pyproject.toml
+      - tests/test_downloads.py
+      - tests/test_model_registry.py
+    stats:
+      files_changed: 0
+      insertions: 662
+      deletions: 134
+    inspected: true
+    inspected_paths:
+      - pykokoro/model_registry.py
+      - pykokoro/model_profiles.py
+      - pykokoro/onnx_backend.py
+      - pyproject.toml
+      - tests/test_model_registry.py
+    observed_behavior:
+      Added validated provider-neutral registry loading with cache fallback, atomic
+      artifact downloads, and size and SHA-256 verification before replacing cached
+      files.
+    public_impact: public
+    decision: accepted
+    evidence_subject: "feat: adapt to new catalog"
+    target_entry_id: entry-0001
+    notes:
+      Reviewed registry validation, download replacement behavior, and regression tests.
+  - sha: dc7c856864d80424adf5dd41f50345ad636ffae9
+    source_ref: git:dc7c856864d80424adf5dd41f50345ad636ffae9
+    short_sha: dc7c856
+    changed_paths:
+      - .github/workflows/tests.yml
+      - README.md
+      - pykokoro/__init__.py
+      - pykokoro/constants.py
+      - pykokoro/frontend_contracts.py
+      - pykokoro/model_profiles.py
+      - pykokoro/model_registry.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/pipeline_config.py
+      - pykokoro/runtime/dispatcher.py
+      - pykokoro/runtime/model_assets.py
+      - pykokoro/runtime/thai_wayu.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pyproject.toml
+      - tests/test_packaging_metadata.py
+      - tests/test_runtime_model_assets.py
+      - tests/test_thai_wayu_runtime.py
+    stats:
+      files_changed: 0
+      insertions: 1344
+      deletions: 234
+    inspected: true
+    inspected_paths:
+      - README.md
+      - pykokoro/constants.py
+      - pykokoro/model_profiles.py
+      - pykokoro/runtime/dispatcher.py
+      - pykokoro/runtime/model_assets.py
+      - pykokoro/runtime/thai_wayu.py
+      - tests/test_runtime_model_assets.py
+      - tests/test_thai_wayu_runtime.py
+    observed_behavior:
+      Added language profiles and runtime dispatch for Arabic, Hebrew, Kazakh, Swedish,
+      Thai, and Vietnamese models, including component-based split-layout Thai Wayu
+      synthesis and explicit unsupported-layout errors.
+    public_impact: public
+    decision: accepted
+    evidence_subject: "feat: add new languanges"
+    target_entry_id: entry-0002
+    notes: Reviewed runtime profile metadata, dispatcher, Thai runtime, and tests.
+  - sha: e2c175b30052d3ffb3dc764c14e48a230b36a5b0
+    source_ref: git:e2c175b30052d3ffb3dc764c14e48a230b36a5b0
+    short_sha: e2c175b
+    changed_paths:
+      - README.md
+      - docs/languages.md
+      - examples/README.md
+      - examples/german.py
+      - examples/german2.py
+      - examples/german3.py
+      - examples/models_and_languages.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/pipeline_config.py
+      - pykokoro/stages/audio_generation/onnx.py
+      - tests/test_german_examples.py
+      - tests/test_model_profile_resolution.py
+      - tests/test_models_and_languages_example.py
+      - tests/test_pipeline_lifecycle.py
+      - tests/test_pipeline_result_retention.py
+      - tests/test_thai_wayu_runtime.py
+    stats:
+      files_changed: 0
+      insertions: 811
+      deletions: 14
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/languages.md
+      - examples/README.md
+      - examples/german.py
+      - examples/german2.py
+      - examples/german3.py
+      - examples/models_and_languages.py
+      - tests/test_german_examples.py
+      - tests/test_models_and_languages_example.py
+    observed_behavior:
+      Added maintained German model examples and a model and language registry
+      inspection and synthesis example, with tests covering selection and lifecycle
+      behavior.
+    public_impact: public
+    decision: accepted
+    evidence_subject: "feat: some first examples and tests"
+    target_entry_id: entry-0003
+    notes: Reviewed example scripts, user-facing documentation, and example tests.
+  - sha: e8d7d4a10c8b0648556a402a9969b9204fe98d8c
+    source_ref: git:e8d7d4a10c8b0648556a402a9969b9204fe98d8c
+    short_sha: e8d7d4a
+    changed_paths:
+      - README.md
+      - docs/languages.md
+      - examples/README.md
+      - examples/models_and_languages.py
+      - pykokoro/artifact_manifest.py
+      - pykokoro/asset_constants.py
+      - pykokoro/audio_generator.py
+      - pykokoro/config_types.py
+      - pykokoro/frontend_contracts.py
+      - pykokoro/model_profiles.py
+      - pykokoro/model_registry.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/pipeline_config.py
+      - pykokoro/runtime/model_assets.py
+      - pykokoro/runtime/thai_wayu.py
+      - pykokoro/stages/audio_generation/onnx.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/types.py
+      - tests/test_bug_fixes.py
+      - tests/test_downloads.py
+      - tests/test_g2p_cache.py
+      - tests/test_model_registry.py
+      - tests/test_packaging_metadata.py
+      - tests/test_runtime_model_assets.py
+      - tests/test_thai_wayu_runtime.py
+    stats:
+      files_changed: 0
+      insertions: 643
+      deletions: 182
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/languages.md
+      - pykokoro/model_profiles.py
+      - pykokoro/model_registry.py
+      - pykokoro/runtime/model_assets.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - tests/test_model_registry.py
+      - tests/test_g2p_cache.py
+      - tests/test_runtime_model_assets.py
+    observed_behavior:
+      Expanded model and voice metadata handling and cache-aware asset resolution, with
+      validation and G2P cache regression coverage for the updated profiles.
+    public_impact: public
+    decision: accepted
+    evidence_subject: "feat: improve voice lists"
+    target_entry_id: entry-0001
+    notes: Reviewed profile, asset, G2P cache, and runtime tests.
+  - sha: 984cd08031a0336beb4a3fcf91cb2a0f267a7bcf
+    source_ref: git:984cd08031a0336beb4a3fcf91cb2a0f267a7bcf
+    short_sha: 984cd08
+    changed_paths:
+      - README.md
+      - docs/installation.md
+      - pykokoro/audio_generator.py
+      - pykokoro/model_registry.py
+      - pykokoro/runtime/model_assets.py
+      - tests/test_model_registry.py
+      - tests/test_runtime_model_assets.py
+    stats:
+      files_changed: 0
+      insertions: 431
+      deletions: 32
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/installation.md
+      - pykokoro/model_registry.py
+      - pykokoro/runtime/model_assets.py
+      - tests/test_model_registry.py
+      - tests/test_runtime_model_assets.py
+    observed_behavior:
+      Improved registry-backed cache refresh and runtime asset materialization while
+      preserving individual artifact validation and replacement semantics.
+    public_impact: public
+    decision: accepted
+    evidence_subject: "feat: registry and model cache updates"
+    target_entry_id: entry-0001
+    notes: Reviewed cache refresh paths and runtime asset tests.
+  - sha: 9e61bb3062475c393fe2ccc76220f5e99d9e57f3
+    source_ref: git:9e61bb3062475c393fe2ccc76220f5e99d9e57f3
+    short_sha: 9e61bb3
+    changed_paths:
+      - examples/german3.py
+      - pykokoro/audio_generator.py
+      - pykokoro/model_registry.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/pipeline.py
+      - pykokoro/pipeline_config.py
+      - pykokoro/stages/synth/onnx.py
+      - pykokoro/types.py
+      - tests/test_german_examples.py
+    stats:
+      files_changed: 0
+      insertions: 154
+      deletions: 5
+    inspected: true
+    inspected_paths:
+      - examples/german3.py
+      - pykokoro/audio_generator.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/pipeline.py
+      - pykokoro/model_registry.py
+      - tests/test_german_examples.py
+    observed_behavior:
+      Added final-waveform and duration-output validation paths, effective phoneme
+      voice-style indexing, and clearer German example diagnostics.
+    public_impact: public
+    decision: accepted
+    evidence_subject: "feat: improve german3 and waveform validation"
+    target_entry_id: entry-0005
+    notes:
+      Reviewed audio generation, runtime initialization, example, and regression
+      changes.
+  - sha: a4d4972cc1ec46c9184270cc40e63be65a51f173
+    source_ref: git:a4d4972cc1ec46c9184270cc40e63be65a51f173
+    short_sha: a4d4972
+    changed_paths:
+      - examples/README.md
+      - examples/german2.py
+      - pykokoro/model_profiles.py
+      - pykokoro/runtime/cache.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - tests/test_cache_keys.py
+      - tests/test_frontend_contracts.py
+      - tests/test_g2p_adapter_spacy_model.py
+      - tests/test_g2p_cache.py
+      - tests/test_german_examples.py
+      - tests/test_maintainer_review4_download_cache.py
+      - tests/test_release_profiles.py
+    stats:
+      files_changed: 0
+      insertions: 223
+      deletions: 27
+    inspected: true
+    inspected_paths:
+      - examples/german2.py
+      - pykokoro/model_profiles.py
+      - pykokoro/runtime/cache.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - tests/test_cache_keys.py
+      - tests/test_g2p_adapter_spacy_model.py
+      - tests/test_g2p_cache.py
+    observed_behavior:
+      Added shared German G2P profile routing and cache identity for frontend, lexicon,
+      and spaCy selection, with regression coverage for cache separation and model
+      setup.
+    public_impact: public
+    decision: accepted
+    evidence_subject: "feat: shared german g2p path"
+    target_entry_id: entry-0006
+    notes: Reviewed G2P routing, cache keys, and German tests.
+  - sha: 45277116465ace6c4833c3d1e91819a64d529f71
+    source_ref: git:45277116465ace6c4833c3d1e91819a64d529f71
+    short_sha: "4527711"
+    changed_paths:
+      - .github/workflows/tests.yml
+      - README.md
+      - docs/installation.md
+      - examples/german3.py
+      - pykokoro/audio_generator.py
+      - pykokoro/model_profiles.py
+      - pykokoro/model_registry.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/pipeline.py
+      - pykokoro/runtime/cache.py
+      - pykokoro/runtime/model_assets.py
+      - pykokoro/runtime/spans.py
+      - pykokoro/stages/doc_parsers/plain.py
+      - pykokoro/stages/doc_parsers/ssmd.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/stages/protocols.py
+      - pykokoro/stages/segmentation/__init__.py
+      - pykokoro/stages/segmentation/phrasplit.py
+      - pykokoro/stages/text_preparation/__init__.py
+      - pykokoro/stages/text_preparation/spokenform.py
+      - pykokoro/types.py
+      - pyproject.toml
+      - requirements-test.txt
+      - tests/test_auto_pause_mode.py
+      - tests/test_g2p_adapter_spacy_model.py
+      - tests/test_g2p_cache.py
+      - tests/test_g2p_spokenform.py
+      - tests/test_german_examples.py
+      - tests/test_german_frontend_golden.py
+      - tests/test_german_segmentation.py
+      - tests/test_maintainer_review4_download_cache.py
+      - tests/test_model_registry.py
+      - tests/test_packaging_metadata.py
+      - tests/test_pipeline_refactor.py
+      - tests/test_runtime_model_assets.py
+      - tests/test_splitter_offsets.py
+      - tests/test_ssmd.py
+      - tests/test_ssmd_080_pause_defaults.py
+    stats:
+      files_changed: 0
+      insertions: 1263
+      deletions: 524
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/installation.md
+      - pykokoro/pipeline.py
+      - pykokoro/stages/text_preparation/spokenform.py
+      - pykokoro/stages/segmentation/phrasplit.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/audio_generator.py
+      - tests/test_pipeline_refactor.py
+      - tests/test_splitter_offsets.py
+      - tests/test_g2p_spokenform.py
+    observed_behavior:
+      Made Spokenform preparation, Phrasplit segmentation, prepared-mode G2P, pause
+      defaults, and inference waveform diagnostics explicit pipeline behavior with
+      remapped metadata offsets and configurable invalid-output handling.
+    public_impact: public
+    decision: accepted
+    evidence_subject: "feat: use spokenform direct outside of kokorog2p"
+    target_entry_id: entry-0004
+    notes:
+      Reviewed the explicit stage pipeline, offset tests, G2P tests, and audio
+      diagnostics.
+  - sha: 2e9a84bb3b026345a1bdcb99340dd7e40d29d3b0
+    source_ref: git:2e9a84bb3b026345a1bdcb99340dd7e40d29d3b0
+    short_sha: 2e9a84b
+    changed_paths:
+      - README.md
+      - examples/german.py
+      - examples/german2.py
+      - examples/german3.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/tokenizer.py
+      - tests/test_cache_keys.py
+      - tests/test_g2p_adapter_spacy_model.py
+      - tests/test_german_examples.py
+      - tests/test_tokenizer.py
+    stats:
+      files_changed: 0
+      insertions: 412
+      deletions: 60
+    inspected: true
+    inspected_paths:
+      - README.md
+      - examples/german.py
+      - examples/german2.py
+      - examples/german3.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/tokenizer.py
+      - tests/test_cache_keys.py
+      - tests/test_g2p_adapter_spacy_model.py
+      - tests/test_tokenizer.py
+    observed_behavior:
+      Added named KokoroG2P lexicon selection and tokenizer cache identity, and updated
+      German examples to compare explicit lexicon choices.
+    public_impact: public
+    decision: accepted
+    evidence_subject: "feat: update to select g2p lexicon"
+    target_entry_id: entry-0006
+    notes: Reviewed lexicon configuration, cache keys, examples, and tokenizer tests.
