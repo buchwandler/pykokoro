@@ -13,11 +13,16 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from typing_extensions import Self
 
-from .config_types import LANG_CODE_TO_ONNX
 from .constants import SAMPLE_RATE
 from .emphasis import apply_emphasis_policy
 from .generation_config import GenerationConfig
-from .pipeline_config import PipelineConfig, resolve_model_defaults
+from .pipeline_config import PipelineConfig, require_document_language, resolve_model_defaults
+from .runtime.language_plan import build_language_plan
+from .runtime.linguistics import (
+    LinguisticRequestState,
+    LinguisticResourcePool,
+    PreparedRunAnalysis,
+)
 from .runtime.tracing import trace_timing
 from .spacy_models import SpacyModelSize
 from .ssmd_config import SSMDRenderConfig
@@ -569,28 +574,6 @@ def build_pipeline(
     return pipeline
 
 
-def _default_lang_from_voice(cfg: PipelineConfig) -> PipelineConfig:
-    if not isinstance(cfg.voice, str):
-        return cfg
-    if "," in cfg.voice or ":" in cfg.voice:
-        return cfg
-    default_lang = GenerationConfig().lang
-    if cfg.generation.lang != default_lang:
-        return cfg
-    from .model_profiles import profile_for_voice
-
-    profile = profile_for_voice(cfg.voice)
-    if profile is not None and profile.language_codes:
-        generation = replace(cfg.generation, lang=profile.language_codes[0])
-        return replace(cfg, generation=generation)
-    voice_key = cfg.voice.split("_", 1)[0].strip().lower()
-    if not voice_key:
-        return cfg
-    voice_lang = LANG_CODE_TO_ONNX.get(voice_key[0])
-    if not voice_lang or voice_lang == cfg.generation.lang:
-        return cfg
-    generation = replace(cfg.generation, lang=voice_lang)
-    return replace(cfg, generation=generation)
 
 
 class KokoroPipeline:
@@ -621,6 +604,7 @@ class KokoroPipeline:
         self._owns_audio_generation = False
         self._owns_audio_postprocessing = False
         self._prepared_objects: list[PreparedAudioUnits] = []
+        self.linguistic_resources = LinguisticResourcePool()
 
     def __enter__(self) -> Self:
         return self
@@ -653,12 +637,13 @@ class KokoroPipeline:
         self._kokoro = None
         self._kokoro_config_key = None
 
+        self.linguistic_resources.clear()
     def _unregister_prepared(self, prepared: PreparedAudioUnits) -> None:
         if prepared in self._prepared_objects:
             self._prepared_objects.remove(prepared)
 
     def _kokoro_key(self, cfg: PipelineConfig) -> tuple[object, ...]:
-        cfg = resolve_model_defaults(_default_lang_from_voice(cfg))
+        cfg = resolve_model_defaults(cfg)
         model_path = str(cfg.model_path) if cfg.model_path else None
         voices_path = str(cfg.voices_path) if cfg.voices_path else None
         model_config_path = str(cfg.model_config_path) if cfg.model_config_path else None
@@ -691,7 +676,7 @@ class KokoroPipeline:
             close()
 
     def _ensure_kokoro(self, cfg: PipelineConfig) -> tuple[Kokoro, bool]:
-        cfg = resolve_model_defaults(_default_lang_from_voice(cfg))
+        cfg = resolve_model_defaults(cfg)
         kokoro_key = self._kokoro_key(cfg)
         if self._kokoro is not None and self._kokoro_config_key == kokoro_key:
             return self._kokoro, False
@@ -737,7 +722,7 @@ class KokoroPipeline:
 
     def _resolve_run_config(self, overrides: dict[str, Any]) -> PipelineConfig:
         if not overrides:
-            return resolve_model_defaults(_default_lang_from_voice(self.config))
+            return resolve_model_defaults(self.config)
         overrides = dict(overrides)
         lang = overrides.pop("lang", None)
         has_generation_override = "generation" in overrides
@@ -752,7 +737,7 @@ class KokoroPipeline:
             overrides["generation"] = generation
         if ssmd_value is not None:
             overrides["ssmd"] = _coerce_ssmd(self.config.ssmd, ssmd_value)
-        return resolve_model_defaults(_default_lang_from_voice(replace(self.config, **overrides)))
+        return resolve_model_defaults(replace(self.config, **overrides))
 
     def prepare_units(
         self,
@@ -782,21 +767,137 @@ class KokoroPipeline:
         with self.prepare_units(text, unit=unit, **overrides) as prepared:
             yield from prepared.render(skip_indices=skip_indices)
 
+    @staticmethod
+    def _linguistic_policy(
+        cfg: PipelineConfig,
+    ) -> tuple[bool | None, str | None, SpacyModelSize | None]:
+        tokenizer_config = cfg.tokenizer_config
+        if tokenizer_config is None:
+            return None, None, None
+        return (
+            tokenizer_config.use_spacy,
+            tokenizer_config.spacy_model,
+            tokenizer_config.spacy_model_size,
+        )
+
+    def _analyze_runs(
+        self,
+        text: str,
+        runs: tuple[Any, ...],
+        cfg: PipelineConfig,
+        trace: Trace,
+        pass_name: str,
+    ) -> list[PreparedRunAnalysis]:
+        use_spacy, model, model_size = self._linguistic_policy(cfg)
+        analyses: list[PreparedRunAnalysis] = []
+        for run in runs:
+            run_text = text[run.char_start : run.char_end]
+            analysis = None
+            if use_spacy is not False:
+                analysis = self.linguistic_resources.analyze(
+                    run_text,
+                    language=run.language,
+                    model=model,
+                    model_size=model_size,
+                    require=use_spacy is True,
+                )
+            analyses.append(
+                PreparedRunAnalysis(
+                    run=run,
+                    text=run_text,
+                    doc=analysis.doc if analysis else None,
+                    annotations=analysis.annotations if analysis else (),
+                    model_name=analysis.model_name if analysis else None,
+                )
+            )
+            trace.events.append(
+                TraceEvent(
+                    stage="linguistics",
+                    name=pass_name,
+                    ms=0.0,
+                    details={
+                        "language": run.language,
+                        "char_start": run.char_start,
+                        "char_end": run.char_end,
+                        "character_count": len(run_text),
+                        "model_name": analysis.model_name if analysis else None,
+                        "annotation_count": len(analysis.annotations) if analysis else 0,
+                        "fallback": analysis is None,
+                    },
+                )
+            )
+        return analyses
+
+
     def _prepare_document(
         self, text: str, cfg: PipelineConfig, unit: AudioUnitKind
     ) -> _PreparedDocument:
+        language = require_document_language(cfg)
         trace = Trace()
         with trace_timing(trace, "doc", "parse"):
             logger.debug("Parsing document")
             doc = self.doc_parser.parse(text, cfg, trace)
             trace.warnings.extend(doc.warnings)
+            state = LinguisticRequestState()
+            doc.linguistic_state = state
+            state.source_plan = build_language_plan(
+                doc.clean_text, doc.annotation_spans, default_language=language
+            )
+            trace.events.append(
+                TraceEvent(
+                    stage="language_plan",
+                    name="source",
+                    ms=0.0,
+                    details={
+                        "runs": len(state.source_plan),
+                        "languages": [run.language for run in state.source_plan],
+                    },
+                )
+            )
+            state.source_analysis = self._analyze_runs(
+                doc.clean_text, state.source_plan, cfg, trace, "pass_a"
+            )
 
-        with trace_timing(trace, "text_preparation", "prepare"):
-            doc = self.text_preparer.prepare(doc, cfg, trace)
-            trace.warnings.extend(doc.preparation.warnings if doc.preparation else ())
+        try:
+            with trace_timing(trace, "text_preparation", "prepare"):
+                doc = self.text_preparer.prepare(doc, cfg, trace)
+        except Exception:
+            state.release_docs()
+            doc.linguistic_state = None
+            raise
+        doc.linguistic_state = state
+        trace.warnings.extend(doc.preparation.warnings if doc.preparation else ())
+        state.prepared_plan = build_language_plan(
+            doc.clean_text, doc.annotation_spans, default_language=language
+        )
+        trace.events.append(
+            TraceEvent(
+                stage="language_plan",
+                name="prepared",
+                ms=0.0,
+                details={
+                    "runs": len(state.prepared_plan),
+                    "languages": [run.language for run in state.prepared_plan],
+                },
+            )
+        )
+        try:
+            state.prepared_analysis = self._analyze_runs(
+                doc.clean_text, state.prepared_plan, cfg, trace, "pass_b"
+            )
+        except Exception:
+            state.release_docs()
+            doc.linguistic_state = None
+            raise
+        state.release_source_docs()
 
-        with trace_timing(trace, "segmentation", "split"):
-            segments = self.sentence_segmenter.split(doc, cfg, trace)
+        try:
+            with trace_timing(trace, "segmentation", "split"):
+                segments = self.sentence_segmenter.split(doc, cfg, trace)
+        except Exception:
+            state.release_docs()
+            doc.linguistic_state = None
+            raise
         if not segments and doc.clean_text:
             segments = [
                 Segment(
@@ -812,9 +913,13 @@ class KokoroPipeline:
         doc.segments = segments
         self._apply_post_segmentation_pauses(doc, segments, cfg)
 
-        with trace_timing(trace, "g2p", "phonemize"):
-            logger.debug("Phonemizing %d segments", len(segments))
-            phoneme_segments = self.g2p.phonemize(segments, doc, cfg, trace)
+        try:
+            with trace_timing(trace, "g2p", "phonemize"):
+                logger.debug("Phonemizing %d segments", len(segments))
+                phoneme_segments = self.g2p.phonemize(segments, doc, cfg, trace)
+        finally:
+            state.release_docs()
+            doc.linguistic_state = None
         phoneme_processor, audio_generator, audio_postprocessor = self._resolve_stages(cfg)
 
         with trace_timing(trace, "phoneme_processing", "preprocess"):

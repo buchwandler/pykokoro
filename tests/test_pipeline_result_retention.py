@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline import KokoroPipeline
 from pykokoro.pipeline_config import PipelineConfig
 from pykokoro.stages.protocols import DocumentResult
@@ -99,7 +100,9 @@ class CountingKokoro:
 
 def _pipeline() -> KokoroPipeline:
     return KokoroPipeline(
-        PipelineConfig(voice="af", return_trace=True),
+        PipelineConfig(
+            voice="af", generation=GenerationConfig(lang="en-us"), return_trace=True
+        ),
         doc_parser=RetentionDocumentParser(),
         g2p=RetentionG2P(),
     )

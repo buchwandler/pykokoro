@@ -22,7 +22,7 @@ Run:
 `python examples/spokenform_showcase.py`
 
 The example feeds unannotated text containing abbreviations, dates, times, currency,
-measurements, and other structured expressions through kokorog2p 0.8+'s automatic
+measurements, and other structured expressions through Spokenform's automatic
 spoken-form preparation. It prints the prepared text and phonemes, then synthesizes the
 same raw source with PyKokoro. Use `--inspect-only` to inspect the front-end result
 without loading a synthesis model.

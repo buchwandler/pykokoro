@@ -92,7 +92,7 @@ def _build_pipeline(cfg: PipelineConfig) -> KokoroPipeline:
 
 
 def test_pipeline_paragraph_indices():
-    cfg = PipelineConfig()
+    cfg = PipelineConfig(generation=GenerationConfig(lang="en-us"))
     pipeline = _build_pipeline(cfg)
     res = pipeline.run(TEXT)
 
@@ -102,7 +102,7 @@ def test_pipeline_paragraph_indices():
 
 
 def test_pipeline_manual_paragraph_pause():
-    generation = GenerationConfig(pause_mode="manual", pause_paragraph=1.25)
+    generation = GenerationConfig(lang="en-us", pause_mode="manual", pause_paragraph=1.25)
     cfg = PipelineConfig(generation=generation)
     pipeline = _build_pipeline(cfg)
     res = pipeline.run(TEXT)
@@ -114,7 +114,7 @@ def test_pipeline_manual_paragraph_pause():
 
 
 def test_pipeline_explicit_break_pause():
-    generation = GenerationConfig(pause_mode="manual")
+    generation = GenerationConfig(lang="en-us", pause_mode="manual")
     cfg = PipelineConfig(generation=generation)
     pipeline = _build_pipeline(cfg)
     res = pipeline.run(TEXT_EXPLICIT_BREAK)

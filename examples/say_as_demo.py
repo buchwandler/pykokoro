@@ -2,15 +2,14 @@
 """
 Say-As Text Normalization Demo for PyKokoro.
 
-This example demonstrates the say-as feature which automatically normalizes
-text based on SSMD/SSML interpret-as types for natural TTS output.
+This example demonstrates SSMD say-as intent and Spokenform-owned semantic
+preparation for natural TTS output.
 
-The say-as feature uses:
-- num2words: For number-to-text conversion
-- babel: For locale-aware date/time formatting
+PyKokoro only carries the structural say-as metadata. Spokenform performs the
+generic written-to-spoken realization.
 
 Requirements:
-    pip install pykokoro  # num2words and babel included as dependencies
+    pip install pykokoro
 
 Usage:
     python examples/say_as_demo.py
@@ -345,7 +344,7 @@ def main():
     print('  [1/2]{as="fraction"} → "one half"')
 
     print("\nLanguage Support:")
-    print("  The say-as feature supports multiple languages through num2words:")
+    print("  The say-as feature is realized by Spokenform.")
     print("  - English (en-us, en-gb)")
     print("  - French (fr-fr)")
     print("  - German (de-de)")

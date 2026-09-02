@@ -80,12 +80,11 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install pytest
         python -m pip install \
-          "kokorog2p[all]==0.8.4" \
-          "phrasplit==0.3.6" \
-          "ssmd==0.8.5" \
-          "spokenform==0.3.5" \
+          "kokorog2p[all]==0.9.0" \
+          "phrasplit==0.3.7" \
+          "ssmd==0.8.6" \
+          "spokenform==0.3.6" \
           "audiosig==0.1.1" \
-          "babel==2.12.0" \
           platformdirs
         python -m pip install -e .
     - name: Lower-bound contract tests
@@ -97,7 +96,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        kokorog2p-version: ["0.8.4"]
+        kokorog2p-version: ["0.9.0"]
     steps:
     - uses: actions/checkout@v4
     - name: Setup Python

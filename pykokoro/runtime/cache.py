@@ -6,6 +6,7 @@ import os
 import secrets
 import threading
 import time
+from collections.abc import Sequence
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, Protocol
@@ -15,7 +16,6 @@ class Cache(Protocol):
     def get(self, key: str) -> Any | None: ...
     def set(self, key: str, value: Any) -> None: ...
     def delete(self, key: str) -> None: ...
-
 
 def make_cache_key(*parts: Any) -> str:
     h = hashlib.sha256()
@@ -27,6 +27,17 @@ def make_cache_key(*parts: Any) -> str:
         h.update(b)
         h.update(b"\x1f")
     return h.hexdigest()
+
+def annotation_fingerprint(annotations: Sequence[Any] | None) -> str:
+    """Return a stable identity for provider-neutral token annotations."""
+    values = []
+    for item in annotations or ():
+        if isinstance(item, dict):
+            values.append(tuple(item.get(key) for key in ("start", "end", "text", "pos", "tag", "lemma", "language")))
+        else:
+            values.append(tuple(getattr(item, key, None) for key in ("start", "end", "text", "pos", "tag", "lemma", "language")))
+    return make_cache_key(values)
+
 
 
 def cache_from_dir(cache_dir: str | None) -> Cache:
@@ -42,6 +53,7 @@ def make_g2p_key(
     is_phonemes: bool,
     tokenizer_config: dict[str, Any] | None,
     phoneme_override: str | None,
+    annotations: Sequence[Any] | None = None,
     kokorog2p_version: str | None = None,
     model_quality: str | None = None,
     model_source: str | None = None,
@@ -60,6 +72,7 @@ def make_g2p_key(
             "is_phonemes": is_phonemes,
             "tokenizer_config": tokenizer_config,
             "phoneme_override": phoneme_override,
+            "annotation_fingerprint": annotation_fingerprint(annotations),
             "kokorog2p_version": kokorog2p_version,
             "model_quality": model_quality,
             "model_source": model_source,

@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 
 class KokoroG2PAdapter(G2PAdapter):
-    _cache_schema = 5
+    _cache_schema = 6
 
     def __init__(self) -> None:
         self._g2p: ModuleType | None = None
@@ -82,6 +82,7 @@ class KokoroG2PAdapter(G2PAdapter):
             )
             overrides = self._prepared_overrides(doc.annotation_spans, segment, span_warnings)
             trace.warnings.extend(span_warnings)
+            annotations = self._prepared_annotations(doc, segment)
 
             lang = generation.lang
             ssmd_metadata: dict[str, str] = {}
@@ -90,12 +91,15 @@ class KokoroG2PAdapter(G2PAdapter):
                 if span_lang:
                     lang = span_lang
                 self._apply_span_metadata(span.attrs, ssmd_metadata)
+            if lang is None:
+                raise ValueError("A language is required for each G2P segment")
 
             cache_key = make_g2p_key(
                 text=segment.text,
                 lang=lang,
                 is_phonemes=generation.is_phonemes,
                 tokenizer_config=asdict(cfg.tokenizer_config) if cfg.tokenizer_config else None,
+                annotations=annotations,
                 phoneme_override=phoneme_override,
                 kokorog2p_version=getattr(g2p, "__version__", None),
                 model_quality=cfg.model_quality,
@@ -129,6 +133,7 @@ class KokoroG2PAdapter(G2PAdapter):
                         segment.text,
                         lang,
                         overrides,
+                        annotations,
                         g2p_instance,
                     )
                     phonemes = str(
@@ -239,11 +244,44 @@ class KokoroG2PAdapter(G2PAdapter):
         return overrides
 
     @staticmethod
+    def _prepared_annotations(doc: DocumentResult, segment: Segment) -> list[Any]:
+        state = getattr(doc, "linguistic_state", None)
+        if state is None:
+            return []
+        annotations: list[Any] = []
+        for analysis in getattr(state, "prepared_analysis", ()):
+            run = analysis.run
+            if run.char_start > segment.char_start or run.char_end < segment.char_end:
+                continue
+            for item in analysis.annotations:
+                if item.end <= segment.char_start or item.start >= segment.char_end:
+                    continue
+                from ...runtime.linguistics import TokenAnnotation
+
+                start = max(item.start, segment.char_start) - segment.char_start
+                end = min(item.end, segment.char_end) - segment.char_start
+                annotations.append(
+                    TokenAnnotation(
+                        start=start,
+                        end=end,
+                        text=item.text,
+                        pos=item.pos,
+                        tag=item.tag,
+                        lemma=item.lemma,
+                        language=item.language,
+                    )
+                )
+            break
+        return annotations
+
+
+    @staticmethod
     def _phonemize_prepared(
         g2p: Any,
         text: str,
         language: str,
         overrides: list[AnnotationSpan],
+        annotations: list[Any],
         g2p_instance: Any,
     ) -> Any:
         prepared = getattr(g2p, "phonemize_prepared", None)
@@ -252,6 +290,7 @@ class KokoroG2PAdapter(G2PAdapter):
                 text,
                 language=language,
                 overrides=overrides or None,
+                annotations=annotations or None,
                 return_phonemes=True,
                 return_ids=True,
                 alignment="span",
@@ -448,7 +487,7 @@ class KokoroG2PAdapter(G2PAdapter):
         tokenizer_config = cfg.tokenizer_config or TokenizerConfig()
         kokorog2p_lang = SUPPORTED_LANGUAGES.get(lang, lang)
         profile, backend, _ = self._resolve_frontend_contract(cfg)
-        model_version = self._get_model_version(cfg)
+        model_version = self._get_model_version(cfg, lang)
         version = "1.0" if model_version == "nabra-82m-v0.1" else model_version
         if profile is not None:
             require_frontend(profile.variant, allow_experimental=cfg.allow_experimental_frontend)
@@ -515,10 +554,12 @@ class KokoroG2PAdapter(G2PAdapter):
         )
 
     @staticmethod
-    def _get_model_version(cfg: PipelineConfig) -> str:
+    def _get_model_version(cfg: PipelineConfig, lang: str | None = None) -> str:
         from ...model_profiles import get_model_profile
         from ...pipeline_config import resolve_model_defaults
 
+        if cfg.generation.lang is None and lang is not None:
+            cfg = replace(cfg, generation=replace(cfg.generation, lang=lang))
         cfg = resolve_model_defaults(cfg)
         assert cfg.model_variant is not None
         assert cfg.model_source is not None

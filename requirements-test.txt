@@ -8,7 +8,7 @@ pytest-cov
 tomli>=2.0.1; python_version < '3.11'
 coverage
 tox
-lingua-language-detector
-kokorog2p[all]>=0.8.4,<0.9
-ssmd>=0.8.5,<0.9
-spokenform>=0.3.5,<0.4
+kokorog2p[all]>=0.9.0,<1.0
+phrasplit>=0.3.7,<0.4
+ssmd>=0.8.6,<0.9
+spokenform>=0.3.6,<0.4

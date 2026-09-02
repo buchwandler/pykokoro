@@ -616,8 +616,6 @@ def _map_ssmd_segment_to_metadata(
     Returns:
         Tuple of (text, metadata)
     """
-    from .say_as import normalize_say_as
-
     metadata = SSMDMetadata()
 
     # Handle text transformations (priority order: audio >
@@ -637,19 +635,11 @@ def _map_ssmd_segment_to_metadata(
         # Use alt_text for phonemization fallback
         text = ssmd_seg.audio.alt_text or ""
     elif ssmd_seg.say_as:
-        # Store say-as metadata
         metadata.say_as_interpret = ssmd_seg.say_as.interpret_as
         metadata.say_as_format = ssmd_seg.say_as.format
         metadata.say_as_detail = ssmd_seg.say_as.detail
-
-        # Normalize text based on interpret-as type
-        text = normalize_say_as(
-            text,
-            interpret_as=ssmd_seg.say_as.interpret_as,
-            lang=lang,
-            format_str=ssmd_seg.say_as.format,
-            detail=ssmd_seg.say_as.detail,
-        )
+        # Spokenform receives the intent through structural metadata.
+        text = ssmd_seg.text
     elif ssmd_seg.substitution:
         text = ssmd_seg.substitution
         metadata.substitution = ssmd_seg.substitution

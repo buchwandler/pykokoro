@@ -70,7 +70,7 @@ def test_default_pipeline_reports_missing_onnxruntime_extra() -> None:
         "from pykokoro.pipeline import KokoroPipeline\n"
         "from pykokoro.pipeline_config import PipelineConfig\n"
         "try:\n"
-        "    KokoroPipeline(PipelineConfig()).run('Hello.')\n"
+        "    KokoroPipeline(PipelineConfig()).run('Hello.', lang='en-us')\n"
         "except RuntimeError as exc:\n"
         "    assert 'pykokoro[cpu]' in str(exc)\n"
         "else:\n"

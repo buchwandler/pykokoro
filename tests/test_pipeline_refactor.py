@@ -130,7 +130,7 @@ def test_pipeline_run_overrides_lang():
     assert res.phoneme_segments
 
 
-def test_pipeline_defaults_lang_from_voice():
+def test_pipeline_requires_explicit_language() -> None:
     cfg = PipelineConfig(voice="bf_lily")
     g2p = DummyG2P()
     pipe = KokoroPipeline(
@@ -141,17 +141,15 @@ def test_pipeline_defaults_lang_from_voice():
         audio_generation=DummyAudioGeneration(),
         audio_postprocessing=DummyAudioPostprocessing(),
     )
-    res = pipe.run("Hello")
-    assert g2p.last_lang == "en-gb"
-    assert res.phoneme_segments
-
+    with pytest.raises(ValueError, match="document language is required"):
+        pipe.run("Hello")
 
 @pytest.mark.skipif(
     os.getenv("PYKOKORO_ONNX_SMOKE") != "1",
     reason="Enable with PYKOKORO_ONNX_SMOKE=1",
 )
 def test_onnx_smoke():
-    cfg = PipelineConfig()
+    cfg = PipelineConfig(generation=GenerationConfig(lang="en-us"))
     res = KokoroPipeline(cfg).run("Hello")
     assert res.audio.size > 0
 
@@ -208,7 +206,7 @@ def test_pipeline_stage_order_is_explicit() -> None:
             return np.zeros(4, dtype=np.float32)
 
     pipe = KokoroPipeline(
-        PipelineConfig(),
+        PipelineConfig(generation=GenerationConfig(lang="en-us")),
         doc_parser=Parser(),
         text_preparer=Preparer(),
         sentence_segmenter=Segmenter(),

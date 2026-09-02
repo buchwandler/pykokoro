@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 import pykokoro.onnx_backend as backend
+from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline_config import PipelineConfig
 from pykokoro.runtime.cache import DiskCache, make_g2p_key
 from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
@@ -170,7 +171,9 @@ def test_g2p_cache_schema_recomputes_and_preserves_warnings(tmp_path, monkeypatc
         sentence_idx=0,
         clause_idx=0,
     )
-    cfg = PipelineConfig(cache_dir=str(tmp_path))
+    cfg = PipelineConfig(
+        generation=GenerationConfig(lang="en-us"), cache_dir=str(tmp_path)
+    )
     key = make_g2p_key(
         text=segment.text,
         lang=cfg.generation.lang,
@@ -212,7 +215,7 @@ def test_g2p_cache_schema_recomputes_and_preserves_warnings(tmp_path, monkeypatc
     assert second_trace.warnings == ["fallback"]
     cached = DiskCache(tmp_path).get(key)
     assert cached == {
-        "schema": 5,
+        "schema": 6,
         "g2p_input_mode": "prepared",
         "preparation_backend": "spokenform",
         "preparation_version": None,

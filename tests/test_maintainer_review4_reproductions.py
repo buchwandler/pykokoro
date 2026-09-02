@@ -150,7 +150,9 @@ def test_failed_backend_replacement_preserves_open_previous_backend(
             self.closed = True
 
     monkeypatch.setattr("pykokoro.onnx_backend.Kokoro", FakeKokoro)
-    pipeline = KokoroPipeline(PipelineConfig(model_variant="v1.0"))
+    pipeline = KokoroPipeline(
+        PipelineConfig(model_variant="v1.0", generation=GenerationConfig(lang="en-us"))
+    )
     pipeline._ensure_kokoro(pipeline.config)
 
     with pytest.raises(RuntimeError, match="replacement failed"):
@@ -161,9 +163,11 @@ def test_failed_backend_replacement_preserves_open_previous_backend(
 
 
 def test_backend_cache_key_snapshots_mutable_nested_configuration() -> None:
-    pipeline = KokoroPipeline(PipelineConfig())
+    pipeline = KokoroPipeline(
+        PipelineConfig(generation=GenerationConfig(lang="en-us"))
+    )
     provider_options = {"execution": {"device_id": 0}}
-    tokenizer_config = TokenizerConfig(mixed_language_allowed=["en-us"])
+    tokenizer_config = TokenizerConfig(lexicons=("gold",))
     cfg = replace(
         pipeline.config,
         provider_options=provider_options,
@@ -174,12 +178,14 @@ def test_backend_cache_key_snapshots_mutable_nested_configuration() -> None:
     provider_options["execution"]["device_id"] = 1
     assert pipeline._kokoro_key(cfg) != initial_key
 
-    tokenizer_config.mixed_language_allowed.append("de")
+    object.__setattr__(tokenizer_config, "lexicons", ("gold", "de"))
     assert pipeline._kokoro_key(cfg) != initial_key
 
 
 def test_backend_cache_key_snapshots_mutable_spokenform_sensitive_tokenizer_flags() -> None:
-    pipeline = KokoroPipeline(PipelineConfig())
+    pipeline = KokoroPipeline(
+        PipelineConfig(generation=GenerationConfig(lang="en-us"))
+    )
     tokenizer_config = TokenizerConfig(load_gold=True, load_silver=True, use_espeak_fallback=True)
     cfg = replace(pipeline.config, tokenizer_config=tokenizer_config)
 

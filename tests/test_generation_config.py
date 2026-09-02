@@ -12,7 +12,7 @@ class TestGenerationConfigCreation:
         """Test creating config with all defaults."""
         config = GenerationConfig()
         assert config.speed == 1.0
-        assert config.lang == "en-us"
+        assert config.lang is None
         assert config.is_phonemes is False
         assert config.pause_mode == "tts"
         assert config.pause_clause == 0.3
@@ -56,7 +56,7 @@ class TestGenerationConfigCreation:
         assert config.speed == 1.2
         assert config.pause_mode == "manual"
         # Defaults for others
-        assert config.lang == "en-us"
+        assert config.lang is None
         assert config.pause_clause == 0.3
 
 

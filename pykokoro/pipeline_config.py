@@ -60,6 +60,19 @@ class PipelineConfig:
     cache_dir: str | None = None
 
 
+def require_document_language(cfg: PipelineConfig) -> str:
+    """Return the explicit document language required for orchestration."""
+    language = cfg.generation.lang
+    if not language:
+        raise ValueError(
+            "A document language is required before text preparation. "
+            "Pass generation.lang=... or run(..., lang=...)."
+        )
+    from .model_profiles import normalize_language_code
+
+    return normalize_language_code(language)
+
+
 def _resolve_manifest_paths(cfg: PipelineConfig) -> PipelineConfig:
     if cfg.release_manifest_path is None:
         return cfg
@@ -107,26 +120,14 @@ def resolve_model_defaults(cfg: PipelineConfig) -> PipelineConfig:
     G2P construction.
     """
     cfg = _resolve_manifest_paths(cfg)
+    require_document_language(cfg)
     from .model_profiles import (
         get_model_profile,
         model_id_for_voice,
-        normalize_language_code,
         profile_for_language,
-        profile_for_voice,
     )
 
-    if (
-        cfg.generation.lang == GenerationConfig().lang
-        and isinstance(cfg.voice, str)
-        and (voice_profile := profile_for_voice(cfg.voice)) is not None
-        and voice_profile.language_codes
-    ):
-        cfg = replace(
-            cfg,
-            generation=replace(cfg.generation, lang=voice_profile.language_codes[0]),
-        )
-
-    lang = normalize_language_code(cfg.generation.lang)
+    lang = require_document_language(cfg)
     source = cfg.model_source
     variant = cfg.model_variant
 
@@ -135,9 +136,6 @@ def resolve_model_defaults(cfg: PipelineConfig) -> PipelineConfig:
         if voice_model is not None:
             variant = voice_model
             source = "huggingface"
-            if cfg.generation.lang == GenerationConfig().lang:
-                cfg = replace(cfg, generation=replace(cfg.generation, lang="ru"))
-    lang = normalize_language_code(cfg.generation.lang)
     if variant is None:
         language_profile = profile_for_language(lang)
         if language_profile is not None and source in {None, "github"}:

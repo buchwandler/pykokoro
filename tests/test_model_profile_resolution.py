@@ -39,8 +39,10 @@ def test_explicit_voice_validation_is_deferred_to_release_metadata():
     assert resolved.voice == "df_eva"
 
 
-def test_martin_voice_alone_infers_german_profile():
-    resolved = resolve_model_defaults(PipelineConfig(voice="martin"))
+def test_martin_voice_requires_explicit_language() -> None:
+    resolved = resolve_model_defaults(
+        PipelineConfig(voice="martin", generation=GenerationConfig(lang="de"))
+    )
     assert resolved.generation.lang == "de"
     assert resolved.model_variant == "v1.2-de-martin"
 
@@ -58,7 +60,7 @@ def test_custom_voice_archive_can_define_its_own_voice_name(tmp_path):
 
 
 def test_resolved_profile_is_in_cache_key():
-    pipeline = KokoroPipeline(PipelineConfig())
+    pipeline = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us")))
     resolved = resolve_model_defaults(PipelineConfig(generation=GenerationConfig(lang="de")))
     key = pipeline._kokoro_key(resolved)
     assert "v1.2-de-martin" in key
@@ -88,8 +90,10 @@ def test_registry_huggingface_profiles_defer_quality_validation(variant, voice):
     assert resolved.voice == voice
 
 
-def test_dima_voice_selects_dima_registry_profile():
-    resolved = resolve_model_defaults(PipelineConfig(voice="dima"))
+def test_dima_voice_requires_explicit_language() -> None:
+    resolved = resolve_model_defaults(
+        PipelineConfig(voice="dima", generation=GenerationConfig(lang="ru"))
+    )
 
     assert resolved.model_source == "huggingface"
     assert resolved.model_variant == "ru-zaakirio-dima"

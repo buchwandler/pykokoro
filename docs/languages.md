@@ -20,23 +20,17 @@ default; Chinese automatic selection retains the GitHub v1.1-zh policy.
 | Kerstin / Crane | `de-crane`       | `default`  | experimental  | explicit + `allow_experimental_frontend=True` |
 | Thorsten        | `de-thorsten`    | `thorsten` | ready         | explicit                                      |
 
-Martin is the automatic German default. Kerstin/Crane and Thorsten are explicit
+The document language is explicit in v0.9. Pass `GenerationConfig(lang="de")` or
+`run(..., lang="de")`; voice and model profiles never infer it. Martin is the default
+German acoustic model when that language is selected. Kerstin/Crane and Thorsten are explicit
 alternative acoustic models; Crane currently requires experimental frontend opt-in.
 Compare them with the maintained examples `examples/german.py`, `examples/german2.py`,
 and `examples/german3.py`.
 
-The Martin profile is a single-speaker model. Its ONNX file is
-`kokoro-german-martin-v1.2.onnx`; its voice archive is `voices-german-martin-v1.2.bin`.
-Both downloads are checked with SHA-256 and the voice archive must contain `martin`. No
-model-specific config file is downloaded.
-
-Automatic written-to-spoken preparation is owned by the compatible kokorog2p 0.8.x
-dependency across the language pipelines where kokorog2p supports it. This includes
-structured forms such as dates, times, decimal commas, measurements, ordinals,
-durations, currency amounts, and abbreviations before G2P. Sentence segmentation and
-source offsets continue to refer to the original document text. PyKokoro's supported
-language and model list remains authoritative; kokorog2p support alone does not add a
-new synthesizer language.
+The integrated pipeline performs Spokenform preparation before sentence segmentation and
+G2P. Spokenform owns written-to-spoken forms such as dates, measurements, ordinals,
+currency amounts, and abbreviations. Explicit mixed-language text uses SSMD `lang` spans.
+Prepared segment offsets refer to the prepared document text and remain exact half-open slices.
 
 Managed Martin cache hits are checked against the pinned SHA-256 digests before use;
 invalid files are removed and downloaded again. Explicit custom paths are validated in

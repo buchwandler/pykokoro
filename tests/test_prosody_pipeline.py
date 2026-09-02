@@ -6,6 +6,7 @@ import numpy as np
 
 from pykokoro import PipelineConfig, ProsodyConfig
 from pykokoro.audio_generator import AudioGenerator
+from pykokoro.generation_config import GenerationConfig
 from pykokoro.stages.audio_postprocessing.onnx import OnnxAudioPostprocessingAdapter
 from pykokoro.stages.synth.onnx import OnnxSynthesizerAdapter
 from pykokoro.types import PhonemeSegment, Trace
@@ -77,7 +78,10 @@ def test_legacy_synth_adapter_forwards_prosody_config() -> None:
             seen.append(kwargs["prosody_config"])
             return np.zeros(1, dtype=np.float32)
 
-    config = PipelineConfig(prosody=ProsodyConfig(method="td_psola", strict=True))
+    config = PipelineConfig(
+        generation=GenerationConfig(lang="en-us"),
+        prosody=ProsodyConfig(method="td_psola", strict=True),
+    )
     OnnxSynthesizerAdapter(FakeKokoro()).synthesize([], config, Trace())
 
     assert seen == [config.prosody]

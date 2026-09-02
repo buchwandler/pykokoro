@@ -93,7 +93,10 @@ def test_pipeline_context_manager_closes_kokoro(monkeypatch):
 
     monkeypatch.setattr("pykokoro.onnx_backend.Kokoro", TrackingKokoro)
 
-    pipeline = KokoroPipeline(PipelineConfig(voice="af"), g2p=DummyG2PAdapter())
+    pipeline = KokoroPipeline(
+        PipelineConfig(voice="af", generation=GenerationConfig(lang="en-us")),
+        g2p=DummyG2PAdapter(),
+    )
     with pipeline as active:
         active.run("Hello")
 
@@ -113,7 +116,10 @@ def test_pipeline_context_manager_closes_on_exception(monkeypatch):
 
     with (
         pytest.raises(RuntimeError),
-        KokoroPipeline(PipelineConfig(voice="af"), g2p=DummyG2PAdapter()) as active,
+        KokoroPipeline(
+            PipelineConfig(voice="af", generation=GenerationConfig(lang="en-us")),
+            g2p=DummyG2PAdapter(),
+        ) as active,
     ):
         active.run("Hello")
         raise RuntimeError("boom")
@@ -125,7 +131,7 @@ def test_pipeline_context_manager_closes_on_exception(monkeypatch):
 def test_pipeline_does_not_close_external_kokoro():
     shared: Any = DummyKokoro()
     pipeline = KokoroPipeline(
-        PipelineConfig(voice="af"),
+        PipelineConfig(voice="af", generation=GenerationConfig(lang="en-us")),
         g2p=DummyG2PAdapter(),
         phoneme_processing=OnnxPhonemeProcessorAdapter(shared),
         audio_generation=OnnxAudioGenerationAdapter(shared),
@@ -150,7 +156,7 @@ def test_phoneme_processor_passes_random_seed_to_short_sentence_preprocess():
 
     shared = SeedRecordingKokoro()
     pipeline = KokoroPipeline(
-        PipelineConfig(voice="af", generation=GenerationConfig(random_seed=42)),
+        PipelineConfig(voice="af", generation=GenerationConfig(lang="en-us", random_seed=42)),
         g2p=DummyG2PAdapter(),
         phoneme_processing=OnnxPhonemeProcessorAdapter(shared),
         audio_generation=OnnxAudioGenerationAdapter(shared),

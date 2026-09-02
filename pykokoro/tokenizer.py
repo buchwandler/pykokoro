@@ -1,8 +1,8 @@
 """Tokenizer for pykokoro - converts text to phonemes and tokens.
 
 This module provides text-to-phoneme and phoneme-to-token conversion using the
-native kokorog2p path. As of kokorog2p 0.8, migrated locales on that path use
-Spokenform-backed semantic preparation before G2P.
+native kokorog2p path. Integrated semantic preparation is orchestrated by
+``SpokenformTextPreparer`` before this leaf stage.
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ from kokorog2p import phonemize
 from kokorog2p.base import G2PBase
 
 from .constants import MAX_PHONEME_LENGTH
-from .mixed_language_handler import MixedLanguageHandler
 from .phoneme_dictionary import PhonemeDictionary
 from .spacy_models import SpacyModelSize, make_spacy_model_request
 
@@ -77,24 +76,13 @@ class TokenizerConfig:
         spacy_model_size: Exact spaCy package tier, or None to select the highest
             installed compatible model. One of: "sm", "md", "lg", "trf".
         use_dictionary: DEPRECATED. Use load_gold and load_silver instead.
-        use_mixed_language: Enable automatic language detection for mixed-language
-            text (default: False). Requires mixed_language_allowed to be set.
-        mixed_language_primary: Primary language code for mixed-language mode
-            (e.g., 'de', 'en-us'). If None, uses the language passed to phonemize().
-        mixed_language_allowed: List of language codes to detect and support in
-            mixed-language mode (e.g., ['de', 'en-us', 'fr']). Required when
-            use_mixed_language is True.
-        mixed_language_confidence: Minimum confidence threshold (0.0-1.0) for
-            accepting language detection results. Words below this threshold
-            fall back to primary_language (default: 0.7).
         phoneme_dictionary_path: Path to custom phoneme dictionary JSON file.
             Format: {"word": "/phoneme/"} where phonemes are in IPA format.
         phoneme_dict_case_sensitive: Whether phoneme dictionary matching should
             be case-sensitive (default: False).
         backend: Phonemization backend: "kokorog2p" (default), "espeak", or "goruut".
-            The native "kokorog2p" path includes Spokenform-backed semantic
-            preparation on supported locales in kokorog2p 0.8+. Requires pygoruut
-            for goruut backend. Raises ImportError if unavailable.
+            Integrated PyKokoro preparation is provided by Spokenform before G2P.
+            Requires pygoruut for goruut backend.
         load_gold: Load gold-tier dictionary (~170k common words). Only applies
             to languages with dictionaries (English, French, German). Default: True.
         load_silver: Load silver-tier dictionary (~100k extra entries). Only applies
@@ -111,10 +99,6 @@ class TokenizerConfig:
     spacy_model: str | None = None
     spacy_model_size: SpacyModelSize | None = None
     use_dictionary: bool = True
-    use_mixed_language: bool = False
-    mixed_language_primary: str | None = None
-    mixed_language_allowed: list[str] | None = None
-    mixed_language_confidence: float = 0.7
     phoneme_dictionary_path: str | None = None
     phoneme_dict_case_sensitive: bool = False
 
@@ -174,34 +158,7 @@ class Tokenizer:
     2. Text to phoneme conversion (via kokorog2p dictionary + espeak fallback)
     3. Phoneme to token conversion (via Kokoro vocabulary)
     4. Token to phoneme conversion (reverse lookup)
-    5. Optional mixed-language support for automatic language detection
-
-    Mixed-Language Support:
-        Enable automatic language detection for text containing multiple languages
-        by setting TokenizerConfig.use_mixed_language=True and specifying
-        allowed_languages. This uses kokorog2p's preprocess_multilang to annotate
-        text with language tags before phonemization.
-
-    Args:
-        espeak_config: Deprecated, kept for backward compatibility
-        vocab_version: Ignored (uses kokorog2p's embedded vocabulary)
-        vocab: Optional custom vocabulary dict (overrides default)
-        config: Optional TokenizerConfig for phonemization settings
-
-    Example:
-        >>> # Single-language usage (default)
-        >>> tokenizer = Tokenizer()
-        >>> phonemes = tokenizer.phonemize("Hello world")
-        >>> tokens = tokenizer.tokenize(phonemes)
-
-        >>> # Mixed-language usage
-        >>> config = TokenizerConfig(
-        ...     use_mixed_language=True,
-        ...     mixed_language_primary="de",
-        ...     mixed_language_allowed=["de", "en-us"]
-        ... )
-        >>> tokenizer = Tokenizer(config=config)
-        >>> phonemes = tokenizer.phonemize("Ich gehe zum Meeting")
+    5. Provider-neutral tokenization and phoneme conversion
     """
 
     def __init__(
@@ -248,10 +205,6 @@ class Tokenizer:
         # G2P instances cache (lazy loaded per language)
         self._g2p_cache: dict[str, G2PBase] = {}
 
-        # Mixed-language handler for automatic language detection
-        self._mixed_language_handler = MixedLanguageHandler(
-            config=self.config, kokorog2p_model=self._kokorog2p_model
-        )
 
         # Phoneme dictionary for custom word->phoneme mappings
         self._phoneme_dictionary_obj: PhonemeDictionary | None = None
@@ -272,28 +225,16 @@ class Tokenizer:
         if espeak_config is not None and (espeak_config.lib_path or espeak_config.data_path):
             logger.warning("EspeakConfig is deprecated. kokorog2p manages espeak internally.")
 
-    def _validate_mixed_language_config(self) -> None:
-        """Delegate to MixedLanguageHandler.validate_config (backward compatibility)."""
-        self._mixed_language_handler.validate_config()
 
     def _get_g2p(self, lang: str) -> G2PBase:
         """Get or create a G2P instance for the given language.
-
-        If mixed-language mode is enabled, preprocessing is applied in the
-        phonemize method before calling this G2P instance.
 
         Args:
             lang: Language code (e.g., 'en-us', 'en-gb', 'de', 'fr-fr')
 
         Returns:
             G2P instance for the language
-
-        Raises:
-            ValueError: If mixed-language config is invalid
         """
-        # Validate mixed-language configuration if enabled
-        if self.config.use_mixed_language:
-            self._validate_mixed_language_config()
 
         if lang not in self._g2p_cache:
             # Map language to kokorog2p format
@@ -381,9 +322,6 @@ class Tokenizer:
         if not text:
             return ""
 
-        # Preprocess for mixed-language detection (before custom dictionary)
-        if self.config.use_mixed_language:
-            text = self._mixed_language_handler.preprocess_text(text, default_language=lang)
         # Apply custom phoneme dictionary first
         processed_text = self._apply_phoneme_dictionary(text)
         g2p = self._get_g2p(lang)

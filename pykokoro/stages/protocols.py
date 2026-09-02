@@ -17,6 +17,7 @@ from ..types import (
 
 if TYPE_CHECKING:
     from ..pipeline_config import PipelineConfig
+    from ..runtime.linguistics import LinguisticRequestState
 
 
 @dataclass
@@ -34,6 +35,8 @@ class DocumentResult:
     structural_clean_text: str | None = None
     preparation: TextPreparationInfo | None = None
 
+    # Ephemeral request state; never part of serialized public results.
+    linguistic_state: LinguisticRequestState | None = field(default=None, repr=False, compare=False)
 
 class DocumentParser(Protocol):
     def parse(self, text: str, cfg: PipelineConfig, trace: Trace) -> DocumentResult: ...

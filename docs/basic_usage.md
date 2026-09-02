@@ -16,8 +16,9 @@ The main entry point is the `KokoroPipeline` class:
 ```python
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
-# Initialize with defaults (HuggingFace v1.0)
-pipe = KokoroPipeline(PipelineConfig(voice="af_bella"))
+# Initialize with an explicit document language (required in v0.9)
+generation = GenerationConfig(lang="en-us")
+pipe = KokoroPipeline(PipelineConfig(voice="af_bella", generation=generation))
 
 # Specify model source and variant
 pipe = KokoroPipeline(
@@ -57,7 +58,9 @@ Create a pipeline once and reuse it across runs:
 ```python
 from pykokoro import KokoroPipeline, PipelineConfig
 
-pipe = KokoroPipeline(PipelineConfig(voice="af_bella"))
+pipe = KokoroPipeline(
+    PipelineConfig(voice="af_bella", generation=GenerationConfig(lang="en-us"))
+)
 result = pipe.run("Hello!")
 print(result.sample_rate)
 ```

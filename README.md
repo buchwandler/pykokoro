@@ -20,16 +20,36 @@ A Python library for Kokoro TTS (Text-to-Speech) using ONNX runtime.
 - **ONNX Execution Providers**: Capability-driven CUDA, NNAPI, XNNPACK, CoreML,
   DirectML, and other runtime-reported providers
 - **Phoneme Support**: Advanced phoneme-based generation with kokorog2p
-- **Language-Aware spaCy Models**: Automatic spaCy model name resolution from language
-  with configurable size (`sm`/`md`/`lg`/`trf`)
+- **Language-Aware spaCy Models**: Shared pipeline-owned Pass-A and Pass-B resources
+  with disabled, local fallback, and strict policies
 - **Hugging Face Integration**: Automatic model downloading from Hugging Face Hub
-- **Text Normalization**: Automatic spoken-form preparation through kokorog2p 0.8+ plus
-  explicit SSMD say-as overrides
-- **Text Normalization**: Automatic say-as support for numbers, dates, phone numbers,
-  and more using SSMD markup
+- **Explicit Language Planning**: The document language is required before parsing; SSMD
+  `lang` spans provide explicit mixed-language runs
+- **Text Normalization**: Spokenform owns generic written-to-spoken preparation, including
+  semantic say-as behavior when supported by the SSMD/Spokenform contract
 - **Maintainer Benchmarking**: PolyNorm-based phoneme regression tooling for the
   PyKokoro frontend path
 
+
+## v0.9 orchestration contract
+
+PyKokoro v0.9 requires an explicit document language. Set `GenerationConfig(lang="en-us")`
+or pass `lang="en-us"` to `run`; the per-call value takes precedence. A voice or model
+profile never selects the language. Mixed-language documents must use explicit SSMD language
+spans, for example:
+
+```python
+config = PipelineConfig(generation=GenerationConfig(lang="en-us"))
+result = KokoroPipeline(config).run(
+    'Hello [Welt]{lang="de"}.',
+    lang="en-us",
+ )
+```
+
+Integrated requests perform source analysis before Spokenform and fresh prepared-text
+analysis afterward. The pipeline reuses loaded local spaCy pipelines, but releases request
+documents before returning results. Use `tokenizer_config.use_spacy=False` to disable NLP,
+leave it unset for local-only fallback, or set it to `True` for strict model availability.
 ## Runtime model support
 
 Runtime model selection uses the canonical `catalog/models.json` registry. Model
@@ -663,18 +683,29 @@ text = (
     "</div>"
 )
 
-pipe = KokoroPipeline(PipelineConfig(voice="af"))
+pipe = KokoroPipeline(
+    PipelineConfig(voice="af", generation=GenerationConfig(lang="en-us"))
+)
 res = pipe.run(text)
 ```
 
+
+## Explicit mixed-language text
+
+Automatic language detection is not part of PyKokoro v0.9. Set the document language explicitly
+and mark language changes with SSMD spans:
+
 ```python
-text = "[Hello]{voice='af_sarah'} ...s [World]{voice='am_michael'}"
-res = pipe.run(text)
+text = 'Hello [Welt]{lang="de"} and [bonjour]{lang="fr"}.'
+result = pipe.run(text, lang="en-us")
 ```
+
+Voice metadata selects a voice only. Applications needing detection must run an external
+detector and convert its result to explicit language spans before calling PyKokoro.
 
 ### Automatic Spoken-Form Normalization
 
-PyKokoro delegates ordinary written-to-spoken text preparation to kokorog2p 0.8+. Common
+Spokenform owns ordinary written-to-spoken preparation in the integrated path. Common
 abbreviations and structured forms such as dates, times, numbers, currency,
 measurements, ordinals, and other supported expressions can be spoken naturally from raw
 text:
@@ -1246,30 +1277,33 @@ save_config(config)
 ### Custom Phoneme Dictionary
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.tokenizer import TokenizerConfig
 
 # Create config with custom phoneme dictionary
 tokenizer_config = TokenizerConfig(phoneme_dictionary_path="my_pronunciations.json")
 
-pipe = KokoroPipeline(PipelineConfig(voice="af_sarah", tokenizer_config=tokenizer_config))
+pipe = KokoroPipeline(
+    PipelineConfig(
+        voice="af_sarah",
+        generation=GenerationConfig(lang="en-us"),
+        tokenizer_config=tokenizer_config,
+    )
+)
 res = pipe.run("Hello")
 ```
 
-### Mixed Language Support
+### Explicit Mixed Language Support
+
+Automatic language detection is intentionally not configured in the tokenizer. Use the
+document language and explicit SSMD `lang` spans instead:
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
-from pykokoro.tokenizer import TokenizerConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
-tokenizer_config = TokenizerConfig(
-    use_mixed_language=True,
-    mixed_language_primary="en-us",
-    mixed_language_allowed=["en-us", "de", "fr"],
-)
-
-pipe = KokoroPipeline(PipelineConfig(voice="af_sarah", tokenizer_config=tokenizer_config))
-res = pipe.run("Ich gehe zum Meeting")
+config = PipelineConfig(generation=GenerationConfig(lang="en-us"))
+pipe = KokoroPipeline(config)
+res = pipe.run("[Ich gehe]{lang=\"de\"} zum Meeting", lang="en-us")
 ```
 
 ### Language-Aware spaCy Model Selection

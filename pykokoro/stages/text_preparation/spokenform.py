@@ -4,15 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from spokenform import (
-    OffsetMap,
-    PreparationConfig,
-    ProtectedSpan,
-    Replacement,
-    prepare_for_kokorog2p,
-)
+from spokenform import OffsetMap, PreparationConfig, ProtectedSpan, prepare_for_kokorog2p
 
 from ...pipeline_config import PipelineConfig
+from ...runtime.language_plan import build_language_plan
 from ...types import AnnotationSpan, BoundaryEvent, TextPreparationInfo, Trace, TraceEvent
 from ..protocols import DocumentResult, TextPreparer
 
@@ -29,34 +24,40 @@ class SpokenformTextPreparer(TextPreparer):
             doc.preparation = TextPreparationInfo(source, source, languages=())
             return doc
 
-        runs = self._language_runs(source, doc.annotation_spans, cfg.generation.lang)
+        state = doc.linguistic_state
+        if state is not None and hasattr(state, "source_plan") and state.source_plan:
+            runs = state.source_plan
+            source_analysis = {item.run: item for item in state.source_analysis}
+        else:
+            if cfg.generation.lang is None:
+                raise ValueError("A document language is required before text preparation")
+            runs = build_language_plan(
+                source, doc.annotation_spans, default_language=cfg.generation.lang
+            )
+            source_analysis = {}
         output_parts: list[str] = []
         run_maps: list[tuple[int, int, OffsetMap, str]] = []
         replacements: list[dict[str, Any]] = []
         warnings: list[str] = []
         output_cursor = 0
-        for start, end, language in runs:
+        for run in runs:
+            start, end, language = run.char_start, run.char_end, run.language
             run_source = source[start:end]
-            explicit_replacements = self._explicit_replacements(
-                run_source, start, doc.annotation_spans, language
-            )
-            intermediate = run_source
+            analysis = source_analysis.get(run)
             explicit_map = OffsetMap.identity(len(run_source))
-            if explicit_replacements:
-                intermediate, _, explicit_map = self._apply_explicit_replacements(
-                    run_source, explicit_replacements
-                )
             protected = self._protected_spans(
                 start, end, doc.annotation_spans, explicit_map, len(run_source)
             )
             prepared = prepare_for_kokorog2p(
-                intermediate,
+                run_source,
                 language=language,
                 config=PreparationConfig.for_kokorog2p(language),
+                annotations=self._spokenform_annotations(analysis.annotations) if analysis else None,
+                nlp=analysis.doc if analysis else None,
                 protected_spans=protected,
             )
             combined_map = explicit_map.compose(
-                prepared.offset_map or OffsetMap.identity(len(intermediate))
+                prepared.offset_map or OffsetMap.identity(len(run_source))
             )
             spoken = prepared.spoken_text
             output_parts.append(spoken)
@@ -143,75 +144,27 @@ class SpokenformTextPreparer(TextPreparer):
         )
         return doc
 
-    @staticmethod
-    def _language_runs(
-        text: str, spans: list[AnnotationSpan], default_language: str
-    ) -> list[tuple[int, int, str]]:
-        positions = {0, len(text)}
-        language_spans: list[AnnotationSpan] = []
-        for span in spans:
-            language = span.attrs.get("lang")
-            if language and span.char_start < span.char_end:
-                language_spans.append(span)
-                positions.update((max(0, span.char_start), min(len(text), span.char_end)))
-        ordered = sorted(positions)
-        runs: list[tuple[int, int, str]] = []
-        for start, end in zip(ordered, ordered[1:], strict=False):
-            if end <= start:
-                continue
-            covering = [
-                span for span in language_spans if span.char_start <= start and end <= span.char_end
-            ]
-            selected = (
-                min(covering, key=lambda span: (span.char_end - span.char_start, -span.char_start))
-                if covering
-                else None
-            )
-            language = (
-                selected.attrs.get("lang", default_language) if selected else default_language
-            )
-            language = str(language)
-            if runs and runs[-1][2] == language and runs[-1][1] == start:
-                runs[-1] = (runs[-1][0], end, language)
-            else:
-                runs.append((start, end, language))
-        return runs or [(0, len(text), default_language)]
+
 
     @staticmethod
-    def _explicit_replacements(
-        run_source: str, run_start: int, spans: list[AnnotationSpan], language: str
-    ) -> tuple[Replacement, ...]:
-        from ...say_as import normalize_say_as
+    def _spokenform_annotations(annotations: tuple[Any, ...]) -> tuple[Any, ...]:
+        if not annotations:
+            return ()
+        from spokenform import TokenAnnotation as SpokenformTokenAnnotation
 
-        result: list[Replacement] = []
-        for span in spans:
-            if span.char_start < run_start or span.char_end > run_start + len(run_source):
-                continue
-            interpret_as = span.attrs.get("as") or span.attrs.get("say_as_interpret")
-            if not interpret_as:
-                continue
-            local_start = span.char_start - run_start
-            local_end = span.char_end - run_start
-            source = run_source[local_start:local_end]
-            replacement = normalize_say_as(
-                source,
-                interpret_as,
-                lang=language,
-                format_str=span.attrs.get("format") or span.attrs.get("say_as_format"),
-                detail=span.attrs.get("detail") or span.attrs.get("say_as_detail"),
+        return tuple(
+            SpokenformTokenAnnotation(
+                start=item.start,
+                end=item.end,
+                text=item.text,
+                pos=item.pos,
+                tag=item.tag,
+                lemma=item.lemma,
+                language=item.language,
             )
-            result.append(
-                Replacement(local_start, local_end, replacement, kind="say-as", language=language)
-            )
-        return tuple(result)
+            for item in annotations
+        )
 
-    @staticmethod
-    def _apply_explicit_replacements(
-        source: str, replacements: tuple[Replacement, ...]
-    ) -> tuple[str, tuple[Any, ...], OffsetMap]:
-        from spokenform.mapping import apply_replacements
-
-        return apply_replacements(source, replacements, stage="ssmd-semantics")
 
     @staticmethod
     def _protected_spans(

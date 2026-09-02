@@ -387,6 +387,7 @@ class PhrasplitSentenceSplitter:
         language: str = "en",
         model_size: str | None = None,
         diagnostics_sink: list[Any] | None = None,
+        doc: Any | None = None,
     ) -> list[SplitItem]:
         kwargs: dict[str, object] = {
             "mode": "sentence",
@@ -396,6 +397,8 @@ class PhrasplitSentenceSplitter:
             "use_spacy": use_spacy,
             "apply_corrections": True,
         }
+        if doc is not None:
+            kwargs["doc"] = doc
 
         if hasattr(phrasplit_module, "split_with_offsets_with_diagnostics"):
             result = phrasplit_module.split_with_offsets_with_diagnostics(text, **kwargs)

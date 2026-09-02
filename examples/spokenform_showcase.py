@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""Show automatic spoken-form preparation provided by kokorog2p 0.8+.
-
-Run from the repository root::
-
-    python examples/spokenform_showcase.py
-
-Use ``--inspect-only`` to inspect the front-end result without loading a voice
-model or writing audio. The normal mode writes ``spokenform_showcase.wav``.
-"""
+"""Show automatic spoken-form preparation provided by Spokenform."""
 
 from __future__ import annotations
 

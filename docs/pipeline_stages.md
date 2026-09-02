@@ -176,7 +176,7 @@ annotations override individual fields.
 
 ### Plain text sentence splitting
 
-`PlainTextDocumentParser` uses PhraseSplit 0.3.6's offset-preserving detailed split API
+`PlainTextDocumentParser` uses PhraseSplit 0.3.7's offset-preserving detailed split API
 for sentence splitting. The returned diagnostics come from the same operation that
 produced the segments, so sentence-model metadata does not require a separate
 model-resolution pass. When `phrasplit` is unavailable, it falls back to a single

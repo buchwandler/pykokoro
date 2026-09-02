@@ -1,6 +1,7 @@
 import numpy as np
 
 from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro.generation_config import GenerationConfig
 from pykokoro.stages.protocols import DocumentResult
 from pykokoro.types import PhonemeSegment, Segment
 
@@ -44,7 +45,7 @@ class DummyStage:
 
 def test_custom_stages_remain_compatible_and_metadata_reaches_result():
     pipe = KokoroPipeline(
-        PipelineConfig(),
+        PipelineConfig(generation=GenerationConfig(lang="en-us")),
         doc_parser=DummyDoc(),
         g2p=DummyG2P(),
         phoneme_processing=DummyStage(),

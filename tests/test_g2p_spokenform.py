@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import kokorog2p
+from spokenform import prepare_for_kokorog2p
 
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline_config import PipelineConfig
@@ -23,9 +24,11 @@ def _result_ids(result) -> list[int]:
 
 
 def test_kokorog2p_spokenform_semantics() -> None:
-    result = kokorog2p.phonemize(
-        TEXT,
+    prepared = prepare_for_kokorog2p(TEXT, language="en-us")
+    result = kokorog2p.phonemize_prepared(
+        prepared.spoken_text,
         language="en-us",
+        use_spacy=False,
         return_phonemes=True,
         return_ids=True,
     )
@@ -42,7 +45,6 @@ def test_kokorog2p_spokenform_semantics() -> None:
     assert result.phonemes
     assert _result_ids(result)
     assert not any(char.isdigit() for char in spoken)
-
 
 def test_adapter_accepts_spokenform_rich_source_without_warnings() -> None:
     cfg = PipelineConfig(generation=GenerationConfig(lang="en-us"))

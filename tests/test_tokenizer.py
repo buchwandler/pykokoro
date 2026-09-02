@@ -1,6 +1,7 @@
 """Tests for pykokoro.tokenizer module."""
 
 import pytest
+from spokenform import prepare_for_kokorog2p
 
 from pykokoro.constants import (
     ESPEAK_ONLY_LANGUAGES,
@@ -8,7 +9,6 @@ from pykokoro.constants import (
     SAMPLE_RATE,
     SUPPORTED_LANGUAGES,
 )
-from pykokoro.mixed_language_handler import MixedLanguageHandler
 from pykokoro.tokenizer import (
     EspeakConfig,
     PhonemeResult,
@@ -254,11 +254,13 @@ class TestTokenizer:
         original_text,
         normalized_text,
     ):
-        """Normalization-sensitive text should phonemize identically on the 0.8 path."""
+        """Spokenform owns normalization before the standalone G2P leaf."""
         tokenizer = Tokenizer(config=TokenizerConfig(backend="kokorog2p", use_spacy=False))
 
-        original_phonemes = tokenizer.phonemize(original_text, lang="en-us")
-        normalized_phonemes = tokenizer.phonemize(normalized_text, lang="en-us")
+        original = prepare_for_kokorog2p(original_text, language="en-us")
+        normalized = prepare_for_kokorog2p(normalized_text, language="en-us")
+        original_phonemes = tokenizer.phonemize(original.spoken_text, lang="en-us")
+        normalized_phonemes = tokenizer.phonemize(normalized.spoken_text, lang="en-us")
 
         assert original_phonemes == normalized_phonemes
         assert tokenizer.tokenize(original_phonemes) == tokenizer.tokenize(normalized_phonemes)
@@ -507,141 +509,3 @@ class TestKokorog2pIntegration:
         # May or may not be marked low confidence depending on espeak behavior
         # Just verify phonemes were produced
         assert "xyzfoobar" not in result.phonemes  # Should be converted to phonemes
-
-
-class TestMixedLanguageSupport:
-    """Tests for mixed-language phonemization support."""
-
-    def test_mixed_language_handler_type_hint(self):
-        """Test MixedLanguageHandler uses TokenizerConfig in annotations."""
-        annotation = MixedLanguageHandler.__init__.__annotations__.get("config")
-        assert annotation == "TokenizerConfig"
-
-    def test_mixed_language_config_defaults(self):
-        """Test that mixed-language config has correct defaults."""
-        config = TokenizerConfig()
-        assert config.use_mixed_language is False
-        assert config.mixed_language_primary is None
-        assert config.mixed_language_allowed is None
-        assert config.mixed_language_confidence == 0.7
-
-    def test_mixed_language_disabled_by_default(self):
-        """Test that mixed-language mode is disabled by default."""
-        tokenizer = Tokenizer()
-        assert tokenizer.config.use_mixed_language is False
-
-        # Should use standard single-language G2P
-        phonemes = tokenizer.phonemize("Hello world", lang="en-us")
-        assert isinstance(phonemes, str)
-        assert len(phonemes) > 0
-
-    def test_mixed_language_validation_no_allowed_languages(self):
-        """Test validation fails when enabled without allowed_languages."""
-        config = TokenizerConfig(use_mixed_language=True)
-        tokenizer = Tokenizer(config=config)
-
-        with pytest.raises(ValueError, match="mixed_language_allowed is not set"):
-            tokenizer.phonemize("Test", lang="en-us")
-
-    def test_mixed_language_validation_empty_allowed_languages(self):
-        """Test validation fails with empty allowed_languages list."""
-        config = TokenizerConfig(use_mixed_language=True, mixed_language_allowed=[])
-        tokenizer = Tokenizer(config=config)
-
-        with pytest.raises(ValueError, match="mixed_language_allowed is not set"):
-            tokenizer.phonemize("Test", lang="en-us")
-
-    def test_mixed_language_validation_unsupported_language(self):
-        """Test validation fails with unsupported language."""
-        config = TokenizerConfig(use_mixed_language=True, mixed_language_allowed=["xx-invalid"])
-        tokenizer = Tokenizer(config=config)
-
-        with pytest.raises(ValueError, match="is not supported"):
-            tokenizer.phonemize("Test", lang="en-us")
-
-    def test_mixed_language_validation_invalid_confidence(self):
-        """Test validation fails with invalid confidence threshold."""
-        # Too high
-        config = TokenizerConfig(
-            use_mixed_language=True,
-            mixed_language_allowed=["en-us", "de"],
-            mixed_language_confidence=1.5,
-        )
-        tokenizer = Tokenizer(config=config)
-
-        with pytest.raises(ValueError, match="must be between 0.0 and 1.0"):
-            tokenizer.phonemize("Test", lang="en-us")
-
-        # Too low
-        config.mixed_language_confidence = -0.1
-        with pytest.raises(ValueError, match="must be between 0.0 and 1.0"):
-            tokenizer.phonemize("Test", lang="en-us")
-
-    def test_mixed_language_fallback_on_import_error(self):
-        """Test fallback to single-language when lingua not available."""
-        config = TokenizerConfig(
-            use_mixed_language=True,
-            mixed_language_primary="de",
-            mixed_language_allowed=["de", "en-us"],
-        )
-        tokenizer = Tokenizer(config=config)
-
-        # If lingua is not available, should fall back gracefully
-        try:
-            phonemes = tokenizer.phonemize("Test text", lang="de")
-            # Should still get phonemes (preprocess_multilang will be skipped)
-            assert isinstance(phonemes, str)
-        except ImportError:
-            pytest.skip("Expected behavior: falls back when lingua unavailable")
-
-    def test_mixed_language_primary_not_in_allowed_error(self):
-        """Test error when primary language not in allowed list."""
-        config = TokenizerConfig(
-            use_mixed_language=True,
-            mixed_language_primary="fr-fr",
-            mixed_language_allowed=["de", "en-us"],  # Missing fr-fr
-        )
-        tokenizer = Tokenizer(config=config)
-
-        # Should raise ValueError because primary not in allowed
-        with pytest.raises(ValueError, match="must be in allowed_languages"):
-            tokenizer.phonemize("Test", lang="de")
-
-    def test_mixed_language_uses_lang_as_primary_fallback(self):
-        """Test that lang parameter is used as primary if not specified."""
-        config = TokenizerConfig(
-            use_mixed_language=True,
-            # No mixed_language_primary specified
-            mixed_language_allowed=["de", "en-us"],
-        )
-        tokenizer = Tokenizer(config=config)
-
-        try:
-            # Should use 'de' as primary since it's passed to phonemize
-            phonemes = tokenizer.phonemize("Test", lang="de")
-            assert isinstance(phonemes, str)
-        except ImportError:
-            pytest.skip("lingua-language-detector not available")
-
-    def test_mixed_language_caching_reuses_instance(self):
-        """Test that the same configuration reuses cached G2P instance."""
-        config = TokenizerConfig(
-            use_mixed_language=True,
-            mixed_language_primary="de",
-            mixed_language_allowed=["de", "en-us"],
-        )
-        tokenizer = Tokenizer(config=config)
-
-        try:
-            # First call creates the G2P instance
-            tokenizer.phonemize("First text", lang="de")
-            cache_size_1 = len(tokenizer._g2p_cache)
-
-            # Second call should reuse the instance
-            tokenizer.phonemize("Second text", lang="de")
-            cache_size_2 = len(tokenizer._g2p_cache)
-
-            # Cache size should be the same (reused)
-            assert cache_size_1 == cache_size_2
-        except ImportError:
-            pytest.skip("lingua-language-detector not available")

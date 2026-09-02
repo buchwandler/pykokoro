@@ -26,7 +26,9 @@ def test_pause_propagation_for_single_batch(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "kokorog2p", fake_g2p)
 
-    generation = GenerationConfig(is_phonemes=True, pause_mode="manual", pause_paragraph=1.25)
+    generation = GenerationConfig(
+        lang="en-us", is_phonemes=True, pause_mode="manual", pause_paragraph=1.25
+    )
     cfg = PipelineConfig(generation=generation)
 
     text = "aaaaa.\n\nbbbbb."

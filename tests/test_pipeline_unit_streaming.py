@@ -12,6 +12,7 @@ from pykokoro import (
     PipelineConfig,
     PreparedAudioUnits,
 )
+from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline import _unit_text_hash
 from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
 from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
@@ -72,7 +73,7 @@ def build_pipeline(
     config: PipelineConfig | None = None,
 ) -> KokoroPipeline:
     return KokoroPipeline(
-        config or PipelineConfig(),
+        config or PipelineConfig(generation=GenerationConfig(lang="en-us")),
         doc_parser=PlainTextDocumentParser(),
         g2p=g2p or CountingG2P(),
         phoneme_processing=processor or CountingProcessor(),
@@ -234,7 +235,7 @@ class MarkerG2P(CountingG2P):
 
 def test_markers_have_local_offsets_and_aggregate_offsets() -> None:
     pipeline = KokoroPipeline(
-        PipelineConfig(),
+        PipelineConfig(generation=GenerationConfig(lang="en-us")),
         doc_parser=MarkerParser(),
         g2p=MarkerG2P(),
         phoneme_processing=CountingProcessor(),

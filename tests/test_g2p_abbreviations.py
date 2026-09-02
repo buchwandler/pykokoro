@@ -60,7 +60,7 @@ def test_kokorog2p_punctuation():
     phonemes = getattr(result, "phonemes", [])
     assert tokens
     assert "! " in phonemes
-    assert "…" in phonemes
+    assert "..." in phonemes
     assert "," in phonemes
     assert ", " not in phonemes
 

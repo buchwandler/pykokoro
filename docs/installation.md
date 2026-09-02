@@ -69,14 +69,13 @@ pip install onnxruntime-gpu==1.19.2
 
 ## Dependencies and optional spaCy
 
-PyKokoro's current integration baseline requires `phrasplit>=0.3.6,<0.4` and
-`ssmd>=0.8.4,<0.9`, alongside `kokorog2p[espeak,en]>=0.8.0,<0.9`. The package installs
-phrasplit, SSMD, NumPy, AudioSig, soundfile, and the other runtime support libraries it
-needs. kokorog2p 0.8.0 owns automatic written-to-spoken preparation and installs its
-compatible Spokenform and abbr2words dependencies transitively; do not install
-`spokenform` separately. `spacy` itself and language models are optional. The default
-tokenizer policy is safe on a clean install:
+PyKokoro v0.9 requires `kokorog2p[espeak,en]>=0.9.0,<1.0`,
+`phrasplit>=0.3.7,<0.4`, `ssmd>=0.8.6,<0.9`, and `spokenform>=0.3.6,<0.4`.
+The document language is explicit: pass `GenerationConfig(lang="en-us")` or `run(..., lang="en-us")`.
+Voice and profile selection never supplies the document language. SSMD `lang` spans
+are the supported mechanism for explicit mixed-language documents.
 
+The pipeline owns reusable spaCy resources for integrated Pass A and Pass B analysis:
 - `use_spacy=False` disables spaCy;
 - `use_spacy=None` selects the best compatible installed local model and falls back
   without downloading when none is available;
@@ -135,9 +134,12 @@ The public API is pipeline-first:
 import pykokoro
 
 from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro.generation_config import GenerationConfig
 
 print(pykokoro.__version__)
-with KokoroPipeline(PipelineConfig(voice="af_bella")) as pipeline:
+with KokoroPipeline(
+    PipelineConfig(voice="af_bella", generation=GenerationConfig(lang="en-us"))
+) as pipeline:
     result = pipeline.run("Hello, world!")
     print(f"Generated {len(result.audio)} samples at {result.sample_rate} Hz")
     result.release_audio()

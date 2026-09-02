@@ -8,6 +8,7 @@ import pytest
 
 from pykokoro.emphasis import apply_emphasis_policy, resolve_emphasis
 from pykokoro.exceptions import CapabilityError
+from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline import KokoroPipeline
 from pykokoro.pipeline_config import PipelineConfig
 from pykokoro.prosody import apply_volume
@@ -240,7 +241,10 @@ class _Postprocessor:
 def test_error_policy_runs_before_audio_generation() -> None:
     generator = _Generator()
     pipeline = KokoroPipeline(
-        PipelineConfig(ssmd=SSMDRenderConfig(emphasis_mode="error")),
+        PipelineConfig(
+            generation=GenerationConfig(lang="en-us"),
+            ssmd=SSMDRenderConfig(emphasis_mode="error"),
+        ),
         doc_parser=_Doc(),
         g2p=_G2P(),
         phoneme_processing=_Processor(),

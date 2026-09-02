@@ -18,7 +18,7 @@ def test_license_and_release_fallback_version_are_present() -> None:
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
     assert "Apache License" in license_text
-    assert pyproject["tool"]["setuptools_scm"]["fallback_version"] == "0.8.7"
+    assert pyproject["tool"]["setuptools_scm"]["fallback_version"] == "0.9.0"
 
 
 def test_companion_dependency_floors_match_current_integration_contract() -> None:
@@ -26,13 +26,12 @@ def test_companion_dependency_floors_match_current_integration_contract() -> Non
         "dependencies"
     ]
 
-    assert "kokorog2p[espeak,en]>=0.8.4,<0.9" in dependencies
-    assert "phrasplit>=0.3.6,<0.4" in dependencies
-
+    assert "kokorog2p[espeak,en]>=0.9.0,<1.0" in dependencies
+    assert "phrasplit>=0.3.7,<0.4" in dependencies
 
 def test_test_requirements_keep_kokorog2p_in_supported_window() -> None:
     requirements = (ROOT / "requirements-test.txt").read_text(encoding="utf-8")
-    assert "kokorog2p[all]>=0.8.4,<0.9" in requirements
+    assert "kokorog2p[all]>=0.9.0,<1.0" in requirements
 
 
 def test_provider_extras_do_not_install_every_runtime_distribution() -> None:
@@ -60,8 +59,8 @@ def test_ssmd_dependency_targets_current_contract() -> None:
     dependencies = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
         "dependencies"
     ]
-    assert "ssmd>=0.8.5,<0.9" in dependencies
-    assert "spokenform>=0.3.5,<0.4" in dependencies
+    assert "ssmd>=0.8.6,<0.9" in dependencies
+    assert "spokenform>=0.3.6,<0.4" in dependencies
 
 
 def test_audiosig_is_the_only_declared_dsp_backend() -> None:
@@ -130,8 +129,8 @@ def test_playback_extra_is_optional_and_keeps_compatibility_alias() -> None:
 def test_version_fallbacks_target_release() -> None:
     source = (ROOT / "pykokoro" / "__init__.py").read_text(encoding="utf-8")
 
-    assert re.search(r'__version__ = "0\.8\.7"', source)
-    assert re.search(r"__version_tuple__ = \(0, 8, 7\)", source)
+    assert re.search(r'__version__ = "0\.9\.0"', source)
+    assert re.search(r"__version_tuple__ = \(0, 9, 0\)", source)
 
 
 def test_lower_bound_workflow_pins_match_project_floors() -> None:
@@ -150,7 +149,7 @@ def test_lower_bound_workflow_pins_match_project_floors() -> None:
         for name, version in re.findall(r'"([A-Za-z0-9_.-]+)(?:\[[^]]+\])?==([^\"]+)"', workflow)
         if version and version[0].isdigit()
     }
-    expected_packages = {"kokorog2p", "phrasplit", "ssmd", "spokenform", "audiosig", "babel"}
+    expected_packages = {"kokorog2p", "phrasplit", "ssmd", "spokenform", "audiosig"}
 
     assert {package: pins[package] for package in expected_packages} == {
         package: floors[package] for package in expected_packages
@@ -161,6 +160,6 @@ def test_lower_bound_workflow_pins_match_project_floors() -> None:
 def test_package_resource_workflow_covers_kokorog2p_window() -> None:
     workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
 
-    assert 'kokorog2p-version: ["0.8.4"]' in workflow
+    assert 'kokorog2p-version: ["0.9.0"]' in workflow
     assert "working-directory: ${{ runner.temp }}" in workflow
     assert "pykokoro-*.whl" in workflow

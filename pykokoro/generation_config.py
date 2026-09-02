@@ -29,11 +29,9 @@ class GenerationConfig:
     Attributes:
         speed: Speech speed multiplier. 1.0 = normal speed, 0.5 = half speed,
             2.0 = double speed. Must be > 0.0. Default: 1.0
-        lang: Default language code for text-to-phoneme conversion.
-            Examples: 'en-us', 'en-gb', 'es', 'fr', 'de', 'it', 'pt', 'ja',
-            'ko', 'zh', 'hi'. Can be overridden per-segment with SSMD
-            [text]{lang="fr"} syntax. Default: "en-us"
-        is_phonemes: If True, treat input text as IPA phonemes instead of
+        lang: Required default language code for text-to-phoneme conversion.
+            Pass it explicitly for each document, or override it with ``run(lang=...)``.
+            Can be overridden per-segment with SSMD ``[text]{lang="fr"}`` syntax.
             regular text, bypassing text-to-phoneme conversion. Default: False
         pause_mode: Pause handling strategy:
             - "tts" (default): TTS generates pauses naturally at sentence
@@ -71,7 +69,7 @@ class GenerationConfig:
         Basic usage with config:
 
         >>> from pykokoro import KokoroPipeline, PipelineConfig
-        >>> config = GenerationConfig(speed=1.2, pause_mode="manual")
+        >>> config = GenerationConfig(lang="en-us", speed=1.2, pause_mode="manual")
         >>> pipe = KokoroPipeline(PipelineConfig(voice="af_sarah", generation=config))
         >>> res = pipe.run("Hello world")
 
@@ -96,7 +94,7 @@ class GenerationConfig:
 
     # Speed and language
     speed: float = 1.0
-    lang: str = "en-us"
+    lang: str | None = None
 
     # Processing modes
     is_phonemes: bool = False
@@ -134,10 +132,10 @@ class GenerationConfig:
                 f"pause_mode must be 'tts', 'manual', or 'auto', got '{self.pause_mode}'"
             )
 
-        # Validate lang is non-empty
-        if not isinstance(self.lang, str) or not self.lang:
-            raise ValueError(f"lang must be a non-empty string, got {self.lang!r}")
-
+        # Document language is required by the production pipeline boundary, not by
+        # lightweight configuration construction.
+        if self.lang is not None and (not isinstance(self.lang, str) or not self.lang):
+            raise ValueError(f"lang must be a non-empty string or None, got {self.lang!r}")
     def merge_with_kwargs(self, **kwargs: Any) -> dict[str, Any]:
         """Merge config with kwargs, with kwargs taking priority.
 

@@ -1,8 +1,9 @@
 from dataclasses import asdict
 
+from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline import KokoroPipeline
 from pykokoro.pipeline_config import PipelineConfig
-from pykokoro.runtime.cache import make_g2p_key
+from pykokoro.runtime.cache import annotation_fingerprint, make_g2p_key
 from pykokoro.tokenizer import TokenizerConfig
 
 
@@ -28,9 +29,10 @@ def test_make_g2p_key_changes_with_is_phonemes():
 
 
 def test_kokoro_key_changes_with_model_quality():
-    pipeline = KokoroPipeline(PipelineConfig())
-    key_fp32 = pipeline._kokoro_key(PipelineConfig(model_quality="fp32"))
-    key_fp16 = pipeline._kokoro_key(PipelineConfig(model_quality="fp16"))
+    generation = GenerationConfig(lang="en-us")
+    pipeline = KokoroPipeline(PipelineConfig(generation=generation))
+    key_fp32 = pipeline._kokoro_key(PipelineConfig(generation=generation, model_quality="fp32"))
+    key_fp16 = pipeline._kokoro_key(PipelineConfig(generation=generation, model_quality="fp16"))
 
     assert key_fp32 != key_fp16
 
@@ -75,3 +77,12 @@ def test_make_g2p_key_changes_with_named_lexicons():
     )
 
     assert gold != crane
+
+def test_annotation_fingerprint_includes_language_and_pos() -> None:
+    base = [{"start": 0, "end": 5, "text": "Hello", "pos": "INTJ", "language": "en-us"}]
+    tagged = [{"start": 0, "end": 5, "text": "Hello", "pos": "NOUN", "language": "en-us"}]
+    german = [{"start": 0, "end": 5, "text": "Hello", "pos": "INTJ", "language": "de"}]
+
+    assert annotation_fingerprint(base) == annotation_fingerprint(list(base))
+    assert annotation_fingerprint(base) != annotation_fingerprint(tagged)
+    assert annotation_fingerprint(base) != annotation_fingerprint(german)

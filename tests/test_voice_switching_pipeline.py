@@ -1,5 +1,6 @@
 import numpy as np
 
+from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline import KokoroPipeline
 from pykokoro.pipeline_config import PipelineConfig
 from pykokoro.runtime.spans import slice_spans
@@ -84,7 +85,7 @@ def test_pipeline_voice_switching_calls_resolver():
         return np.zeros((1, 1), dtype=np.float32)
 
     pipeline = KokoroPipeline(
-        PipelineConfig(voice="af"),
+        PipelineConfig(voice="af", generation=GenerationConfig(lang="en-us")),
         g2p=DummyG2PAdapter(),
         phoneme_processing=DummyPhonemeProcessor(),
         audio_generation=DummyAudioGenerator(resolver),

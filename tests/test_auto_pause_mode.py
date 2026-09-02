@@ -74,7 +74,9 @@ def test_auto_clause_pause_in_g2p(monkeypatch):
     monkeypatch.setitem(sys.modules, "kokorog2p", fake_g2p)
 
     text = "a" * 300 + "," + "b" * 300 + "," + "c" * 300
-    generation = GenerationConfig(is_phonemes=True, pause_mode="auto", pause_clause=0.25)
+    generation = GenerationConfig(
+        lang="en-us", is_phonemes=True, pause_mode="auto", pause_clause=0.25
+    )
     cfg = PipelineConfig(generation=generation)
     doc = DocumentResult(clean_text=text)
     segments = [
