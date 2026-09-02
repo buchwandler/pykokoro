@@ -1,0 +1,209 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: 0.9.0
+git_base_ref: v0.8.8
+git_base_sha: b2e39572919f06e0acdd6e81985beb82eb742307
+git_head_ref: HEAD
+git_head_sha: 9f874b210ddeb26a7ab593e36a2fc1f55be6c277
+git_range: b2e39572919f06e0acdd6e81985beb82eb742307..9f874b210ddeb26a7ab593e36a2fc1f55be6c277
+commit_count: 2
+rows:
+  - sha: 65ed9eec616468ccf37dd1a2138c6b464baf7d98
+    source_ref: git:65ed9eec616468ccf37dd1a2138c6b464baf7d98
+    short_sha: 65ed9ee
+    changed_paths:
+      - .github/workflows/tests.yml
+      - README.md
+      - docs/basic_usage.md
+      - docs/examples.md
+      - docs/installation.md
+      - docs/languages.md
+      - docs/pipeline_stages.md
+      - examples/mixed_language.py
+      - examples/say_as_demo.py
+      - examples/spokenform_showcase.py
+      - pykokoro/__init__.py
+      - pykokoro/generation_config.py
+      - pykokoro/mixed_language_handler.py
+      - pykokoro/pipeline.py
+      - pykokoro/pipeline_config.py
+      - pykokoro/runtime/cache.py
+      - pykokoro/runtime/language_plan.py
+      - pykokoro/runtime/linguistics.py
+      - pykokoro/say_as.py
+      - pykokoro/ssmd_parser.py
+      - pykokoro/stages/doc_parsers/plain.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/stages/protocols.py
+      - pykokoro/stages/segmentation/phrasplit.py
+      - pykokoro/stages/text_preparation/spokenform.py
+      - pykokoro/tokenizer.py
+      - pyproject.toml
+      - requirements-test.txt
+      - tests/test_auto_pause_mode.py
+      - tests/test_cache_keys.py
+      - tests/test_emphasis_policy.py
+      - tests/test_g2p_abbreviations.py
+      - tests/test_g2p_cache.py
+      - tests/test_g2p_pause_propagation.py
+      - tests/test_g2p_spokenform.py
+      - tests/test_generation_config.py
+      - tests/test_import_boundaries.py
+      - tests/test_language_plan.py
+      - tests/test_maintainer_review4_download_cache.py
+      - tests/test_maintainer_review4_reproductions.py
+      - tests/test_mixed_language.py
+      - tests/test_model_profile_resolution.py
+      - tests/test_packaging_metadata.py
+      - tests/test_pipeline_lifecycle.py
+      - tests/test_pipeline_paragraphs.py
+      - tests/test_pipeline_refactor.py
+      - tests/test_pipeline_result_retention.py
+      - tests/test_pipeline_unit_streaming.py
+      - tests/test_prosody_pipeline.py
+      - tests/test_say_as.py
+      - tests/test_ssmd_080_pipeline.py
+      - tests/test_tokenizer.py
+      - tests/test_voice_switching_pipeline.py
+    stats:
+      files_changed: 0
+      insertions: 997
+      deletions: 1897
+    inspected: true
+    inspected_paths:
+      - .github/workflows/tests.yml
+      - README.md
+      - docs/basic_usage.md
+      - docs/examples.md
+      - docs/installation.md
+      - docs/languages.md
+      - docs/pipeline_stages.md
+      - examples/mixed_language.py
+      - examples/say_as_demo.py
+      - examples/spokenform_showcase.py
+      - pykokoro/__init__.py
+      - pykokoro/generation_config.py
+      - pykokoro/mixed_language_handler.py
+      - pykokoro/pipeline.py
+      - pykokoro/pipeline_config.py
+      - pykokoro/runtime/cache.py
+      - pykokoro/runtime/language_plan.py
+      - pykokoro/runtime/linguistics.py
+      - pykokoro/say_as.py
+      - pykokoro/ssmd_parser.py
+      - pykokoro/stages/doc_parsers/plain.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/stages/protocols.py
+      - pykokoro/stages/segmentation/phrasplit.py
+      - pykokoro/stages/text_preparation/spokenform.py
+      - pykokoro/tokenizer.py
+      - pyproject.toml
+      - requirements-test.txt
+      - tests/test_auto_pause_mode.py
+      - tests/test_cache_keys.py
+      - tests/test_emphasis_policy.py
+      - tests/test_g2p_abbreviations.py
+      - tests/test_g2p_cache.py
+      - tests/test_g2p_pause_propagation.py
+      - tests/test_g2p_spokenform.py
+      - tests/test_generation_config.py
+      - tests/test_import_boundaries.py
+      - tests/test_language_plan.py
+      - tests/test_maintainer_review4_download_cache.py
+      - tests/test_maintainer_review4_reproductions.py
+      - tests/test_mixed_language.py
+      - tests/test_model_profile_resolution.py
+      - tests/test_packaging_metadata.py
+      - tests/test_pipeline_lifecycle.py
+      - tests/test_pipeline_paragraphs.py
+      - tests/test_pipeline_refactor.py
+      - tests/test_pipeline_result_retention.py
+      - tests/test_pipeline_unit_streaming.py
+      - tests/test_prosody_pipeline.py
+      - tests/test_say_as.py
+      - tests/test_ssmd_080_pipeline.py
+      - tests/test_tokenizer.py
+      - tests/test_voice_switching_pipeline.py
+    observed_behavior:
+      The integrated pipeline now requires an explicit document language, builds
+      validated language runs from SSMD spans, performs shared source and prepared-text
+      linguistic analysis, passes provider-neutral annotations into Spokenform and G2P,
+      and segments prepared runs with preserved offsets. Generic written-to-spoken and
+      say-as realization is delegated to Spokenform; the obsolete automatic
+      mixed-language and local say-as implementations are removed. Documentation,
+      examples, tests, and v0.9 dependency declarations are updated for this
+      orchestration contract.
+    public_impact: public
+    decision: accepted
+    evidence_subject: "feat: prepare 0.9.0 release, move normalization out of kokorog2p"
+    target_entry_id: entry-0002
+    notes: Reviewed the complete commit diff and affected tests.
+  - sha: 9f874b210ddeb26a7ab593e36a2fc1f55be6c277
+    source_ref: git:9f874b210ddeb26a7ab593e36a2fc1f55be6c277
+    short_sha: 9f874b2
+    changed_paths:
+      - README.md
+      - docs/installation.md
+      - docs/languages.md
+      - examples/mixed_language.py
+      - pykokoro/generation_config.py
+      - pykokoro/pipeline.py
+      - pykokoro/runtime/cache.py
+      - pykokoro/runtime/language_plan.py
+      - pykokoro/runtime/linguistics.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/stages/protocols.py
+      - pykokoro/stages/segmentation/phrasplit.py
+      - pykokoro/stages/text_preparation/spokenform.py
+      - pykokoro/tokenizer.py
+      - tests/test_cache_keys.py
+      - tests/test_g2p_spokenform.py
+      - tests/test_maintainer_review4_download_cache.py
+      - tests/test_maintainer_review4_reproductions.py
+      - tests/test_packaging_metadata.py
+      - tests/test_pipeline_refactor.py
+      - tests/test_pipeline_result_retention.py
+      - uv.lock
+    stats:
+      files_changed: 0
+      insertions: 115
+      deletions: 97
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/installation.md
+      - docs/languages.md
+      - examples/mixed_language.py
+      - pykokoro/generation_config.py
+      - pykokoro/pipeline.py
+      - pykokoro/runtime/cache.py
+      - pykokoro/runtime/language_plan.py
+      - pykokoro/runtime/linguistics.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/stages/protocols.py
+      - pykokoro/stages/segmentation/phrasplit.py
+      - pykokoro/stages/text_preparation/spokenform.py
+      - pykokoro/tokenizer.py
+      - tests/test_cache_keys.py
+      - tests/test_g2p_spokenform.py
+      - tests/test_maintainer_review4_download_cache.py
+      - tests/test_maintainer_review4_reproductions.py
+      - tests/test_packaging_metadata.py
+      - tests/test_pipeline_refactor.py
+      - tests/test_pipeline_result_retention.py
+      - uv.lock
+    observed_behavior:
+      The locked dependency set is updated to the v0.9-compatible releases, including
+      kokorog2p 0.9.0, phrasplit 0.3.7, Spokenform 0.3.6, and SSMD 0.8.6; the remaining
+      changes are formatting-only cleanup of the already reviewed implementation and
+      tests.
+    public_impact: public
+    decision: accepted
+    evidence_subject: "chore: pre-commit"
+    target_entry_id: entry-0003
+    notes:
+      Reviewed the complete commit diff; no separate product behavior beyond the lock
+      update.
