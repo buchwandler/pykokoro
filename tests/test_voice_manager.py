@@ -106,6 +106,24 @@ class TestVoiceLoading:
         assert any("Successfully loaded" in record.message for record in caplog.records)
         assert any("3 voices" in record.message for record in caplog.records)
 
+    def test_github_loading_logs_one_info_success(self, mock_npz_file, caplog):
+        caplog.set_level(logging.DEBUG)
+        manager = VoiceManager(model_source="github")
+        manager.load_voices(mock_npz_file)
+
+        info_success = [
+            record
+            for record in caplog.records
+            if record.levelno == logging.INFO and "Successfully loaded" in record.message
+        ]
+        raw_load = [
+            record
+            for record in caplog.records
+            if record.levelno == logging.DEBUG and "raw GitHub voice archive" in record.message
+        ]
+        assert len(info_success) == 1
+        assert len(raw_load) == 1
+
 
 class TestGetVoices:
     """Test getting voice list."""

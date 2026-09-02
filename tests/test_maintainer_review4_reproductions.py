@@ -174,10 +174,10 @@ def test_backend_cache_key_snapshots_mutable_nested_configuration() -> None:
 
     initial_key = pipeline._kokoro_key(cfg)
     provider_options["execution"]["device_id"] = 1
-    assert pipeline._kokoro_key(cfg) != initial_key
-
+    provider_key = pipeline._kokoro_key(cfg)
+    assert provider_key != initial_key
     object.__setattr__(tokenizer_config, "lexicons", ("gold", "de"))
-    assert pipeline._kokoro_key(cfg) != initial_key
+    assert pipeline._kokoro_key(cfg) == provider_key
 
 
 def test_backend_cache_key_snapshots_mutable_spokenform_sensitive_tokenizer_flags() -> None:

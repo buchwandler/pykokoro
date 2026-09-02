@@ -309,8 +309,12 @@ class VoiceManager:
                 ) from exc
 
         self._voices_data = self._normalize_loaded_voices(voices, voices_path)
-        logger.info(f"Successfully loaded {len(self._voices_data)} voices from {voices_path}")
-        logger.debug(f"Available voices: {', '.join(sorted(self._voices_data.keys()))}")
+        logger.info(
+            "Successfully loaded %d voices from %s",
+            len(self._voices_data),
+            voices_path,
+        )
+        logger.debug("Available voices: %s", ", ".join(sorted(self._voices_data.keys())))
 
     def _load_voices_bin_github(self, voices_path: Path) -> dict[str, np.ndarray]:
         """Load voices from GitHub format .bin file.
@@ -335,8 +339,12 @@ class VoiceManager:
         # Convert NpzFile to dictionary
         voices: dict[str, np.ndarray] = dict(voices_npz)
 
-        logger.info(f"Successfully loaded {len(voices)} voices from {voices_path}")
-        logger.debug(f"Available voices: {', '.join(sorted(voices.keys()))}")
+        logger.debug(
+            "Loaded raw GitHub voice archive with %d entries from %s",
+            len(voices),
+            voices_path,
+        )
+        logger.debug("Available raw voices: %s", ", ".join(sorted(voices.keys())))
 
         return voices
 

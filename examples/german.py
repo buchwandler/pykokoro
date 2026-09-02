@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -107,10 +108,19 @@ def main() -> None:
     print("  fourth: olaph lexicon")
     print(f"  separator: {LEXICON_SEPARATOR_SECONDS:.1f} s silence")
 
+    base_config = make_config(lexicons=None)
     results: dict[str, Any] = {}
-    for label, lexicons in LEXICON_SOURCES:
-        with KokoroPipeline(make_config(lexicons=lexicons)) as pipeline:
-            results[label] = pipeline.run(TEXT)
+    with KokoroPipeline(base_config) as pipeline:
+        assert base_config.tokenizer_config is not None
+        for label, lexicons in LEXICON_SOURCES:
+            tokenizer_config = replace(
+                base_config.tokenizer_config,
+                lexicons=lexicons,
+            )
+            results[label] = pipeline.run(
+                TEXT,
+                tokenizer_config=tokenizer_config,
+            )
 
     for label, _lexicons in LEXICON_SOURCES:
         print_result(label, results[label])

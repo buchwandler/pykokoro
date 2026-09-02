@@ -57,6 +57,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+def _acoustic_tokenizer_key(config: TokenizerConfig | None) -> object:
+    """Return tokenizer settings that affect the acoustic backend."""
+    if config is None:
+        return None
+    # Named lexicons affect frontend G2P only, not the acoustic runtime.
+    return _freeze_config_value(replace(config, lexicons=None))
+
 
 def _load_default_onnx_adapters() -> tuple[type[Any], type[Any], type[Any]]:
     """Load ONNX stage classes only when a default stage is actually needed."""
@@ -660,9 +667,10 @@ class KokoroPipeline:
             cfg.provider,
             _freeze_config_value(cfg.provider_options),
             _freeze_config_value(cfg.session_options),
-            _freeze_config_value(cfg.tokenizer_config),
+            _acoustic_tokenizer_key(cfg.tokenizer_config),
             _freeze_config_value(cfg.espeak_config),
             _freeze_config_value(cfg.short_sentence_config),
+            _freeze_config_value(cfg.waveform_validation),
             cfg.allow_experimental_frontend,
         )
 

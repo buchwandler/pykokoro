@@ -155,8 +155,10 @@ def test_g2p_instance_cache_distinguishes_named_lexicons(monkeypatch):
 
     gold = adapter._get_g2p_instance("de", gold_cfg)
     crane = adapter._get_g2p_instance("de", crane_cfg)
+    gold_again = adapter._get_g2p_instance("de", gold_cfg)
 
     assert gold is not crane
+    assert gold is gold_again
     assert [entry["lexicons"] for entry in created] == [("gold",), ("crane",)]
 
 
