@@ -8,11 +8,7 @@ import soundfile as sf
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
 
-SOURCE = (
-    "Guten Tag. "
-    '[This is an English phrase.]{lang="en-US"} '
-    "Weiter auf Deutsch."
-)
+SOURCE = 'Guten Tag. [This is an English phrase.]{lang="en-US"} Weiter auf Deutsch.'
 
 
 def main() -> None:

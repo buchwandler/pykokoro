@@ -86,10 +86,10 @@ def build_language_plan(
     for start, end in zip(ordered_positions, ordered_positions[1:], strict=False):
         if end <= start:
             continue
-        covering = [
-            span for span in explicit if span[0] <= start and end <= span[1]
-        ]
-        selected = min(covering, key=lambda span: (span[1] - span[0], -span[0])) if covering else None
+        covering = [span for span in explicit if span[0] <= start and end <= span[1]]
+        selected = (
+            min(covering, key=lambda span: (span[1] - span[0], -span[0])) if covering else None
+        )
         language = selected[2] if selected is not None else default
         if runs and runs[-1].language == language and runs[-1].char_end == start:
             runs[-1] = LanguageRun(runs[-1].char_start, end, language)

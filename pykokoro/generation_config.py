@@ -136,6 +136,7 @@ class GenerationConfig:
         # lightweight configuration construction.
         if self.lang is not None and (not isinstance(self.lang, str) or not self.lang):
             raise ValueError(f"lang must be a non-empty string or None, got {self.lang!r}")
+
     def merge_with_kwargs(self, **kwargs: Any) -> dict[str, Any]:
         """Merge config with kwargs, with kwargs taking priority.
 

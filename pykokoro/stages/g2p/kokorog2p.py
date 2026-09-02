@@ -274,7 +274,6 @@ class KokoroG2PAdapter(G2PAdapter):
             break
         return annotations
 
-
     @staticmethod
     def _phonemize_prepared(
         g2p: Any,

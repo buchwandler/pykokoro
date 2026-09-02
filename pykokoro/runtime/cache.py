@@ -17,6 +17,7 @@ class Cache(Protocol):
     def set(self, key: str, value: Any) -> None: ...
     def delete(self, key: str) -> None: ...
 
+
 def make_cache_key(*parts: Any) -> str:
     h = hashlib.sha256()
     for p in parts:
@@ -28,16 +29,26 @@ def make_cache_key(*parts: Any) -> str:
         h.update(b"\x1f")
     return h.hexdigest()
 
+
 def annotation_fingerprint(annotations: Sequence[Any] | None) -> str:
     """Return a stable identity for provider-neutral token annotations."""
     values = []
     for item in annotations or ():
         if isinstance(item, dict):
-            values.append(tuple(item.get(key) for key in ("start", "end", "text", "pos", "tag", "lemma", "language")))
+            values.append(
+                tuple(
+                    item.get(key)
+                    for key in ("start", "end", "text", "pos", "tag", "lemma", "language")
+                )
+            )
         else:
-            values.append(tuple(getattr(item, key, None) for key in ("start", "end", "text", "pos", "tag", "lemma", "language")))
+            values.append(
+                tuple(
+                    getattr(item, key, None)
+                    for key in ("start", "end", "text", "pos", "tag", "lemma", "language")
+                )
+            )
     return make_cache_key(values)
-
 
 
 def cache_from_dir(cache_dir: str | None) -> Cache:

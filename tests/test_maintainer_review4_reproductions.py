@@ -163,9 +163,7 @@ def test_failed_backend_replacement_preserves_open_previous_backend(
 
 
 def test_backend_cache_key_snapshots_mutable_nested_configuration() -> None:
-    pipeline = KokoroPipeline(
-        PipelineConfig(generation=GenerationConfig(lang="en-us"))
-    )
+    pipeline = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us")))
     provider_options = {"execution": {"device_id": 0}}
     tokenizer_config = TokenizerConfig(lexicons=("gold",))
     cfg = replace(
@@ -183,9 +181,7 @@ def test_backend_cache_key_snapshots_mutable_nested_configuration() -> None:
 
 
 def test_backend_cache_key_snapshots_mutable_spokenform_sensitive_tokenizer_flags() -> None:
-    pipeline = KokoroPipeline(
-        PipelineConfig(generation=GenerationConfig(lang="en-us"))
-    )
+    pipeline = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us")))
     tokenizer_config = TokenizerConfig(load_gold=True, load_silver=True, use_espeak_fallback=True)
     cfg = replace(pipeline.config, tokenizer_config=tokenizer_config)
 

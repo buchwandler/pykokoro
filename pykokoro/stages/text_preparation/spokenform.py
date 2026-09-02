@@ -52,7 +52,9 @@ class SpokenformTextPreparer(TextPreparer):
                 run_source,
                 language=language,
                 config=PreparationConfig.for_kokorog2p(language),
-                annotations=self._spokenform_annotations(analysis.annotations) if analysis else None,
+                annotations=self._spokenform_annotations(analysis.annotations)
+                if analysis
+                else None,
                 nlp=analysis.doc if analysis else None,
                 protected_spans=protected,
             )
@@ -144,8 +146,6 @@ class SpokenformTextPreparer(TextPreparer):
         )
         return doc
 
-
-
     @staticmethod
     def _spokenform_annotations(annotations: tuple[Any, ...]) -> tuple[Any, ...]:
         if not annotations:
@@ -164,7 +164,6 @@ class SpokenformTextPreparer(TextPreparer):
             )
             for item in annotations
         )
-
 
     @staticmethod
     def _protected_spans(

@@ -69,13 +69,14 @@ pip install onnxruntime-gpu==1.19.2
 
 ## Dependencies and optional spaCy
 
-PyKokoro v0.9 requires `kokorog2p[espeak,en]>=0.9.0,<1.0`,
-`phrasplit>=0.3.7,<0.4`, `ssmd>=0.8.6,<0.9`, and `spokenform>=0.3.6,<0.4`.
-The document language is explicit: pass `GenerationConfig(lang="en-us")` or `run(..., lang="en-us")`.
-Voice and profile selection never supplies the document language. SSMD `lang` spans
-are the supported mechanism for explicit mixed-language documents.
+PyKokoro v0.9 requires `kokorog2p[espeak,en]>=0.9.0,<1.0`, `phrasplit>=0.3.7,<0.4`,
+`ssmd>=0.8.6,<0.9`, and `spokenform>=0.3.6,<0.4`. The document language is explicit:
+pass `GenerationConfig(lang="en-us")` or `run(..., lang="en-us")`. Voice and profile
+selection never supplies the document language. SSMD `lang` spans are the supported
+mechanism for explicit mixed-language documents.
 
 The pipeline owns reusable spaCy resources for integrated Pass A and Pass B analysis:
+
 - `use_spacy=False` disables spaCy;
 - `use_spacy=None` selects the best compatible installed local model and falls back
   without downloading when none is available;

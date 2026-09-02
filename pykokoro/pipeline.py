@@ -574,8 +574,6 @@ def build_pipeline(
     return pipeline
 
 
-
-
 class KokoroPipeline:
     def __init__(
         self,
@@ -638,6 +636,7 @@ class KokoroPipeline:
         self._kokoro_config_key = None
 
         self.linguistic_resources.clear()
+
     def _unregister_prepared(self, prepared: PreparedAudioUnits) -> None:
         if prepared in self._prepared_objects:
             self._prepared_objects.remove(prepared)
@@ -827,7 +826,6 @@ class KokoroPipeline:
                 )
             )
         return analyses
-
 
     def _prepare_document(
         self, text: str, cfg: PipelineConfig, unit: AudioUnitKind

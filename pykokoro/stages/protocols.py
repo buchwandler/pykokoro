@@ -38,6 +38,7 @@ class DocumentResult:
     # Ephemeral request state; never part of serialized public results.
     linguistic_state: LinguisticRequestState | None = field(default=None, repr=False, compare=False)
 
+
 class DocumentParser(Protocol):
     def parse(self, text: str, cfg: PipelineConfig, trace: Trace) -> DocumentResult: ...
 

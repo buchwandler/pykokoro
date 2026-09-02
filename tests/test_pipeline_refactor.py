@@ -144,6 +144,7 @@ def test_pipeline_requires_explicit_language() -> None:
     with pytest.raises(ValueError, match="document language is required"):
         pipe.run("Hello")
 
+
 @pytest.mark.skipif(
     os.getenv("PYKOKORO_ONNX_SMOKE") != "1",
     reason="Enable with PYKOKORO_ONNX_SMOKE=1",

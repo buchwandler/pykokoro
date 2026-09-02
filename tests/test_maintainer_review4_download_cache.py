@@ -171,9 +171,7 @@ def test_g2p_cache_schema_recomputes_and_preserves_warnings(tmp_path, monkeypatc
         sentence_idx=0,
         clause_idx=0,
     )
-    cfg = PipelineConfig(
-        generation=GenerationConfig(lang="en-us"), cache_dir=str(tmp_path)
-    )
+    cfg = PipelineConfig(generation=GenerationConfig(lang="en-us"), cache_dir=str(tmp_path))
     key = make_g2p_key(
         text=segment.text,
         lang=cfg.generation.lang,

@@ -22,15 +22,16 @@ default; Chinese automatic selection retains the GitHub v1.1-zh policy.
 
 The document language is explicit in v0.9. Pass `GenerationConfig(lang="de")` or
 `run(..., lang="de")`; voice and model profiles never infer it. Martin is the default
-German acoustic model when that language is selected. Kerstin/Crane and Thorsten are explicit
-alternative acoustic models; Crane currently requires experimental frontend opt-in.
-Compare them with the maintained examples `examples/german.py`, `examples/german2.py`,
-and `examples/german3.py`.
+German acoustic model when that language is selected. Kerstin/Crane and Thorsten are
+explicit alternative acoustic models; Crane currently requires experimental frontend
+opt-in. Compare them with the maintained examples `examples/german.py`,
+`examples/german2.py`, and `examples/german3.py`.
 
 The integrated pipeline performs Spokenform preparation before sentence segmentation and
 G2P. Spokenform owns written-to-spoken forms such as dates, measurements, ordinals,
-currency amounts, and abbreviations. Explicit mixed-language text uses SSMD `lang` spans.
-Prepared segment offsets refer to the prepared document text and remain exact half-open slices.
+currency amounts, and abbreviations. Explicit mixed-language text uses SSMD `lang`
+spans. Prepared segment offsets refer to the prepared document text and remain exact
+half-open slices.
 
 Managed Martin cache hits are checked against the pinned SHA-256 digests before use;
 invalid files are removed and downloaded again. Explicit custom paths are validated in

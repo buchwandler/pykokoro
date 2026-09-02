@@ -100,9 +100,7 @@ class CountingKokoro:
 
 def _pipeline() -> KokoroPipeline:
     return KokoroPipeline(
-        PipelineConfig(
-            voice="af", generation=GenerationConfig(lang="en-us"), return_trace=True
-        ),
+        PipelineConfig(voice="af", generation=GenerationConfig(lang="en-us"), return_trace=True),
         doc_parser=RetentionDocumentParser(),
         g2p=RetentionG2P(),
     )

@@ -10,11 +10,11 @@ resolution-markers = [
 
 [[package]]
 name = "abbr2words"
-version = "0.2.12"
+version = "0.2.13"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/a5/fa/ddb055b470be4f9e3d1d324921bfb95d9dc2c5c6c4cfec5a086f98565470/abbr2words-0.2.12.tar.gz", hash = "sha256:44ad98e3f6f41c608a4dbb2a64b73f8f80719ae6e88ba7a1b5bbf838c4611b7b", size = 303972, upload-time = "2026-08-27T19:22:42.917Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fb/fe/427b30ca984319380ed18fc1b797d14cf2a430a9cd5c3d3e0daf528a9ffe/abbr2words-0.2.13.tar.gz", hash = "sha256:7919fb0d965ebb0347e1cd08911018ba0a90780d14535ee375ec2e96a0724a38", size = 314475, upload-time = "2026-08-31T15:22:11.214Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/73/f3/159d0cc2ed03901d1faf0a0048a96e5a078d2b53e8ddbe8ad77ae92b985a/abbr2words-0.2.12-py3-none-any.whl", hash = "sha256:d123b41ef8f0b85c2993e642fbaf9f492bd3db8eab2db74c2b630a0dec299993", size = 126546, upload-time = "2026-08-27T19:22:41.755Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/7a/1771fe5e1e248e47359384eef5fab4c790c106772ceda2f9ed832add4244/abbr2words-0.2.13-py3-none-any.whl", hash = "sha256:5be62d1a587c7bf7037989922fb5be7f212a654e81ebc5b3ac92b3d8cb89781e", size = 128904, upload-time = "2026-08-31T15:22:10.196Z" },
 ]
 
 [[package]]
@@ -134,15 +134,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/09/9c/1badd30c08377fdedde9a07f304244b70a94ace188085819fd68e4189236/audiosig-0.1.2.tar.gz", hash = "sha256:49a2adc9f0dea4327341164d91368d5795aa7de73730107c13ca02ccaf81893e", size = 173209, upload-time = "2026-08-01T14:35:22.67Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/65/a8/7fc9b913bc399b8b90116b0b2d1c4bd2a6abad14bf00be3d15fb80d65784/audiosig-0.1.2-py3-none-any.whl", hash = "sha256:24cb2726e6bb445e9c1e42b9e280f497c5189e7a567289a5528c2eb9fc9177c3", size = 43983, upload-time = "2026-08-01T14:35:21.543Z" },
-]
-
-[[package]]
-name = "babel"
-version = "2.18.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/7d/b2/51899539b6ceeeb420d40ed3cd4b7a40519404f9baf3d4ac99dc413a834b/babel-2.18.0.tar.gz", hash = "sha256:b80b99a14bd085fcacfa15c9165f651fbb3406e66cc603abf11c5750937c992d", size = 9959554, upload-time = "2026-02-01T12:30:56.078Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/77/f5/21d2de20e8b8b0408f0681956ca2c69f1320a3848ac50e6e7f39c6159675/babel-2.18.0-py3-none-any.whl", hash = "sha256:e2b422b277c2b9a9630c1d7903c2a00d0830c409c59ac8cae9081c92f1aeba35", size = 10196845, upload-time = "2026-02-01T12:30:53.445Z" },
 ]
 
 [[package]]
@@ -901,6 +892,15 @@ wheels = [
 ]
 
 [[package]]
+name = "g2lex"
+version = "0.1.8"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a7/71/2ad5c6f9007e2de546bd23a7bc7bc4f3547e141f92f99816cb904c025da7/g2lex-0.1.8.tar.gz", hash = "sha256:33dac62808ce39bbcf3b76eb63f6a081914e1306b9dc1ae5e1960bf07b1bd71b", size = 123364, upload-time = "2026-08-31T18:42:11.039Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3c/ac/bbb29f388b77e89eaf2bedeb5740e4729cddc63e8932572f1654ecd12a53/g2lex-0.1.8-py3-none-any.whl", hash = "sha256:9801812c92f33558dae473f1423aa329559a9ea9d9648ecd0951a3e086a5fc1e", size = 118339, upload-time = "2026-08-31T18:42:09.589Z" },
+]
+
+[[package]]
 name = "h11"
 version = "0.16.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1013,20 +1013,18 @@ wheels = [
 
 [[package]]
 name = "kokorog2p"
-version = "0.8.3"
+version = "0.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "abbr2words" },
-    { name = "spokenform" },
+    { name = "g2lex" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4e/32/2e78d1148cb287de0d781d134bfc854d25d064814491b42dc1c48f51163a/kokorog2p-0.8.3.tar.gz", hash = "sha256:6541e96d4f0b9c53a70ba03a6043d677ecaa525d5b0d829fa5f460afdb064aaa", size = 9247664, upload-time = "2026-08-28T16:53:06.185Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f4/9d/bad050757c5a40fbdf73947d3c75406f46af387bb0be6bb6ed00eb244495/kokorog2p-0.9.0.tar.gz", hash = "sha256:e41132629e1ea2cda41e31630559ba210877278faf566827b4bed202b3a883a8", size = 35258695, upload-time = "2026-09-02T10:45:24.39Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bf/10/9b589a2588bb62d7f3140cb6c5fc4e51bd9e5b5a8c641ae4ea18508577d0/kokorog2p-0.8.3-py3-none-any.whl", hash = "sha256:61719ebf8602e5da28311b044da2d419be0905619436fc47a96dd8489ca57a63", size = 8729068, upload-time = "2026-08-28T16:53:03.783Z" },
+    { url = "https://files.pythonhosted.org/packages/7a/c4/d383992a25d6d70a212d64c770e88cfc2964a325176031623c2565c52c7d/kokorog2p-0.9.0-py3-none-any.whl", hash = "sha256:5415bc55d9045e523c0fb554c77af09d282b867d6ed8bbabb78d6a17f05830f5", size = 34546269, upload-time = "2026-09-02T10:45:20.519Z" },
 ]
 
 [package.optional-dependencies]
 en = [
-    { name = "num2words" },
     { name = "spacy" },
 ]
 espeak = [
@@ -1888,15 +1886,15 @@ wheels = [
 
 [[package]]
 name = "phrasplit"
-version = "0.3.6"
+version = "0.3.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/71/a6/342696f16b80a80161a39b32d7b1f05cdb47476cc7d5dc5129d1e6118e49/phrasplit-0.3.6.tar.gz", hash = "sha256:44a83d1339c54795d5b50bdab993281734b85d1353a766f8bc0d7c96c2dda2ed", size = 182549, upload-time = "2026-08-25T04:42:56.481Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/06/f1/f60277299b44d4e6f67d18cb0173b5c91d9d093950074916390fd10c9ace/phrasplit-0.3.7.tar.gz", hash = "sha256:8e4e68d05c993d0d6ba28144b347031c281f37fde9ff86220397091668839bed", size = 186338, upload-time = "2026-09-01T14:22:05.184Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/92/45/b8cf2506673479551128d7278ff6229f279196b357b7ee6693f235969751/phrasplit-0.3.6-py3-none-any.whl", hash = "sha256:43bde91f5b8dc39c8df585aea31fce114e47b936568092edd20724cf378ce5a6", size = 51551, upload-time = "2026-08-25T04:42:55.533Z" },
+    { url = "https://files.pythonhosted.org/packages/fd/ac/6ba4115d01b88d3b15df7f29e683e12cad2f7145b7f929da5d1684d8c786/phrasplit-0.3.7-py3-none-any.whl", hash = "sha256:2cea99f91b7933803274cda41a61cad47853b6991b306e59f96eb62de6a0b3c1", size = 52856, upload-time = "2026-09-01T14:22:03.96Z" },
 ]
 
 [[package]]
@@ -2167,17 +2165,16 @@ name = "pykokoro"
 source = { editable = "." }
 dependencies = [
     { name = "audiosig" },
-    { name = "babel" },
     { name = "chardet" },
     { name = "charset-normalizer" },
     { name = "kokorog2p", extra = ["en", "espeak"] },
-    { name = "num2words" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version == '3.11.*'" },
     { name = "numpy", version = "2.5.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "phrasplit" },
     { name = "platformdirs" },
     { name = "soundfile" },
+    { name = "spokenform" },
     { name = "ssmd" },
     { name = "typing-extensions" },
 ]
@@ -2226,21 +2223,19 @@ sounddevice = [
 [package.metadata]
 requires-dist = [
     { name = "audiosig", specifier = ">=0.1.1,<0.2" },
-    { name = "babel", specifier = ">=2.12.0" },
     { name = "chardet" },
     { name = "charset-normalizer" },
     { name = "coremltools", marker = "extra == 'coreml'", specifier = ">=7.0" },
     { name = "huggingface-hub", marker = "extra == 'huggingface'", specifier = ">=0.27" },
-    { name = "kokorog2p", extras = ["en", "espeak"], specifier = ">=0.8.1,<0.9" },
+    { name = "kokorog2p", extras = ["en", "espeak"], specifier = ">=0.9.0,<1.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.0.0" },
-    { name = "num2words", specifier = ">=0.5.12" },
     { name = "numpy" },
     { name = "onnxruntime", marker = "extra == 'coreml'", specifier = ">=1.17.0" },
     { name = "onnxruntime", marker = "extra == 'cpu'", specifier = ">=1.17.0" },
     { name = "onnxruntime-directml", marker = "extra == 'directml'", specifier = ">=1.17.0" },
     { name = "onnxruntime-gpu", marker = "extra == 'gpu'", specifier = ">=1.17.0" },
     { name = "onnxruntime-openvino", marker = "extra == 'openvino'", specifier = ">=1.17.0" },
-    { name = "phrasplit", specifier = ">=0.3.6,<0.4" },
+    { name = "phrasplit", specifier = ">=0.3.7,<0.4" },
     { name = "platformdirs" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0.0" },
@@ -2249,7 +2244,8 @@ requires-dist = [
     { name = "sounddevice", marker = "extra == 'playback'" },
     { name = "sounddevice", marker = "extra == 'sounddevice'" },
     { name = "soundfile" },
-    { name = "ssmd", specifier = ">=0.8.4,<0.9" },
+    { name = "spokenform", specifier = ">=0.3.6,<0.4" },
+    { name = "ssmd", specifier = ">=0.8.6,<0.9" },
     { name = "tomli", marker = "python_full_version < '3.11' and extra == 'dev'", specifier = ">=2.0.1" },
     { name = "typing-extensions", specifier = ">=4.0" },
 ]
@@ -2564,16 +2560,16 @@ wheels = [
 
 [[package]]
 name = "spokenform"
-version = "0.3.3"
+version = "0.3.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "abbr2words" },
     { name = "cn2an" },
     { name = "num2words" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/03/d5/cd34c16e25611d4bb45ea9eedf08b27a89b87c1a8d5161189d7f0b5d9d53/spokenform-0.3.3.tar.gz", hash = "sha256:eb547df67060ad2fb7653c37bc1cac7f13bb84d79d28533b40dad1e143fec29b", size = 431137, upload-time = "2026-08-27T20:26:13.745Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/16/1d/dc61aac5189e7e2dc4ce609ff4f1e1fd0d101e761986ae842a545266eac2/spokenform-0.3.6.tar.gz", hash = "sha256:616a20919ab2ad092392ccc5439c109c25cd5679a94c778d381b0f6843718d51", size = 474102, upload-time = "2026-09-01T14:42:56.555Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1f/01/17abc45aa0cf6d5dcad6a2b6c959f268b7716edb03982604215c5bd5e8c6/spokenform-0.3.3-py3-none-any.whl", hash = "sha256:b07a19cdb65507d9563713b00b7d2d90d5659741533dfe28e56977ca93a4c361", size = 164694, upload-time = "2026-08-27T20:26:12.128Z" },
+    { url = "https://files.pythonhosted.org/packages/29/fb/b896f847dc063c074a42997101d8eecdac0896048ed6e44c780f03a045c5/spokenform-0.3.6-py3-none-any.whl", hash = "sha256:307a8053556dc5cac394e998f4f8ba493724733d7421a51d3e96d47d548efd8c", size = 175952, upload-time = "2026-09-01T14:42:55.131Z" },
 ]
 
 [[package]]
@@ -2637,7 +2633,7 @@ wheels = [
 
 [[package]]
 name = "ssmd"
-version = "0.8.4"
+version = "0.8.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -2645,9 +2641,9 @@ dependencies = [
     { name = "pyyaml" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/26/9e/d28b79dadff83bf0e012b49b1708408080e72b2c604259d526a013cfe9d5/ssmd-0.8.4.tar.gz", hash = "sha256:328f79af9fd8c00f32f484e7f957408bb8058ae5f6e4cc64e198e47271b07db6", size = 286043, upload-time = "2026-08-24T21:01:11.502Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/38/97/1e836dd4ce1032fc8fd852b2d07ef95d70b4c71a4ebf1b5fa118ba6d1b01/ssmd-0.8.6.tar.gz", hash = "sha256:d7194cf98a6691cab551d1a13a6113b8f6c800dcc9d2550c5250340a57fdb9de", size = 295946, upload-time = "2026-09-01T14:24:54.697Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3d/3d/0fae4a9e82158c953a3fb70fef609401b88a9c55f75ec69e8a135773b6ff/ssmd-0.8.4-py3-none-any.whl", hash = "sha256:3cbd2cb621cbeb13a8a24413915a940f30cacc8de5239c86c001e419361ff2cc", size = 111878, upload-time = "2026-08-24T21:01:10.288Z" },
+    { url = "https://files.pythonhosted.org/packages/06/ac/e1bbd818cd573e6f4c6400aee1d71c4a5b0b2f6b74d9d21bc5ba857a362f/ssmd-0.8.6-py3-none-any.whl", hash = "sha256:33af2de6ae09f2d32b5bf1f4bace6d954bdb7b3a7dfedf5a09147791f47bacec", size = 115934, upload-time = "2026-09-01T14:24:53.409Z" },
 ]
 
 [[package]]

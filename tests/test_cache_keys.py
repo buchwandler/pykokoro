@@ -78,6 +78,7 @@ def test_make_g2p_key_changes_with_named_lexicons():
 
     assert gold != crane
 
+
 def test_annotation_fingerprint_includes_language_and_pos() -> None:
     base = [{"start": 0, "end": 5, "text": "Hello", "pos": "INTJ", "language": "en-us"}]
     tagged = [{"start": 0, "end": 5, "text": "Hello", "pos": "NOUN", "language": "en-us"}]

@@ -29,6 +29,7 @@ def test_companion_dependency_floors_match_current_integration_contract() -> Non
     assert "kokorog2p[espeak,en]>=0.9.0,<1.0" in dependencies
     assert "phrasplit>=0.3.7,<0.4" in dependencies
 
+
 def test_test_requirements_keep_kokorog2p_in_supported_window() -> None:
     requirements = (ROOT / "requirements-test.txt").read_text(encoding="utf-8")
     assert "kokorog2p[all]>=0.9.0,<1.0" in requirements

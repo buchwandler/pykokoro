@@ -130,7 +130,9 @@ class PhrasplitSentenceSegmenter(PhrasplitSentenceSplitter, SentenceSegmenter):
                 if end <= start:
                     continue
                 abs_start, abs_end = run.char_start + start, run.char_start + end
-                resolved_sentence = sentence_index if sentence is None else sentence_index + sentence
+                resolved_sentence = (
+                    sentence_index if sentence is None else sentence_index + sentence
+                )
                 segments.append(
                     Segment(
                         id=f"p0_s{resolved_sentence}_c{clause or 0}_seg{segment_index}",
@@ -163,7 +165,6 @@ class PhrasplitSentenceSegmenter(PhrasplitSentenceSplitter, SentenceSegmenter):
                 sentence_index += 1
         return segments
 
-
     @staticmethod
     def _has_non_whitespace_gap(text: str, items: list[Any]) -> bool:
         cursor = 0
@@ -175,8 +176,11 @@ class PhrasplitSentenceSegmenter(PhrasplitSentenceSplitter, SentenceSegmenter):
                 return True
             cursor = max(cursor, end)
         return bool(text[cursor:].strip())
+
     @staticmethod
-    def _repair_closing_quote_boundaries(doc: DocumentResult, segments: list[Segment]) -> list[Segment]:
+    def _repair_closing_quote_boundaries(
+        doc: DocumentResult, segments: list[Segment]
+    ) -> list[Segment]:
         """Split a terminator followed by a closing quote and new sentence."""
         repaired: list[Segment] = []
         pattern = re.compile(r"[.!?][\"'»”’]+\s+(?=[A-ZÄÖÜÀ-Þ])")
@@ -189,11 +193,27 @@ class PhrasplitSentenceSegmenter(PhrasplitSentenceSplitter, SentenceSegmenter):
                 end = segment.char_start + match.start() + len(match.group(0).rstrip())
                 if end <= start or end >= segment.char_end:
                     continue
-                repaired.append(replace(segment, text=doc.clean_text[start:end], char_start=start, char_end=end, sentence_idx=sentence_idx))
+                repaired.append(
+                    replace(
+                        segment,
+                        text=doc.clean_text[start:end],
+                        char_start=start,
+                        char_end=end,
+                        sentence_idx=sentence_idx,
+                    )
+                )
                 sentence_idx += 1
                 start = segment.char_start + match.end()
             if start < segment.char_end:
-                repaired.append(replace(segment, text=doc.clean_text[start:segment.char_end], char_start=start, char_end=segment.char_end, sentence_idx=sentence_idx))
+                repaired.append(
+                    replace(
+                        segment,
+                        text=doc.clean_text[start : segment.char_end],
+                        char_start=start,
+                        char_end=segment.char_end,
+                        sentence_idx=sentence_idx,
+                    )
+                )
             next_sentence[paragraph_idx] = sentence_idx + 1
         return repaired
 

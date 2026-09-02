@@ -58,6 +58,7 @@ class LinguisticRequestState:
         """Release Pass-A documents after preparation has consumed them."""
         for analysis in self.source_analysis:
             analysis.doc = None
+
     def release_docs(self) -> None:
         """Release provider documents while preserving lightweight annotations."""
         for analysis in (*self.source_analysis, *self.prepared_analysis):

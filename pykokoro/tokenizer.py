@@ -205,7 +205,6 @@ class Tokenizer:
         # G2P instances cache (lazy loaded per language)
         self._g2p_cache: dict[str, G2PBase] = {}
 
-
         # Phoneme dictionary for custom word->phoneme mappings
         self._phoneme_dictionary_obj: PhonemeDictionary | None = None
         if self.config.phoneme_dictionary_path:
@@ -224,7 +223,6 @@ class Tokenizer:
         # Log if espeak_config was provided (deprecated)
         if espeak_config is not None and (espeak_config.lib_path or espeak_config.data_path):
             logger.warning("EspeakConfig is deprecated. kokorog2p manages espeak internally.")
-
 
     def _get_g2p(self, lang: str) -> G2PBase:
         """Get or create a G2P instance for the given language.

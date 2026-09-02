@@ -25,18 +25,17 @@ A Python library for Kokoro TTS (Text-to-Speech) using ONNX runtime.
 - **Hugging Face Integration**: Automatic model downloading from Hugging Face Hub
 - **Explicit Language Planning**: The document language is required before parsing; SSMD
   `lang` spans provide explicit mixed-language runs
-- **Text Normalization**: Spokenform owns generic written-to-spoken preparation, including
-  semantic say-as behavior when supported by the SSMD/Spokenform contract
+- **Text Normalization**: Spokenform owns generic written-to-spoken preparation,
+  including semantic say-as behavior when supported by the SSMD/Spokenform contract
 - **Maintainer Benchmarking**: PolyNorm-based phoneme regression tooling for the
   PyKokoro frontend path
 
-
 ## v0.9 orchestration contract
 
-PyKokoro v0.9 requires an explicit document language. Set `GenerationConfig(lang="en-us")`
-or pass `lang="en-us"` to `run`; the per-call value takes precedence. A voice or model
-profile never selects the language. Mixed-language documents must use explicit SSMD language
-spans, for example:
+PyKokoro v0.9 requires an explicit document language. Set
+`GenerationConfig(lang="en-us")` or pass `lang="en-us"` to `run`; the per-call value
+takes precedence. A voice or model profile never selects the language. Mixed-language
+documents must use explicit SSMD language spans, for example:
 
 ```python
 config = PipelineConfig(generation=GenerationConfig(lang="en-us"))
@@ -47,9 +46,11 @@ result = KokoroPipeline(config).run(
 ```
 
 Integrated requests perform source analysis before Spokenform and fresh prepared-text
-analysis afterward. The pipeline reuses loaded local spaCy pipelines, but releases request
-documents before returning results. Use `tokenizer_config.use_spacy=False` to disable NLP,
-leave it unset for local-only fallback, or set it to `True` for strict model availability.
+analysis afterward. The pipeline reuses loaded local spaCy pipelines, but releases
+request documents before returning results. Use `tokenizer_config.use_spacy=False` to
+disable NLP, leave it unset for local-only fallback, or set it to `True` for strict
+model availability.
+
 ## Runtime model support
 
 Runtime model selection uses the canonical `catalog/models.json` registry. Model
@@ -689,11 +690,10 @@ pipe = KokoroPipeline(
 res = pipe.run(text)
 ```
 
-
 ## Explicit mixed-language text
 
-Automatic language detection is not part of PyKokoro v0.9. Set the document language explicitly
-and mark language changes with SSMD spans:
+Automatic language detection is not part of PyKokoro v0.9. Set the document language
+explicitly and mark language changes with SSMD spans:
 
 ```python
 text = 'Hello [Welt]{lang="de"} and [bonjour]{lang="fr"}.'

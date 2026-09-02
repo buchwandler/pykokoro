@@ -46,6 +46,7 @@ def test_kokorog2p_spokenform_semantics() -> None:
     assert _result_ids(result)
     assert not any(char.isdigit() for char in spoken)
 
+
 def test_adapter_accepts_spokenform_rich_source_without_warnings() -> None:
     cfg = PipelineConfig(generation=GenerationConfig(lang="en-us"))
     doc = DocumentResult(clean_text=TEXT)
