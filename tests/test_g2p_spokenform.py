@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import kokorog2p
+import pytest
 from spokenform import prepare_for_kokorog2p
 
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline_config import PipelineConfig
 from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
 from pykokoro.stages.protocols import DocumentResult
+from pykokoro.tokenizer import TokenizerConfig
 from pykokoro.types import Segment, Trace
 
 TEXT = (
@@ -96,3 +98,63 @@ def test_adapter_uses_prepared_entrypoint(monkeypatch) -> None:
     )
     KokoroG2PAdapter().phonemize([segment], doc, cfg, Trace())
     assert calls == ["prepared"]
+
+
+@pytest.mark.parametrize("source", ["gold", "crane", "espeak", "olaph"])
+def test_german_martin_named_lexicons_are_vocab_safe(source, tmp_path) -> None:
+    """Keep PyKokoro's real tokenizer boundary safe for named German lexicons."""
+    import kokorog2p
+
+    from pykokoro.runtime.language_plan import LanguageRun
+    from pykokoro.runtime.linguistics import (
+        LinguisticRequestState,
+        PreparedRunAnalysis,
+        TokenAnnotation,
+    )
+
+    text = "Haus Brücke fünf"
+    segment = Segment(
+        id="seg",
+        text=text,
+        char_start=0,
+        char_end=len(text),
+        paragraph_idx=0,
+        sentence_idx=0,
+        clause_idx=0,
+    )
+    annotation = TokenAnnotation(
+        start=0,
+        end=4,
+        text="Haus",
+        tag="NN",
+        language="de",
+    )
+    doc = DocumentResult(clean_text=text, segments=[segment])
+    doc.linguistic_state = LinguisticRequestState(
+        prepared_analysis=[
+            PreparedRunAnalysis(
+                run=LanguageRun(0, len(text), "de"),
+                text=text,
+                doc=None,
+                annotations=(annotation,),
+            )
+        ]
+    )
+    config = PipelineConfig(
+        cache_dir=str(tmp_path),
+        generation=GenerationConfig(lang="de"),
+        tokenizer_config=TokenizerConfig(
+            lexicons=(source,),
+            use_spacy=False,
+        ),
+    )
+    trace = Trace()
+
+    result = KokoroG2PAdapter().phonemize([segment], doc, config, trace)[0]
+
+    assert result.tokens
+    assert result.phonemes
+    valid, invalid = kokorog2p.validate_for_kokoro(result.phonemes, model="1.0")
+    assert valid, invalid
+    assert not any("[VOCAB] invalid chars" in warning for warning in trace.warnings)
+    assert not any(char in result.phonemes for char in "̩̯͡ʏ")

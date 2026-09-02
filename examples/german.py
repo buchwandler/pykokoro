@@ -27,6 +27,12 @@ CRANE_LEXICONS = ("crane",)
 ESPEAK_LEXICONS = ("espeak",)
 OLAPH_LEXICONS = ("olaph",)
 LEXICON_SEPARATOR_SECONDS = 1.0
+LEXICON_SOURCES = (
+    ("gold", GOLD_LEXICONS),
+    ("crane", CRANE_LEXICONS),
+    ("espeak", ESPEAK_LEXICONS),
+    ("olaph", OLAPH_LEXICONS),
+)
 
 
 def make_config(*, lexicons: str | tuple[str, ...] | None = None) -> PipelineConfig:
@@ -70,6 +76,13 @@ def combine_lexicon_audio(
     return np.concatenate(audio_parts, axis=0)
 
 
+def format_lexicon_layout() -> str:
+    """Return the ordered audio layout shown by the comparison example."""
+    return f" -> {LEXICON_SEPARATOR_SECONDS:.1f} s silence -> ".join(
+        label for label, _lexicons in LEXICON_SOURCES
+    )
+
+
 def print_result(label: str, result: Any) -> None:
     """Print phonemes and warnings for one lexicon run."""
     print(f"\n[{label}] phonemes:")
@@ -86,30 +99,25 @@ def main() -> None:
     """Generate the German Gold-versus-Crane comparison."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s")
     print("Generating German comparison:")
+
     print("  acoustic model: Martin v1.2")
-    print("  first: gold lexicon")
+    print("  first:  gold lexicon")
     print("  second: crane lexicon")
-    print("  third: espeak lexicon")
-    print("  forth: olaph lexicon")
+    print("  third:  espeak lexicon")
+    print("  fourth: olaph lexicon")
     print(f"  separator: {LEXICON_SEPARATOR_SECONDS:.1f} s silence")
 
-    with KokoroPipeline(make_config(lexicons=GOLD_LEXICONS)) as pipeline:
-        gold_result = pipeline.run(TEXT)
-    with KokoroPipeline(make_config(lexicons=CRANE_LEXICONS)) as pipeline:
-        crane_result = pipeline.run(TEXT)
-    with KokoroPipeline(make_config(lexicons=ESPEAK_LEXICONS)) as pipeline:
-        espeak_result = pipeline.run(TEXT)
-    with KokoroPipeline(make_config(lexicons=OLAPH_LEXICONS)) as pipeline:
-        olaph_result = pipeline.run(TEXT)
+    results: dict[str, Any] = {}
+    for label, lexicons in LEXICON_SOURCES:
+        with KokoroPipeline(make_config(lexicons=lexicons)) as pipeline:
+            results[label] = pipeline.run(TEXT)
 
-    print_result("gold", gold_result)
-    print_result("crane", crane_result)
-    print_result("espeak", espeak_result)
-    print_result("olaph", olaph_result)
-    audio = combine_lexicon_audio(gold_result, crane_result, espeak_result, olaph_result)
-    sf.write(OUTPUT_FILE, audio, gold_result.sample_rate)
+    for label, _lexicons in LEXICON_SOURCES:
+        print_result(label, results[label])
+    audio = combine_lexicon_audio(*(results[label] for label, _lexicons in LEXICON_SOURCES))
+    sf.write(OUTPUT_FILE, audio, results[LEXICON_SOURCES[0][0]].sample_rate)
     print(f"\nWrote {OUTPUT_FILE}")
-    print(f"Layout: gold -> {LEXICON_SEPARATOR_SECONDS:.1f} s silence -> crane")
+    print(f"Layout: {format_lexicon_layout()}")
 
 
 if __name__ == "__main__":

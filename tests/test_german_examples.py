@@ -52,6 +52,18 @@ def test_german_examples_share_normalization_comparison_text() -> None:
         assert case in german.TEXT
 
 
+def test_german_comparison_layout_lists_all_lexicons() -> None:
+    assert [label for label, _lexicons in german.LEXICON_SOURCES] == [
+        "gold",
+        "crane",
+        "espeak",
+        "olaph",
+    ]
+    assert german.format_lexicon_layout() == (
+        "gold -> 1.0 s silence -> crane -> 1.0 s silence -> espeak -> 1.0 s silence -> olaph"
+    )
+
+
 @pytest.mark.parametrize("module", [german, german2, german3])
 def test_german_configs_change_only_lexicon(module) -> None:
     gold = module.make_config(lexicons=("gold",))
