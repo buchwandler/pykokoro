@@ -132,7 +132,7 @@ class SpokenformTextPreparer(TextPreparer):
         trace.warnings.extend(item for item in warnings if item not in trace.warnings)
         trace.events.append(
             TraceEvent(
-                stage="text_preparation",
+                stage="text_preparation_run",
                 name="prepare",
                 ms=0.0,
                 details={

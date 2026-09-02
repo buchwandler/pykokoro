@@ -43,6 +43,7 @@ def __getattr__(name: str) -> Any:
     if name in {
         "KokoroPipeline",
         "PreparedAudioUnits",
+        "PreparedFrontend",
         "build_pipeline",
         "with_spacy_model",
         "with_spacy_model_size",
@@ -51,6 +52,7 @@ def __getattr__(name: str) -> Any:
             from .pipeline import (
                 KokoroPipeline,
                 PreparedAudioUnits,
+                PreparedFrontend,
                 build_pipeline,
                 with_spacy_model,
                 with_spacy_model_size,
@@ -65,6 +67,7 @@ def __getattr__(name: str) -> Any:
         return {
             "KokoroPipeline": KokoroPipeline,
             "PreparedAudioUnits": PreparedAudioUnits,
+            "PreparedFrontend": PreparedFrontend,
             "build_pipeline": build_pipeline,
             "with_spacy_model": with_spacy_model,
             "with_spacy_model_size": with_spacy_model_size,
@@ -99,6 +102,7 @@ __all__ = [
     "AudioUnitResult",
     "WordTiming",
     "PreparedAudioUnits",
+    "PreparedFrontend",
     "PipelineConfig",
     "__version__",
     "__version_tuple__",

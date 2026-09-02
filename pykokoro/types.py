@@ -234,6 +234,19 @@ class Trace:
             "fallback_onnx_calls": self.counters.get("fallback_onnx_calls", 0),
         }
 
+    def event_summary(self) -> dict[tuple[str, str], float]:
+        """Return aggregate durations grouped by stage and event name.
+
+        Aggregate timing events are intentionally separate from diagnostic events.
+        Callers must not sum nested aggregate events as a critical-path total.
+        """
+        totals: dict[tuple[str, str], float] = {}
+        for event in self.events:
+            key = (event.stage, event.name)
+            totals[key] = totals.get(key, 0.0) + event.ms
+        return totals
+
+
 
 @dataclass
 class AudioResult:

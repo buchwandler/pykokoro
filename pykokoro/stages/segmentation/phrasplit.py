@@ -93,7 +93,7 @@ class PhrasplitSentenceSegmenter(PhrasplitSentenceSplitter, SentenceSegmenter):
                 if diagnostics:
                     trace.events.append(
                         TraceEvent(
-                            stage="segmentation",
+                            stage="segmentation_run",
                             name="precomputed",
                             ms=0.0,
                             details={"language": run.language, "diagnostics": len(diagnostics)},
@@ -251,7 +251,7 @@ class PhrasplitSentenceSegmenter(PhrasplitSentenceSplitter, SentenceSegmenter):
         metadata["segment_count"] = len(segments)
         trace.events.append(
             TraceEvent(
-                stage="segmentation",
+                stage="segmentation_run",
                 name="split",
                 ms=0.0,
                 details={"backend": "phrasplit", "segment_count": len(segments)},

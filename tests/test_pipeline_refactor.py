@@ -226,3 +226,89 @@ def test_pipeline_stage_order_is_explicit() -> None:
         "audio_generation",
         "audio_postprocessing",
     ]
+
+
+def test_pipeline_trace_aggregates_top_level_stage_timings() -> None:
+    config = PipelineConfigType(
+        generation=GenerationConfig(lang="en-us"),
+        return_trace=True,
+    )
+    pipeline = KokoroPipeline(
+        config,
+        doc_parser=DummyDocParser(),
+        g2p=DummyG2P(),
+        phoneme_processing=DummyPhonemeProcessor(),
+        audio_generation=DummyAudioGeneration(),
+        audio_postprocessing=DummyAudioPostprocessing(),
+    )
+    result = pipeline.run("Hello")
+    assert result.trace is not None
+
+    summary = result.trace.event_summary()
+    required = (
+        ("doc", "parse"),
+        ("language_plan", "source"),
+        ("linguistics", "pass_a"),
+        ("text_preparation", "prepare"),
+        ("language_plan", "prepared"),
+        ("linguistics", "pass_b"),
+        ("segmentation", "split"),
+        ("g2p", "phonemize"),
+        ("runtime", "resolve_stages"),
+        ("phoneme_processing", "preprocess"),
+        ("audio_generation", "generate"),
+        ("audio_postprocessing", "postprocess"),
+    )
+    assert all(summary[key] > 0.0 for key in required)
+    assert not any(event.stage == "linguistics" and event.ms == 0.0 for event in result.trace.events)
+
+
+def test_reusable_frontend_renders_multiple_lexicons_without_repreparation() -> None:
+    from pykokoro.tokenizer import TokenizerConfig
+
+    class CountingParser(DummyDocParser):
+        calls = 0
+
+        def parse(self, text, cfg, trace):
+            self.calls += 1
+            return super().parse(text, cfg, trace)
+
+    class CountingG2P(DummyG2P):
+        lexicons: list[tuple[str, ...] | None] = []
+
+        def phonemize(self, segments, doc, cfg, trace):
+            self.lexicons.append(
+                cfg.tokenizer_config.lexicons if cfg.tokenizer_config is not None else None
+            )
+            return super().phonemize(segments, doc, cfg, trace)
+
+    parser = CountingParser()
+    g2p = CountingG2P()
+    pipeline = KokoroPipeline(
+        PipelineConfigType(
+            generation=GenerationConfig(lang="en-us"),
+            return_trace=True,
+        ),
+        doc_parser=parser,
+        g2p=g2p,
+        phoneme_processing=DummyPhonemeProcessor(),
+        audio_generation=DummyAudioGeneration(),
+        audio_postprocessing=DummyAudioPostprocessing(),
+    )
+    frontend = pipeline.prepare_frontend("Hello")
+    try:
+        gold = pipeline.render_frontend(
+            frontend, tokenizer_config=TokenizerConfig(lexicons=("gold",))
+        )
+        crane = pipeline.render_frontend(
+            frontend, tokenizer_config=TokenizerConfig(lexicons=("crane",))
+        )
+        assert parser.calls == 1
+        assert g2p.lexicons == [("gold",), ("crane",)]
+        assert frontend.segments
+        assert gold.trace is not None
+        assert crane.trace is not None
+    finally:
+        frontend.close()
+    with pytest.raises(RuntimeError, match="PreparedFrontend is closed"):
+        _ = frontend.text

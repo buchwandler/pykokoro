@@ -108,6 +108,65 @@ class _PreparedDocument:
     audio_postprocessor: AudioPostprocessor
 
 
+@dataclass(slots=True)
+class PreparedFrontend:
+    """Reusable lexicon-independent frontend preparation for one request."""
+
+    _pipeline: KokoroPipeline
+    _cfg: PipelineConfig
+    _trace: Trace
+    _doc: Any
+    _segments: list[Segment]
+    _state: LinguisticRequestState
+    _unit_kind: AudioUnitKind
+    _closed: bool = False
+
+    @property
+    def text(self) -> str:
+        self._ensure_open()
+        return self._doc.clean_text
+
+    @property
+    def segments(self) -> tuple[Segment, ...]:
+        self._ensure_open()
+        return tuple(self._segments)
+
+    @property
+    def trace(self) -> Trace:
+        self._ensure_open()
+        return self._trace
+
+    @property
+    def document_metadata(self) -> Mapping[str, Any]:
+        self._ensure_open()
+        return MappingProxyType(_copy_metadata_value(self._doc.metadata))
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._state.release_docs()
+        self._doc.linguistic_state = None
+        self._segments.clear()
+        self._doc = None
+        self._closed = True
+
+    def _ensure_open(self) -> None:
+        if self._closed:
+            raise RuntimeError("PreparedFrontend is closed")
+
+    def __enter__(self) -> Self:
+        self._ensure_open()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        self.close()
+
+
 class PreparedAudioUnits:
     """A globally prepared document that can render selected units sequentially."""
 
@@ -769,6 +828,44 @@ class KokoroPipeline:
         self._prepared_objects.append(result)
         return result
 
+    def prepare_frontend(
+        self,
+        text: str,
+        *,
+        unit: AudioUnitKind = "paragraph",
+        **overrides: Any,
+    ) -> PreparedFrontend:
+        """Prepare lexicon-independent frontend state for repeated rendering."""
+        if unit not in ("paragraph", "sentence"):
+            raise ValueError(f"Unsupported audio unit kind: {unit!r}")
+        cfg = deepcopy(self._resolve_run_config(overrides))
+        if cfg.tokenizer_config is not None:
+            cfg = replace(
+                cfg,
+                tokenizer_config=replace(cfg.tokenizer_config, lexicons=None),
+            )
+        return self._prepare_frontend(text, cfg, unit)
+
+    def render_frontend(
+        self,
+        frontend: PreparedFrontend,
+        *,
+        tokenizer_config: TokenizerConfig | Mapping[str, Any] | None = None,
+    ) -> AudioResult:
+        """Render one lexicon-dependent result from prepared frontend state."""
+        if frontend._pipeline is not self:
+            raise ValueError("frontend belongs to a different KokoroPipeline")
+        frontend._ensure_open()
+        rendered_tokenizer_config = (
+            frontend._cfg.tokenizer_config
+            if tokenizer_config is None
+            else _coerce_tokenizer(frontend._cfg.tokenizer_config, tokenizer_config)
+        )
+        config = replace(frontend._cfg, tokenizer_config=rendered_tokenizer_config)
+        prepared = self._render_frontend(frontend, config)
+        return self._audio_result_from_prepared(prepared)
+
+
     def iter_units(
         self,
         text: str,
@@ -826,7 +923,7 @@ class KokoroPipeline:
             )
             trace.events.append(
                 TraceEvent(
-                    stage="linguistics",
+                    stage="linguistics_run",
                     name=pass_name,
                     ms=0.0,
                     details={
@@ -842,6 +939,62 @@ class KokoroPipeline:
             )
         return analyses
 
+    def _prepare_frontend(
+        self, text: str, cfg: PipelineConfig, unit: AudioUnitKind
+    ) -> PreparedFrontend:
+        language = require_document_language(cfg)
+        trace = Trace()
+        with trace_timing(trace, "doc", "parse"):
+            logger.debug("Parsing document")
+            doc = self.doc_parser.parse(text, cfg, trace)
+        trace.warnings.extend(doc.warnings)
+        state = LinguisticRequestState()
+        doc.linguistic_state = state
+        try:
+            with trace_timing(trace, "language_plan", "source"):
+                state.source_plan = build_language_plan(
+                    doc.clean_text, doc.annotation_spans, default_language=language
+                )
+            with trace_timing(trace, "linguistics", "pass_a"):
+                state.source_analysis = self._analyze_runs(
+                    doc.clean_text, state.source_plan, cfg, trace, "pass_a"
+                )
+            with trace_timing(trace, "text_preparation", "prepare"):
+                doc = self.text_preparer.prepare(doc, cfg, trace)
+            doc.linguistic_state = state
+            trace.warnings.extend(doc.preparation.warnings if doc.preparation else ())
+            with trace_timing(trace, "language_plan", "prepared"):
+                state.prepared_plan = build_language_plan(
+                    doc.clean_text, doc.annotation_spans, default_language=language
+                )
+            with trace_timing(trace, "linguistics", "pass_b"):
+                state.prepared_analysis = self._analyze_runs(
+                    doc.clean_text, state.prepared_plan, cfg, trace, "pass_b"
+                )
+            state.release_source_docs()
+            with trace_timing(trace, "segmentation", "split"):
+                segments = self.sentence_segmenter.split(doc, cfg, trace)
+        except Exception:
+            state.release_docs()
+            doc.linguistic_state = None
+            raise
+        if not segments and doc.clean_text:
+            segments = [
+                Segment(
+                    id="p0_s0_c0_seg0",
+                    text=doc.clean_text,
+                    char_start=0,
+                    char_end=len(doc.clean_text),
+                    paragraph_idx=0,
+                    sentence_idx=0,
+                    clause_idx=0,
+                )
+            ]
+        doc.segments = segments
+        self._apply_post_segmentation_pauses(doc, segments, cfg)
+        return PreparedFrontend(self, cfg, trace, doc, segments, state, unit)
+
+
     def _prepare_document(
         self, text: str, cfg: PipelineConfig, unit: AudioUnitKind
     ) -> _PreparedDocument:
@@ -850,27 +1003,17 @@ class KokoroPipeline:
         with trace_timing(trace, "doc", "parse"):
             logger.debug("Parsing document")
             doc = self.doc_parser.parse(text, cfg, trace)
-            trace.warnings.extend(doc.warnings)
-            state = LinguisticRequestState()
-            doc.linguistic_state = state
+        trace.warnings.extend(doc.warnings)
+        state = LinguisticRequestState()
+        doc.linguistic_state = state
+        with trace_timing(trace, "language_plan", "source"):
             state.source_plan = build_language_plan(
                 doc.clean_text, doc.annotation_spans, default_language=language
             )
-            trace.events.append(
-                TraceEvent(
-                    stage="language_plan",
-                    name="source",
-                    ms=0.0,
-                    details={
-                        "runs": len(state.source_plan),
-                        "languages": [run.language for run in state.source_plan],
-                    },
-                )
-            )
+        with trace_timing(trace, "linguistics", "pass_a"):
             state.source_analysis = self._analyze_runs(
                 doc.clean_text, state.source_plan, cfg, trace, "pass_a"
             )
-
         try:
             with trace_timing(trace, "text_preparation", "prepare"):
                 doc = self.text_preparer.prepare(doc, cfg, trace)
@@ -880,24 +1023,15 @@ class KokoroPipeline:
             raise
         doc.linguistic_state = state
         trace.warnings.extend(doc.preparation.warnings if doc.preparation else ())
-        state.prepared_plan = build_language_plan(
-            doc.clean_text, doc.annotation_spans, default_language=language
-        )
-        trace.events.append(
-            TraceEvent(
-                stage="language_plan",
-                name="prepared",
-                ms=0.0,
-                details={
-                    "runs": len(state.prepared_plan),
-                    "languages": [run.language for run in state.prepared_plan],
-                },
+        with trace_timing(trace, "language_plan", "prepared"):
+            state.prepared_plan = build_language_plan(
+                doc.clean_text, doc.annotation_spans, default_language=language
             )
-        )
         try:
-            state.prepared_analysis = self._analyze_runs(
-                doc.clean_text, state.prepared_plan, cfg, trace, "pass_b"
-            )
+            with trace_timing(trace, "linguistics", "pass_b"):
+                state.prepared_analysis = self._analyze_runs(
+                    doc.clean_text, state.prepared_plan, cfg, trace, "pass_b"
+                )
         except Exception:
             state.release_docs()
             doc.linguistic_state = None
@@ -933,7 +1067,8 @@ class KokoroPipeline:
         finally:
             state.release_docs()
             doc.linguistic_state = None
-        phoneme_processor, audio_generator, audio_postprocessor = self._resolve_stages(cfg)
+        with trace_timing(trace, "runtime", "resolve_stages"):
+            phoneme_processor, audio_generator, audio_postprocessor = self._resolve_stages(cfg)
 
         with trace_timing(trace, "phoneme_processing", "preprocess"):
             logger.debug("Preprocessing %d phoneme segments", len(phoneme_segments))
@@ -954,6 +1089,52 @@ class KokoroPipeline:
             audio_generator=audio_generator,
             audio_postprocessor=audio_postprocessor,
         )
+    @staticmethod
+    def _copy_frontend_trace(trace: Trace) -> Trace:
+        return Trace(
+            warnings=list(trace.warnings),
+            events=list(trace.events),
+            prosody=deepcopy(trace.prosody),
+            model=deepcopy(trace.model),
+            counters=dict(trace.counters),
+        )
+
+    def _render_frontend(
+        self, frontend: PreparedFrontend, cfg: PipelineConfig
+    ) -> _PreparedDocument:
+        frontend._ensure_open()
+        doc = frontend._doc
+        doc.linguistic_state = frontend._state
+        trace = self._copy_frontend_trace(frontend._trace)
+        try:
+            with trace_timing(trace, "g2p", "phonemize"):
+                logger.debug("Phonemizing %d segments", len(frontend._segments))
+                phoneme_segments = self.g2p.phonemize(frontend._segments, doc, cfg, trace)
+        finally:
+            frontend._state.release_docs()
+            doc.linguistic_state = None
+        with trace_timing(trace, "runtime", "resolve_stages"):
+            phoneme_processor, audio_generator, audio_postprocessor = self._resolve_stages(cfg)
+        with trace_timing(trace, "phoneme_processing", "preprocess"):
+            logger.debug("Preprocessing %d phoneme segments", len(phoneme_segments))
+            phoneme_segments = phoneme_processor.process(phoneme_segments, cfg, trace)
+        apply_emphasis_policy(phoneme_segments, cfg, trace)
+        segments = list(frontend._segments)
+        groups = self._build_unit_groups(doc, segments, phoneme_segments, cfg, frontend._unit_kind)
+        return _PreparedDocument(
+            cfg=cfg,
+            unit_kind=frontend._unit_kind,
+            trace=trace,
+            doc=doc,
+            segments=segments,
+            phoneme_segments=phoneme_segments,
+            groups=groups,
+            phoneme_processor=phoneme_processor,
+            audio_generator=audio_generator,
+            audio_postprocessor=audio_postprocessor,
+        )
+
+
 
     @staticmethod
     def _apply_post_segmentation_pauses(
@@ -1301,6 +1482,57 @@ class KokoroPipeline:
                 segment.raw_audio = None
                 segment.processed_audio = None
             raise
+
+    def _audio_result_from_prepared(self, prepared: _PreparedDocument) -> AudioResult:
+        prepared_units = PreparedAudioUnits(self, prepared)
+        self._prepared_objects.append(prepared_units)
+        cfg = prepared.cfg
+        final_audio: list[Any] = []
+        markers: list[dict[str, Any]] = []
+        word_timings: list[Any] = []
+        retained_phonemes: list[PhonemeSegment] = []
+        base_offset = 0
+        try:
+            for unit_result in prepared_units.render():
+                final_audio.append(unit_result.audio)
+                markers.extend(
+                    {
+                        "name": marker["name"],
+                        "char_offset": marker["char_offset"],
+                        "sample_offset": marker["sample_offset"] + base_offset,
+                    }
+                    for marker in unit_result.markers
+                )
+                word_timings.extend(
+                    replace(
+                        timing,
+                        start_sample=timing.start_sample + base_offset,
+                        end_sample=timing.end_sample + base_offset,
+                    )
+                    for timing in unit_result.word_timings
+                )
+                if cfg.retain_segment_audio:
+                    retained_phonemes.extend(
+                        _copy_phoneme_segment(segment) for segment in unit_result.phoneme_segments
+                    )
+                base_offset += len(unit_result.audio)
+            source_segments = list(prepared.segments)
+            source_phonemes = retained_phonemes if cfg.retain_segment_audio else list(prepared.phoneme_segments)
+            audio = np.concatenate(final_audio) if final_audio else np.array([], dtype=np.float32)
+            metadata = dict(prepared_units.document_metadata)
+            return AudioResult(
+                audio=audio,
+                sample_rate=SAMPLE_RATE,
+                segments=source_segments,
+                phoneme_segments=source_phonemes,
+                trace=prepared.trace if cfg.return_trace else None,
+                document_metadata=metadata,
+                markers=markers,
+                word_timings=word_timings,
+            )
+        finally:
+            prepared_units.close()
+
 
     def run(self, text: str, **overrides: Any) -> AudioResult:
         with self.prepare_units(text, unit="paragraph", **overrides) as prepared:
