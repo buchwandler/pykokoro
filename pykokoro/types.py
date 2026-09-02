@@ -205,13 +205,34 @@ class TraceEvent:
 
 @dataclass
 class Trace:
-    """Structured debugging output."""
+    """Structured debugging output and lightweight inference accounting."""
 
     warnings: list[str] = field(default_factory=list)
     events: list[TraceEvent] = field(default_factory=list)
     prosody: list[dict[str, Any]] = field(default_factory=list)
     inference: list[dict[str, Any]] = field(default_factory=list)
     model: dict[str, Any] = field(default_factory=dict)
+    counters: dict[str, int] = field(default_factory=dict)
+
+    def inference_summary(self) -> dict[str, float | int | None]:
+        """Return aggregate acoustic inference metrics without retaining extra arrays."""
+        calls = len(self.inference)
+        hits = sum(1 for item in self.inference if item.get("cache_hit") is True)
+        misses = sum(1 for item in self.inference if item.get("cache_hit") is False)
+        runtime_ms = sum(float(item.get("runtime_ms", 0.0)) for item in self.inference)
+        audio_seconds = sum(float(item.get("audio_seconds", 0.0)) for item in self.inference)
+        return {
+            "onnx_calls": calls,
+            "onnx_cache_hits": hits,
+            "onnx_cache_misses": misses,
+            "onnx_runtime_ms": runtime_ms,
+            "onnx_audio_seconds": audio_seconds,
+            "onnx_rtf": runtime_ms / 1000.0 / audio_seconds if audio_seconds else None,
+            "logical_phoneme_segments": self.counters.get("logical_phoneme_segments", 0),
+            "initial_onnx_calls": self.counters.get("initial_onnx_calls", 0),
+            "short_sentence_retry_calls": self.counters.get("short_sentence_retry_calls", 0),
+            "fallback_onnx_calls": self.counters.get("fallback_onnx_calls", 0),
+        }
 
 
 @dataclass

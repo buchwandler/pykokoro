@@ -67,5 +67,5 @@ class OnnxAudioGenerationAdapter:
             "default_voice_name": cfg.voice if isinstance(cfg.voice, str) else None
         }
         if "trace" in inspect.signature(generate_raw).parameters:
-            kwargs["trace"] = trace
+            kwargs["trace"] = trace if cfg.return_trace else None
         return generate_raw(*arguments, **kwargs)

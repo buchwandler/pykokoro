@@ -36,6 +36,9 @@ class OnnxSynthesizerAdapter:
             espeak_config=cfg.espeak_config,
             short_sentence_config=cfg.short_sentence_config,
             waveform_validation=cfg.waveform_validation,
+            inference_audio_diagnostics=cfg.inference_audio_diagnostics,
+            inference_cache_enabled=cfg.inference_cache_enabled,
+            inference_cache_max_bytes=cfg.inference_cache_max_bytes,
         )
         self._kokoro = kokoro
 

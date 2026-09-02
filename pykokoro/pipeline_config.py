@@ -46,6 +46,9 @@ class PipelineConfig:
     espeak_config: EspeakConfig | None = None
     short_sentence_config: ShortSentenceConfig | None = None
     waveform_validation: Literal["off", "warn", "strict"] = "off"
+    inference_audio_diagnostics: bool = False
+    inference_cache_enabled: bool = True
+    inference_cache_max_bytes: int = 128 * 1024 * 1024
     allow_experimental_frontend: bool = False
 
     # Span slicing

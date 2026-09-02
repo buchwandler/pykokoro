@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import logging
 import random
 import re
 import time
+from collections import OrderedDict
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -296,8 +298,13 @@ class AudioGenerator:
         model_source: ModelSource = "huggingface",
         short_sentence_config: ShortSentenceConfig | None = None,
         waveform_validation: Literal["off", "warn", "strict"] = "off",
+        inference_audio_diagnostics: bool = False,
+        inference_cache_enabled: bool = True,
+        inference_cache_max_bytes: int = 128 * 1024 * 1024,
     ):
         """Initialize the audio generator."""
+        if inference_cache_max_bytes < 0:
+            raise ValueError("inference_cache_max_bytes must be non-negative")
         self._session = session
         self._tokenizer = tokenizer
         self._model_source = model_source
@@ -305,6 +312,14 @@ class AudioGenerator:
         if waveform_validation not in {"off", "warn", "strict"}:
             raise ValueError(f"Unsupported waveform validation mode: {waveform_validation!r}")
         self._waveform_validation = waveform_validation
+        self._inference_audio_diagnostics = inference_audio_diagnostics
+        self._inference_cache_enabled = inference_cache_enabled and inference_cache_max_bytes > 0
+        self._inference_cache_max_bytes = inference_cache_max_bytes
+        self._inference_cache: OrderedDict[bytes, tuple[np.ndarray, np.ndarray | None, int]] = (
+            OrderedDict()
+        )
+        self._inference_cache_bytes = 0
+        self._inference_call_number = 0
         self._input_metas = {
             str(input_meta.name): input_meta for input_meta in session.get_inputs()
         }
@@ -389,12 +404,121 @@ class AudioGenerator:
             "speed": speed_input,
         }
 
+    @staticmethod
+    def _inference_cache_key(inputs: dict[str, np.ndarray | list[list[int]]]) -> bytes:
+        """Build a digest from the exact arrays passed to ONNX Runtime."""
+        digest = hashlib.blake2b(digest_size=20)
+        for name in sorted(inputs):
+            array = np.ascontiguousarray(np.asarray(inputs[name]))
+            digest.update(name.encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(array.dtype.str.encode("ascii"))
+            digest.update(b"\0")
+            digest.update(repr(array.shape).encode("ascii"))
+            digest.update(b"\0")
+            digest.update(memoryview(array).cast("B"))
+        return digest.digest()
+
+    def _get_cached_inference(self, key: bytes) -> tuple[np.ndarray, np.ndarray | None] | None:
+        if not self._inference_cache_enabled:
+            return None
+        cached = self._inference_cache.get(key)
+        if cached is None:
+            return None
+        audio, pred_dur, _ = cached
+        self._inference_cache.move_to_end(key)
+        return audio.copy(), None if pred_dur is None else pred_dur.copy()
+
+    def _put_cached_inference(
+        self, key: bytes, audio: np.ndarray, pred_dur: np.ndarray | None
+    ) -> None:
+        if not self._inference_cache_enabled:
+            return
+        cached_audio = np.array(audio, copy=True)
+        cached_duration = None if pred_dur is None else np.array(pred_dur, copy=True)
+        entry_bytes = cached_audio.nbytes + (
+            cached_duration.nbytes if cached_duration is not None else 0
+        )
+        if entry_bytes > self._inference_cache_max_bytes:
+            return
+        previous = self._inference_cache.pop(key, None)
+        if previous is not None:
+            self._inference_cache_bytes -= previous[2]
+        self._inference_cache[key] = (cached_audio, cached_duration, entry_bytes)
+        self._inference_cache_bytes += entry_bytes
+        while self._inference_cache_bytes > self._inference_cache_max_bytes:
+            _, (_, _, removed_bytes) = self._inference_cache.popitem(last=False)
+            self._inference_cache_bytes -= removed_bytes
+
+    def clear_inference_cache(self) -> None:
+        """Release all cached raw inference outputs."""
+        self._inference_cache.clear()
+        self._inference_cache_bytes = 0
+
+    def close(self) -> None:
+        """Release generator-owned inference cache state."""
+        self.clear_inference_cache()
+
+    def _record_inference(
+        self,
+        trace: Trace | None,
+        *,
+        effective_phonemes: str,
+        tokens: list[int],
+        inputs: dict[str, np.ndarray | list[list[int]]],
+        audio: np.ndarray,
+        runtime_s: float,
+        cache_hit: bool,
+        cache_key: bytes,
+        attempt_kind: str,
+    ) -> None:
+        self._inference_call_number += 1
+        if trace is None:
+            return
+        audio_samples = int(np.asarray(audio).size)
+        audio_seconds = audio_samples / SAMPLE_RATE if audio_samples else 0.0
+        trace.inference.append(
+            {
+                "call_number": self._inference_call_number,
+                "cache_hit": cache_hit,
+                "cache_key_short": cache_key.hex()[:12],
+                "runtime_ms": runtime_s * 1000.0,
+                "audio_samples": audio_samples,
+                "audio_seconds": audio_seconds,
+                "rtf": runtime_s / audio_seconds if audio_seconds else None,
+                "effective_phonemes": effective_phonemes,
+                "phoneme_count": len(effective_phonemes),
+                "token_ids": list(tokens),
+                "token_count": len(tokens),
+                "attempt_kind": attempt_kind,
+                "inputs": {
+                    name: {
+                        "dtype": str(np.asarray(value).dtype),
+                        "shape": list(np.asarray(value).shape),
+                    }
+                    for name, value in inputs.items()
+                },
+            }
+        )
+        counters = trace.counters
+        counters["logical_phoneme_segments"] = counters.get("logical_phoneme_segments", 0)
+        if attempt_kind == "initial":
+            counters["initial_onnx_calls"] = counters.get("initial_onnx_calls", 0) + 1
+        elif attempt_kind == "retry":
+            counters["short_sentence_retry_calls"] = (
+                counters.get("short_sentence_retry_calls", 0) + 1
+            )
+        elif attempt_kind == "fallback":
+            counters["fallback_onnx_calls"] = counters.get("fallback_onnx_calls", 0) + 1
+
     def _run_onnx(
         self,
         phonemes: str,
         voice_style: np.ndarray,
         speed: float,
         trace: Trace | None = None,
+        *,
+        attempt_kind: str = "initial",
     ) -> tuple[np.ndarray, np.ndarray | None]:
         effective_phonemes = phonemes[:MAX_PHONEME_LENGTH]
         tokens = self._tokenizer.tokenize(effective_phonemes)
@@ -407,31 +531,41 @@ class AudioGenerator:
             voice_style_indexed = voice_style_indexed[None, :]
         tokens_padded = self._pad_tokens(tokens)
         inputs = self._build_onnx_inputs(tokens_padded, voice_style_indexed, speed)
-        results = self._session.run(None, inputs)
-        audio = np.asarray(results[0]).T
-        audio = np.squeeze(audio)
-        timestamp_index = self._timestamp_output_index
-        pred_dur = (
-            np.asarray(results[timestamp_index]).squeeze()
-            if timestamp_index is not None and timestamp_index < len(results)
-            else None
-        )
-        noise_detected, noise_metrics = _is_stationary_broadband_noise(audio)
-        audio_metrics = _waveform_metrics(audio)
-        audio_metrics.update(
-            {
-                "stationary_broadband_noise": noise_detected,
-                "stationary_broadband_noise_metrics": noise_metrics,
-            }
+        cache_key = self._inference_cache_key(inputs)
+        cached = self._get_cached_inference(cache_key)
+        if cached is not None:
+            audio, pred_dur = cached
+            runtime_s = 0.0
+            cache_hit = True
+        else:
+            started = time.perf_counter()
+            results = self._session.run(None, inputs)
+            runtime_s = time.perf_counter() - started
+            audio = np.squeeze(np.asarray(results[0]).T)
+            timestamp_index = self._timestamp_output_index
+            pred_dur = (
+                np.asarray(results[timestamp_index]).squeeze()
+                if timestamp_index is not None and timestamp_index < len(results)
+                else None
+            )
+            self._put_cached_inference(cache_key, audio, pred_dur)
+            cache_hit = False
+        self._record_inference(
+            trace,
+            effective_phonemes=effective_phonemes,
+            tokens=tokens,
+            inputs=inputs,
+            audio=audio,
+            runtime_s=runtime_s,
+            cache_hit=cache_hit,
+            cache_key=cache_key,
+            attempt_kind=attempt_kind,
         )
         if trace is not None:
-            style_values = np.asarray(voice_style_indexed, dtype=np.float64)
-            trace.inference.append(
+            style_values = np.asarray(voice_style_indexed, dtype=np.float32)
+            diagnostic = trace.inference[-1]
+            diagnostic.update(
                 {
-                    "effective_phonemes": effective_phonemes,
-                    "phoneme_count": len(effective_phonemes),
-                    "token_ids": list(tokens),
-                    "token_count": len(tokens),
                     "style_row": style_idx,
                     "style": {
                         "shape": list(voice_style_indexed.shape),
@@ -440,20 +574,23 @@ class AudioGenerator:
                         "mean": float(np.mean(style_values)) if style_values.size else 0.0,
                         "std": float(np.std(style_values)) if style_values.size else 0.0,
                     },
-                    "inputs": {
-                        name: {
-                            "dtype": str(np.asarray(value).dtype),
-                            "shape": list(np.asarray(value).shape),
-                        }
-                        for name, value in inputs.items()
-                    },
+                    "audio": {"samples": int(np.asarray(audio).size)},
                     "speed": {
                         "value": float(speed),
                         "dtype": str(np.asarray(inputs["speed"]).dtype),
                     },
-                    "audio": audio_metrics,
                 }
             )
+            if self._inference_audio_diagnostics:
+                noise_detected, noise_metrics = _is_stationary_broadband_noise(audio)
+                audio_metrics = _waveform_metrics(audio)
+                audio_metrics.update(
+                    {
+                        "stationary_broadband_noise": noise_detected,
+                        "stationary_broadband_noise_metrics": noise_metrics,
+                    }
+                )
+                diagnostic["audio"] = audio_metrics
         return audio, pred_dur
 
     def generate_from_phonemes(
@@ -825,10 +962,29 @@ class AudioGenerator:
                 segment.raw_audio = None
                 continue
 
+            if trace is not None:
+                trace.counters["logical_phoneme_segments"] = (
+                    trace.counters.get("logical_phoneme_segments", 0) + 1
+                )
             segment_voice_style = self._resolve_segment_voice(segment, voice_style, voice_resolver)
-            audio, pred_dur = self._run_onnx(
-                segment.phonemes, segment_voice_style, speed, trace=trace
-            )
+            if trace is None:
+                audio, pred_dur = self._run_onnx(segment.phonemes, segment_voice_style, speed)
+            else:
+                audio, pred_dur = self._run_onnx(
+                    segment.phonemes,
+                    segment_voice_style,
+                    speed,
+                    trace=trace,
+                    attempt_kind="initial",
+                )
+            if trace is not None:
+                trace.inference[-1].update(
+                    {
+                        "segment_id": segment.id,
+                        "sentence_idx": segment.sentence_idx,
+                        "effective_voice": segment.voice_name,
+                    }
+                )
             segment.word_timings = self._map_pred_dur_to_word_timings(segment, pred_dur, len(audio))
             self._log_short_sentence_timestamps(segment, pred_dur)
             segment.raw_audio = self._prepare_short_sentence_phrase_audio(
@@ -836,10 +992,12 @@ class AudioGenerator:
                 audio,
                 segment_voice_style,
                 speed,
+                trace=trace,
             )
 
-            noise_detected, _ = _is_stationary_broadband_noise(audio)
-            noise_flags.append(noise_detected)
+            if self._waveform_validation != "off":
+                noise_detected, _ = _is_stationary_broadband_noise(audio)
+                noise_flags.append(noise_detected)
         if noise_flags and all(noise_flags) and self._waveform_validation != "off":
             message = (
                 "All raw ONNX segments resemble stationary broadband noise; "
@@ -980,6 +1138,8 @@ class AudioGenerator:
         audio: np.ndarray,
         voice_style: np.ndarray,
         speed: float,
+        *,
+        trace: Trace | None = None,
     ) -> np.ndarray:
         """Accept confident phrase cuts or regenerate a wrap fallback."""
         short_sentence_metadata = (segment.ssmd_metadata or {}).get(SHORT_SENTENCE_META_KEY)
@@ -1002,6 +1162,7 @@ class AudioGenerator:
             short_sentence_metadata,
             voice_style,
             speed,
+            trace=trace,
         )
         if retry_audio is not None:
             return retry_audio
@@ -1020,7 +1181,12 @@ class AudioGenerator:
             "falling back to wrap mode.",
             segment.text[:50],
         )
-        fallback_audio, _ = self._run_onnx(fallback_phonemes, voice_style, speed)
+        if trace is None:
+            fallback_audio, _ = self._run_onnx(fallback_phonemes, voice_style, speed)
+        else:
+            fallback_audio, _ = self._run_onnx(
+                fallback_phonemes, voice_style, speed, trace=trace, attempt_kind="fallback"
+            )
         short_sentence_metadata["cut_applied"] = True
         short_sentence_metadata["fallback_used"] = "wrap"
         segment.phonemes = fallback_phonemes
@@ -1038,6 +1204,8 @@ class AudioGenerator:
         short_sentence_metadata: dict[str, object],
         voice_style: np.ndarray,
         speed: float,
+        *,
+        trace: Trace | None = None,
     ) -> np.ndarray | None:
         templates = short_sentence_metadata.get("phrase_fallback_templates")
         if not isinstance(templates, list):
@@ -1084,7 +1252,12 @@ class AudioGenerator:
             if retry is None or retry.metadata is None:
                 continue
 
-            retry_audio, pred_dur = self._run_onnx(retry.phonemes, voice_style, speed)
+            if trace is None:
+                retry_audio, pred_dur = self._run_onnx(retry.phonemes, voice_style, speed)
+            else:
+                retry_audio, pred_dur = self._run_onnx(
+                    retry.phonemes, voice_style, speed, trace=trace, attempt_kind="retry"
+                )
             timing_tokens = retry.metadata.get("timing_tokens")
             retry_timings: list[WordTiming] = []
             if pred_dur is not None and isinstance(timing_tokens, list):

@@ -57,6 +57,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
 def _acoustic_tokenizer_key(config: TokenizerConfig | None) -> object:
     """Return tokenizer settings that affect the acoustic backend."""
     if config is None:
@@ -671,6 +672,9 @@ class KokoroPipeline:
             _freeze_config_value(cfg.espeak_config),
             _freeze_config_value(cfg.short_sentence_config),
             _freeze_config_value(cfg.waveform_validation),
+            cfg.inference_audio_diagnostics,
+            cfg.inference_cache_enabled,
+            cfg.inference_cache_max_bytes,
             cfg.allow_experimental_frontend,
         )
 
@@ -716,6 +720,9 @@ class KokoroPipeline:
             espeak_config=cfg.espeak_config,
             short_sentence_config=cfg.short_sentence_config,
             waveform_validation=cfg.waveform_validation,
+            inference_audio_diagnostics=cfg.inference_audio_diagnostics,
+            inference_cache_enabled=cfg.inference_cache_enabled,
+            inference_cache_max_bytes=cfg.inference_cache_max_bytes,
         )
         self._kokoro = new_kokoro
         self._kokoro_config_key = kokoro_key

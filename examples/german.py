@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import replace
 from typing import Any
 
@@ -96,6 +97,36 @@ def print_result(label: str, result: Any) -> None:
             print(f"  - {warning}")
 
 
+def print_performance(label: str, result: Any, wall_seconds: float) -> None:
+    """Print measured pipeline and acoustic metrics for one lexicon run."""
+    audio_seconds = len(result.audio) / result.sample_rate if result.sample_rate else 0.0
+    summary = result.trace.inference_summary() if result.trace is not None else {}
+    onnx_runtime_ms = float(summary.get("onnx_runtime_ms", 0.0))
+    onnx_audio_seconds = float(summary.get("onnx_audio_seconds", audio_seconds))
+    onnx_calls = int(summary.get("onnx_calls", 0))
+    cache_hits = int(summary.get("onnx_cache_hits", 0))
+    cache_misses = int(summary.get("onnx_cache_misses", 0))
+    retry_calls = int(summary.get("short_sentence_retry_calls", 0))
+    fallback_calls = int(summary.get("fallback_onnx_calls", 0))
+    print(f"\n[{label}] performance:")
+    print(f"  wall:                 {wall_seconds:.3f} s")
+    print(f"  audio:                {audio_seconds:.3f} s")
+    print(
+        f"  end-to-end RTF:       {wall_seconds / audio_seconds:.3f}"
+        if audio_seconds
+        else "  end-to-end RTF:       n/a"
+    )
+    print(f"  ONNX calls:           {onnx_calls - cache_hits}")
+    print(f"  ONNX time:            {onnx_runtime_ms / 1000.0:.3f} s")
+    print(
+        f"  model-only RTF:       {onnx_runtime_ms / 1000.0 / onnx_audio_seconds:.3f}"
+        if onnx_audio_seconds
+        else "  model-only RTF:       n/a"
+    )
+    print(f"  cache hits/misses:    {cache_hits}/{cache_misses}")
+    print(f"  short retries/fallbacks: {retry_calls}/{fallback_calls}")
+
+
 def main() -> None:
     """Generate the German Gold-versus-Crane comparison."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s")
@@ -110,6 +141,7 @@ def main() -> None:
 
     base_config = make_config(lexicons=None)
     results: dict[str, Any] = {}
+    timings: dict[str, float] = {}
     with KokoroPipeline(base_config) as pipeline:
         assert base_config.tokenizer_config is not None
         for label, lexicons in LEXICON_SOURCES:
@@ -117,13 +149,16 @@ def main() -> None:
                 base_config.tokenizer_config,
                 lexicons=lexicons,
             )
+            started = time.perf_counter()
             results[label] = pipeline.run(
                 TEXT,
                 tokenizer_config=tokenizer_config,
             )
+            timings[label] = time.perf_counter() - started
 
     for label, _lexicons in LEXICON_SOURCES:
         print_result(label, results[label])
+        print_performance(label, results[label], timings[label])
     audio = combine_lexicon_audio(*(results[label] for label, _lexicons in LEXICON_SOURCES))
     sf.write(OUTPUT_FILE, audio, results[LEXICON_SOURCES[0][0]].sample_rate)
     print(f"\nWrote {OUTPUT_FILE}")

@@ -1782,6 +1782,9 @@ class Kokoro:
         model_variant: ModelVariant = DEFAULT_MODEL_VARIANT,
         short_sentence_config: "ShortSentenceConfig | None" = None,
         waveform_validation: Literal["off", "warn", "strict"] = "off",
+        inference_audio_diagnostics: bool = False,
+        inference_cache_enabled: bool = True,
+        inference_cache_max_bytes: int = 128 * 1024 * 1024,
     ) -> None:
         """
         Initialize the Kokoro ONNX backend.
@@ -1944,6 +1947,9 @@ class Kokoro:
         if waveform_validation not in {"off", "warn", "strict"}:
             raise ValueError(f"Unsupported waveform validation mode: {waveform_validation!r}")
         self._waveform_validation = waveform_validation
+        self._inference_audio_diagnostics = inference_audio_diagnostics
+        self._inference_cache_enabled = inference_cache_enabled
+        self._inference_cache_max_bytes = inference_cache_max_bytes
 
     def _get_vocabulary(self) -> dict[str, int]:
         """Get vocabulary for the current model variant.
@@ -2238,6 +2244,9 @@ class Kokoro:
             model_source=self._model_source,
             short_sentence_config=self._short_sentence_config,
             waveform_validation=self._waveform_validation,
+            inference_audio_diagnostics=self._inference_audio_diagnostics,
+            inference_cache_enabled=self._inference_cache_enabled,
+            inference_cache_max_bytes=self._inference_cache_max_bytes,
         )
 
     def get_voices(self) -> list[str]:
@@ -2575,6 +2584,9 @@ class Kokoro:
         """Release database, tokenizer, voice, generator, and ONNX resources."""
         voice_db, self._voice_db = getattr(self, "_voice_db", None), None
 
+        audio_generator = getattr(self, "_audio_generator", None)
+        if callable(getattr(audio_generator, "close", None)):
+            audio_generator.close()
         self._audio_generator = None
         self._tokenizer = None
         self._voice_manager = None
