@@ -75,6 +75,29 @@ provider, voice, quality, frontend, layout, and support status without downloadi
 weights. Pass `--model MODEL_ID` to synthesize only one selected model; experimental
 frontends additionally require `--include-experimental`.
 
+### Public model capability discovery
+
+Downstream applications can inspect the canonical runtime inventory without importing
+the ONNX backend or downloading model assets:
+
+```python
+from pykokoro import discover_models
+
+inventory = discover_models()
+for model in inventory.models:
+    print(model.model_id, model.languages, model.voices, model.status)
+```
+
+`discover_models()` reports runtime capabilities, selected distribution provenance,
+frontend and G2P metadata, qualities, and verified named lexicons. `offline=True` uses
+only the cached registry and forbids network access. `refresh=True` refreshes registry
+metadata only, never model or voice assets; the two options cannot be combined.
+`registry_source` and `cache_fallback` describe where the inventory came from.
+
+This API is distinct from `available_model_releases()`: discovery describes capabilities
+the installed PyKokoro runtime can use, while the release catalog describes published
+model artifacts.
+
 ## Installation
 
 ### Basic Installation (CPU only)

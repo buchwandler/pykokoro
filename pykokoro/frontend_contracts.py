@@ -36,6 +36,16 @@ FRONTEND_FIXTURES: dict[ModelVariant, FrontendFixture] = {
     "th-wayu": FrontendFixture("th-wayu", "th", "สวัสดี", "kokorog2p", "sawatdi"),
 }
 
+FRONTEND_NAMED_LEXICONS: dict[str, tuple[str, ...]] = {
+    "kokorog2p-de-thorsten-v1": ("gold", "crane"),
+    "nabra-arabic-v1": (),
+}
+
+
+def named_lexicons_for_frontend(frontend: str) -> tuple[str, ...] | None:
+    """Return verified named-lexicon support for a frontend, if known."""
+    return FRONTEND_NAMED_LEXICONS.get(frontend)
+
 
 def require_frontend(variant: ModelVariant, *, allow_experimental: bool) -> str:
     """Return the required frontend, rejecting unsupported silent fallbacks."""

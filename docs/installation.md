@@ -116,6 +116,29 @@ stale catalog metadata, the catalog is refreshed once without falling back to th
 cache, then asset resolution is retried. Offline mode never refreshes over the network,
 and manual deletion of the registry catalog or model directory is not required.
 
+## Model capability discovery
+
+Use the public discovery API to inspect models, voices, languages, qualities, frontends,
+and runtime status without downloading model or voice assets:
+
+```python
+from pykokoro import discover_models
+
+inventory = discover_models(offline=True)
+for model in inventory.models:
+    print(model.model_id, model.languages, model.voices, model.status)
+```
+
+The default call follows the registry network and cache policy. `offline=True` forbids
+network access and requires cached registry metadata. `refresh=True` forces a registry
+metadata refresh and may report `cache_fallback=True` if the existing policy uses a
+valid cache after a failed refresh. Refresh never downloads model assets, and
+`offline=True, refresh=True` is invalid. `registry_source` identifies the registry or
+cache used.
+
+`discover_models()` is runtime capability discovery. `available_model_releases()`
+remains the API for published release and artifact discovery.
+
 ## System requirements
 
 Install `espeak-ng` when using the espeak fallback or backend.

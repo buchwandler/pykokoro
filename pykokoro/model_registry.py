@@ -221,6 +221,8 @@ class RegistryClient:
         refresh: bool = False,
         allow_cache_fallback: bool = True,
     ) -> ModelRegistry:
+        if offline and refresh:
+            raise ValueError("offline and refresh cannot be combined")
         if self.path is not None:
             data = _read_json(self.path)
             _validate_registry(data)
@@ -410,6 +412,17 @@ def select_distribution(
             if distribution.runtime_ready and distribution.provider == provider:
                 return distribution
     raise ModelRegistryError(f"No runtime distribution matches download preference {preference!r}")
+
+
+def distribution_source(distribution: RuntimeDistribution) -> str:
+    """Return the PipelineConfig model source for a registry distribution."""
+    if distribution.provider == "github-release":
+        return "github"
+    if distribution.provider == "huggingface":
+        return "huggingface"
+    raise ModelRegistryError(
+        f"Distribution {distribution.id!r} has unsupported provider {distribution.provider!r}"
+    )
 
 
 def _sha256_file(path: Path) -> str:

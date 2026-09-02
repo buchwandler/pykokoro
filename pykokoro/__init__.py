@@ -28,6 +28,14 @@ def __getattr__(name: str) -> Any:
             "resolve_model_release": resolve_model_release,
             "download_model_release": download_model_release,
         }[name]
+    if name in {"discover_models", "ModelCapabilities", "ModelDiscoveryResult"}:
+        from .discovery import ModelCapabilities, ModelDiscoveryResult, discover_models
+
+        return {
+            "discover_models": discover_models,
+            "ModelCapabilities": ModelCapabilities,
+            "ModelDiscoveryResult": ModelDiscoveryResult,
+        }[name]
     if name == "PipelineConfig":
         from .pipeline_config import PipelineConfig
 
@@ -77,6 +85,9 @@ __all__ = [
     "available_model_releases",
     "download_model_release",
     "resolve_model_release",
+    "discover_models",
+    "ModelCapabilities",
+    "ModelDiscoveryResult",
     "GenerationConfig",
     "ProsodyConfig",
     "ProsodyMethod",

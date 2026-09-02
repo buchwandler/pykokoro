@@ -38,8 +38,8 @@ class RuntimeProfile:
     runtime_available: bool = True
     redistribution_allowed: bool = True
     support_status: str = "ready"
-
     g2p_backend: G2PBackend | None = None
+    named_lexicons: tuple[str, ...] | None = None
 
     @property
     def available_qualities(self) -> tuple[str, ...]:
@@ -173,6 +173,7 @@ MODEL_PROFILES.update(
             False,
             voice_names=("thorsten",),
             g2p_backend="kokorog2p",
+            named_lexicons=("gold", "crane"),
         ),
         ("github", "kk-anuarsv"): RuntimeProfile(
             "github",
@@ -378,16 +379,15 @@ def get_registry_model_profile(
     registry: Any | None = None,
 ) -> RuntimeProfile:
     """Build a profile from canonical registry metadata and local capabilities."""
-    from .model_registry import ModelRegistryError, RegistryClient
+    from .frontend_contracts import named_lexicons_for_frontend
+    from .model_registry import ModelRegistryError, RegistryClient, distribution_source
 
     if registry is None:
         registry = RegistryClient().load(offline=offline)
     model = registry.model(model_id)
     distribution = model.distribution(preference) if model.runtime_available else None
     source: ModelSource = (
-        "github"
-        if distribution is not None and distribution.provider == "github-release"
-        else "huggingface"
+        distribution_source(distribution) if distribution is not None else "huggingface"
     )
     local = MODEL_PROFILES.get((source, model_id))
     qualities = (
@@ -425,6 +425,7 @@ def get_registry_model_profile(
         frontend=model.frontend,
         frontend_experimental=local.frontend_experimental if local is not None else False,
         g2p_backend=local.g2p_backend if local is not None else None,
+        named_lexicons=named_lexicons_for_frontend(model.frontend),
         onnx_inputs=onnx_inputs if isinstance(onnx_inputs, Mapping) else {},
         sample_rate=model.sample_rate,
         max_tokens=model.max_tokens,

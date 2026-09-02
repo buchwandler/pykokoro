@@ -214,6 +214,11 @@ def test_registry_forced_refresh_requests_cache_revalidation(
     assert "pykokoro_refresh=" in requests[0].full_url
 
 
+def test_registry_rejects_offline_refresh_combination(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="offline and refresh cannot be combined"):
+        RegistryClient(cache_path=tmp_path / "models.json").load(offline=True, refresh=True)
+
+
 def test_verify_artifact_reports_expected_and_actual_size(tmp_path: Path) -> None:
     path = tmp_path / "artifact.bin"
     path.write_bytes(b"new")

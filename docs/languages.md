@@ -4,6 +4,25 @@ PyKokoro resolves omitted model settings from the requested language before crea
 ONNX backend or G2P cache. Non-German runs retain the existing Hugging Face v1.0
 default; Chinese automatic selection retains the GitHub v1.1-zh policy.
 
+## Runtime model discovery
+
+Applications that need to list available models should use the public metadata-only API:
+
+```python
+from pykokoro import discover_models
+
+inventory = discover_models(offline=True)
+for model in inventory.models:
+    print(model.model_id, model.languages, model.voices, model.default_voice)
+```
+
+Discovery uses the canonical registry and reports normalized language codes,
+model-specific voices, qualities, frontend status, G2P backend, and verified named
+lexicons. It does not download weights, voice archives, or initialize ONNX Runtime. The
+default mode may use the network, `offline=True` forbids it, and `refresh=True`
+refreshes registry metadata only. `available_model_releases()` serves a different
+purpose: it lists published release artifacts rather than runtime capabilities.
+
 ## German
 
 `de`, `de-de`, `de-at`, and `de-ch` automatically select:

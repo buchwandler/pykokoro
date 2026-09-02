@@ -1,6 +1,10 @@
 import pytest
 
-from pykokoro.frontend_contracts import FRONTEND_FIXTURES, require_frontend
+from pykokoro.frontend_contracts import (
+    FRONTEND_FIXTURES,
+    named_lexicons_for_frontend,
+    require_frontend,
+)
 from pykokoro.model_profiles import get_model_profile
 
 
@@ -46,3 +50,9 @@ def test_nabra_frontend_is_release_ready():
 
 def test_native_profiles_are_not_marked_experimental():
     assert not get_model_profile("v1.2-de-martin", "github").frontend_experimental
+
+
+def test_named_lexicon_inventory_has_explicit_unknown_and_empty_states() -> None:
+    assert named_lexicons_for_frontend("kokorog2p-de-thorsten-v1") == ("gold", "crane")
+    assert named_lexicons_for_frontend("nabra-arabic-v1") == ()
+    assert named_lexicons_for_frontend("unclassified-frontend") is None
