@@ -3,9 +3,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import soundfile as sf
+
+try:
+    from ._output import artifact_dir
+except ImportError:
+    from _output import artifact_dir
 
 from pykokoro import KokoroPipeline, PipelineConfig, SSMDRenderConfig
 
@@ -42,7 +45,7 @@ to store beside each WAV file.
 
 
 def main() -> None:
-    output_dir = Path("paragraph-ssmd-voices")
+    output_dir = artifact_dir() / "paragraph-ssmd-voices"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     config = PipelineConfig(

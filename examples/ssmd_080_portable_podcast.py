@@ -5,6 +5,11 @@ from __future__ import annotations
 
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import KokoroPipeline, PipelineConfig, SSMDRenderConfig
 
 PODCAST_SCRIPT = """---
@@ -37,7 +42,7 @@ The body uses stable roles while the header selects concrete voices.
 def main() -> None:
     cfg = PipelineConfig(ssmd=SSMDRenderConfig())
     result = KokoroPipeline(cfg).run(PODCAST_SCRIPT)
-    sf.write("ssmd_080_portable_podcast.wav", result.audio, result.sample_rate)
+    sf.write(artifact_path("ssmd_080_portable_podcast.wav"), result.audio, result.sample_rate)
     print(f"Rendered {result.document_metadata.get('title')!r}")
 
 

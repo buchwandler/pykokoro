@@ -9,6 +9,11 @@ Usage:
     python examples/hf_v11zh_demo.py
 """
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 import pykokoro
 
 
@@ -54,7 +59,7 @@ def main():
         # Save output
         import soundfile as sf
 
-        output_file = "hf_v11zh_demo.wav"
+        output_file = artifact_path("hf_v11zh_demo.wav")
         sf.write(output_file, samples, sample_rate)
         print(f"✓ Saved to: {output_file}")
 

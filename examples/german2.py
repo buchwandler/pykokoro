@@ -9,6 +9,11 @@ from typing import Any
 import numpy as np
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.tokenizer import TokenizerConfig
 
@@ -87,7 +92,7 @@ def main() -> None:
     print_result("gold", gold_result)
     print_result("crane", crane_result)
     audio = combine_lexicon_audio(gold_result, crane_result)
-    sf.write(OUTPUT_FILE, audio, gold_result.sample_rate)
+    sf.write(artifact_path(OUTPUT_FILE), audio, gold_result.sample_rate)
     print(f"\nWrote {OUTPUT_FILE}")
     print(f"Layout: gold -> {LEXICON_SEPARATOR_SECONDS:.1f} s silence -> crane")
 

@@ -82,11 +82,10 @@ def test_german_configs_change_only_lexicon(module) -> None:
     assert gold.short_sentence_config == crane.short_sentence_config
 
 
-
 @pytest.mark.parametrize(
     ("mode", "use_spacy", "size"),
     [("off", False, None), ("auto", None, None), ("sm", True, "sm")],
- )
+)
 def test_german_benchmark_spacy_modes(mode: str, use_spacy: bool | None, size: str | None) -> None:
     config = german.make_config(spacy_mode=mode)
     assert config.tokenizer_config is not None
@@ -102,6 +101,7 @@ def test_german_benchmark_parser_controls() -> None:
     assert args.runs == 2
     assert args.warmup is True
     assert args.show_stage_times is False
+
 
 @pytest.mark.parametrize("module", [german, german2, german3])
 def test_german_audio_combination(module) -> None:

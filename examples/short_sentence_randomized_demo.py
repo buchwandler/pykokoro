@@ -6,6 +6,11 @@ from __future__ import annotations
 import numpy as np
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.short_sentence_handler import (
@@ -221,7 +226,7 @@ def main() -> None:
             all_samples.append(group_pause)
 
     combined = np.concatenate(all_samples) if all_samples else np.array([], dtype=np.float32)
-    sf.write(OUTPUT_FILE, combined, sample_rate)
+    sf.write(artifact_path(OUTPUT_FILE), combined, sample_rate)
 
     print_separator("OUTPUT")
     print(f"Created {OUTPUT_FILE}")

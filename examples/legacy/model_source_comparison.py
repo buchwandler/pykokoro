@@ -32,6 +32,11 @@ Note:
 
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.onnx_backend import Kokoro
 from pykokoro.stages.audio_generation.onnx import OnnxAudioGenerationAdapter
@@ -95,7 +100,7 @@ def main():
     result_hf_v10 = pipeline_hf_v10.run(ENGLISH_TEXT, voice=voice_to_use)
     samples_hf_v10, sample_rate = result_hf_v10.audio, result_hf_v10.sample_rate
 
-    output_file_hf_v10 = "hf_v1.0_demo.wav"
+    output_file_hf_v10 = artifact_path("hf_v1.0_demo.wav")
     sf.write(output_file_hf_v10, samples_hf_v10, sample_rate)
 
     duration_hf_v10 = len(samples_hf_v10) / sample_rate
@@ -137,7 +142,7 @@ def main():
         result_hf_v11zh.sample_rate,
     )
 
-    output_file_hf_v11zh = "hf_v1.1_zh_demo.wav"
+    output_file_hf_v11zh = artifact_path("hf_v1.1_zh_demo.wav")
     sf.write(output_file_hf_v11zh, samples_hf_v11zh, sample_rate)
 
     duration_hf_v11zh = len(samples_hf_v11zh) / sample_rate
@@ -181,7 +186,7 @@ def main():
         result_github_v10.sample_rate,
     )
 
-    output_file_github_v10 = "github_v1.0_demo.wav"
+    output_file_github_v10 = artifact_path("github_v1.0_demo.wav")
     sf.write(output_file_github_v10, samples_github_v10, sample_rate)
 
     duration_github_v10 = len(samples_github_v10) / sample_rate
@@ -234,7 +239,7 @@ def main():
         result_github_v11zh.sample_rate,
     )
 
-    output_file_github_v11zh = "github_v1.1_zh_demo.wav"
+    output_file_github_v11zh = artifact_path("github_v1.1_zh_demo.wav")
     sf.write(output_file_github_v11zh, samples_github_v11zh, sample_rate)
 
     duration_github_v11zh = len(samples_github_v11zh) / sample_rate

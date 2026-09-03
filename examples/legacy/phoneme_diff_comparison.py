@@ -39,6 +39,11 @@ import sys
 
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 import pykokoro
 
 # Import misaki if available
@@ -311,7 +316,7 @@ def generate_diff_report(differences, text):
     return "\n".join(report_lines)
 
 
-def generate_audio_narration(differences, output_file="phoneme_diff_report.wav"):
+def generate_audio_narration(differences, output_file=None):
     """Generate audio narration of the phoneme differences.
 
     Creates audio where you can hear each word pronounced using the actual
@@ -321,6 +326,8 @@ def generate_audio_narration(differences, output_file="phoneme_diff_report.wav")
         differences: List of difference dictionaries
         output_file: Path to save audio file
     """
+    if output_file is None:
+        output_file = artifact_path("phoneme_diff_report.wav")
     import numpy as np
 
     if not differences:
@@ -496,7 +503,7 @@ def main():
     report = generate_diff_report(differences, text)
 
     # Save text report
-    report_file = "phoneme_diff_report.txt"
+    report_file = artifact_path("phoneme_diff_report.txt")
     with open(report_file, "w", encoding="utf-8") as f:
         f.write(report)
     print(f"Text report saved to: {report_file}")
@@ -505,7 +512,7 @@ def main():
     print("\n" + report)
 
     # Save JSON data
-    json_file = "phoneme_diff_data.json"
+    json_file = artifact_path("phoneme_diff_data.json")
     with open(json_file, "w", encoding="utf-8") as f:
         json.dump(
             {

@@ -10,6 +10,11 @@ from typing import Any
 
 import soundfile as sf
 
+try:
+    from ._output import artifact_dir
+except ImportError:
+    from _output import artifact_dir
+
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.model_profiles import (
     get_registry_model_profile,
@@ -200,7 +205,7 @@ def main() -> int:
     parser.add_argument("--voice", metavar="VOICE")
     parser.add_argument("--quality", metavar="QUALITY")
     parser.add_argument("--include-experimental", action="store_true")
-    parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
+    parser.add_argument("--output-dir", type=Path, default=artifact_dir() / OUTPUT_DIR)
     args = parser.parse_args()
 
     try:

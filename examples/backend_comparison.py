@@ -26,6 +26,11 @@ Output:
 import numpy as np
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.tokenizer import Tokenizer, TokenizerConfig
@@ -219,7 +224,7 @@ def main():
         print_separator("Combining All Backends")
         combined_samples = np.concatenate(all_samples)
 
-        output_file = "backend_comparison.wav"
+        output_file = artifact_path("backend_comparison.wav")
         sf.write(output_file, combined_samples, sample_rate_value)
 
         total_duration = len(combined_samples) / sample_rate_value

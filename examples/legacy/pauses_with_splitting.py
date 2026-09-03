@@ -17,6 +17,11 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import PipelineConfig
 from pykokoro.constants import SAMPLE_RATE
 from pykokoro.generation_config import GenerationConfig
@@ -175,7 +180,7 @@ def main():
     samples = kokoro.concatenate_audio_segments(processed_audio_segments)
     sample_rate = SAMPLE_RATE
 
-    output_file = "pauses_splitting_demo.wav"
+    output_file = artifact_path("pauses_splitting_demo.wav")
     sf.write(output_file, samples, sample_rate)
     duration = len(samples) / sample_rate
 

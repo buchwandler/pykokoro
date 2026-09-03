@@ -12,6 +12,11 @@ from typing import Any, cast
 import numpy as np
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.spacy_models import SpacyModelSize
 from pykokoro.tokenizer import TokenizerConfig
@@ -131,6 +136,7 @@ def print_result(label: str, result: Any) -> None:
         for warning in result.trace.warnings:
             print(f"  - {warning}")
 
+
 @dataclass(frozen=True)
 class BenchmarkRun:
     result: Any
@@ -171,7 +177,7 @@ def print_performance(
     *,
     show_stage_times: bool,
     accounted_stage_seconds: float,
-    ) -> None:
+) -> None:
     """Print measured pipeline, stage, acoustic, and cold/warm metrics."""
     result = run.result
     audio_seconds = len(result.audio) / result.sample_rate if result.sample_rate else 0.0
@@ -211,6 +217,7 @@ def print_performance(
         print("  stage timing:")
         for name, seconds in stage_times(result).items():
             print(f"    {name:32s} {seconds:.3f} s")
+
 
 def _positive_int(value: str) -> int:
     parsed = int(value)
@@ -254,7 +261,7 @@ def measure_runs(
     *,
     warmup: bool,
     runs: int,
- ) -> dict[str, list[BenchmarkRun]]:
+) -> dict[str, list[BenchmarkRun]]:
     """Render every lexicon from one prepared frontend."""
     if warmup:
         for config in configs.values():
@@ -315,9 +322,10 @@ def main(argv: list[str] | None = None) -> None:
             )
     final_results = [runs_by_label[label][-1].result for label, _lexicons in LEXICON_SOURCES]
     audio = combine_lexicon_audio(*final_results)
-    sf.write(OUTPUT_FILE, audio, final_results[0].sample_rate)
+    sf.write(artifact_path(OUTPUT_FILE), audio, final_results[0].sample_rate)
     print(f"\nWrote {OUTPUT_FILE}")
     print(f"Layout: {format_lexicon_layout()}")
+
 
 if __name__ == "__main__":
     main()

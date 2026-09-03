@@ -208,6 +208,8 @@ __marimo__/
 pykokoro/_version.py
 
 *.wav
+example-artifacts/*
+!example-artifacts/.gitkeep
 TASKS.md
 context_pykokoro.*
 .benchmarks/

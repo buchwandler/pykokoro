@@ -28,6 +28,11 @@ Output:
 
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
 
@@ -52,7 +57,7 @@ def main():
     res1 = pipe.run(text1, voice="am_michael")
     samples, sample_rate = res1.audio, res1.sample_rate
 
-    output1 = "example1_basic_pauses.wav"
+    output1 = artifact_path("example1_basic_pauses.wav")
     sf.write(output1, samples, sample_rate)
     duration1 = len(samples) / sample_rate
     print(f"✓ Generated: {output1}")
@@ -81,7 +86,7 @@ def main():
     )
     samples, sample_rate = res2.audio, res2.sample_rate
 
-    output2 = "example2_custom_durations.wav"
+    output2 = artifact_path("example2_custom_durations.wav")
     sf.write(output2, samples, sample_rate)
     duration2 = len(samples) / sample_rate
     print(f"✓ Generated: {output2}")
@@ -100,7 +105,7 @@ def main():
     res3 = pipe.run(text3, voice="am_adam")
     samples, sample_rate = res3.audio, res3.sample_rate
 
-    output3 = "example3_leading_pause.wav"
+    output3 = artifact_path("example3_leading_pause.wav")
     sf.write(output3, samples, sample_rate)
     duration3 = len(samples) / sample_rate
     print(f"✓ Generated: {output3}")
@@ -119,7 +124,7 @@ def main():
     res4 = pipe.run(text4, voice="af_bella")
     samples, sample_rate = res4.audio, res4.sample_rate
 
-    output4 = "example4_consecutive_pauses.wav"
+    output4 = artifact_path("example4_consecutive_pauses.wav")
     sf.write(output4, samples, sample_rate)
     duration4 = len(samples) / sample_rate
     print(f"✓ Generated: {output4}")
@@ -138,7 +143,7 @@ def main():
     res5 = pipe.run(text5, voice="af_nicole")
     samples, sample_rate = res5.audio, res5.sample_rate
 
-    output5 = "example5_custom_time_pauses.wav"
+    output5 = artifact_path("example5_custom_time_pauses.wav")
     sf.write(output5, samples, sample_rate)
     duration5 = len(samples) / sample_rate
     print(f"✓ Generated: {output5}")

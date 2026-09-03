@@ -22,6 +22,11 @@ Output:
 
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
 
@@ -130,7 +135,7 @@ def main():
     samples, sample_rate = result.audio, result.sample_rate
 
     # Save to file
-    output_file = "podcast_ssmd_demo.wav"
+    output_file = artifact_path("podcast_ssmd_demo.wav")
     sf.write(output_file, samples, sample_rate)
 
     duration = len(samples) / sample_rate

@@ -23,6 +23,11 @@ Output:
 import numpy as np
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.onnx_backend import Kokoro
 from pykokoro.stages.audio_generation.onnx import OnnxAudioGenerationAdapter
@@ -237,7 +242,7 @@ def main():
     final_audio = np.concatenate(audio_parts)
 
     # Save to file
-    output_file = "voices_demo.wav"
+    output_file = artifact_path("voices_demo.wav")
     sf.write(output_file, final_audio, sample_rate)
 
     duration = len(final_audio) / sample_rate

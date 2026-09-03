@@ -27,6 +27,11 @@ Output:
 import numpy as np
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.short_sentence_handler import (
@@ -198,7 +203,7 @@ def main():
     print_separator("Saving Combined Audio")
 
     combined_samples = np.concatenate(disabled_samples + pretext_samples + neutral_phrase_samples)
-    output_file = "short_sentence_demo.wav"
+    output_file = artifact_path("short_sentence_demo.wav")
     sf.write(output_file, combined_samples, sample_rate)
 
     total_duration = len(combined_samples) / sample_rate

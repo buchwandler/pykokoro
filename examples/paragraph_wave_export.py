@@ -19,6 +19,11 @@ from uuid import uuid4
 
 import soundfile as sf
 
+try:
+    from ._output import artifact_dir
+except ImportError:
+    from _output import artifact_dir
+
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 MANIFEST_SCHEMA = "pykokoro-paragraph-export-v1"
@@ -91,7 +96,7 @@ def _entry_filename(index: int, text_hash: str) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", nargs="?", type=Path, help="UTF-8 SSMD/Markdown input")
-    parser.add_argument("--output-dir", type=Path, default=Path("paragraph-waves"))
+    parser.add_argument("--output-dir", type=Path, default=artifact_dir() / "paragraph-waves")
     parser.add_argument("--voice", default="af_sarah")
     parser.add_argument("--lang", default="en-us")
     parser.add_argument(

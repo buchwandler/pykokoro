@@ -25,6 +25,11 @@ Available English voices:
 
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.tokenizer import Tokenizer
@@ -57,7 +62,7 @@ def main():
     res = pipe.run(TEXT)
     samples, sample_rate = res.audio, res.sample_rate
 
-    output_file = "english_demo.wav"
+    output_file = artifact_path("english_demo.wav")
     sf.write(output_file, samples, sample_rate)
 
     duration = len(samples) / sample_rate
@@ -82,7 +87,7 @@ def main():
         res_phonemes.sample_rate,
     )
 
-    output_file_phonemes = "english_phonemes_demo.wav"
+    output_file_phonemes = artifact_path("english_phonemes_demo.wav")
     sf.write(output_file_phonemes, samples_from_phonemes, sample_rate)
 
     duration_phonemes = len(samples_from_phonemes) / sample_rate
@@ -98,7 +103,7 @@ def main():
     samples_custom = pipe.run(custom_text).audio
     sample_rate = res.sample_rate
 
-    output_file_custom = "english_custom_demo.wav"
+    output_file_custom = artifact_path("english_custom_demo.wav")
     sf.write(output_file_custom, samples_custom, sample_rate)
     print(f"Created {output_file_custom}")
 

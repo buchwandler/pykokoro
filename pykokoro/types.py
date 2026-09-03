@@ -247,7 +247,6 @@ class Trace:
         return totals
 
 
-
 @dataclass
 class AudioResult:
     """Generated audio and its diagnostic metadata.

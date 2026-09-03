@@ -19,6 +19,11 @@ from __future__ import annotations
 
 import onnxruntime as ort
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.onnx_session import (
     get_available_execution_providers,
@@ -150,7 +155,7 @@ def test_auto_provider():
         generation=GenerationConfig(lang="en-us", speed=1.0),
         provider="auto",
     )
-    output_file = "provider_auto_demo.wav"
+    output_file = artifact_path("provider_auto_demo.wav")
     with KokoroPipeline(config) as pipeline:
         result = pipeline.run(TEST_TEXT)
         result.save_wav(output_file)

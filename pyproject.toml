@@ -22,7 +22,7 @@ authors = [
 ]
 keywords = ["tts", "text-to-speech", "kokoro", "phonemizer", "espeak"]
 dependencies = [
-    "kokorog2p[espeak,en]>=0.9.0,<1.0",
+    "kokorog2p[espeak,en]>=0.9.1,<1.0",
     "phrasplit>=0.3.7,<0.4",
     "numpy",
     "audiosig>=0.1.1,<0.2",

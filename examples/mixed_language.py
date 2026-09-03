@@ -5,6 +5,11 @@ from __future__ import annotations
 
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
 
@@ -21,7 +26,7 @@ def main() -> None:
     )
     try:
         result = pipe.run(SOURCE)
-        sf.write("mixed_language_demo.wav", result.audio, result.sample_rate)
+        sf.write(artifact_path("mixed_language_demo.wav"), result.audio, result.sample_rate)
         print("Created mixed_language_demo.wav")
     finally:
         pipe.close()

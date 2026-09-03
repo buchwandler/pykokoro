@@ -20,6 +20,11 @@ Output:
 import argparse
 import logging
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.debug.segment_invariants import check_segment_invariants
 from pykokoro.generation_config import GenerationConfig
@@ -404,7 +409,7 @@ def main() -> None:
 
     print("\nGenerating audio (this may take a while for long text)...")
 
-    output_file = "contractions_advanced_demo.wav"
+    output_file = artifact_path("contractions_advanced_demo.wav")
     result = pipeline.run(TEXT)
     result.save_wav(output_file)
 

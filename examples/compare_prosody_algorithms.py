@@ -15,6 +15,11 @@ from time import perf_counter
 import numpy as np
 import soundfile as sf
 
+try:
+    from ._output import artifact_dir
+except ImportError:
+    from _output import artifact_dir
+
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig, ProsodyConfig
 from pykokoro.prosody import apply_prosody
 
@@ -268,7 +273,7 @@ def main() -> int:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("prosody_algorithm_comparison"),
+        default=artifact_dir() / "prosody_algorithm_comparison",
     )
     parser.add_argument("--blind-seed", type=int, default=20260731)
     args = parser.parse_args()

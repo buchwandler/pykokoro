@@ -23,6 +23,11 @@ Output:
 import numpy as np
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 import pykokoro
 
 # Ultra-short dialogue sentences
@@ -239,7 +244,7 @@ def main():
     print_separator("Combining All Versions")
     combined_samples = np.concatenate(all_samples)
 
-    output_file = "token_length_effects_comparison.wav"
+    output_file = artifact_path("token_length_effects_comparison.wav")
     sf.write(output_file, combined_samples, sample_rate)
 
     total_duration = len(combined_samples) / sample_rate

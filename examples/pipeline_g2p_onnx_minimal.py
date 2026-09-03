@@ -14,6 +14,11 @@ Output:
     pipeline_g2p_onnx_minimal.wav
 """
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.stages.protocols import DocumentResult
 from pykokoro.types import Segment, Trace
@@ -59,7 +64,7 @@ def main() -> None:
         doc_parser=PlainDocumentParser(),
     )
     result = pipeline.run(text)
-    output_path = "pipeline_g2p_onnx_minimal.wav"
+    output_path = artifact_path("pipeline_g2p_onnx_minimal.wav")
     result.save_wav(output_path)
     print(f"Wrote {output_path}")
 

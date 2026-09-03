@@ -8,6 +8,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.onnx_backend import Kokoro
 from pykokoro.stages.audio_generation.onnx import OnnxAudioGenerationAdapter
@@ -94,19 +99,19 @@ def main() -> None:
         "ssmd-full",
         full_pipeline,
         SSMD_TEXT,
-        "pipeline_stage_showcase_ssmd.wav",
+        artifact_path("pipeline_stage_showcase_ssmd.wav"),
     )
     run_pipeline(
         "paragraph",
         paragraph_pipeline,
         PARAGRAPH_TEXT,
-        "pipeline_stage_showcase_paragraph.wav",
+        artifact_path("pipeline_stage_showcase_paragraph.wav"),
     )
     run_pipeline(
         "minimal",
         minimal_pipeline,
         SIMPLE_TEXT,
-        "pipeline_stage_showcase_minimal.wav",
+        artifact_path("pipeline_stage_showcase_minimal.wav"),
     )
 
 

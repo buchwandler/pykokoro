@@ -28,6 +28,11 @@ Features demonstrated:
 
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import KokoroPipeline, PipelineConfig, SSMDRenderConfig
 from pykokoro.generation_config import GenerationConfig
 
@@ -112,7 +117,7 @@ def main():
     res = pipe.run(story)
     samples, sample_rate = res.audio, res.sample_rate
 
-    output_file = "ssmd_story_demo.wav"
+    output_file = artifact_path("ssmd_story_demo.wav")
     sf.write(output_file, samples, sample_rate)
 
     duration = len(samples) / sample_rate
@@ -136,7 +141,7 @@ def main():
     )
     samples_fr, sample_rate_fr = res_fr.audio, res_fr.sample_rate
 
-    output_file_fr = "ssmd_french_story_demo.wav"
+    output_file_fr = artifact_path("ssmd_french_story_demo.wav")
     sf.write(output_file_fr, samples_fr, sample_rate_fr)
 
     duration_fr = len(samples_fr) / sample_rate_fr
@@ -158,7 +163,7 @@ Custom 2 second pause ...2s like this.
     print("\nGenerating audio with various breaks...")
     samples_breaks = pipe.run(break_examples).audio
 
-    output_file_breaks = "ssmd_breaks_demo.wav"
+    output_file_breaks = artifact_path("ssmd_breaks_demo.wav")
     sf.write(output_file_breaks, samples_breaks, sample_rate)
     print(f"Created: {output_file_breaks}")
 
@@ -175,7 +180,7 @@ The formula [H2O]{sub="water"} is essential for life.
     print("\nGenerating audio with opt-in approximate emphasis...")
     samples_emphasis = pipe.run(emphasis_text).audio
 
-    output_file_emphasis = "ssmd_emphasis_demo.wav"
+    output_file_emphasis = artifact_path("ssmd_emphasis_demo.wav")
     sf.write(output_file_emphasis, samples_emphasis, sample_rate)
     print(f"Created: {output_file_emphasis}")
 
@@ -192,7 +197,7 @@ The formula [H2O]{sub="water"} is essential for life.
     print("\nGenerating audio with automatic voice switching...")
     samples_voices = pipe.run(voice_switching_text).audio
 
-    output_file_voices = "ssmd_voice_switching_demo.wav"
+    output_file_voices = artifact_path("ssmd_voice_switching_demo.wav")
     sf.write(output_file_voices, samples_voices, sample_rate)
     print(f"Created: {output_file_voices}")
     print("Note: Each segment automatically uses its annotated voice!")

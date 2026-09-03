@@ -17,6 +17,11 @@ import time
 
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
 
@@ -89,7 +94,7 @@ def benchmark_provider(
 
         # Save sample output
         suffix = f"_{list(provider_options.keys())[0]}" if provider_options else ""
-        output_file = f"benchmark_{provider_name}{suffix}.wav"
+        output_file = artifact_path(f"benchmark_{provider_name}{suffix}.wav")
         sf.write(output_file, samples, sr)
         print(f"  Saved sample to: {output_file}")
 

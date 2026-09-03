@@ -16,6 +16,11 @@ import json
 
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 import pykokoro
 
 TEXT = "Hello from the audio-ready transcript demo."
@@ -36,7 +41,7 @@ def main() -> None:
     print("\nGenerating audio from transcript...")
     samples, sample_rate = kokoro.create_from_transcript(transcript)
 
-    output_file = "transcript_demo.wav"
+    output_file = artifact_path("transcript_demo.wav")
     sf.write(output_file, samples, sample_rate)
 
     duration = len(samples) / sample_rate

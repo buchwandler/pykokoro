@@ -16,6 +16,11 @@ Output:
 import numpy as np
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.tokenizer import Tokenizer
@@ -89,7 +94,7 @@ def main():
     print("Combining all variations into one file...")
     combined_samples = np.concatenate(all_samples)
 
-    output_file = "punctuation_variations_combined.wav"
+    output_file = artifact_path("punctuation_variations_combined.wav")
     sf.write(output_file, combined_samples, sample_rate_value)
 
     total_duration = len(combined_samples) / sample_rate_value

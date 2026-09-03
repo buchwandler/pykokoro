@@ -19,6 +19,11 @@ from pathlib import Path
 
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import KokoroPipeline, PipelineConfig, ProsodyConfig
 from pykokoro.generation_config import GenerationConfig
 
@@ -91,10 +96,10 @@ def main() -> None:
         )
     )
 
-    render(pipe, "Volume", VOLUME_SCRIPT, Path("prosody_volume_demo.wav"))
-    render(pipe, "Pitch", PITCH_SCRIPT, Path("prosody_pitch_demo.wav"))
-    render(pipe, "Rate", RATE_SCRIPT, Path("prosody_rate_demo.wav"))
-    render(pipe, "Combined", COMBINED_SCRIPT, Path("prosody_combined_demo.wav"))
+    render(pipe, "Volume", VOLUME_SCRIPT, artifact_path("prosody_volume_demo.wav"))
+    render(pipe, "Pitch", PITCH_SCRIPT, artifact_path("prosody_pitch_demo.wav"))
+    render(pipe, "Rate", RATE_SCRIPT, artifact_path("prosody_rate_demo.wav"))
+    render(pipe, "Combined", COMBINED_SCRIPT, artifact_path("prosody_combined_demo.wav"))
 
     print("\nDone.")
 

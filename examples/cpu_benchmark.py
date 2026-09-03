@@ -24,6 +24,11 @@ from typing import Any
 
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
 
@@ -325,7 +330,7 @@ def test_combined_optimal():
         )
         res = pipe.run(TEXT)
         samples, sr = res.audio, res.sample_rate
-        sf.write("cpu_benchmark_optimal.wav", samples, sr)
+        sf.write(artifact_path("cpu_benchmark_optimal.wav"), samples, sr)
         print("  Saved sample to: cpu_benchmark_optimal.wav")
 
         return optimal_config

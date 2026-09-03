@@ -15,6 +15,11 @@ Output:
 import argparse
 import logging
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.debug.segment_invariants import check_segment_invariants
 from pykokoro.generation_config import GenerationConfig
@@ -178,7 +183,7 @@ def main() -> None:
         print(f"  - {abbr}")
     print()
 
-    output_file = "abbreviations_demo.wav"
+    output_file = artifact_path("abbreviations_demo.wav")
     result = pipeline.run(TEXT)
     result.save_wav(output_file)
 

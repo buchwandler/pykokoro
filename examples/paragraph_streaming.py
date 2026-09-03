@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import soundfile as sf
+
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
 
 from pykokoro import KokoroPipeline, PipelineConfig
 
@@ -24,7 +27,7 @@ The second paragraph follows.
 
         for result in prepared.render():
             try:
-                output = Path(f"paragraph-{result.descriptor.index + 1:08d}.wav")
+                output = artifact_path(f"paragraph-{result.descriptor.index + 1:08d}.wav")
                 sf.write(output, result.audio, result.sample_rate)
             finally:
                 result.release_audio()

@@ -865,7 +865,6 @@ class KokoroPipeline:
         prepared = self._render_frontend(frontend, config)
         return self._audio_result_from_prepared(prepared)
 
-
     def iter_units(
         self,
         text: str,
@@ -994,7 +993,6 @@ class KokoroPipeline:
         self._apply_post_segmentation_pauses(doc, segments, cfg)
         return PreparedFrontend(self, cfg, trace, doc, segments, state, unit)
 
-
     def _prepare_document(
         self, text: str, cfg: PipelineConfig, unit: AudioUnitKind
     ) -> _PreparedDocument:
@@ -1089,6 +1087,7 @@ class KokoroPipeline:
             audio_generator=audio_generator,
             audio_postprocessor=audio_postprocessor,
         )
+
     @staticmethod
     def _copy_frontend_trace(trace: Trace) -> Trace:
         return Trace(
@@ -1133,8 +1132,6 @@ class KokoroPipeline:
             audio_generator=audio_generator,
             audio_postprocessor=audio_postprocessor,
         )
-
-
 
     @staticmethod
     def _apply_post_segmentation_pauses(
@@ -1517,7 +1514,9 @@ class KokoroPipeline:
                     )
                 base_offset += len(unit_result.audio)
             source_segments = list(prepared.segments)
-            source_phonemes = retained_phonemes if cfg.retain_segment_audio else list(prepared.phoneme_segments)
+            source_phonemes = (
+                retained_phonemes if cfg.retain_segment_audio else list(prepared.phoneme_segments)
+            )
             audio = np.concatenate(final_audio) if final_audio else np.array([], dtype=np.float32)
             metadata = dict(prepared_units.document_metadata)
             return AudioResult(
@@ -1532,7 +1531,6 @@ class KokoroPipeline:
             )
         finally:
             prepared_units.close()
-
 
     def run(self, text: str, **overrides: Any) -> AudioResult:
         with self.prepare_units(text, unit="paragraph", **overrides) as prepared:

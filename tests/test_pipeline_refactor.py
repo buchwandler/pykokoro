@@ -260,7 +260,9 @@ def test_pipeline_trace_aggregates_top_level_stage_timings() -> None:
         ("audio_postprocessing", "postprocess"),
     )
     assert all(summary[key] > 0.0 for key in required)
-    assert not any(event.stage == "linguistics" and event.ms == 0.0 for event in result.trace.events)
+    assert not any(
+        event.stage == "linguistics" and event.ms == 0.0 for event in result.trace.events
+    )
 
 
 def test_reusable_frontend_renders_multiple_lexicons_without_repreparation() -> None:

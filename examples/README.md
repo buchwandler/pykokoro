@@ -56,6 +56,30 @@ generation and postprocessing are bounded to the selected unit waveform and play
 queue. Persist or copy a result before advancing the iterator because advancing releases
 the previous waveform. Descriptor hashes use the `pykokoro-audio-unit-v1` schema.
 
+## Sequential verification runner
+
+Run the maintained, non-interactive examples in sequence from the repository root:
+
+```bash
+python examples/run_all.py
+```
+
+The runner continues after a failure and exits with a nonzero status if any selected
+example fails. Use `--list` to inspect the default selection without running it.
+Archived, playback, and optional or hardware-dependent examples are opt-in:
+
+```bash
+python examples/run_all.py --list
+python examples/run_all.py --include-legacy
+python examples/run_all.py --include-playback
+python examples/run_all.py --include-optional
+```
+
+Generated WAV files and diagnostic artifacts are written below `example-artifacts/`.
+When using the runner, each example gets its own subdirectory, making it easy to inspect
+or compare its files without overwriting another example's output. The directory is
+intentionally ignored by Git and contains only a tracked `.gitkeep` marker.
+
 ## Archived examples
 
 The `legacy/` directory contains historical scripts that targeted the removed `Kokoro()`

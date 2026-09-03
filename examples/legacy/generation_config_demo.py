@@ -25,6 +25,11 @@ Output:
 
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 import pykokoro
 from pykokoro import GenerationConfig
 
@@ -49,7 +54,7 @@ def main():
         config=default_config,
     )
 
-    output1 = "example1_default_config.wav"
+    output1 = artifact_path("example1_default_config.wav")
     sf.write(output1, samples, sr)
     print(f"✓ Generated: {output1}")
 
@@ -89,7 +94,7 @@ def main():
         config=manual_config,
     )
 
-    output2 = "example2_custom_config.wav"
+    output2 = artifact_path("example2_custom_config.wav")
     sf.write(output2, samples, sr)
     print(f"✓ Generated: {output2}")
 
@@ -125,7 +130,7 @@ def main():
     import numpy as np
 
     combined = np.concatenate(audio_segments)
-    output3 = "example3_config_reuse.wav"
+    output3 = artifact_path("example3_config_reuse.wav")
     sf.write(output3, combined, sr)
     print(f"✓ Generated: {output3}")
 
@@ -151,7 +156,7 @@ def main():
         speed=1.5,  # Override just the speed
     )
 
-    output4 = "example4_config_override.wav"
+    output4 = artifact_path("example4_config_override.wav")
     sf.write(output4, samples, sr)
     print(f"✓ Generated: {output4}")
 
@@ -170,7 +175,7 @@ def main():
         pause_sentence=0.5,
     )
 
-    output5 = "example5_backward_compat.wav"
+    output5 = artifact_path("example5_backward_compat.wav")
     sf.write(output5, samples, sr)
     print(f"✓ Generated: {output5}")
 

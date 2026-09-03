@@ -22,6 +22,11 @@ Output:
 import numpy as np
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 import pykokoro
 from pykokoro.voice_manager import VoiceBlend
 
@@ -143,7 +148,7 @@ def main():
     print_separator("Saving Combined Audio")
     combined_samples = np.concatenate(all_samples)
 
-    output_file = "voice_slerp_demo.wav"
+    output_file = artifact_path("voice_slerp_demo.wav")
     sf.write(output_file, combined_samples, sample_rate)
 
     total_duration = len(combined_samples) / sample_rate

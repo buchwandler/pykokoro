@@ -29,6 +29,11 @@ Supported interpret-as types:
 
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
 
@@ -259,49 +264,49 @@ def main():
 
     # Demo 1: Numbers
     audio_numbers = demo_numbers(pipe)
-    output_file = "say_as_numbers_demo.wav"
+    output_file = artifact_path("say_as_numbers_demo.wav")
     sf.write(output_file, audio_numbers, SAMPLE_RATE)
     duration = len(audio_numbers) / SAMPLE_RATE
     print(f"✓ Created: {output_file} ({duration:.2f}s)")
 
     # Demo 2: Text normalization
     audio_text = demo_text_normalization(pipe)
-    output_file = "say_as_text_demo.wav"
+    output_file = artifact_path("say_as_text_demo.wav")
     sf.write(output_file, audio_text, SAMPLE_RATE)
     duration = len(audio_text) / SAMPLE_RATE
     print(f"✓ Created: {output_file} ({duration:.2f}s)")
 
     # Demo 3: Date/Time
     audio_datetime = demo_datetime(pipe)
-    output_file = "say_as_datetime_demo.wav"
+    output_file = artifact_path("say_as_datetime_demo.wav")
     sf.write(output_file, audio_datetime, SAMPLE_RATE)
     duration = len(audio_datetime) / SAMPLE_RATE
     print(f"✓ Created: {output_file} ({duration:.2f}s)")
 
     # Demo 4: Telephone and Units
     audio_tel_units = demo_telephone_and_units(pipe)
-    output_file = "say_as_telephone_units_demo.wav"
+    output_file = artifact_path("say_as_telephone_units_demo.wav")
     sf.write(output_file, audio_tel_units, SAMPLE_RATE)
     duration = len(audio_tel_units) / SAMPLE_RATE
     print(f"✓ Created: {output_file} ({duration:.2f}s)")
 
     # Demo 5: Mixed features
     audio_mixed = demo_mixed_features(pipe)
-    output_file = "say_as_mixed_demo.wav"
+    output_file = artifact_path("say_as_mixed_demo.wav")
     sf.write(output_file, audio_mixed, SAMPLE_RATE)
     duration = len(audio_mixed) / SAMPLE_RATE
     print(f"✓ Created: {output_file} ({duration:.2f}s)")
 
     # Demo 6: Multi-language
     audio_multilang = demo_multilingual(pipe)
-    output_file = "say_as_multilingual_demo.wav"
+    output_file = artifact_path("say_as_multilingual_demo.wav")
     sf.write(output_file, audio_multilang, SAMPLE_RATE)
     duration = len(audio_multilang) / SAMPLE_RATE
     print(f"✓ Created: {output_file} ({duration:.2f}s)")
 
     # Demo 7: Error handling
     audio_errors = demo_error_handling(pipe)
-    output_file = "say_as_error_handling_demo.wav"
+    output_file = artifact_path("say_as_error_handling_demo.wav")
     sf.write(output_file, audio_errors, SAMPLE_RATE)
     duration = len(audio_errors) / SAMPLE_RATE
     print(f"✓ Created: {output_file} ({duration:.2f}s)")

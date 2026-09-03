@@ -9,10 +9,14 @@ subsequent unit is appended directly to the file.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
 import soundfile as sf
+
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
 
 from pykokoro import KokoroPipeline, PipelineConfig
 
@@ -26,7 +30,7 @@ array in memory.
 
 
 def main() -> None:
-    wav_path = Path("streamed-chapter.wav")
+    wav_path = artifact_path("streamed-chapter.wav")
     marker_path = wav_path.with_suffix(".markers.json")
     writer: sf.SoundFile | None = None
     aggregate_markers: list[dict[str, Any]] = []

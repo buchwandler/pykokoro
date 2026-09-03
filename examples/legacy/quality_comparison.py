@@ -15,6 +15,11 @@ from pathlib import Path
 
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import Kokoro
 
 # ========================================================================
@@ -105,7 +110,7 @@ def main():
             duration = len(samples) / sample_rate
 
             # Save to file
-            output_file = f"{quality}.wav"
+            output_file = artifact_path(f"{quality}.wav")
             sf.write(output_file, samples, sample_rate)
 
             # Get file size

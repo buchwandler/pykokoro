@@ -8,6 +8,11 @@ from pathlib import Path
 
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 import pykokoro
 from pykokoro import Tokenizer, TokenizerConfig
 
@@ -59,7 +64,7 @@ samples, sample_rate = kokoro.create(
 )
 
 # Save to file
-output_path = "phoneme_dictionary_demo.wav"
+output_path = artifact_path("phoneme_dictionary_demo.wav")
 sf.write(output_path, samples, sample_rate)
 
 duration = len(samples) / sample_rate

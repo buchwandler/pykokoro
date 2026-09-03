@@ -8,6 +8,11 @@ from pathlib import Path
 
 import kokorog2p
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 TEXT = (
@@ -30,7 +35,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("spokenform_showcase.wav"),
+        default=artifact_path("spokenform_showcase.wav"),
         help="WAV path for normal synthesis mode.",
     )
     return parser.parse_args()

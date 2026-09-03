@@ -26,6 +26,11 @@ Output:
 
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
 from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
@@ -159,7 +164,7 @@ def main():
     print(f"  Sample rate: {sample_rate} Hz")
 
     # Save the audio
-    output_file = "optimal_phoneme_length_demo.wav"
+    output_file = artifact_path("optimal_phoneme_length_demo.wav")
     sf.write(output_file, samples, sample_rate)
     print(f"\nSaved to: {output_file}")
 

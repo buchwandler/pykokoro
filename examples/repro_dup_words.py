@@ -6,6 +6,11 @@ from __future__ import annotations
 import argparse
 import logging
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.debug.segment_invariants import check_segment_invariants
 from pykokoro.generation_config import GenerationConfig
@@ -35,7 +40,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--out",
-        default="repro_dup_words.wav",
+        default=str(artifact_path("repro_dup_words.wav")),
         help="Path to write WAV output.",
     )
     parser.add_argument(

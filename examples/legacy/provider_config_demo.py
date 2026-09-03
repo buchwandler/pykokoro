@@ -7,6 +7,11 @@ using SessionOptions and provider_options.
 
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 import pykokoro
 
 # Example 1: Simple - Use defaults
@@ -20,7 +25,7 @@ audio, sr = kokoro_cpu.create(
     voice="af_bella",
     lang="en-us",
 )
-sf.write("provider_demo_cpu.wav", audio, sr)
+sf.write(artifact_path("provider_demo_cpu.wav"), audio, sr)
 print(f"✓ Generated audio with CPU provider: {len(audio)} samples at {sr} Hz\n")
 kokoro_cpu.close()
 
@@ -41,7 +46,7 @@ audio, sr = kokoro_threads.create(
     voice="af_bella",
     lang="en-us",
 )
-sf.write("provider_demo_cpu_threads.wav", audio, sr)
+sf.write(artifact_path("provider_demo_cpu_threads.wav"), audio, sr)
 print(f"✓ Generated audio with 4 threads: {len(audio)} samples at {sr} Hz\n")
 kokoro_threads.close()
 
@@ -68,7 +73,7 @@ try:
             voice="af_bella",
             lang="en-us",
         )
-        sf.write("provider_demo_openvino.wav", audio, sr)
+        sf.write(artifact_path("provider_demo_openvino.wav"), audio, sr)
         print(f"✓ Generated audio with OpenVINO FP16: {len(audio)} samples at {sr} Hz\n")
         kokoro_openvino.close()
     else:
@@ -99,7 +104,7 @@ try:
             voice="af_bella",
             lang="en-us",
         )
-        sf.write("provider_demo_cuda.wav", audio, sr)
+        sf.write(artifact_path("provider_demo_cuda.wav"), audio, sr)
         print(f"✓ Generated audio with CUDA (2GB limit): {len(audio)} samples at {sr} Hz\n")
         kokoro_cuda.close()
     else:
@@ -133,7 +138,7 @@ try:
         voice="af_bella",
         lang="en-us",
     )
-    sf.write("provider_demo_advanced.wav", audio, sr)
+    sf.write(artifact_path("provider_demo_advanced.wav"), audio, sr)
     print(f"✓ Generated audio with advanced options: {len(audio)} samples at {sr} Hz\n")
     kokoro_advanced.close()
 except ImportError:
@@ -156,7 +161,7 @@ audio, sr = kokoro_auto.create(
     voice="af_bella",
     lang="en-us",
 )
-sf.write("provider_demo_auto.wav", audio, sr)
+sf.write(artifact_path("provider_demo_auto.wav"), audio, sr)
 print(f"✓ Generated audio with auto-select: {len(audio)} samples at {sr} Hz\n")
 kokoro_auto.close()
 

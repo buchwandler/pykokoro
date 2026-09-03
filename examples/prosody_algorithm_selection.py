@@ -23,6 +23,11 @@ import audiosig
 import numpy as np
 import soundfile as sf
 
+try:
+    from ._output import artifact_dir
+except ImportError:
+    from _output import artifact_dir
+
 import pykokoro
 from pykokoro import ProsodyConfig
 from pykokoro.prosody import apply_prosody, parse_rate
@@ -203,7 +208,9 @@ def main() -> int:
         "--text", default=DEFAULT_TEXT, help="text synthesized once when --input-wav is omitted"
     )
     parser.add_argument("--voice", default="af_bella")
-    parser.add_argument("--output-dir", type=Path, default=Path("prosody_algorithm_outputs"))
+    parser.add_argument(
+        "--output-dir", type=Path, default=artifact_dir() / "prosody_algorithm_outputs"
+    )
     parser.add_argument("--rate", default="87%")
     parser.add_argument("--pitch", default="+1.2st")
     parser.add_argument(

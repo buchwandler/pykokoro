@@ -16,6 +16,11 @@ when heading_emphasis capability is enabled (on by default in PyKokoro).
 
 import soundfile as sf
 
+try:
+    from ._output import artifact_path
+except ImportError:
+    from _output import artifact_path
+
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
 
@@ -75,7 +80,7 @@ def main():
     audio, sample_rate = res.audio, res.sample_rate
 
     # Save to file
-    output_file = "headings_demo.wav"
+    output_file = artifact_path("headings_demo.wav")
     sf.write(output_file, audio, sample_rate)
 
     # Calculate duration
