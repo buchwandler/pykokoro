@@ -59,7 +59,7 @@ STAGE_TIMING_KEYS = (
 def make_config(
     *,
     lexicons: str | tuple[str, ...] | None = None,
-    spacy_mode: str = "off",
+    spacy_mode: str = "auto",
 ) -> PipelineConfig:
     """Return the deterministic German Martin benchmark configuration."""
     if spacy_mode not in SPACY_MODES:
