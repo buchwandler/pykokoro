@@ -1438,13 +1438,14 @@ PyKokoro-owned datasets.
 #### Automatic Lexphon data provisioning
 
 German named lexicons are provisioned by Lexphon. `TokenizerConfig.lexicon_data_policy`
-defaults to `"auto"`: PyKokoro checks the selected logical IDs locally, installs only missing
-assets on the first required construction, and retries G2P construction once. Warm paths use
-the installed store without loading the catalog or accessing the network.
+defaults to `"auto"`: PyKokoro checks the selected logical IDs locally, installs only
+missing assets on the first required construction, and retries G2P construction once.
+Warm paths use the installed store without loading the catalog or accessing the network.
 
-Use `"installed-only"` for offline or pre-provisioned deployments. In that mode a missing
-asset raises Lexphon's original installation error and PyKokoro does not consult the catalog.
-Catalog, download, integrity, alphabet, and other G2P errors are propagated unchanged.
+Use `"installed-only"` for offline or pre-provisioned deployments. In that mode a
+missing asset raises Lexphon's original installation error and PyKokoro does not consult
+the catalog. Catalog, download, integrity, alphabet, and other G2P errors are propagated
+unchanged.
 
 ```python
 from pykokoro.tokenizer import TokenizerConfig
@@ -1464,10 +1465,9 @@ lexphon data install de-de:gold
 lexphon data verify de-de:gold
 ```
 
-Set `LEXPHON_DATA_HOME` to select the persistent data store. Set
-`LEXPHON_CATALOG_URL` to use a pinned local or remote catalog during provisioning. A
-pre-populated data store can be copied into an offline runtime; no catalog is needed on
-warm paths.
+Set `LEXPHON_DATA_HOME` to select the persistent data store. Set `LEXPHON_CATALOG_URL`
+to use a pinned local or remote catalog during provisioning. A pre-populated data store
+can be copied into an offline runtime; no catalog is needed on warm paths.
 
 **External G2P Libraries**: You can also use external phonemization libraries like
 [Misaki](https://github.com/hexgrad/misaki):

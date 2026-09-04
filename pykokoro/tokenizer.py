@@ -121,9 +121,7 @@ class TokenizerConfig:
         self.spacy_model_size = request.size
         self.lexicons = _normalize_lexicons(self.lexicons)
         if self.lexicon_data_policy not in {"auto", "installed-only"}:
-            raise ValueError(
-                "lexicon_data_policy must be 'auto' or 'installed-only'"
-            )
+            raise ValueError("lexicon_data_policy must be 'auto' or 'installed-only'")
 
 
 # Backward compatibility alias

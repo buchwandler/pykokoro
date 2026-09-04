@@ -28,9 +28,7 @@ def required_lexphon_ids(
         load_silver=config.load_silver,
     )
     return tuple(
-        spec.id
-        for name in names
-        if (spec := get_lexicon_spec(language, name)).backend == "lexphon"
+        spec.id for name in names if (spec := get_lexicon_spec(language, name)).backend == "lexphon"
     )
 
 

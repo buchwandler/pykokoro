@@ -176,9 +176,7 @@ def test_g2p_instance_cache_distinguishes_named_lexicons(monkeypatch):
     crane_cfg = PipelineConfig(tokenizer_config=TokenizerConfig(lexicons=("crane",)))
 
     installed_only_cfg = PipelineConfig(
-        tokenizer_config=replace(
-            gold_cfg.tokenizer_config, lexicon_data_policy="installed-only"
-        )
+        tokenizer_config=replace(gold_cfg.tokenizer_config, lexicon_data_policy="installed-only")
     )
     gold = adapter._get_g2p_instance("de", gold_cfg)
     crane = adapter._get_g2p_instance("de", crane_cfg)
@@ -227,7 +225,6 @@ def test_adapter_retries_after_lexphon_provisioning(monkeypatch):
     assert installed == ["de"]
 
 
-
 def test_tokenizer_forwards_named_lexicons(monkeypatch):
     captured: dict[str, object] = {}
 
@@ -266,9 +263,7 @@ def test_legacy_tokenizer_retries_after_lexphon_provisioning(monkeypatch):
         "pykokoro.lexicon_data.install_missing_lexphon_data",
         lambda language, config: installed.append(language) or ("de-de:gold",),
     )
-    tokenizer = tokenizer_module.Tokenizer(
-        vocab={}, config=TokenizerConfig(lexicons=("gold",))
-    )
+    tokenizer = tokenizer_module.Tokenizer(vocab={}, config=TokenizerConfig(lexicons=("gold",)))
 
     result = tokenizer._get_g2p("de")
 

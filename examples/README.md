@@ -24,15 +24,15 @@ scripts below use the current pipeline-first API.
 - `termux_android_onnx.py` — Android/Termux provider configuration; requires a
   compatible ONNX Runtime build and model assets.
 
-
 ## German lexicon data
 
 The German examples use named KokoroG2P lexicons. PyKokoro defaults to automatic Lexphon
-provisioning: on a missing selected asset, it installs the asset and retries G2P construction
-once. This first-use step may access the catalog and network. Later runs use the local store.
+provisioning: on a missing selected asset, it installs the asset and retries G2P
+construction once. This first-use step may access the catalog and network. Later runs
+use the local store.
 
-For offline deployments, pre-provision the required assets and select strict installed-only
-behavior in `TokenizerConfig`:
+For offline deployments, pre-provision the required assets and select strict
+installed-only behavior in `TokenizerConfig`:
 
 ```python
 from pykokoro.tokenizer import TokenizerConfig
@@ -52,16 +52,16 @@ lexphon data verify de-de:gold
 ```
 
 Use `LEXPHON_DATA_HOME` for a persistent or copied data directory and
-`LEXPHON_CATALOG_URL` for a pinned catalog. Missing data, catalog, download, integrity, and
-G2P errors are reported without silent fallback.
-The maintained analysis and language demos are also import-safe and indexed here:
-`abbreviations.py`, `automatic_pauses_demo.py`, `backend_comparison.py`,
-`boundary_detection_analysis.py`, `chinese.py`, `compare_prosody_algorithms.py`,
-`contractions.py`, `contractions_advanced.py`, `cpu_benchmark.py`, `dash_variations.py`,
-`english.py`, `french.py`, `headings_demo.py`, `hindi.py`, `homographs.py`,
-`italian.py`, `japanese.py`, `korean.py`, `mixed_language.py`,
-`optimal_phoneme_length_demo.py`, `paragraph_streaming.py`, `pauses_demo.py`,
-`phoneme_print_demo.py`, `pipeline_g2p_onnx_minimal.py`, `podcast.py`, `portuguese.py`,
+`LEXPHON_CATALOG_URL` for a pinned catalog. Missing data, catalog, download, integrity,
+and G2P errors are reported without silent fallback. The maintained analysis and
+language demos are also import-safe and indexed here: `abbreviations.py`,
+`automatic_pauses_demo.py`, `backend_comparison.py`, `boundary_detection_analysis.py`,
+`chinese.py`, `compare_prosody_algorithms.py`, `contractions.py`,
+`contractions_advanced.py`, `cpu_benchmark.py`, `dash_variations.py`, `english.py`,
+`french.py`, `headings_demo.py`, `hindi.py`, `homographs.py`, `italian.py`,
+`japanese.py`, `korean.py`, `mixed_language.py`, `optimal_phoneme_length_demo.py`,
+`paragraph_streaming.py`, `pauses_demo.py`, `phoneme_print_demo.py`,
+`pipeline_g2p_onnx_minimal.py`, `podcast.py`, `portuguese.py`,
 `prosody_algorithm_selection.py`, `prosody_demo.py`, `provider_info.py`,
 `punctuation.py`, `punctuation_variations.py`, `repro_dup_words.py`, `say_as_demo.py`,
 `short_sentence_demo.py`, `short_sentence_randomized_demo.py`,

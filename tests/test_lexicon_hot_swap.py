@@ -36,9 +36,7 @@ def test_acoustic_key_ignores_lexicon_but_tracks_runtime_settings() -> None:
     )
     installed_only = replace(
         base,
-        tokenizer_config=replace(
-            base.tokenizer_config, lexicon_data_policy="installed-only"
-        ),
+        tokenizer_config=replace(base.tokenizer_config, lexicon_data_policy="installed-only"),
     )
     assert pipeline._kokoro_key(base) == pipeline._kokoro_key(installed_only)
     assert pipeline._kokoro_key(base) == pipeline._kokoro_key(crane)

@@ -122,6 +122,7 @@ def test_install_checks_missing_assets_and_skips_catalog_when_warm(
     assert install_missing_lexphon_data("de", TokenizerConfig(lexicons=("gold",))) == ()
     assert store.installed_calls == ["de-de:gold"]
 
+
 def test_install_rechecks_under_lock_after_another_installer_wins(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -148,9 +149,6 @@ def test_install_rechecks_under_lock_after_another_installer_wins(
 
     assert install_missing_lexphon_data("de", TokenizerConfig(lexicons=("gold",))) == ()
     assert store.calls == 2
-
-
-
 
 
 def test_install_uses_local_catalog_and_g2lex_asset(
@@ -185,7 +183,9 @@ def test_retry_provisions_once_and_retries_once(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(
         "pykokoro.lexicon_data.install_missing_lexphon_data",
-        lambda language, config: installations.append((language, config.lexicon_data_policy)) or ("de-de:gold",),
+        lambda language, config: (
+            installations.append((language, config.lexicon_data_policy)) or ("de-de:gold",)
+        ),
     )
 
     result = create_g2p_with_lexphon_retry(
