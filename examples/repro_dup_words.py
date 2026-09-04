@@ -30,7 +30,7 @@ def parse_args() -> argparse.Namespace:
         default="Hello world. Hello world.",
         help="Input text to synthesize.",
     )
-    parser.add_argument("--voice", default="af", help="Voice name to use.")
+    parser.add_argument("--voice", default="af_sarah", help="Voice name to use.")
     parser.add_argument("--lang", default="en-us", help="Language code.")
     parser.add_argument(
         "--pause-mode",

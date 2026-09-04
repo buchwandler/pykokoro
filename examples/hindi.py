@@ -25,6 +25,7 @@ except ImportError:
 
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
+from pykokoro.tokenizer import TokenizerConfig
 
 # Hindi wisdom about life and perseverance
 TEXT = "जीवन में सफलता उन्हें मिलती है जो कभी हार नहीं मानते। हर सुबह एक नई शुरुआत है, हर दिन एक नया अवसर है।"
@@ -37,7 +38,11 @@ def main():
     """Generate Hindi speech audio."""
     print("Initializing TTS engine...")
     pipe = KokoroPipeline(
-        PipelineConfig(voice=VOICE, generation=GenerationConfig(lang=LANG, speed=1.0))
+        PipelineConfig(
+            voice=VOICE,
+            generation=GenerationConfig(lang=LANG, speed=1.0),
+            tokenizer_config=TokenizerConfig(backend="espeak"),
+        )
     )
 
     print(f"Text: {TEXT}")

@@ -82,7 +82,7 @@ def main() -> None:
         return
 
     cfg = PipelineConfig(
-        voice="af",
+        voice="af_sarah",
         generation=GenerationConfig(lang="en-us"),
         return_trace=True,
     )

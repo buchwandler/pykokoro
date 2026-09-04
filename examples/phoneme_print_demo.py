@@ -10,7 +10,7 @@ from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 def main() -> None:
     text = "Hello world. This example prints phoneme outputs from the pipeline."
-    cfg = PipelineConfig(voice="af", generation=GenerationConfig(lang="en-us"))
+    cfg = PipelineConfig(voice="af_sarah", generation=GenerationConfig(lang="en-us"))
     pipeline = KokoroPipeline(cfg)
     result = pipeline.run(text)
 

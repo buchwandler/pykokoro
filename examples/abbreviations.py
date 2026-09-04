@@ -27,7 +27,7 @@ from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
 from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
 from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
 from pykokoro.stages.g2p.noop import NoopG2PAdapter
-from pykokoro.types import Segment, Trace
+from pykokoro.types import Segment
 
 # Text with comprehensive abbreviations coverage
 TEXT = """
@@ -187,12 +187,12 @@ def main() -> None:
     result = pipeline.run(TEXT)
     result.save_wav(output_file)
 
-    doc = doc_parser.parse(TEXT, cfg, Trace())
-
-    print(f"clean_text length: {len(doc.clean_text)}")
+    print(f"clean_text length: {len(result.clean_text)}")
     print_segments(result.segments)
     print_phoneme_segments(result.phoneme_segments)
-    check_segment_invariants(result.segments, doc.clean_text)
+    invariant_result = check_segment_invariants(result.segments, result.clean_text)
+    if not invariant_result.ok:
+        raise RuntimeError("Prepared segment invariants failed")
 
     if result.trace and result.trace.warnings:
         print("Warnings:")

@@ -27,6 +27,7 @@ wires the missing adapters automatically.
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 config = PipelineConfig(
+    generation=GenerationConfig(lang="en-us"),
     voice="af_bella",
     generation=GenerationConfig(speed=1.0),
 )
@@ -289,9 +290,10 @@ specific execution provider.
 
 ```python
 from pathlib import Path
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 cfg = PipelineConfig(
+    generation=GenerationConfig(lang="en-us"),
     voice="af_bella",
     model_path=Path("/models/kokoro.onnx"),
     voices_path=Path("/models/voices.bin"),

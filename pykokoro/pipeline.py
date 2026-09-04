@@ -175,6 +175,8 @@ class PreparedAudioUnits:
         self._prepared: _PreparedDocument | None = prepared
         self._units = tuple(group.descriptor for group in prepared.groups)
         self._unit_kind = prepared.unit_kind
+        self._clean_text = prepared.doc.clean_text
+        self._source_text = prepared.doc.structural_clean_text
         self._document_metadata = {
             "title": _copy_metadata_value(prepared.doc.header.get("title")),
             "voice_bindings": _copy_metadata_value(prepared.doc.header.get("voice_bindings", {})),
@@ -194,6 +196,16 @@ class PreparedAudioUnits:
     @property
     def unit_kind(self) -> AudioUnitKind:
         return self._unit_kind
+
+    @property
+    def clean_text(self) -> str:
+        """Prepared text used as the coordinate space for segments."""
+        return self._clean_text
+
+    @property
+    def source_text(self) -> str | None:
+        """Structural text before spokenform preparation."""
+        return self._source_text
 
     @property
     def document_metadata(self) -> Mapping[str, Any]:
@@ -1528,6 +1540,8 @@ class KokoroPipeline:
                 document_metadata=metadata,
                 markers=markers,
                 word_timings=word_timings,
+                clean_text=prepared_units.clean_text,
+                source_text=prepared_units.source_text,
             )
         finally:
             prepared_units.close()
@@ -1584,6 +1598,8 @@ class KokoroPipeline:
             document_metadata=metadata,
             markers=markers,
             word_timings=word_timings,
+            clean_text=prepared.clean_text,
+            source_text=prepared.source_text,
         )
 
     def play_streaming(

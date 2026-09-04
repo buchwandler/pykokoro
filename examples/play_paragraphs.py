@@ -17,7 +17,7 @@ no WAV files are created.
 
 from __future__ import annotations
 
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.playback import SoundDevicePlayer
 
 TEXT = """
@@ -32,7 +32,12 @@ This is the third paragraph, also sent directly to the audio device.
 def main() -> None:
     player: SoundDevicePlayer | None = None
     with (
-        KokoroPipeline(PipelineConfig(voice="af_sarah")) as pipeline,
+        KokoroPipeline(
+            PipelineConfig(
+                voice="af_sarah",
+                generation=GenerationConfig(lang="en-us"),
+            )
+        ) as pipeline,
         pipeline.prepare_units(TEXT, unit="paragraph") as prepared,
     ):
         try:

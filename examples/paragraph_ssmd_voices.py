@@ -10,7 +10,7 @@ try:
 except ImportError:
     from _output import artifact_dir
 
-from pykokoro import KokoroPipeline, PipelineConfig, SSMDRenderConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig, SSMDRenderConfig
 
 SCRIPT = """---
 title: Paragraph Streaming With Portable Voices
@@ -50,6 +50,7 @@ def main() -> None:
 
     config = PipelineConfig(
         voice="af_sarah",
+        generation=GenerationConfig(lang="en-us"),
         ssmd=SSMDRenderConfig(provider="kokoro", missing_voice="error"),
         retain_segment_audio=False,
     )

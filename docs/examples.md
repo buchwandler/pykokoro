@@ -32,9 +32,9 @@ without loading a synthesis model.
 The simplest example:
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
-pipe = KokoroPipeline(PipelineConfig(voice="af_bella"))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_bella"))
 result = pipe.run("Hello, world!")
 
 # Direct system playback, using the optional playback dependency:
@@ -50,7 +50,7 @@ Generate the same text with different voices:
 
 ```python
 import soundfile as sf
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 text = "This is a demonstration of different voices."
 
@@ -63,7 +63,7 @@ voices = [
 
 for voice_name, description in voices:
     print(f"Generating: {description}")
-    pipe = KokoroPipeline(PipelineConfig(voice=voice_name))
+    pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice=voice_name))
     result = pipe.run(text)
     sf.write(f"voice_{voice_name}.wav", result.audio, result.sample_rate)
 ```
@@ -85,7 +85,7 @@ Back to normal.
 """
 
 generation = GenerationConfig(pause_mode="manual")
-pipe = KokoroPipeline(PipelineConfig(voice="af_bella", generation=generation))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_bella", generation=generation))
 result = pipe.run(text)
 sf.write("pauses_demo.wav", result.audio, result.sample_rate)
 ```
@@ -105,7 +105,7 @@ generation = GenerationConfig(
     pause_sentence=0.5,
     pause_paragraph=1.0,
 )
-pipe = KokoroPipeline(PipelineConfig(voice="af_bella", generation=generation))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_bella", generation=generation))
 result = pipe.run(text)
 sf.write("custom_pauses.wav", result.audio, result.sample_rate)
 ```
@@ -117,11 +117,11 @@ sf.write("custom_pauses.wav", result.audio, result.sample_rate)
 ```python
 import soundfile as sf
 
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.onnx_backend import VoiceBlend
 
 blend = VoiceBlend.parse("af_bella:50,af_sarah:50")
-pipe = KokoroPipeline(PipelineConfig(voice=blend))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice=blend))
 result = pipe.run("This is a blended voice")
 sf.write("blended.wav", result.audio, result.sample_rate)
 ```
@@ -131,11 +131,11 @@ sf.write("blended.wav", result.audio, result.sample_rate)
 ```python
 import soundfile as sf
 
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.onnx_backend import VoiceBlend
 
 blend = VoiceBlend.parse("af_bella:70,af_sarah:30")
-pipe = KokoroPipeline(PipelineConfig(voice=blend))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice=blend))
 result = pipe.run("Weighted blend example")
 sf.write("weighted_blend.wav", result.audio, result.sample_rate)
 ```
@@ -187,7 +187,7 @@ This is a new paragraph. It will also be handled efficiently.
 """
 
 generation = GenerationConfig(pause_mode="manual")
-pipe = KokoroPipeline(PipelineConfig(voice="af_bella", generation=generation))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_bella", generation=generation))
 result = pipe.run(long_text)
 sf.write("long_text.wav", result.audio, result.sample_rate)
 ```
@@ -234,7 +234,7 @@ sentence-level coarticulation.
 import soundfile as sf
 from pathlib import Path
 
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 scripts = {
     "intro": "Welcome to our podcast!",
@@ -246,7 +246,7 @@ scripts = {
 output_dir = Path("podcast_segments")
 output_dir.mkdir(exist_ok=True)
 
-pipe = KokoroPipeline(PipelineConfig(voice="af_bella"))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_bella"))
 for filename, text in scripts.items():
     print(f"Generating {filename}...")
     result = pipe.run(text)

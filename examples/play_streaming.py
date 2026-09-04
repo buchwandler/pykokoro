@@ -15,7 +15,7 @@ No temporary WAV file or complete generated waveform is retained.
 
 from __future__ import annotations
 
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 TEXT = """
 The first sentence starts playing as soon as it is generated.
@@ -26,7 +26,12 @@ The same persistent output stream is reused for the whole passage.
 
 def main() -> None:
     """Generate and play the sentence stream."""
-    with KokoroPipeline(PipelineConfig(voice="af_sarah")) as pipeline:
+    with KokoroPipeline(
+        PipelineConfig(
+            voice="af_sarah",
+            generation=GenerationConfig(lang="en-us"),
+        )
+    ) as pipeline:
         pipeline.play_streaming(TEXT, queue_size=2)
 
 

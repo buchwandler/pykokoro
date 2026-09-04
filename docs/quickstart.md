@@ -106,7 +106,7 @@ Control how fast or slow the speech is:
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 # Normal speed (default)
-pipe = KokoroPipeline(PipelineConfig(voice="af_bella", generation=GenerationConfig(speed=1.0)))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_bella", generation=GenerationConfig(speed=1.0)))
 audio1 = pipe.run("Normal speed").audio
 
 # Slower (0.5x)
@@ -123,7 +123,7 @@ audio3 = pipe.run("Faster speech").audio
 Add natural pauses in your speech using SSMD break syntax:
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 text = """
 Welcome to the tutorial ...c
@@ -132,7 +132,7 @@ And this is a longer pause ...p
 These pauses make speech sound more natural.
 """
 
-pipe = KokoroPipeline(PipelineConfig(voice="af_bella"))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_bella"))
 result = pipe.run(text)
 
 import soundfile as sf
@@ -149,9 +149,9 @@ Pause syntax (SSMD breaks): \* `...c` - Short/comma pause (0.3 seconds, default)
 Reuse a pipeline instance for multiple runs:
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
-pipe = KokoroPipeline(PipelineConfig(voice="af_bella"))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_bella"))
 for sentence in ["Hello", "How are you?", "Goodbye!"]:
     result = pipe.run(sentence)
     print(result.audio.shape)
@@ -197,7 +197,7 @@ The text will be processed intelligently.
 This is a new paragraph. It will be processed efficiently.
 """
 
-pipe = KokoroPipeline(PipelineConfig(voice="af_bella"))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_bella"))
 result = pipe.run(long_text)
 
 # Or let PyKokoro insert boundary pauses
@@ -226,6 +226,7 @@ import soundfile as sf
 def text_to_speech(text, output_file, voice="af_bella", speed=1.0):
     """Convert text to speech and save to file."""
     config = PipelineConfig(
+        generation=GenerationConfig(lang="en-us"),
         voice=voice,
         generation=GenerationConfig(speed=speed),
     )
@@ -265,7 +266,7 @@ always a silent no-op. `warn` emits one diagnostic per logical source segment, a
 `error` rejects effectful emphasis before inference.
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 script = """---
 title: Quick review
@@ -275,7 +276,7 @@ voice_bindings:
 ---
 <div voice="narrator">This text uses a portable role.</div>
 """
-result = KokoroPipeline(PipelineConfig()).run(script)
+result = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), )).run(script)
 assert result.document_metadata["title"] == "Quick review"
 ```
 

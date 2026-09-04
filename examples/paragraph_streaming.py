@@ -9,7 +9,7 @@ try:
 except ImportError:
     from _output import artifact_path
 
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 
 def main() -> None:
@@ -20,7 +20,12 @@ The first paragraph ends here.
 
 The second paragraph follows.
 """
-    pipeline = KokoroPipeline(PipelineConfig(voice="af_sarah"))
+    pipeline = KokoroPipeline(
+        PipelineConfig(
+            voice="af_sarah",
+            generation=GenerationConfig(lang="en-us"),
+        )
+    )
     with pipeline.prepare_units(script, unit="paragraph") as prepared:
         for descriptor in prepared.units:
             print(descriptor.index, descriptor.paragraph_idx, descriptor.text_hash)

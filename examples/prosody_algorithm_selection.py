@@ -162,14 +162,19 @@ def _load_reference(path: Path) -> tuple[np.ndarray, int]:
     return _mono_float32(audio), int(sample_rate)
 
 
-def _synthesize_reference(*, text: str, voice: str) -> tuple[np.ndarray, int]:
+def _synthesize_reference(
+    *,
+    text: str,
+    voice: str,
+    lang: str,
+) -> tuple[np.ndarray, int]:
     # Keep the input-WAV path free of ONNX imports.
     from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
     from pykokoro.short_sentence_handler import ShortSentenceConfig
 
     config = PipelineConfig(
         voice=voice,
-        generation=GenerationConfig(speed=1.0, random_seed=0),
+        generation=GenerationConfig(lang=lang, speed=1.0, random_seed=0),
         # Algorithm comparison must not include the carrier-phrase cutter.
         short_sentence_config=ShortSentenceConfig(enabled=False),
     )
@@ -209,6 +214,11 @@ def main() -> int:
     )
     parser.add_argument("--voice", default="af_bella")
     parser.add_argument(
+        "--lang",
+        default="en-us",
+        help="Document language for the reference utterance.",
+    )
+    parser.add_argument(
         "--output-dir", type=Path, default=artifact_dir() / "prosody_algorithm_outputs"
     )
     parser.add_argument("--rate", default="87%")
@@ -238,7 +248,9 @@ def main() -> int:
         reference, sample_rate = _load_reference(args.input_wav)
         source_description = str(args.input_wav)
     else:
-        reference, sample_rate = _synthesize_reference(text=args.text, voice=args.voice)
+        reference, sample_rate = _synthesize_reference(
+            text=args.text, voice=args.voice, lang=args.lang
+        )
         source_description = f"PyKokoro voice={args.voice!r}"
 
     if sample_rate <= 0:

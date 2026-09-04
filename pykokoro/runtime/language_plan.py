@@ -39,6 +39,19 @@ def canonicalize_language(language: str) -> str:
     return normalized
 
 
+def _strictly_contains(
+    outer_start: int,
+    outer_end: int,
+    inner_start: int,
+    inner_end: int,
+) -> bool:
+    return (
+        outer_start <= inner_start
+        and inner_end <= outer_end
+        and (outer_start, outer_end) != (inner_start, inner_end)
+    )
+
+
 def build_language_plan(
     text: str,
     annotations: Sequence[AnnotationSpan],
@@ -71,13 +84,18 @@ def build_language_plan(
 
     for index, (start, end, language) in enumerate(explicit):
         for other_start, other_end, other_language in explicit[index + 1 :]:
-            if start < other_end and other_start < end and language != other_language:
-                raise ValueError(
-                    "Conflicting overlapping language spans: "
-                    f"{start}:{end}={language!r} and "
-                    f"{other_start}:{other_end}={other_language!r}"
-                )
-
+            if language == other_language or not (start < other_end and other_start < end):
+                continue
+            nested = _strictly_contains(start, end, other_start, other_end) or _strictly_contains(
+                other_start, other_end, start, end
+            )
+            if nested:
+                continue
+            raise ValueError(
+                "Conflicting overlapping language spans: "
+                f"{start}:{end}={language!r} and "
+                f"{other_start}:{other_end}={other_language!r}"
+            )
     positions = {0, len(text)}
     for start, end, _language in explicit:
         positions.update((start, end))

@@ -176,9 +176,9 @@ python examples/gpu_benchmark.py
 The pipeline API is the only supported interface.
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
-pipe = KokoroPipeline(PipelineConfig(voice="af_sarah"))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_sarah"))
 res = pipe.run("Hello")
 audio = res.audio
 ```
@@ -190,10 +190,11 @@ segment for diagnostics and callers that inspect segment audio. For long documen
 enable compact result retention when only the final waveform and metadata are needed:
 
 ```python
-from pykokoro import PipelineConfig, build_pipeline
+from pykokoro import GenerationConfig, PipelineConfig, build_pipeline
 
 pipeline = build_pipeline(
     config=PipelineConfig(
+        generation=GenerationConfig(lang="en-us"),
         voice="af_heart",
         retain_segment_audio=False,
     )
@@ -221,9 +222,9 @@ one paragraph at a time. Preparation resolves SSMD directives, pauses, markers, 
 and preprocessing globally; `skip_indices` can omit units already completed by a caller.
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
-pipeline = KokoroPipeline(PipelineConfig(voice="af_sarah"))
+pipeline = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_sarah"))
 with pipeline.prepare_units("First paragraph.\n\nSecond paragraph.") as prepared:
     for unit in prepared.render(skip_indices={0}):
         try:
@@ -255,11 +256,11 @@ Stages can be replaced with no-op adapters when you want to disable behavior. Se
 `examples/pipeline_stage_showcase.py` for a full wiring example.
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
 
 pipe = KokoroPipeline(
-    PipelineConfig(voice="af"),
+    PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_sarah"),
     doc_parser=PlainTextDocumentParser(),
 )
 res = pipe.run("First paragraph.\n\nSecond paragraph.")
@@ -276,9 +277,9 @@ Old (removed):
 New:
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
-pipe = KokoroPipeline(PipelineConfig(voice="af"))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_sarah"))
 res = pipe.run("Hello")
 audio = res.audio
 ```
@@ -302,9 +303,9 @@ res = pipe.run("Hello")
 ```python
 # Auto-select by runtime capability (CUDA > NNAPI > OpenVINO > CoreML > DirectML > XNNPACK > CPU)
 # The selected accelerator is paired with CPU fallback when the session supports it.
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
-pipe = KokoroPipeline(PipelineConfig(provider="auto", voice="af_sarah"))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), provider="auto", voice="af_sarah"))
 res = pipe.run("Hello")
 ```
 
@@ -383,11 +384,11 @@ audio = res.audio
 
 ```python
 # Blend two voices (50% each)
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.voice_manager import VoiceBlend
 
 blend = VoiceBlend.parse("af_nicole:50,am_michael:50")
-pipe = KokoroPipeline(PipelineConfig(voice=blend))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice=blend))
 res = pipe.run("Mixed voice")
 audio = res.audio
 ```
@@ -397,9 +398,9 @@ audio = res.audio
 For independent chunks, `AudioResult.play()` plays each generated waveform directly:
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
-pipe = KokoroPipeline(PipelineConfig(voice="af_sarah"))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_sarah"))
 chunks = ["Long text", "here..."]
 for text_chunk in chunks:
     result = pipe.run(text_chunk)
@@ -410,10 +411,10 @@ For long text with low startup latency, prefer sentence streaming through one pe
 bounded output stream:
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 text = "First sentence. Second sentence. Third sentence."
-with KokoroPipeline(PipelineConfig(voice="af_sarah")) as pipe:
+with KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_sarah")) as pipe:
     pipe.play_streaming(text, unit="sentence", queue_size=2)
 ```
 
@@ -473,9 +474,9 @@ Add explicit pauses using SSMD break syntax in your text:
 text = "Chapter 5 ...p I'm Klaus. ...c Welcome to the show!"
 
 # Breaks are processed automatically
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
-pipe = KokoroPipeline(PipelineConfig(voice="am_michael"))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="am_michael"))
 res = pipe.run(text)
 audio = res.audio
 ```
@@ -496,12 +497,12 @@ normally.
 **Custom Pause Durations:**
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
-from pykokoro.generation_config import GenerationConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 config = PipelineConfig(
     voice="am_michael",
     generation=GenerationConfig(
+        lang="en-us",
         pause_mode="manual",
         pause_clause=0.2,  # ...c = 200ms
         pause_sentence=0.5,  # ...s = 500ms
@@ -529,12 +530,12 @@ computer vision, natural language processing, and speech recognition.
 """
 
 # Automatic pauses at clause, sentence, and paragraph boundaries
-from pykokoro import KokoroPipeline, PipelineConfig
-from pykokoro.generation_config import GenerationConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 config = PipelineConfig(
     voice="af_sarah",
     generation=GenerationConfig(
+        lang="en-us",
         pause_mode="auto",
         pause_clause=0.25,  # Pause after clauses (commas)
         pause_sentence=0.5,  # Pause after sentences
@@ -599,7 +600,7 @@ text = "Welcome! ...p Let's discuss AI, machine learning, and deep learning."
 
 config = PipelineConfig(
     voice="af_sarah",
-    generation=GenerationConfig(pause_mode="auto", pause_variance=0.05),
+    generation=GenerationConfig(lang="en-us", pause_mode="auto", pause_variance=0.05),
 )
 pipe = KokoroPipeline(config)
 res = pipe.run(text)
@@ -686,9 +687,9 @@ intonation, or spectral continuity lost during separate synthesis.
 To request audible approximation explicitly:
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig, SSMDRenderConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig, SSMDRenderConfig
 
-config = PipelineConfig(ssmd=SSMDRenderConfig(emphasis_mode="approximate"))
+config = PipelineConfig(generation=GenerationConfig(lang="en-us"), ssmd=SSMDRenderConfig(emphasis_mode="approximate"))
 result = KokoroPipeline(config).run("This is *moderate emphasis*.")
 ```
 
@@ -708,7 +709,7 @@ text = (
 )
 
 pipe = KokoroPipeline(
-    PipelineConfig(voice="af", generation=GenerationConfig(lang="en-us"))
+    PipelineConfig(voice="af_sarah", generation=GenerationConfig(lang="en-us"))
 )
 res = pipe.run(text)
 ```
@@ -760,10 +761,10 @@ Use SSMD (Speech Synthesis Markdown) say-as annotations when the author needs ex
 interpretation or an override. They are not required for common automatic forms:
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
 
-pipe = KokoroPipeline(PipelineConfig(voice="af_sarah"))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_sarah"))
 
 # Cardinal numbers
 text = 'I have [123]{as="cardinal"} apples'
@@ -888,7 +889,7 @@ NOTE: Currently, phrase and randomized-phrase mode only support ENGLISH text! (s
 You can customize the behavior using `ShortSentenceConfig`:
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.short_sentence_handler import ShortSentenceConfig
 
 # Less aggressive short sentence handling (also less acurate)
@@ -904,7 +905,7 @@ short_sentence_config = ShortSentenceConfig(
     min_phoneme_length=40,  # Treat segments <40 phoneme tokens as short
 )
 
-pipe = KokoroPipeline(PipelineConfig(voice="af_sarah", short_sentence_config=short_sentence_config))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_sarah", short_sentence_config=short_sentence_config))
 res = pipe.run("Why?")
 ```
 
@@ -954,11 +955,11 @@ this list. E.g. --voice-blend "bf_lily:60,bf_isabella:40"
 **Disabling Short Sentence Handling:**
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.short_sentence_handler import ShortSentenceConfig
 
 short_sentence_config = ShortSentenceConfig(enabled=False)
-pipe = KokoroPipeline(PipelineConfig(voice="af_sarah", short_sentence_config=short_sentence_config))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_sarah", short_sentence_config=short_sentence_config))
 res = pipe.run("Why?")
 ```
 
@@ -1049,9 +1050,9 @@ audio = res.audio
 List all available voices:
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
-pipe = KokoroPipeline(PipelineConfig(voice="af_sarah"))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_sarah"))
 pipe.run("Hello")
 # Voices are loaded lazily by the backend after the first run.
 voices = pipe.synth._kokoro.get_voices()
@@ -1068,10 +1069,11 @@ HuggingFace is the default source with 54 multi-language voices. It downloads th
 voice archive, and the vocabulary config required by the HuggingFace profile:
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 pipe = KokoroPipeline(
     PipelineConfig(
+        generation=GenerationConfig(lang="en-us"),
         voice="af_sarah",
         model_source="huggingface",
         model_quality="fp32",  # fp32, fp16, q8, q8f16, q4, q4f16, uint8, uint8f16
@@ -1085,10 +1087,11 @@ res = pipe.run("Hello world")
 54 voices with additional `fp16-gpu` optimized quality:
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 pipe = KokoroPipeline(
     PipelineConfig(
+        generation=GenerationConfig(lang="en-us"),
         voice="af_sarah",
         model_source="github",
         model_variant="v1.0",
@@ -1373,7 +1376,7 @@ pipe = KokoroPipeline(PipelineConfig(voice="af_sarah", tokenizer_config=tokenize
 Control which phonemization backend and dictionaries to use:
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.tokenizer import TokenizerConfig
 
 # Default: Full dictionaries with espeak fallback (best quality)
@@ -1397,7 +1400,7 @@ tokenizer_config = TokenizerConfig(
 # Alternative backend (requires pygoruut)
 tokenizer_config = TokenizerConfig(backend="goruut")
 
-pipe = KokoroPipeline(PipelineConfig(voice="af_sarah", tokenizer_config=tokenizer_config))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_sarah", tokenizer_config=tokenizer_config))
 res = pipe.run("Hello")
 ```
 
@@ -1466,7 +1469,7 @@ always win over document defaults, and simultaneous defaults use the longest dur
 
 ```python
 from dataclasses import replace
-from pykokoro import KokoroPipeline, PipelineConfig, SSMDRenderConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig, SSMDRenderConfig
 
 script = """---
 title: Portable review
@@ -1484,7 +1487,7 @@ pause_defaults:
 
 <div voice="guest">The roles remain portable across renderers.</div>
 """
-cfg = PipelineConfig(ssmd=SSMDRenderConfig())
+cfg = PipelineConfig(generation=GenerationConfig(lang="en-us"), ssmd=SSMDRenderConfig())
 result = KokoroPipeline(cfg).run(
     script,
     ssmd=replace(cfg.ssmd, voice_bindings={"kokoro": {"guest": "bf_emma"}}),

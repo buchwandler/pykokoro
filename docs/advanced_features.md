@@ -15,9 +15,9 @@ from pathlib import Path
 
 import soundfile as sf
 
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
-with KokoroPipeline(PipelineConfig(voice="af_sarah")) as pipeline:
+with KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_sarah")) as pipeline:
     with pipeline.prepare_units(script, unit="paragraph") as prepared:
         for result in prepared.render(skip_indices={0, 1}):
             try:
@@ -33,7 +33,9 @@ with KokoroPipeline(PipelineConfig(voice="af_sarah")) as pipeline:
 Sentence units provide the low-startup-latency direct-playback path:
 
 ```python
-with KokoroPipeline(PipelineConfig(voice="af_sarah")) as pipeline:
+from pykokoro import GenerationConfig
+
+with KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_sarah")) as pipeline:
     pipeline.play_streaming(script, unit="sentence", queue_size=2)
 ```
 
@@ -94,11 +96,11 @@ passed through `PipelineConfig`:
 ```python
 import soundfile as sf
 
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.voice_manager import VoiceBlend
 
 blend = VoiceBlend.parse("af_bella:50,af_sarah:50")
-with KokoroPipeline(PipelineConfig(voice=blend)) as pipeline:
+with KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice=blend)) as pipeline:
     result = pipeline.run("This is a blended voice.")
     sf.write("blended.wav", result.audio, result.sample_rate)
     result.release_audio()
@@ -148,9 +150,9 @@ The old single-object API is not part of the current package. Use the pipeline
 lifecycle:
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
-with KokoroPipeline(PipelineConfig(voice="af_bella")) as pipeline:
+with KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_bella")) as pipeline:
     result = pipeline.run(text)
     audio = result.audio.copy()
     sample_rate = result.sample_rate

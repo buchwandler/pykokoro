@@ -266,6 +266,8 @@ class AudioResult:
     document_metadata: dict[str, Any] = field(default_factory=dict)
     markers: list[dict[str, Any]] = field(default_factory=list)
     word_timings: list[WordTiming] = field(default_factory=list)
+    clean_text: str = ""
+    source_text: str | None = None
 
     def release_segment_audio(self) -> None:
         """Release per-segment raw and processed audio arrays.

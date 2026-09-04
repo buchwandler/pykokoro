@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
-from pykokoro import PipelineConfig, build_pipeline
+from pykokoro import GenerationConfig, PipelineConfig, build_pipeline
 
 
 def main() -> None:
     text = "Word timing lets an application highlight the word being spoken."
     with (
-        build_pipeline(config=PipelineConfig(voice="af_sarah")) as pipeline,
+        build_pipeline(
+            config=PipelineConfig(
+                voice="af_sarah",
+                generation=GenerationConfig(lang="en-us"),
+            )
+        ) as pipeline,
         pipeline.prepare_units(text, unit="sentence") as prepared,
     ):
         for result in prepared.render():

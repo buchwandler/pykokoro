@@ -135,9 +135,9 @@ pipe = KokoroPipeline(
 ### Basic Text-to-Speech
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
-pipe = KokoroPipeline(PipelineConfig(voice="af_bella"))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_bella"))
 result = pipe.run("Hello, world!")
 audio = result.audio
 sample_rate = result.sample_rate
@@ -150,9 +150,9 @@ Using soundfile (recommended):
 ```python
 import soundfile as sf
 
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
-pipe = KokoroPipeline(PipelineConfig(voice="af_bella"))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_bella"))
 result = pipe.run("Hello!")
 sf.write("output.wav", result.audio, result.sample_rate)
 ```
@@ -166,9 +166,9 @@ pip install "pykokoro[cpu,playback]"
 Then play the generated waveform without creating an intermediate WAV file:
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
-pipe = KokoroPipeline(PipelineConfig(voice="af_bella"))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_bella"))
 result = pipe.run("Hello!")
 result.play()
 ```
@@ -185,9 +185,9 @@ For long text, `play_streaming()` starts playback after the first sentence and g
 subsequent sentence units while one persistent output stream consumes queued audio:
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
-with KokoroPipeline(PipelineConfig(voice="af_bella")) as pipe:
+with KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_bella")) as pipe:
     pipe.play_streaming("First sentence. Second sentence. Third sentence.")
 ```
 
@@ -207,9 +207,9 @@ Voice names follow the pattern: `{accent}_{gender}_{name}`
 Use the voice name in `PipelineConfig`:
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
-pipe = KokoroPipeline(PipelineConfig(voice="bf_emma"))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="bf_emma"))
 result = pipe.run("Hello from the UK!")
 ```
 
@@ -278,7 +278,7 @@ Adjust the speaking rate with `GenerationConfig.speed`:
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 generation = GenerationConfig(speed=1.5)
-pipe = KokoroPipeline(PipelineConfig(voice="af_bella", generation=generation))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_bella", generation=generation))
 result = pipe.run("Fast speech")
 ```
 
@@ -335,7 +335,7 @@ from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 text = "Hello! ...c This is a short pause. ...s And now a longer pause."
 generation = GenerationConfig(pause_mode="manual")
-pipe = KokoroPipeline(PipelineConfig(voice="af_bella", generation=generation))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_bella", generation=generation))
 result = pipe.run(text)
 ```
 
@@ -361,7 +361,7 @@ generation = GenerationConfig(
     pause_variance=0.05,
     random_seed=42,
 )
-pipe = KokoroPipeline(PipelineConfig(voice="af_sarah", generation=generation))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_sarah", generation=generation))
 result = pipe.run(text)
 ```
 
@@ -370,20 +370,20 @@ result = pipe.run(text)
 SSMD say-as syntax converts numbers, dates, and other formats:
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 text = 'I have [123]{as="cardinal"} apples and [12/31/2024]{as="date" format="mdy"}.'
-pipe = KokoroPipeline(PipelineConfig(voice="af_sarah"))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_sarah"))
 result = pipe.run(text)
 ```
 
 ## Error Handling
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 try:
-    pipe = KokoroPipeline(PipelineConfig(voice="invalid_voice"))
+    pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="invalid_voice"))
     pipe.run("Hello!")
 except Exception as exc:
     print(f"Pipeline error: {exc}")
@@ -396,7 +396,7 @@ Process multiple texts efficiently:
 ```python
 import soundfile as sf
 
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 texts = [
     ("Welcome", "welcome.wav"),
@@ -404,7 +404,7 @@ texts = [
     ("Goodbye", "goodbye.wav"),
 ]
 
-pipe = KokoroPipeline(PipelineConfig(voice="af_bella"))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_bella"))
 for text, filename in texts:
     result = pipe.run(text)
     sf.write(filename, result.audio, result.sample_rate)
@@ -431,7 +431,7 @@ accepted in every mode. Explicit SSMD `volume` takes precedence, and scaling doe
 add automatic pitch or rate changes.
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig, SSMDRenderConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig, SSMDRenderConfig
 
 script = """---
 title: Portable podcast
@@ -445,6 +445,7 @@ pause_defaults:
 <div voice="host">Welcome to the portable podcast.</div>
 """
 config = PipelineConfig(
+    generation=GenerationConfig(lang="en-us"),
     ssmd=SSMDRenderConfig(
         emphasis_mode="approximate",
         emphasis_gain_scale=1.5,

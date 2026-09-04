@@ -17,9 +17,9 @@ audio stages do.
 Use a provider name exposed by the installed ONNX Runtime build:
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
-with KokoroPipeline(PipelineConfig(provider="nnapi")) as pipeline:
+with KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), provider="nnapi")) as pipeline:
     result = pipeline.run("Hello from Android.")
 ```
 

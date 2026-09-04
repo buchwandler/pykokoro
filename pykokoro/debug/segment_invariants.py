@@ -74,7 +74,11 @@ def _check_coverage(
 
     coverage = [0] * len(clean_text)
     for seg in segments:
-        for idx in range(seg.char_start, seg.char_end):
+        if seg.char_end < seg.char_start:
+            continue
+        start = max(0, min(len(clean_text), seg.char_start))
+        end = max(start, min(len(clean_text), seg.char_end))
+        for idx in range(start, end):
             coverage[idx] += 1
 
     errors: list[str] = []

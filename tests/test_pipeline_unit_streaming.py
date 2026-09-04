@@ -103,6 +103,27 @@ def test_descriptors_are_ordered_and_have_clean_text_ranges() -> None:
             assert len(unit.text_hash) == 64
 
 
+def test_results_expose_prepared_and_source_text_coordinates() -> None:
+    pipeline = build_pipeline()
+    result = pipeline.run("Dr. Smith arrived.")
+
+    assert result.source_text == "Dr. Smith arrived."
+    assert result.clean_text != result.source_text
+    for segment in result.segments:
+        assert segment.text == result.clean_text[segment.char_start : segment.char_end]
+
+
+def test_prepared_units_retain_text_metadata_after_close() -> None:
+    pipeline = build_pipeline()
+    prepared = pipeline.prepare_units("Hello world.")
+
+    assert prepared.clean_text == "Hello world."
+    assert prepared.source_text == "Hello world."
+    prepared.close()
+    assert prepared.clean_text == "Hello world."
+    assert prepared.source_text == "Hello world."
+
+
 def test_global_stages_run_once_and_generation_is_deferred() -> None:
     g2p = CountingG2P()
     processor = CountingProcessor()

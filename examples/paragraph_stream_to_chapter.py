@@ -18,7 +18,7 @@ try:
 except ImportError:
     from _output import artifact_path
 
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 TEXT = """The first paragraph starts the chapter and contains an @intro marker.
 
@@ -38,7 +38,12 @@ def main() -> None:
 
     try:
         with (
-            KokoroPipeline(PipelineConfig(voice="af_sarah")) as pipeline,
+            KokoroPipeline(
+                PipelineConfig(
+                    voice="af_sarah",
+                    generation=GenerationConfig(lang="en-us"),
+                )
+            ) as pipeline,
             pipeline.prepare_units(TEXT, unit="paragraph") as prepared,
         ):
             for result in prepared.render():

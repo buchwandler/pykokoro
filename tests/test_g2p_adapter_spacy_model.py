@@ -31,6 +31,26 @@ def test_kokorog2p_adapter_forwards_spacy_model(monkeypatch):
     assert captured["spacy_model"] == "en_core_web_trf"
 
 
+def test_hindi_fallback_uses_explicit_espeak_backend(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeG2PModule:
+        @staticmethod
+        def get_g2p(**kwargs):
+            captured.update(kwargs)
+            return object()
+
+    adapter = KokoroG2PAdapter()
+    monkeypatch.setattr(adapter, "_load", lambda: FakeG2PModule())
+
+    adapter._get_g2p_instance(
+        "hi", PipelineConfig(tokenizer_config=TokenizerConfig(backend="espeak"))
+    )
+
+    assert captured["language"] == "hi"
+    assert captured["backend"] == "espeak"
+
+
 def test_kokorog2p_adapter_resolves_auto_spacy_model(monkeypatch):
     captured: dict[str, object] = {}
 

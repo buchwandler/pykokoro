@@ -78,10 +78,11 @@ def _synthesize_reference(
     text: str,
     *,
     voice: str,
+    lang: str,
 ) -> tuple[np.ndarray, int]:
     config = PipelineConfig(
         voice=voice,
-        generation=GenerationConfig(speed=1.0),
+        generation=GenerationConfig(lang=lang, speed=1.0),
     )
     pipeline = KokoroPipeline(config)
     try:
@@ -271,6 +272,11 @@ def main() -> int:
     )
     parser.add_argument("--voice", default="af_bella")
     parser.add_argument(
+        "--lang",
+        default="en-us",
+        help="Document language for the reference utterance.",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=artifact_dir() / "prosody_algorithm_comparison",
@@ -284,7 +290,7 @@ def main() -> int:
         reference, sample_rate = _load_reference(args.input_wav)
         source_description = str(args.input_wav)
     else:
-        reference, sample_rate = _synthesize_reference(args.text, voice=args.voice)
+        reference, sample_rate = _synthesize_reference(args.text, voice=args.voice, lang=args.lang)
         source_description = f"PyKokoro voice={args.voice!r}"
 
     sf.write(

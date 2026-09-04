@@ -16,9 +16,9 @@ This page provides API documentation for the supported pipeline-first interface.
 **Basic Example:**
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
-pipe = KokoroPipeline(PipelineConfig(voice="af_bella"))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_bella"))
 result = pipe.run("Hello, world!")
 print(result.sample_rate)
 ```
@@ -211,11 +211,11 @@ the previous result's waveform unless the caller copied or persisted it first.
 ```
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.onnx_backend import VoiceBlend
 
 blend = VoiceBlend.parse("af_bella:60,af_sarah:40")
-pipe = KokoroPipeline(PipelineConfig(voice=blend))
+pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice=blend))
 result = pipe.run("Blended voice example")
 ```
 

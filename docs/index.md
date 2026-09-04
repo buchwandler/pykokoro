@@ -46,6 +46,7 @@ changelog
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 config = PipelineConfig(
+    generation=GenerationConfig(lang="en-us"),
     voice="af_bella",
     generation=GenerationConfig(speed=1.0),
 )

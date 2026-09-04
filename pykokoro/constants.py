@@ -51,6 +51,7 @@ ESPEAK_ONLY_LANGUAGES = {
     "pl": "pl",
     "tr": "tr",
     "ru": "ru",
+    "hi": "hi",
 }
 
 # SSML-based default mappings for absolute values
