@@ -44,7 +44,7 @@ def _example_paths(
 
 
 def _label(path: Path) -> str:
-    return str(path.relative_to(PROJECT_ROOT))
+    return path.relative_to(PROJECT_ROOT).as_posix()
 
 
 def run_examples(paths: Sequence[Path], *, runner: RunCommand = subprocess.run) -> int:
