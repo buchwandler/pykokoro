@@ -2,14 +2,14 @@ schema_version: 1
 object_type: commit_audit_sheet
 versioning:
   schema_version: 1
-  revision: 3
+  revision: 6
 release_version: 0.9.0
 git_base_ref: v0.8.8
 git_base_sha: b2e39572919f06e0acdd6e81985beb82eb742307
-git_head_ref: HEAD
-git_head_sha: 9f874b210ddeb26a7ab593e36a2fc1f55be6c277
-git_range: b2e39572919f06e0acdd6e81985beb82eb742307..9f874b210ddeb26a7ab593e36a2fc1f55be6c277
-commit_count: 2
+git_head_ref: 47324fb454bc216a506937277df7bb52c8983dd9
+git_head_sha: 47324fb454bc216a506937277df7bb52c8983dd9
+git_range: b2e39572919f06e0acdd6e81985beb82eb742307..47324fb454bc216a506937277df7bb52c8983dd9
+commit_count: 15
 rows:
   - sha: 65ed9eec616468ccf37dd1a2138c6b464baf7d98
     source_ref: git:65ed9eec616468ccf37dd1a2138c6b464baf7d98
@@ -138,6 +138,7 @@ rows:
       orchestration contract.
     public_impact: public
     decision: accepted
+    stale: false
     evidence_subject: "feat: prepare 0.9.0 release, move normalization out of kokorog2p"
     target_entry_id: entry-0002
     notes: Reviewed the complete commit diff and affected tests.
@@ -202,8 +203,628 @@ rows:
       tests.
     public_impact: public
     decision: accepted
+    stale: false
     evidence_subject: "chore: pre-commit"
     target_entry_id: entry-0003
     notes:
       Reviewed the complete commit diff; no separate product behavior beyond the lock
       update.
+  - sha: 87b1d08be29fa43080c3d9f2b5a0c00d17f694b5
+    source_ref: git:87b1d08be29fa43080c3d9f2b5a0c00d17f694b5
+    short_sha: 87b1d08
+    changed_paths:
+      - .ledger/releaseledger/data/ledgers/main/events/events.jsonl
+      - .ledger/releaseledger/data/ledgers/main/releases/0.9.0/audit/commit-audit.yaml
+      - .ledger/releaseledger/data/ledgers/main/releases/0.9.0/entries/entry-0001.md
+      - .ledger/releaseledger/data/ledgers/main/releases/0.9.0/entries/entry-0002.md
+      - .ledger/releaseledger/data/ledgers/main/releases/0.9.0/entries/entry-0003.md
+      - .ledger/releaseledger/data/ledgers/main/releases/0.9.0/release.md
+      - docs/changelog.md
+    stats:
+      files_changed: 0
+      insertions: 320
+      deletions: 16
+    inspected: true
+    inspected_paths:
+      - .ledger/releaseledger/data/ledgers/main/events/events.jsonl
+      - .ledger/releaseledger/data/ledgers/main/releases/0.9.0/audit/commit-audit.yaml
+      - .ledger/releaseledger/data/ledgers/main/releases/0.9.0/entries/entry-0001.md
+      - .ledger/releaseledger/data/ledgers/main/releases/0.9.0/entries/entry-0002.md
+      - .ledger/releaseledger/data/ledgers/main/releases/0.9.0/entries/entry-0003.md
+      - .ledger/releaseledger/data/ledgers/main/releases/0.9.0/release.md
+      - docs/changelog.md
+    observed_behavior:
+      Only releaseledger records and the generated changelog section changed; no
+      separate product behavior.
+    public_impact: internal
+    decision: internal
+    stale: false
+    evidence_subject: "doc: changelog"
+    target_entry_id: entry-0011
+    notes:
+      Only releaseledger records and the generated changelog section changed; no
+      separate product behavior.
+  - sha: 3ffb3cad16434324b7d6cbe898286ee6788ddc56
+    source_ref: git:3ffb3cad16434324b7d6cbe898286ee6788ddc56
+    short_sha: 3ffb3ca
+    changed_paths:
+      - examples/german.py
+      - tests/test_g2p_spokenform.py
+      - tests/test_german_examples.py
+    stats:
+      files_changed: 0
+      insertions: 101
+      deletions: 19
+    inspected: true
+    inspected_paths:
+      - examples/german.py
+      - tests/test_g2p_spokenform.py
+      - tests/test_german_examples.py
+    observed_behavior:
+      Reviewed the German comparison changes and vocabulary-safety regression tests.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "fix: german example"
+    target_entry_id: entry-0004
+    notes:
+      Reviewed the German comparison changes and vocabulary-safety regression tests.
+  - sha: 19818d8051d8610c73f24f4bec7d81025594d1c5
+    source_ref: git:19818d8051d8610c73f24f4bec7d81025594d1c5
+    short_sha: 19818d8
+    changed_paths:
+      - examples/german.py
+      - pykokoro/pipeline.py
+      - pykokoro/voice_manager.py
+      - tests/test_g2p_adapter_spacy_model.py
+      - tests/test_lexicon_hot_swap.py
+      - tests/test_maintainer_review4_reproductions.py
+      - tests/test_voice_manager.py
+    stats:
+      files_changed: 0
+      insertions: 176
+      deletions: 11
+    inspected: true
+    inspected_paths:
+      - examples/german.py
+      - pykokoro/pipeline.py
+      - pykokoro/voice_manager.py
+      - tests/test_g2p_adapter_spacy_model.py
+      - tests/test_lexicon_hot_swap.py
+      - tests/test_maintainer_review4_reproductions.py
+      - tests/test_voice_manager.py
+    observed_behavior:
+      Reviewed shared backend reuse, lexicon hot-swapping, and related tests.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: improved german example"
+    target_entry_id: entry-0005
+    notes: Reviewed shared backend reuse, lexicon hot-swapping, and related tests.
+  - sha: 2d964a8e033243af0e4b2ccc8a3cf27e78ef7d96
+    source_ref: git:2d964a8e033243af0e4b2ccc8a3cf27e78ef7d96
+    short_sha: 2d964a8
+    changed_paths:
+      - benchmarks/benchmark_martin_cpu.py
+      - examples/german.py
+      - pykokoro/audio_generator.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/pipeline.py
+      - pykokoro/pipeline_config.py
+      - pykokoro/stages/audio_generation/onnx.py
+      - pykokoro/stages/synth/onnx.py
+      - pykokoro/types.py
+      - tests/test_audio_generator_performance.py
+    stats:
+      files_changed: 0
+      insertions: 767
+      deletions: 39
+    inspected: true
+    inspected_paths:
+      - benchmarks/benchmark_martin_cpu.py
+      - examples/german.py
+      - pykokoro/audio_generator.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/pipeline.py
+      - pykokoro/pipeline_config.py
+      - pykokoro/stages/audio_generation/onnx.py
+      - pykokoro/stages/synth/onnx.py
+      - pykokoro/types.py
+      - tests/test_audio_generator_performance.py
+    observed_behavior:
+      Reviewed inference cache, trace metrics, diagnostics options, benchmark tooling,
+      and tests.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: show benchmark results on german example"
+    target_entry_id: entry-0006
+    notes:
+      Reviewed inference cache, trace metrics, diagnostics options, benchmark tooling,
+      and tests.
+  - sha: 9a4ac9217457075c5427e2e7e5e9ca2208c57684
+    source_ref: git:9a4ac9217457075c5427e2e7e5e9ca2208c57684
+    short_sha: 9a4ac92
+    changed_paths:
+      - README.md
+      - docs/installation.md
+      - docs/languages.md
+      - pykokoro/__init__.py
+      - pykokoro/discovery.py
+      - pykokoro/frontend_contracts.py
+      - pykokoro/model_profiles.py
+      - pykokoro/model_registry.py
+      - tests/test_frontend_contracts.py
+      - tests/test_model_discovery.py
+      - tests/test_model_registry.py
+    stats:
+      files_changed: 0
+      insertions: 529
+      deletions: 6
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/installation.md
+      - docs/languages.md
+      - pykokoro/__init__.py
+      - pykokoro/discovery.py
+      - pykokoro/frontend_contracts.py
+      - pykokoro/model_profiles.py
+      - pykokoro/model_registry.py
+      - tests/test_frontend_contracts.py
+      - tests/test_model_discovery.py
+      - tests/test_model_registry.py
+    observed_behavior:
+      Reviewed the metadata-only discovery API, exports, documentation, and contract
+      tests.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: api for model discovery"
+    target_entry_id: entry-0007
+    notes:
+      Reviewed the metadata-only discovery API, exports, documentation, and contract
+      tests.
+  - sha: 7ad8fb8707a6958f2401d0180f27d8693ad650a8
+    source_ref: git:7ad8fb8707a6958f2401d0180f27d8693ad650a8
+    short_sha: 7ad8fb8
+    changed_paths:
+      - examples/german.py
+      - pykokoro/__init__.py
+      - pykokoro/pipeline.py
+      - pykokoro/stages/segmentation/phrasplit.py
+      - pykokoro/stages/text_preparation/spokenform.py
+      - pykokoro/types.py
+      - tests/test_german_examples.py
+      - tests/test_pipeline_refactor.py
+    stats:
+      files_changed: 0
+      insertions: 582
+      deletions: 72
+    inspected: true
+    inspected_paths:
+      - examples/german.py
+      - pykokoro/__init__.py
+      - pykokoro/pipeline.py
+      - pykokoro/stages/segmentation/phrasplit.py
+      - pykokoro/stages/text_preparation/spokenform.py
+      - pykokoro/types.py
+      - tests/test_german_examples.py
+      - tests/test_pipeline_refactor.py
+    observed_behavior:
+      Reviewed reusable frontend preparation, lexicon-dependent rendering, timing
+      aggregation, and tests.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: better benchmark options"
+    target_entry_id: entry-0005
+    notes:
+      Reviewed reusable frontend preparation, lexicon-dependent rendering, timing
+      aggregation, and tests.
+  - sha: 6fd56ff3708cd442d74ef087bc3b34f02c1e6a5a
+    source_ref: git:6fd56ff3708cd442d74ef087bc3b34f02c1e6a5a
+    short_sha: 6fd56ff
+    changed_paths:
+      - examples/german.py
+    stats:
+      files_changed: 0
+      insertions: 1
+      deletions: 1
+    inspected: true
+    inspected_paths:
+      - examples/german.py
+    observed_behavior: Reviewed the German example default-mode correction.
+    public_impact: docs
+    decision: accepted
+    stale: false
+    evidence_subject: "fix: update default mode"
+    target_entry_id: entry-0009
+    notes: Reviewed the German example default-mode correction.
+  - sha: 392f37124a79528de6517ca2f8f9204f530eaed7
+    source_ref: git:392f37124a79528de6517ca2f8f9204f530eaed7
+    short_sha: 392f371
+    changed_paths:
+      - .gitignore
+      - _output.py
+      - example-artifacts/.gitkeep
+      - examples/README.md
+      - examples/_output.py
+      - examples/abbreviations.py
+      - examples/automatic_pauses_demo.py
+      - examples/backend_comparison.py
+      - examples/chinese.py
+      - examples/compare_prosody_algorithms.py
+      - examples/contractions.py
+      - examples/contractions_advanced.py
+      - examples/cpu_benchmark.py
+      - examples/dash_variations.py
+      - examples/english.py
+      - examples/french.py
+      - examples/german.py
+      - examples/german2.py
+      - examples/german3.py
+      - examples/headings_demo.py
+      - examples/hindi.py
+      - examples/homographs.py
+      - examples/italian.py
+      - examples/japanese.py
+      - examples/korean.py
+      - examples/legacy/generation_config_demo.py
+      - examples/legacy/gpu_benchmark.py
+      - examples/legacy/hf_v11zh_demo.py
+      - examples/legacy/model_source_comparison.py
+      - examples/legacy/pauses_with_splitting.py
+      - examples/legacy/phoneme_dictionary_demo.py
+      - examples/legacy/phoneme_diff_comparison.py
+      - examples/legacy/pipeline_stage_showcase.py
+      - examples/legacy/provider_config_demo.py
+      - examples/legacy/quality_comparison.py
+      - examples/legacy/token_length_effects.py
+      - examples/legacy/transcript_demo.py
+      - examples/legacy/voice_slerp_demo.py
+      - examples/legacy/voices.py
+      - examples/mixed_language.py
+      - examples/models_and_languages.py
+      - examples/optimal_phoneme_length_demo.py
+      - examples/paragraph_ssmd_voices.py
+      - examples/paragraph_stream_to_chapter.py
+      - examples/paragraph_streaming.py
+      - examples/paragraph_wave_export.py
+      - examples/pauses_demo.py
+      - examples/pipeline_g2p_onnx_minimal.py
+      - examples/podcast.py
+      - examples/portuguese.py
+      - examples/prosody_algorithm_selection.py
+      - examples/prosody_demo.py
+      - examples/provider_info.py
+      - examples/punctuation.py
+      - examples/punctuation_variations.py
+      - examples/repro_dup_words.py
+      - examples/run_all.py
+      - examples/say_as_demo.py
+      - examples/short_sentence_demo.py
+      - examples/short_sentence_randomized_demo.py
+      - examples/short_sentence_voices_demo.py
+      - examples/spanish.py
+      - examples/spokenform_showcase.py
+      - examples/ssmd_080_portable_podcast.py
+      - examples/ssmd_demo.py
+      - pykokoro/pipeline.py
+      - pykokoro/types.py
+      - pyproject.toml
+      - tests/test_example_output.py
+      - tests/test_example_runner.py
+      - tests/test_german_examples.py
+      - tests/test_pipeline_refactor.py
+    stats:
+      files_changed: 0
+      insertions: 683
+      deletions: 112
+    inspected: true
+    inspected_paths:
+      - .gitignore
+      - _output.py
+      - example-artifacts/.gitkeep
+      - examples/README.md
+      - examples/_output.py
+      - examples/abbreviations.py
+      - examples/automatic_pauses_demo.py
+      - examples/backend_comparison.py
+      - examples/chinese.py
+      - examples/compare_prosody_algorithms.py
+      - examples/contractions.py
+      - examples/contractions_advanced.py
+      - examples/cpu_benchmark.py
+      - examples/dash_variations.py
+      - examples/english.py
+      - examples/french.py
+      - examples/german.py
+      - examples/german2.py
+      - examples/german3.py
+      - examples/headings_demo.py
+      - examples/hindi.py
+      - examples/homographs.py
+      - examples/italian.py
+      - examples/japanese.py
+      - examples/korean.py
+      - examples/legacy/generation_config_demo.py
+      - examples/legacy/gpu_benchmark.py
+      - examples/legacy/hf_v11zh_demo.py
+      - examples/legacy/model_source_comparison.py
+      - examples/legacy/pauses_with_splitting.py
+      - examples/legacy/phoneme_dictionary_demo.py
+      - examples/legacy/phoneme_diff_comparison.py
+      - examples/legacy/pipeline_stage_showcase.py
+      - examples/legacy/provider_config_demo.py
+      - examples/legacy/quality_comparison.py
+      - examples/legacy/token_length_effects.py
+      - examples/legacy/transcript_demo.py
+      - examples/legacy/voice_slerp_demo.py
+      - examples/legacy/voices.py
+      - examples/mixed_language.py
+      - examples/models_and_languages.py
+      - examples/optimal_phoneme_length_demo.py
+      - examples/paragraph_ssmd_voices.py
+      - examples/paragraph_stream_to_chapter.py
+      - examples/paragraph_streaming.py
+      - examples/paragraph_wave_export.py
+      - examples/pauses_demo.py
+      - examples/pipeline_g2p_onnx_minimal.py
+      - examples/podcast.py
+      - examples/portuguese.py
+      - examples/prosody_algorithm_selection.py
+      - examples/prosody_demo.py
+      - examples/provider_info.py
+      - examples/punctuation.py
+      - examples/punctuation_variations.py
+      - examples/repro_dup_words.py
+      - examples/run_all.py
+      - examples/say_as_demo.py
+      - examples/short_sentence_demo.py
+      - examples/short_sentence_randomized_demo.py
+      - examples/short_sentence_voices_demo.py
+      - examples/spanish.py
+      - examples/spokenform_showcase.py
+      - examples/ssmd_080_portable_podcast.py
+      - examples/ssmd_demo.py
+      - pykokoro/pipeline.py
+      - pykokoro/types.py
+      - pyproject.toml
+      - tests/test_example_output.py
+      - tests/test_example_runner.py
+      - tests/test_german_examples.py
+      - tests/test_pipeline_refactor.py
+    observed_behavior:
+      Reviewed the maintained-example migration, artifact isolation, sequential runner,
+      and tests.
+    public_impact: docs
+    decision: accepted
+    stale: false
+    evidence_subject: "chore: update examples"
+    target_entry_id: entry-0009
+    notes:
+      Reviewed the maintained-example migration, artifact isolation, sequential runner,
+      and tests.
+  - sha: acf094ac847f229151e74314d62b44acf0e60176
+    source_ref: git:acf094ac847f229151e74314d62b44acf0e60176
+    short_sha: acf094a
+    changed_paths:
+      - README.md
+      - docs/advanced_features.md
+      - docs/api_reference.md
+      - docs/basic_usage.md
+      - docs/examples.md
+      - docs/index.md
+      - docs/installation.md
+      - docs/pipeline_stages.md
+      - docs/quickstart.md
+      - examples/abbreviations.py
+      - examples/compare_prosody_algorithms.py
+      - examples/hindi.py
+      - examples/paragraph_ssmd_voices.py
+      - examples/paragraph_stream_to_chapter.py
+      - examples/paragraph_streaming.py
+      - examples/phoneme_print_demo.py
+      - examples/pipeline_g2p_onnx_minimal.py
+      - examples/play_paragraphs.py
+      - examples/play_streaming.py
+      - examples/prosody_algorithm_selection.py
+      - examples/repro_dup_words.py
+      - examples/spokenform_showcase.py
+      - examples/ssmd_080_portable_podcast.py
+      - examples/stream_with_word_timings.py
+      - pykokoro/constants.py
+      - pykokoro/debug/segment_invariants.py
+      - pykokoro/pipeline.py
+      - pykokoro/runtime/language_plan.py
+      - pykokoro/types.py
+      - tests/test_examples_contract.py
+      - tests/test_g2p_adapter_spacy_model.py
+      - tests/test_language_plan.py
+      - tests/test_pipeline_unit_streaming.py
+      - tests/test_segment_invariants.py
+      - tests/test_tokenizer.py
+    stats:
+      files_changed: 0
+      insertions: 460
+      deletions: 133
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/advanced_features.md
+      - docs/api_reference.md
+      - docs/basic_usage.md
+      - docs/examples.md
+      - docs/index.md
+      - docs/installation.md
+      - docs/pipeline_stages.md
+      - docs/quickstart.md
+      - examples/abbreviations.py
+      - examples/compare_prosody_algorithms.py
+      - examples/hindi.py
+      - examples/paragraph_ssmd_voices.py
+      - examples/paragraph_stream_to_chapter.py
+      - examples/paragraph_streaming.py
+      - examples/phoneme_print_demo.py
+      - examples/pipeline_g2p_onnx_minimal.py
+      - examples/play_paragraphs.py
+      - examples/play_streaming.py
+      - examples/prosody_algorithm_selection.py
+      - examples/repro_dup_words.py
+      - examples/spokenform_showcase.py
+      - examples/ssmd_080_portable_podcast.py
+      - examples/stream_with_word_timings.py
+      - pykokoro/constants.py
+      - pykokoro/debug/segment_invariants.py
+      - pykokoro/pipeline.py
+      - pykokoro/runtime/language_plan.py
+      - pykokoro/types.py
+      - tests/test_examples_contract.py
+      - tests/test_g2p_adapter_spacy_model.py
+      - tests/test_language_plan.py
+      - tests/test_pipeline_unit_streaming.py
+      - tests/test_segment_invariants.py
+      - tests/test_tokenizer.py
+    observed_behavior:
+      Reviewed explicit example language contracts, clean/source text results, nested
+      language spans, and invariant diagnostics.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: fix all examples"
+    target_entry_id: entry-0008
+    notes:
+      Reviewed explicit example language contracts, clean/source text results, nested
+      language spans, and invariant diagnostics.
+  - sha: 43e998272dfc17beaf2795a1538ddfbc244d5359
+    source_ref: git:43e998272dfc17beaf2795a1538ddfbc244d5359
+    short_sha: 43e9982
+    changed_paths:
+      - .github/workflows/tests.yml
+      - README.md
+      - examples/README.md
+      - examples/german.py
+      - pykokoro/lexicon_data.py
+      - pykokoro/pipeline.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/tokenizer.py
+      - pyproject.toml
+      - requirements-test.txt
+      - tests/test_g2p_adapter_spacy_model.py
+      - tests/test_lexicon_hot_swap.py
+      - tests/test_lexphon_provisioning.py
+      - tests/test_packaging_metadata.py
+      - tests/test_tokenizer.py
+    stats:
+      files_changed: 0
+      insertions: 598
+      deletions: 26
+    inspected: true
+    inspected_paths:
+      - .github/workflows/tests.yml
+      - README.md
+      - examples/README.md
+      - examples/german.py
+      - pykokoro/lexicon_data.py
+      - pykokoro/pipeline.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/tokenizer.py
+      - pyproject.toml
+      - requirements-test.txt
+      - tests/test_g2p_adapter_spacy_model.py
+      - tests/test_lexicon_hot_swap.py
+      - tests/test_lexphon_provisioning.py
+      - tests/test_packaging_metadata.py
+      - tests/test_tokenizer.py
+    observed_behavior:
+      Reviewed Lexphon provisioning, installed-only policy, KokoroG2P integration,
+      dependency updates, and tests.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: adapt to new kokorog2p"
+    target_entry_id: entry-0010
+    notes:
+      Reviewed Lexphon provisioning, installed-only policy, KokoroG2P integration,
+      dependency updates, and tests.
+  - sha: 76e6429e9fc483b4980b97d0b6a0d04aa2278598
+    source_ref: git:76e6429e9fc483b4980b97d0b6a0d04aa2278598
+    short_sha: 76e6429
+    changed_paths:
+      - tests/test_german_frontend_golden.py
+    stats:
+      files_changed: 0
+      insertions: 1
+      deletions: 1
+    inspected: true
+    inspected_paths:
+      - tests/test_german_frontend_golden.py
+    observed_behavior:
+      Only a German frontend golden-test expectation was corrected; no shipped runtime
+      behavior changed.
+    public_impact: internal
+    decision: internal
+    stale: false
+    evidence_subject: "fix: pytest"
+    target_entry_id: entry-0012
+    notes:
+      Only a German frontend golden-test expectation was corrected; no shipped runtime
+      behavior changed.
+  - sha: 87c9b3bf5412ac7e07ebb5008ae7852a1b8cfbc0
+    source_ref: git:87c9b3bf5412ac7e07ebb5008ae7852a1b8cfbc0
+    short_sha: 87c9b3b
+    changed_paths:
+      - examples/run_all.py
+    stats:
+      files_changed: 0
+      insertions: 1
+      deletions: 1
+    inspected: true
+    inspected_paths:
+      - examples/run_all.py
+    observed_behavior:
+      Reviewed the example runner path correction for Windows-compatible output.
+    public_impact: docs
+    decision: accepted
+    stale: false
+    evidence_subject: "fix: windows path"
+    target_entry_id: entry-0009
+    notes: Reviewed the example runner path correction for Windows-compatible output.
+  - sha: 47324fb454bc216a506937277df7bb52c8983dd9
+    source_ref: git:47324fb454bc216a506937277df7bb52c8983dd9
+    short_sha: 47324fb
+    changed_paths:
+      - README.md
+      - examples/README.md
+      - pykokoro/lexicon_data.py
+      - pykokoro/pipeline.py
+      - pykokoro/tokenizer.py
+      - tests/test_g2p_adapter_spacy_model.py
+      - tests/test_lexicon_hot_swap.py
+      - tests/test_lexphon_provisioning.py
+    stats:
+      files_changed: 0
+      insertions: 35
+      deletions: 48
+    inspected: true
+    inspected_paths:
+      - README.md
+      - examples/README.md
+      - pykokoro/lexicon_data.py
+      - pykokoro/pipeline.py
+      - pykokoro/tokenizer.py
+      - tests/test_g2p_adapter_spacy_model.py
+      - tests/test_lexicon_hot_swap.py
+      - tests/test_lexphon_provisioning.py
+    observed_behavior:
+      Reviewed final Lexphon and KokoroG2P compatibility cleanup, documentation, and
+      regression tests.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "chore: pre-commit"
+    target_entry_id: entry-0010
+    notes:
+      Reviewed final Lexphon and KokoroG2P compatibility cleanup, documentation, and
+      regression tests.
