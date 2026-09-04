@@ -10,6 +10,21 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - only used on Python 3.10
     import tomli as tomllib
 
+
+def test_public_discovery_api_symbols_are_packaged() -> None:
+    import importlib.metadata
+
+    import pykokoro
+    from pykokoro import ModelCapabilities, ModelDiscoveryResult, discover_models
+
+    assert callable(discover_models)
+    assert ModelCapabilities
+    assert ModelDiscoveryResult
+    assert pykokoro.__file__
+    assert importlib.metadata.version("pykokoro")
+    assert (Path(pykokoro.__file__).parent / "discovery.py").is_file()
+
+
 ROOT = Path(__file__).parents[1]
 
 

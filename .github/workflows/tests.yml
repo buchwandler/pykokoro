@@ -119,3 +119,4 @@ jobs:
       run: |
         "$RUNNER_TEMP/pykokoro-wheel-venv/bin/python" -c \
           "import kokorog2p; assert kokorog2p.get_kokoro_vocab()"
+        "$RUNNER_TEMP/pykokoro-wheel-venv/bin/python" -c \

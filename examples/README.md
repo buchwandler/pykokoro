@@ -24,6 +24,23 @@ scripts below use the current pipeline-first API.
 - `termux_android_onnx.py` — Android/Termux provider configuration; requires a
   compatible ONNX Runtime build and model assets.
 
+## Canonical German TTS samples
+
+Generate the three benchmark sentences from https://ttssamples.syntheticspeech.de/ as
+separate WAV files:
+
+```bash
+python examples/german_tts_samples.py --help
+python examples/german_tts_samples.py --model v1.2-de-martin --lexicon gold
+python examples/german_tts_samples.py --model de-crane --lexicon olaph
+python examples/german_tts_samples.py --model de-thorsten --lexicon crane
+```
+
+Outputs are written below `example-artifacts/german_tts_samples/<model>/<lexicon>/`,
+with one file for each sentence. The four named lexicons may require Lexphon data
+provisioning on first use; see [German lexicon data](#german-lexicon-data) below for
+offline provisioning guidance.
+
 ## German lexicon data
 
 The German examples use named KokoroG2P lexicons. PyKokoro defaults to automatic Lexphon
