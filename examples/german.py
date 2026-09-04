@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Generate German Gold-versus-Crane speech with the Martin v1.2 model."""
+"""Generate German Gold-versus-Crane speech with the Martin v1.2 model.
+
+Lexphon data is provisioned automatically on first use. Pre-install assets and set
+``lexicon_data_policy="installed-only"`` for an offline run; see ``examples/README.md``.
+"""
 
 from __future__ import annotations
 

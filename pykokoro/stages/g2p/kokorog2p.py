@@ -6,6 +6,7 @@ from types import ModuleType
 from typing import TYPE_CHECKING, Any, cast
 
 from ...constants import MAX_PHONEME_LENGTH, SUPPORTED_LANGUAGES
+from ...lexicon_data import create_g2p_with_lexphon_retry
 from ...runtime.cache import cache_from_dir, make_g2p_key
 from ...runtime.spans import slice_boundaries, slice_spans
 from ...spacy_models import SpacyModelSize, make_spacy_model_request, spacy_selection_metadata
@@ -512,12 +513,19 @@ class KokoroG2PAdapter(G2PAdapter):
 
         if profile is not None and profile.variant == "ar-nabra":
             kwargs["model_profile"] = "nabra-82m-v0.1"
-        cache_key = tuple(sorted(kwargs.items()))
+        cache_key = tuple(sorted(kwargs.items())) + (
+            ("__pykokoro_lexicon_data_policy", tokenizer_config.lexicon_data_policy),
+        )
         if cache_key in self._g2p_instances:
             return self._g2p_instances[cache_key]
 
         g2p_module = self._load()
-        g2p_instance = g2p_module.get_g2p(**kwargs)
+        g2p_instance = create_g2p_with_lexphon_retry(
+            g2p_module,
+            language=kokorog2p_lang,
+            config=tokenizer_config,
+            kwargs=kwargs,
+        )
         self._g2p_instances[cache_key] = g2p_instance
         return g2p_instance
 

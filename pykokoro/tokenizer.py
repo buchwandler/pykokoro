@@ -11,18 +11,21 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, TypeAlias
+from types import SimpleNamespace
+from typing import Any, Literal, TypeAlias
 
 import kokorog2p as _kokorog2p
 from kokorog2p import phonemize
 from kokorog2p.base import G2PBase
 
 from .constants import MAX_PHONEME_LENGTH
+from .lexicon_data import create_g2p_with_lexphon_retry
 from .phoneme_dictionary import PhonemeDictionary
 from .spacy_models import SpacyModelSize, make_spacy_model_request
 
 N_TOKENS = _kokorog2p.N_TOKENS
 BackendType: TypeAlias = str
+LexiconDataPolicy: TypeAlias = Literal["auto", "installed-only"]
 GToken: TypeAlias = Any
 filter_for_kokoro = _kokorog2p.filter_for_kokoro
 get_g2p = _kokorog2p.get_g2p
@@ -107,6 +110,7 @@ class TokenizerConfig:
     load_gold: bool = True
     load_silver: bool = True
     lexicons: str | Sequence[str] | None = None
+    lexicon_data_policy: LexiconDataPolicy = "auto"
 
     def __post_init__(self) -> None:
         request = make_spacy_model_request(
@@ -116,6 +120,10 @@ class TokenizerConfig:
         self.spacy_model = request.model
         self.spacy_model_size = request.size
         self.lexicons = _normalize_lexicons(self.lexicons)
+        if self.lexicon_data_policy not in {"auto", "installed-only"}:
+            raise ValueError(
+                "lexicon_data_policy must be 'auto' or 'installed-only'"
+            )
 
 
 # Backward compatibility alias
@@ -242,19 +250,25 @@ class Tokenizer:
 
             # All languages are now fully supported by kokorog2p
             # kokorog2p uses dictionary + espeak fallback for all languages
-            self._g2p_cache[lang] = get_g2p(
+            kwargs = {
+                "language": kokorog2p_lang,
+                "use_goruut_fallback": self.config.use_goruut_fallback,
+                "use_espeak_fallback": self.config.use_espeak_fallback,
+                "use_spacy": self.config.use_spacy,
+                "spacy_model": self.config.spacy_model,
+                "spacy_model_size": self.config.spacy_model_size,
+                "backend": self.config.backend,
+                "load_gold": self.config.load_gold,
+                "load_silver": self.config.load_silver,
+                "lexicons": self.config.lexicons,
+                "version": self._kokorog2p_model,
+                "phoneme_quotes": "curly",
+            }
+            self._g2p_cache[lang] = create_g2p_with_lexphon_retry(
+                SimpleNamespace(get_g2p=get_g2p),
                 language=kokorog2p_lang,
-                use_goruut_fallback=self.config.use_goruut_fallback,
-                use_espeak_fallback=self.config.use_espeak_fallback,
-                use_spacy=self.config.use_spacy,
-                spacy_model=self.config.spacy_model,
-                spacy_model_size=self.config.spacy_model_size,
-                backend=self.config.backend,
-                load_gold=self.config.load_gold,
-                load_silver=self.config.load_silver,
-                lexicons=self.config.lexicons,
-                version=self._kokorog2p_model,
-                phoneme_quotes="curly",
+                config=self.config,
+                kwargs=kwargs,
             )
 
         return self._g2p_cache[lang]

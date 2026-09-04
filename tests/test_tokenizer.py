@@ -45,6 +45,12 @@ class TestTokenizerConfig:
         assert config.spacy_model is None
         assert config.spacy_model_size is None
         assert config.use_dictionary is True
+        assert config.lexicon_data_policy == "auto"
+
+    @pytest.mark.parametrize("policy", ["manual", "AUTO", "installed_only"])
+    def test_invalid_lexicon_data_policy(self, policy):
+        with pytest.raises(ValueError, match="lexicon_data_policy"):
+            TokenizerConfig(lexicon_data_policy=policy)
 
     def test_named_lexicons_normalize_to_ordered_tuple(self):
         assert TokenizerConfig(lexicons="gold").lexicons == ("gold",)

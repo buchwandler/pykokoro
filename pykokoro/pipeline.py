@@ -63,7 +63,9 @@ def _acoustic_tokenizer_key(config: TokenizerConfig | None) -> object:
     if config is None:
         return None
     # Named lexicons affect frontend G2P only, not the acoustic runtime.
-    return _freeze_config_value(replace(config, lexicons=None))
+    return _freeze_config_value(
+        replace(config, lexicons=None, lexicon_data_policy="auto")
+    )
 
 
 def _load_default_onnx_adapters() -> tuple[type[Any], type[Any], type[Any]]:

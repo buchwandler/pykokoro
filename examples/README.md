@@ -24,6 +24,36 @@ scripts below use the current pipeline-first API.
 - `termux_android_onnx.py` — Android/Termux provider configuration; requires a
   compatible ONNX Runtime build and model assets.
 
+
+## German lexicon data
+
+The German examples use named KokoroG2P lexicons. PyKokoro defaults to automatic Lexphon
+provisioning: on a missing selected asset, it installs the asset and retries G2P construction
+once. This first-use step may access the catalog and network. Later runs use the local store.
+
+For offline deployments, pre-provision the required assets and select strict installed-only
+behavior in `TokenizerConfig`:
+
+```python
+from pykokoro.tokenizer import TokenizerConfig
+
+config = TokenizerConfig(
+    lexicons=("gold",),
+    lexicon_data_policy="installed-only",
+)
+```
+
+Manual provisioning uses the Lexphon CLI:
+
+```bash
+lexphon data available de-DE
+lexphon data install de-de:gold
+lexphon data verify de-de:gold
+```
+
+Use `LEXPHON_DATA_HOME` for a persistent or copied data directory and
+`LEXPHON_CATALOG_URL` for a pinned catalog. Missing data, catalog, download, integrity, and
+G2P errors are reported without silent fallback.
 The maintained analysis and language demos are also import-safe and indexed here:
 `abbreviations.py`, `automatic_pauses_demo.py`, `backend_comparison.py`,
 `boundary_detection_analysis.py`, `chinese.py`, `compare_prosody_algorithms.py`,
