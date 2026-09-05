@@ -98,6 +98,30 @@ This API is distinct from `available_model_releases()`: discovery describes capa
 the installed PyKokoro runtime can use, while the release catalog describes published
 model artifacts.
 
+### Public pipeline configuration resolution
+
+For preflight, orchestration, dry-run planning, and configuration inspection, resolve
+the automatic model choices without constructing the synthesis runtime or loading model
+and voice assets:
+
+```python
+from pykokoro import GenerationConfig, PipelineConfig, resolve_pipeline_config
+
+requested = PipelineConfig(generation=GenerationConfig(lang="de"))
+resolved = resolve_pipeline_config(requested)
+
+print(resolved.model_variant)
+print(resolved.model_source)
+print(resolved.model_quality)
+print(resolved.voice)
+```
+
+`resolve_pipeline_config()` is a metadata-only operation. It applies PyKokoro's built-in
+model, source, quality, and voice policy without constructing `KokoroPipeline`,
+importing ONNX Runtime, creating an ONNX session, loading assets, or synthesizing audio.
+It does not replace `discover_models()`, which provides runtime capability and model
+inventory metadata.
+
 ## Installation
 
 ### Basic Installation (CPU only)

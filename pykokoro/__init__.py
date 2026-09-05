@@ -36,10 +36,13 @@ def __getattr__(name: str) -> Any:
             "ModelCapabilities": ModelCapabilities,
             "ModelDiscoveryResult": ModelDiscoveryResult,
         }[name]
-    if name == "PipelineConfig":
-        from .pipeline_config import PipelineConfig
+    if name in {"PipelineConfig", "resolve_pipeline_config"}:
+        from .pipeline_config import PipelineConfig, resolve_pipeline_config
 
-        return PipelineConfig
+        return {
+            "PipelineConfig": PipelineConfig,
+            "resolve_pipeline_config": resolve_pipeline_config,
+        }[name]
     if name in {
         "KokoroPipeline",
         "PreparedAudioUnits",
@@ -104,6 +107,7 @@ __all__ = [
     "PreparedAudioUnits",
     "PreparedFrontend",
     "PipelineConfig",
+    "resolve_pipeline_config",
     "__version__",
     "__version_tuple__",
     "build_pipeline",

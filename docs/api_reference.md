@@ -99,6 +99,29 @@ generated single waveform.
    :show-inheritance:
 ```
 
+### Metadata-only pipeline resolution
+
+```{eval-rst}
+.. autofunction:: pykokoro.resolve_pipeline_config
+```
+
+Use `resolve_pipeline_config()` to resolve PyKokoro's automatic model, source, quality,
+and voice choices before constructing a runtime pipeline:
+
+```python
+from pykokoro import GenerationConfig, PipelineConfig, resolve_pipeline_config
+
+requested = PipelineConfig(generation=GenerationConfig(lang="de"))
+resolved = resolve_pipeline_config(requested)
+print(resolved.model_variant, resolved.model_source)
+print(resolved.model_quality, resolved.voice)
+```
+
+This is a metadata-only operation. It does not construct `KokoroPipeline`, import ONNX
+Runtime, create an ONNX session, load model or voice assets, or synthesize audio. Use
+the separate `discover_models()` API when runtime capability and model inventory
+metadata is needed.
+
 ### GenerationConfig
 
 ```{eval-rst}

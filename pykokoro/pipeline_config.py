@@ -115,6 +115,18 @@ def _resolve_manifest_paths(cfg: PipelineConfig) -> PipelineConfig:
     )
 
 
+def resolve_pipeline_config(cfg: PipelineConfig) -> PipelineConfig:
+    """Resolve automatic pipeline defaults without loading synthesis assets.
+
+    The returned config is the effective built-in model, source, quality, and voice
+    configuration that PyKokoro will use for runtime construction. This function
+    performs configuration and profile resolution only. It does not construct a
+    pipeline or runtime backend, load model or voice tensors, create an ONNX session,
+    or synthesize audio.
+    """
+    return resolve_model_defaults(cfg)
+
+
 def resolve_model_defaults(cfg: PipelineConfig) -> PipelineConfig:
     """Resolve language-aware model and voice defaults into a concrete config.
 
