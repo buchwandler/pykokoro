@@ -740,16 +740,30 @@ res = pipe.run(text)
 
 ## Explicit mixed-language text
 
-Automatic language detection is not part of PyKokoro v0.9. Set the document language
-explicitly and mark language changes with SSMD spans:
+Automatic routing is optional and remains separate from the explicit document language.
+Set the document language explicitly and mark semantic or pronunciation-only language
+spans with SSMD:
 
 ```python
-text = 'Hello [Welt]{lang="de"} and [bonjour]{lang="fr"}.'
-result = pipe.run(text, lang="en-us")
+from pykokoro import (
+    GenerationConfig,
+    LanguageDetectionConfig,
+    KokoroPipeline,
+    PipelineConfig,
+)
+
+config = PipelineConfig(
+    generation=GenerationConfig(lang="de"),
+    language_detection=LanguageDetectionConfig(mode="auto", languages=("de", "en")),
+)
+pipe = KokoroPipeline(config)
+text = 'Die [File]{lang="en" scope="pronunciation"} wird gecancelt.'
+result = pipe.run(text)
 ```
 
-Voice metadata selects a voice only. Applications needing detection must run an external
-detector and convert its result to explicit language spans before calling PyKokoro.
+`scope="pronunciation"` changes only G2P. Automatic KokoroG2P routing also changes only
+pronunciation fragments. The selected PyKokoro acoustic model, voice, ONNX provider, and
+document language remain German.
 
 ### Automatic Spoken-Form Normalization
 

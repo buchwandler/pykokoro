@@ -215,7 +215,8 @@ result = pipe.run("Hello from the UK!")
 
 ## Language Settings
 
-PyKokoro defaults language from the voice prefix, but you can override it:
+PyKokoro requires an explicit document language. Set it with `GenerationConfig.lang`;
+the voice prefix does not select the language:
 
 ```python
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
@@ -226,6 +227,30 @@ result = pipe.run("Bonjour le monde")
 ```
 
 Supported languages: `en-us`, `en-gb`, `es`, `fr`, `de`, `it`, `pt`, `hi`, `ja`, `zh`
+
+### Automatic pronunciation routing
+
+Keep `GenerationConfig.lang` as the explicit semantic and acoustic-model language. To
+let KokoroG2P route eligible words between selected pronunciation languages, configure
+candidates explicitly:
+
+```python
+from pykokoro import GenerationConfig, LanguageDetectionConfig, KokoroPipeline, PipelineConfig
+
+config = PipelineConfig(
+    generation=GenerationConfig(lang="de"),
+    language_detection=LanguageDetectionConfig(mode="auto", languages=("de", "en")),
+)
+result = KokoroPipeline(config).run(
+    'Die [File]{lang="en" scope="pronunciation"} wird gecancelt.'
+)
+```
+
+The precedence is per-run override, pipeline configuration, SSMD `language_detection`
+header, then disabled. Pronunciation-only SSMD spans and automatic routes affect G2P
+only. They do not select a foreign voice, acoustic model, ONNX session, Spokenform
+language, or linguistic-analysis language. Use `scope="semantic"` (or omit `scope`) when
+a language span should affect the semantic pipeline.
 
 ## Language-Aware spaCy Models
 

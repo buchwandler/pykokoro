@@ -50,6 +50,7 @@ class SsmdDocumentParser:
         for diagnostic in diagnostics:
             self._warn_once(trace, f"{diagnostic.code}: {diagnostic.message}")
 
+        language_hint = ssmd.language_detection_hint(parsed.header)
         annotations = [
             AnnotationSpan(
                 char_start=start,
@@ -68,6 +69,11 @@ class SsmdDocumentParser:
                 resolved_pause_defaults.to_dict() if resolved_pause_defaults is not None else None
             ),
             "ssmd_structure": True,
+            "language_detection_hint": (
+                {"mode": language_hint.mode, "languages": list(language_hint.languages)}
+                if language_hint is not None
+                else None
+            ),
         }
         if parse_ssmd_document is not _legacy_parse_ssmd_document:
             compatibility: Any = parse_ssmd_document(text)

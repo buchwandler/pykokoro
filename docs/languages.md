@@ -57,3 +57,24 @@ invalid files are removed and downloaded again. Explicit custom paths are valida
 place and are never replaced by managed downloads. The profile's `suggested_speed`
 metadata is advisory only, so callers should set `GenerationConfig(speed=1.125)` when
 they want the demonstration speed.
+
+## Fixed-model multilingual pronunciation
+
+Automatic routing is an optional G2P policy. Configure
+`LanguageDetectionConfig(mode="auto", languages=("de", "en"))` while keeping
+`GenerationConfig(lang="de")` as the document and acoustic-model language. KokoroG2P
+supplies the lexical evidence and route diagnostics; PyKokoro reuses its existing
+per-language G2P instances and passes every route through the already selected model
+vocabulary.
+
+SSMD spans with `scope="pronunciation"`, such as
+`[File]{lang="en" scope="pronunciation"}`, constrain only the pronunciation of that
+source range. They do not change Spokenform, spaCy analysis, Phrasplit, voice, model
+source, model variant, model quality, or ONNX session. Omit `scope` or use
+`scope="semantic"` when the language should own the semantic pipeline run.
+
+The effective policy precedence is per-run override,
+`PipelineConfig.language_detection`, the SSMD `language_detection` header hint, then
+disabled. `is_phonemes=True` bypasses routing because the input already contains model
+phonemes. Route and alignment diagnostics are retained in document metadata and use
+clean-text offsets.

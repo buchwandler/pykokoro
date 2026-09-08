@@ -69,7 +69,9 @@ def build_language_plan(
     default = canonicalize_language(default_language)
     explicit: list[tuple[int, int, str]] = []
     for annotation in annotations:
-        language = annotation.attrs.get("lang")
+        language = annotation.attrs.get("lang") or annotation.attrs.get("language")
+        if annotation.attrs.get("scope", "semantic") == "pronunciation":
+            continue
         if language is None:
             continue
         start = annotation.char_start

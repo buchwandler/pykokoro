@@ -8,6 +8,7 @@ from dataclasses import replace
 from typing import Any
 
 from ...pipeline_config import PipelineConfig
+from ...runtime.language_plan import canonicalize_language
 from ...types import Segment, Trace, TraceEvent
 from ..doc_parsers.plain import PhrasplitSentenceSplitter
 from ..protocols import DocumentResult, SentenceSegmenter
@@ -39,6 +40,7 @@ class PhrasplitSentenceSegmenter(PhrasplitSentenceSplitter, SentenceSegmenter):
         else:
             segments = self._split_prepared_runs(doc, cfg, trace, state.prepared_analysis)
         segments = self._repair_closing_quote_boundaries(doc, segments)
+        segments = [self._with_semantic_language(doc, segment, cfg) for segment in segments]
         refined: list[Segment] = []
         for segment in segments:
             boundaries = self._structural_cuts(segment, doc)
@@ -61,6 +63,24 @@ class PhrasplitSentenceSegmenter(PhrasplitSentenceSplitter, SentenceSegmenter):
                 )
         self._record_diagnostics(doc, trace, refined, cfg)
         return refined
+
+    @staticmethod
+    def _with_semantic_language(
+        doc: DocumentResult, segment: Segment, cfg: PipelineConfig
+    ) -> Segment:
+        state = doc.linguistic_state
+        language = None
+        plans = getattr(state, "prepared_plan", ()) if state is not None else ()
+        covering = [
+            run
+            for run in plans
+            if run.char_start <= segment.char_start and segment.char_end <= run.char_end
+        ]
+        if covering:
+            language = min(covering, key=lambda run: run.char_end - run.char_start).language
+        if language is None:
+            language = canonicalize_language(cfg.generation.lang or "en-us")
+        return replace(segment, meta={**segment.meta, "language": language})
 
     def _split_prepared_runs(
         self, doc: DocumentResult, cfg: PipelineConfig, trace: Trace, analyses: list[Any]
@@ -218,10 +238,21 @@ class PhrasplitSentenceSegmenter(PhrasplitSentenceSplitter, SentenceSegmenter):
         return repaired
 
     @staticmethod
+    def _hard_metadata_keys_for_span(span: Any) -> set[str]:
+        attrs = dict(span.attrs)
+        if attrs.get("scope", "semantic") == "pronunciation":
+            attrs.pop("lang", None)
+            attrs.pop("language", None)
+        return set(_HARD_METADATA_KEYS.intersection(attrs))
+
+    @staticmethod
     def _structural_cuts(segment: Segment, doc: DocumentResult) -> list[int]:
         cuts: set[int] = set()
         for span in doc.annotation_spans:
-            if _HARD_METADATA_KEYS.intersection(span.attrs) and span.char_start < span.char_end:
+            if (
+                PhrasplitSentenceSegmenter._hard_metadata_keys_for_span(span)
+                and span.char_start < span.char_end
+            ):
                 if segment.char_start < span.char_start < segment.char_end:
                     cuts.add(span.char_start)
                 if segment.char_start < span.char_end < segment.char_end:

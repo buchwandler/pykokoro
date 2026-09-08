@@ -16,6 +16,7 @@ from typing_extensions import Self
 from .constants import SAMPLE_RATE
 from .emphasis import apply_emphasis_policy
 from .generation_config import GenerationConfig
+from .language_detection import LanguageDetectionConfig
 from .pipeline_config import PipelineConfig, require_document_language, resolve_model_defaults
 from .runtime.language_plan import build_language_plan
 from .runtime.linguistics import (
@@ -347,6 +348,23 @@ def _coerce_tokenizer(base: TokenizerConfig | None, value: Any) -> TokenizerConf
     )
 
 
+def _coerce_language_detection(
+    value: Any,
+) -> LanguageDetectionConfig | None:
+    if value is None:
+        return None
+    if isinstance(value, LanguageDetectionConfig):
+        return value
+    if isinstance(value, Mapping):
+        return LanguageDetectionConfig(
+            mode=value.get("mode", "off"),
+            languages=tuple(value.get("languages", ())),
+        )
+    raise TypeError(
+        f"language_detection must be LanguageDetectionConfig | Mapping | None, got {type(value)!r}"
+    )
+
+
 def _coerce_paths_inplace(data: dict[str, Any]) -> None:
     # Convenience: accept str paths in config dict.
     for key in ("model_path", "voices_path", "model_config_path", "release_manifest_path"):
@@ -369,6 +387,7 @@ def _coerce_pipeline_config(
         gen_value = data.pop("generation", None)
         ssmd_value = data.pop("ssmd", None)
         tokenizer_value = data.pop("tokenizer_config", None)
+        language_detection_value = data.pop("language_detection", None)
 
         _coerce_paths_inplace(data)
         cfg = PipelineConfig(**data)
@@ -381,6 +400,12 @@ def _coerce_pipeline_config(
             cfg = replace(
                 cfg,
                 tokenizer_config=_coerce_tokenizer(cfg.tokenizer_config, tokenizer_value),
+            )
+
+        if language_detection_value is not None:
+            cfg = replace(
+                cfg,
+                language_detection=_coerce_language_detection(language_detection_value),
             )
 
         return cfg
@@ -399,6 +424,7 @@ def _merge_config(
     gen_value = data.pop("generation", None)
     ssmd_value = data.pop("ssmd", None)
     tokenizer_value = data.pop("tokenizer_config", None)
+    language_detection_value = data.pop("language_detection", None)
 
     _coerce_paths_inplace(data)
     cfg = replace(base, **data)
@@ -411,6 +437,12 @@ def _merge_config(
         cfg = replace(
             cfg,
             tokenizer_config=_coerce_tokenizer(cfg.tokenizer_config, tokenizer_value),
+        )
+
+    if language_detection_value is not None:
+        cfg = replace(
+            cfg,
+            language_detection=_coerce_language_detection(language_detection_value),
         )
 
     return cfg

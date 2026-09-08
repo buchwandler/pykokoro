@@ -117,3 +117,21 @@ def test_language_plan_accepts_hindi_as_espeak_fallback() -> None:
     assert _languages(build_language_plan("नमस्ते", (), default_language="hi")) == [
         (0, len("नमस्ते"), "hi"),
     ]
+
+
+def test_language_plan_ignores_pronunciation_language_scope() -> None:
+    text = "Manpowerdiskussion"
+    annotations = [
+        AnnotationSpan(0, 8, {"lang": "en", "scope": "pronunciation"}),
+    ]
+    assert _languages(build_language_plan(text, annotations, default_language="de")) == [
+        (0, len(text), "de"),
+    ]
+
+
+def test_language_plan_accepts_language_alias() -> None:
+    text = "hello"
+    annotations = [AnnotationSpan(0, len(text), {"language": "en"})]
+    assert _languages(build_language_plan(text, annotations, default_language="de")) == [
+        (0, len(text), "en-us"),
+    ]

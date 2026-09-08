@@ -75,6 +75,7 @@ def make_g2p_key(
     input_mode: str = "prepared",
     preparation_backend: str | None = "spokenform",
     preparation_version: str | None = None,
+    language_routing: dict[str, Any] | None = None,
 ) -> str:
     return make_cache_key(
         {
@@ -94,6 +95,7 @@ def make_g2p_key(
             "input_mode": input_mode,
             "preparation_backend": preparation_backend,
             "preparation_version": preparation_version,
+            "language_routing": language_routing,
         }
     )
 

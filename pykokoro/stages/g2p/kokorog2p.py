@@ -6,11 +6,18 @@ from types import ModuleType
 from typing import TYPE_CHECKING, Any, cast
 
 from ...constants import MAX_PHONEME_LENGTH, SUPPORTED_LANGUAGES
+from ...language_detection import ResolvedLanguageDetection, resolve_language_detection
 from ...lexicon_data import create_g2p_with_lexphon_retry
 from ...runtime.cache import cache_from_dir, make_g2p_key
 from ...runtime.spans import slice_boundaries, slice_spans
 from ...spacy_models import SpacyModelSize, make_spacy_model_request, spacy_selection_metadata
-from ...types import AnnotationSpan, G2PAlignmentToken, PhonemeSegment, _model_span_token_count
+from ...types import (
+    AnnotationSpan,
+    G2PAlignmentToken,
+    PhonemeSegment,
+    TraceEvent,
+    _model_span_token_count,
+)
 from ..protocols import DocumentResult, G2PAdapter
 
 if TYPE_CHECKING:
@@ -22,7 +29,7 @@ if TYPE_CHECKING:
 
 
 class KokoroG2PAdapter(G2PAdapter):
-    _cache_schema = 6
+    _cache_schema = 7
 
     def __init__(self) -> None:
         self._g2p: ModuleType | None = None
@@ -59,6 +66,20 @@ class KokoroG2PAdapter(G2PAdapter):
         model_version = self._get_model_version(cfg)
         profile, resolved_backend, phoneme_postprocess = self._resolve_frontend_contract(cfg)
         frontend = profile.frontend if profile is not None else None
+        resolved_routing = resolve_language_detection(cfg.language_detection, doc.header)
+        if generation.is_phonemes:
+            effective_routing = ResolvedLanguageDetection(
+                source=resolved_routing.source,
+            )
+        else:
+            effective_routing = resolved_routing
+        doc.metadata["language_detection"] = {
+            "mode": resolved_routing.mode,
+            "languages": list(resolved_routing.languages),
+            "source": resolved_routing.source,
+        }
+        route_diagnostics: list[dict[str, Any]] = []
+        doc.metadata["g2p_language_routes"] = route_diagnostics
         out: list[PhonemeSegment] = []
 
         for segment in segments:
@@ -85,14 +106,11 @@ class KokoroG2PAdapter(G2PAdapter):
             trace.warnings.extend(span_warnings)
             annotations = self._prepared_annotations(doc, segment)
 
-            lang = generation.lang
+            lang = segment.meta.get("language") or generation.lang
             ssmd_metadata: dict[str, str] = {}
             for span in span_list:
-                span_lang = span.attrs.get("lang")
-                if span_lang:
-                    lang = span_lang
                 self._apply_span_metadata(span.attrs, ssmd_metadata)
-            if lang is None:
+            if not isinstance(lang, str) or not lang:
                 raise ValueError("A language is required for each G2P segment")
 
             cache_key = make_g2p_key(
@@ -112,13 +130,17 @@ class KokoroG2PAdapter(G2PAdapter):
                 input_mode="prepared",
                 preparation_backend=doc.preparation.backend if doc.preparation else "spokenform",
                 preparation_version=doc.preparation.version if doc.preparation else None,
+                language_routing=effective_routing.as_routing(),
             )
             cached = cache.get(cache_key)
             cached_payload = self._read_cache_payload(cached)
             alignment_tokens: list[G2PAlignmentToken] = []
+            language_routes: list[dict[str, Any]] = []
             result_warnings: list[str] = []
             if cached_payload is not None:
-                phonemes, tokens, alignment_tokens, result_warnings = cached_payload
+                phonemes, tokens, alignment_tokens, result_warnings, language_routes = (
+                    cached_payload
+                )
                 trace.warnings.extend(result_warnings)
             else:
                 if cached is not None:
@@ -129,6 +151,12 @@ class KokoroG2PAdapter(G2PAdapter):
                 else:
                     g2p_instance = self._get_g2p_instance(lang, cfg)
                     self._record_selection(doc, lang, cfg, g2p_instance)
+
+                    def resolve_language_g2p(candidate: str) -> Any:
+                        instance = self._get_g2p_instance(candidate, cfg)
+                        self._record_selection(doc, candidate, cfg, instance)
+                        return instance
+
                     result = self._phonemize_prepared(
                         g2p,
                         segment.text,
@@ -136,6 +164,9 @@ class KokoroG2PAdapter(G2PAdapter):
                         overrides,
                         annotations,
                         g2p_instance,
+                        g2p_resolver=resolve_language_g2p,
+                        language_routing=effective_routing.as_routing(),
+                        target_model=model_version,
                     )
                     phonemes = str(
                         getattr(result, "phonemes", None) or getattr(result, "phoneme", "")
@@ -145,8 +176,13 @@ class KokoroG2PAdapter(G2PAdapter):
                         getattr(result, "tokens", []), segment, g2p, model_version
                     )
                     result_warnings = [str(warning) for warning in getattr(result, "warnings", [])]
+                    language_routes = [
+                        asdict(route) for route in getattr(result, "language_routes", [])
+                    ]
                     if result_warnings:
                         trace.warnings.extend(result_warnings)
+            global_routes = self._globalize_language_routes(language_routes, segment.char_start)
+            route_diagnostics.extend(global_routes)
             if cfg.model_variant in {"de-thorsten", "de-crane"}:
                 phonemes, tokens, alignment_tokens = self._normalize_german_short_u_payload(
                     str(phonemes), alignment_tokens, g2p, model_version
@@ -165,6 +201,8 @@ class KokoroG2PAdapter(G2PAdapter):
                     "tokens": tokens,
                     "alignment_tokens": [token.to_dict() for token in alignment_tokens],
                     "warnings": result_warnings,
+                    "language_routes": language_routes,
+                    "effective_language_routing": effective_routing.as_routing(),
                 },
             )
 
@@ -214,6 +252,21 @@ class KokoroG2PAdapter(G2PAdapter):
                     )
                 )
 
+        trace.events.append(
+            TraceEvent(
+                stage="g2p",
+                name="language_routing",
+                ms=0.0,
+                details={
+                    "mode": effective_routing.mode,
+                    "languages": list(effective_routing.languages),
+                    "route_count": len(route_diagnostics),
+                    "mixed_token_count": sum(
+                        1 for route in route_diagnostics if len(route.get("fragments", ())) > 1
+                    ),
+                },
+            )
+        )
         return out
 
     @staticmethod
@@ -225,8 +278,12 @@ class KokoroG2PAdapter(G2PAdapter):
         overrides: list[AnnotationSpan] = []
         for span in spans:
             attrs = {
-                key: value for key, value in span.attrs.items() if key in {"ph", "phonemes", "lang"}
+                key: value
+                for key, value in span.attrs.items()
+                if key in {"ph", "phonemes", "lang", "language"}
             }
+            if "lang" not in attrs and "language" in attrs:
+                attrs["lang"] = attrs.pop("language")
             if (
                 not attrs
                 or span.char_end <= segment.char_start
@@ -283,6 +340,10 @@ class KokoroG2PAdapter(G2PAdapter):
         overrides: list[AnnotationSpan],
         annotations: list[Any],
         g2p_instance: Any,
+        *,
+        g2p_resolver: Any = None,
+        language_routing: dict[str, object] | None = None,
+        target_model: str | None = None,
     ) -> Any:
         prepared = getattr(g2p, "phonemize_prepared", None)
         if callable(prepared):
@@ -295,6 +356,10 @@ class KokoroG2PAdapter(G2PAdapter):
                 return_ids=True,
                 alignment="span",
                 g2p=g2p_instance,
+                overlap="split",
+                g2p_resolver=g2p_resolver,
+                language_routing=language_routing,
+                target_model=target_model,
             )
         # Compatibility for test doubles and old installations; released PyKokoro
         # dependencies always provide the prepared entry point.
@@ -309,7 +374,7 @@ class KokoroG2PAdapter(G2PAdapter):
     @classmethod
     def _read_cache_payload(
         cls, cached: Any
-    ) -> tuple[str, list[int], list[G2PAlignmentToken], list[str]] | None:
+    ) -> tuple[str, list[int], list[G2PAlignmentToken], list[str], list[dict[str, Any]]] | None:
         if (
             not isinstance(cached, dict)
             or cached.get("schema") != cls._cache_schema
@@ -321,11 +386,17 @@ class KokoroG2PAdapter(G2PAdapter):
         tokens = cached.get("tokens")
         raw_alignment = cached.get("alignment_tokens")
         warnings = cached.get("warnings")
+        raw_routes = cached.get("language_routes")
         if not isinstance(phonemes, str) or not isinstance(tokens, list):
             return None
         if not all(isinstance(token, int) and not isinstance(token, bool) for token in tokens):
             return None
-        if not isinstance(raw_alignment, list) or not isinstance(warnings, list):
+        if (
+            not isinstance(raw_alignment, list)
+            or not isinstance(warnings, list)
+            or not isinstance(raw_routes, list)
+            or not all(isinstance(route, dict) for route in raw_routes)
+        ):
             return None
         if not all(isinstance(warning, str) for warning in warnings):
             return None
@@ -347,7 +418,30 @@ class KokoroG2PAdapter(G2PAdapter):
                     model_token_count=item.get("model_token_count"),
                 )
             )
-        return phonemes, tokens, alignment, warnings
+        return phonemes, tokens, alignment, warnings, [dict(route) for route in raw_routes]
+
+    @staticmethod
+    def _globalize_language_routes(
+        routes: list[dict[str, Any]], offset: int
+    ) -> list[dict[str, Any]]:
+        global_routes: list[dict[str, Any]] = []
+        for raw_route in routes:
+            route = dict(raw_route)
+            for key in ("char_start", "char_end"):
+                if isinstance(route.get(key), int):
+                    route[key] += offset
+            fragments = []
+            for raw_fragment in route.get("fragments", []):
+                if not isinstance(raw_fragment, dict):
+                    continue
+                fragment = dict(raw_fragment)
+                for key in ("char_start", "char_end"):
+                    if isinstance(fragment.get(key), int):
+                        fragment[key] += offset
+                fragments.append(fragment)
+            route["fragments"] = fragments
+            global_routes.append(route)
+        return global_routes
 
     @staticmethod
     def _normalize_german_short_u_payload(
@@ -356,7 +450,7 @@ class KokoroG2PAdapter(G2PAdapter):
         g2p: Any,
         model_version: str,
     ) -> tuple[str, list[int], list[G2PAlignmentToken]]:
-        """Keep German short-u phonemes, model IDs, and alignment spans consistent."""
+        """Apply the model-vocabulary compatibility transform to every route."""
         cleaned_phonemes = phonemes.replace("ʏ", "y")
         tokens = list(g2p.phonemes_to_ids(cleaned_phonemes, model=model_version))
         cleaned_alignment = [
@@ -480,41 +574,65 @@ class KokoroG2PAdapter(G2PAdapter):
         )
         return profile, backend, postprocess
 
-    def _get_g2p_instance(self, lang: str, cfg: PipelineConfig) -> G2PBase:
-        from ...frontend_contracts import require_frontend
+    @staticmethod
+    def _g2p_kwargs_for_language(
+        lang: str,
+        cfg: PipelineConfig,
+        backend: str,
+        profile: Any | None,
+        model_version: str,
+    ) -> dict[str, Any]:
+        from kokorog2p.language_codes import normalize_language_code
+        from kokorog2p.lexicons import normalize_lexicon_selection
+
         from ...tokenizer import TokenizerConfig
 
         tokenizer_config = cfg.tokenizer_config or TokenizerConfig()
         kokorog2p_lang = SUPPORTED_LANGUAGES.get(lang, lang)
-        profile, backend, _ = self._resolve_frontend_contract(cfg)
-        model_version = self._get_model_version(cfg, lang)
-        version = "1.0" if model_version == "nabra-82m-v0.1" else model_version
-        if profile is not None:
-            require_frontend(profile.variant, allow_experimental=cfg.allow_experimental_frontend)
+        default_language = normalize_language_code(cfg.generation.lang or lang)
+        candidate_language = normalize_language_code(kokorog2p_lang)
+        lexicons = tokenizer_config.lexicons
+        if candidate_language != default_language and lexicons is not None:
+            try:
+                lexicons = normalize_lexicon_selection(candidate_language, lexicons)
+            except ValueError:
+                lexicons = None
+        candidate_backend = backend if candidate_language == default_language else "kokorog2p"
         request = make_spacy_model_request(
             model=tokenizer_config.spacy_model,
             size=tokenizer_config.spacy_model_size,
         )
-
         kwargs: dict[str, Any] = {
             "language": kokorog2p_lang,
-            "version": version,
+            "version": "1.0" if model_version == "nabra-82m-v0.1" else model_version,
             "phoneme_quotes": "curly",
             "use_goruut_fallback": tokenizer_config.use_goruut_fallback,
             "use_espeak_fallback": tokenizer_config.use_espeak_fallback,
             "use_spacy": tokenizer_config.use_spacy,
             "spacy_model": request.model,
             "spacy_model_size": request.size,
-            "backend": backend,
+            "backend": candidate_backend,
             "load_gold": tokenizer_config.load_gold,
             "load_silver": tokenizer_config.load_silver,
-            "lexicons": tokenizer_config.lexicons,
+            "lexicons": lexicons,
         }
-
         if profile is not None and profile.variant == "ar-nabra":
             kwargs["model_profile"] = "nabra-82m-v0.1"
+        return kwargs
+
+    def _get_g2p_instance(self, lang: str, cfg: PipelineConfig) -> G2PBase:
+        from ...frontend_contracts import require_frontend
+        from ...tokenizer import TokenizerConfig
+
+        profile, backend, _ = self._resolve_frontend_contract(cfg)
+        model_version = self._get_model_version(cfg, lang)
+        if profile is not None:
+            require_frontend(profile.variant, allow_experimental=cfg.allow_experimental_frontend)
+        kwargs = self._g2p_kwargs_for_language(lang, cfg, backend, profile, model_version)
+        tokenizer_config = cfg.tokenizer_config or TokenizerConfig()
+        lexicon_data_policy = tokenizer_config.lexicon_data_policy
         cache_key = tuple(sorted(kwargs.items())) + (
-            ("__pykokoro_lexicon_data_policy", tokenizer_config.lexicon_data_policy),
+            ("__pykokoro_lexicon_data_policy", lexicon_data_policy),
         )
         if cache_key in self._g2p_instances:
             return self._g2p_instances[cache_key]
@@ -522,7 +640,7 @@ class KokoroG2PAdapter(G2PAdapter):
         g2p_module = self._load()
         g2p_instance = create_g2p_with_lexphon_retry(
             g2p_module,
-            language=kokorog2p_lang,
+            language=kwargs["language"],
             config=tokenizer_config,
             kwargs=kwargs,
         )

@@ -41,14 +41,14 @@ def test_companion_dependency_floors_match_current_integration_contract() -> Non
         "dependencies"
     ]
 
-    assert "kokorog2p[espeak,en]>=0.9.2,<1.0" in dependencies
+    assert "kokorog2p[espeak,en]>=0.9.3,<1.0" in dependencies
     assert "lexphon>=0.1.0,<0.2" in dependencies
     assert "phrasplit>=0.3.7,<0.4" in dependencies
 
 
 def test_test_requirements_keep_kokorog2p_in_supported_window() -> None:
     requirements = (ROOT / "requirements-test.txt").read_text(encoding="utf-8")
-    assert "kokorog2p[all]>=0.9.2,<1.0" in requirements
+    assert "kokorog2p[all]>=0.9.3,<1.0" in requirements
     assert "lexphon>=0.1.0,<0.2" in requirements
 
 
@@ -77,7 +77,7 @@ def test_ssmd_dependency_targets_current_contract() -> None:
     dependencies = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
         "dependencies"
     ]
-    assert "ssmd>=0.8.6,<0.9" in dependencies
+    assert "ssmd>=0.8.7,<0.9" in dependencies
     assert "spokenform>=0.3.6,<0.4" in dependencies
 
 
@@ -185,6 +185,6 @@ def test_lower_bound_workflow_pins_match_project_floors() -> None:
 def test_package_resource_workflow_covers_kokorog2p_window() -> None:
     workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
 
-    assert 'kokorog2p-version: ["0.9.2"]' in workflow
+    assert 'kokorog2p-version: ["0.9.3"]' in workflow
     assert "working-directory: ${{ runner.temp }}" in workflow
     assert "pykokoro-*.whl" in workflow

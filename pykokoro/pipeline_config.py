@@ -12,6 +12,7 @@ from .config_types import (
     ProviderType,
 )
 from .generation_config import GenerationConfig
+from .language_detection import LanguageDetectionConfig
 from .prosody_config import ProsodyConfig
 from .short_sentence_handler import ShortSentenceConfig
 from .ssmd_config import SSMDRenderConfig
@@ -25,6 +26,7 @@ class PipelineConfig:
 
     voice: str | VoiceBlend | None = None
     generation: GenerationConfig = field(default_factory=GenerationConfig)
+    language_detection: LanguageDetectionConfig | None = None
     ssmd: SSMDRenderConfig = field(default_factory=SSMDRenderConfig)
     prosody: ProsodyConfig = field(default_factory=ProsodyConfig)
 

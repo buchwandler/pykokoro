@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .generation_config import GenerationConfig
+from .language_detection import LanguageDetectionConfig
 from .prosody_config import ProsodyConfig, ProsodyMethod
 from .ssmd_config import SSMDPauseOverrides, SSMDRenderConfig
 
@@ -95,6 +96,7 @@ __all__ = [
     "ModelCapabilities",
     "ModelDiscoveryResult",
     "GenerationConfig",
+    "LanguageDetectionConfig",
     "ProsodyConfig",
     "ProsodyMethod",
     "SSMDPauseOverrides",
