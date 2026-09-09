@@ -84,7 +84,12 @@ class G2PAlignmentToken:
     char_start: int | None = None
     char_end: int | None = None
     model_token_count: int | None = None
-
+    pronunciation_source: str | None = None
+    pronunciation_provider: str | None = None
+    pronunciation_lexicon_id: str | None = None
+    pronunciation_requested_language: str | None = None
+    pronunciation_source_ipa: str | None = None
+    pronunciation_language_markers: list[dict[str, Any]] | None = None
     def to_dict(self) -> dict[str, Any]:
         return {
             "text": self.text,
@@ -93,6 +98,12 @@ class G2PAlignmentToken:
             "char_start": self.char_start,
             "char_end": self.char_end,
             "model_token_count": self.model_token_count,
+            "pronunciation_source": self.pronunciation_source,
+            "pronunciation_provider": self.pronunciation_provider,
+            "pronunciation_lexicon_id": self.pronunciation_lexicon_id,
+            "pronunciation_requested_language": self.pronunciation_requested_language,
+            "pronunciation_source_ipa": self.pronunciation_source_ipa,
+            "pronunciation_language_markers": self.pronunciation_language_markers,
         }
 
 

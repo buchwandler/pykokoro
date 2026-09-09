@@ -71,12 +71,21 @@ def test_make_g2p_key_changes_with_named_lexicons():
         **base,
         tokenizer_config=asdict(TokenizerConfig(lexicons=("gold",))),
     )
+    gold_none = make_g2p_key(
+        **base,
+        tokenizer_config=asdict(TokenizerConfig(lexicons=("gold",), fallback="none")),
+    )
+    gold_espeak = make_g2p_key(
+        **base,
+        tokenizer_config=asdict(TokenizerConfig(lexicons=("gold",), fallback="espeak")),
+    )
     crane = make_g2p_key(
         **base,
         tokenizer_config=asdict(TokenizerConfig(lexicons=("crane",))),
     )
 
     assert gold != crane
+    assert gold_none != gold_espeak
 
 
 def test_annotation_fingerprint_includes_language_and_pos() -> None:

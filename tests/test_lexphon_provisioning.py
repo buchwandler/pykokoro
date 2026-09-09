@@ -94,6 +94,19 @@ def test_required_lexphon_ids_resolves_selected_metadata() -> None:
     assert required_lexphon_ids("de", config) == ("de-de:gold", "de-de:crane")
 
 
+def test_provider_only_configuration_skips_lexphon_assets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = TokenizerConfig(lexicons=(), fallback="espeak")
+
+    monkeypatch.setattr(
+        "lexphon.catalog.load_catalog",
+        lambda: pytest.fail("provider-only fallback must not load the catalog"),
+    )
+
+    assert required_lexphon_ids("de", config) == ()
+    assert install_missing_lexphon_data("de", config) == ()
+
 def test_install_checks_missing_assets_and_skips_catalog_when_warm(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

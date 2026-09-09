@@ -82,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
         use_spacy=False,
         load_gold=True,
         load_silver=True,
-        use_espeak_fallback=True,
+        fallback="espeak",
     )
     environment = collect_environment_fingerprint(
         backend=args.backend,

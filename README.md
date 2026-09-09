@@ -1417,30 +1417,31 @@ Control which phonemization backend and dictionaries to use:
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.tokenizer import TokenizerConfig
 
-# Default: Full dictionaries with espeak fallback (best quality)
+# Native KokoroG2P: selected dictionaries, then Lexphon eSpeak on misses.
 tokenizer_config = TokenizerConfig(
-    backend="espeak", load_gold=True, load_silver=True, use_espeak_fallback=True
-)
-
-# Memory-optimized: Gold dictionary only
-tokenizer_config = TokenizerConfig(
-    backend="espeak",
+    backend="kokorog2p",
     load_gold=True,
-    load_silver=False,  # Saves ~22-31 MB
-    use_espeak_fallback=True,
+    load_silver=True,
+    fallback="espeak",
 )
 
-# Fastest initialization: Pure espeak
+# Native KokoroG2P with no provider fallback.
 tokenizer_config = TokenizerConfig(
-    backend="espeak", load_gold=False, load_silver=False, use_espeak_fallback=True
+    backend="kokorog2p",
+    lexicons=("gold",),
+    fallback="none",
 )
 
-# Alternative backend (requires pygoruut)
-tokenizer_config = TokenizerConfig(backend="goruut")
+# Primary eSpeak backend. This is not lexicon-first fallback behavior.
+tokenizer_config = TokenizerConfig(backend="espeak")
 
+# Primary Goruut backend (requires the Goruut extra/runtime).
+tokenizer_config = TokenizerConfig(backend="goruut")
 pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_sarah", tokenizer_config=tokenizer_config))
 res = pipe.run("Hello")
 ```
+
+`backend="kokorog2p"` selects the native lexicon-first stack. Its `fallback` chooses the optional Lexphon provider after selected lexicons miss: `none`, `espeak`, or `goruut`. `backend="espeak"` and `backend="goruut"` select those engines as the primary backend instead.
 
 **Note**: `use_dictionary` parameter is deprecated. Use `load_gold` and `load_silver`
 instead for finer control.
@@ -1453,9 +1454,8 @@ The native KokoroG2P backend also supports explicit named lexicon selection thro
 ```python
 from pykokoro.tokenizer import TokenizerConfig
 
-# Compatibility behavior, controlled by KokoroG2P and legacy switches.
+# Compatibility behavior, with language defaults selected by KokoroG2P.
 default_config = TokenizerConfig()
-
 # German Gold lexicon only.
 gold_config = TokenizerConfig(lexicons="gold")
 
@@ -1470,6 +1470,8 @@ layered lookup, where the first matching layer wins. That layered lookup is not 
 Gold-versus-Crane A/B comparison. For an A/B comparison, render separately with
 `("gold",)` and `("crane",)` and combine the results yourself.
 
+
+Provider-only operation is explicit with `lexicons=()`; it selects no static Lexphon layers and can use `fallback="espeak"` or `fallback="goruut"`. A static lexicon named `espeak` is still a lexical resource and does not mean the dynamic eSpeak provider.
 The named lexicons are KokoroG2P/G2Lex resources consumed by PyKokoro; they are not
 PyKokoro-owned datasets.
 

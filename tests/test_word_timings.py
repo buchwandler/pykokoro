@@ -149,7 +149,15 @@ def test_kokorog2p_alignment_reads_token_metadata() -> None:
         text="Hello",
         char_start=0,
         char_end=5,
-        meta={"phonemes": "həˈloʊ", "whitespace": ""},
+        meta={
+            "phonemes": "həˈloʊ",
+            "whitespace": "",
+            "pronunciation_source": "provider",
+            "pronunciation_provider": "espeak",
+            "pronunciation_requested_language": "de-de",
+            "pronunciation_source_ipa": "fˈaɪl",
+            "pronunciation_language_markers": [{"language": "en", "ipa_offset": 0}],
+        },
     )
 
     tokens = KokoroG2PAdapter._normalize_alignment_tokens([raw_token], segment, G2P(), "1.0")
@@ -159,6 +167,34 @@ def test_kokorog2p_alignment_reads_token_metadata() -> None:
     assert tokens[0].phonemes == "həˈloʊ"
     assert tokens[0].char_start == 0
     assert tokens[0].char_end == 5
+    assert tokens[0].pronunciation_source == "provider"
+    assert tokens[0].pronunciation_provider == "espeak"
+    assert tokens[0].pronunciation_requested_language == "de-de"
+    assert tokens[0].pronunciation_source_ipa == "fˈaɪl"
+    assert tokens[0].pronunciation_language_markers == [{"language": "en", "ipa_offset": 0}]
+    assert tokens[0].to_dict()["pronunciation_provider"] == "espeak"
+
+def test_kokorog2p_alignment_preserves_static_lexicon_provenance() -> None:
+    class G2P:
+        @staticmethod
+        def phonemes_to_ids(phonemes: str, *, model: str) -> list[int]:
+            _ = model
+            return list(range(len(phonemes)))
+
+    segment = Segment(id="segment-lexicon", text="File", char_start=0, char_end=4)
+    raw_token = {
+        "text": "File",
+        "phonemes": "fˈiːlə",
+        "whitespace": "",
+        "pronunciation_source": "lexicon",
+        "pronunciation_lexicon_id": "de-de:espeak",
+    }
+
+    tokens = KokoroG2PAdapter._normalize_alignment_tokens([raw_token], segment, G2P(), "1.0")
+
+    assert tokens[0].pronunciation_source == "lexicon"
+    assert tokens[0].pronunciation_lexicon_id == "de-de:espeak"
+    assert tokens[0].pronunciation_provider is None
 
 
 def test_alignment_offsets_are_rebased_to_document_clean_text() -> None:

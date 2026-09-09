@@ -154,11 +154,14 @@ def test_kokorog2p_adapter_forwards_named_lexicons(monkeypatch):
 
     adapter = KokoroG2PAdapter()
     monkeypatch.setattr(adapter, "_load", lambda: FakeG2PModule())
-    cfg = PipelineConfig(tokenizer_config=TokenizerConfig(lexicons=("crane",)))
-
+    cfg = PipelineConfig(
+        tokenizer_config=TokenizerConfig(lexicons=("crane",), fallback="goruut")
+    )
     adapter._get_g2p_instance("de", cfg)
 
     assert captured["lexicons"] == ("crane",)
+    assert captured["use_espeak_fallback"] is False
+    assert captured["use_goruut_fallback"] is True
 
 
 def test_g2p_instance_cache_distinguishes_named_lexicons(monkeypatch):
@@ -172,25 +175,37 @@ def test_g2p_instance_cache_distinguishes_named_lexicons(monkeypatch):
 
     adapter = KokoroG2PAdapter()
     monkeypatch.setattr(adapter, "_load", lambda: FakeG2PModule())
-    gold_cfg = PipelineConfig(tokenizer_config=TokenizerConfig(lexicons=("gold",)))
+    gold_cfg = PipelineConfig(
+        tokenizer_config=TokenizerConfig(lexicons=("gold",), fallback="none")
+    )
     crane_cfg = PipelineConfig(tokenizer_config=TokenizerConfig(lexicons=("crane",)))
+    espeak_cfg = PipelineConfig(
+        tokenizer_config=TokenizerConfig(lexicons=("gold",), fallback="espeak")
+    )
 
     installed_only_cfg = PipelineConfig(
         tokenizer_config=replace(gold_cfg.tokenizer_config, lexicon_data_policy="installed-only")
     )
     gold = adapter._get_g2p_instance("de", gold_cfg)
+    espeak = adapter._get_g2p_instance("de", espeak_cfg)
     crane = adapter._get_g2p_instance("de", crane_cfg)
     installed_only = adapter._get_g2p_instance("de", installed_only_cfg)
     gold_again = adapter._get_g2p_instance("de", gold_cfg)
 
     assert gold is not crane
+    assert gold is not espeak
     assert gold is gold_again
     assert gold is not installed_only
     assert [entry["lexicons"] for entry in created] == [
         ("gold",),
+        ("gold",),
         ("crane",),
         ("gold",),
     ]
+    assert created[0]["use_espeak_fallback"] is False
+    assert created[0]["use_goruut_fallback"] is False
+    assert created[1]["use_espeak_fallback"] is True
+    assert created[1]["use_goruut_fallback"] is False
 
 
 def test_adapter_retries_after_lexphon_provisioning(monkeypatch):
@@ -235,12 +250,16 @@ def test_tokenizer_forwards_named_lexicons(monkeypatch):
     import pykokoro.tokenizer as tokenizer_module
 
     monkeypatch.setattr(tokenizer_module, "get_g2p", fake_get_g2p)
-    tokenizer = tokenizer_module.Tokenizer(vocab={}, config=TokenizerConfig(lexicons=("gold",)))
+    tokenizer = tokenizer_module.Tokenizer(
+        vocab={}, config=TokenizerConfig(lexicons=("gold",), fallback="none")
+    )
 
     tokenizer._get_g2p("de")
 
     assert captured["lexicons"] == ("gold",)
 
+    assert captured["use_espeak_fallback"] is False
+    assert captured["use_goruut_fallback"] is False
 
 def test_legacy_tokenizer_retries_after_lexphon_provisioning(monkeypatch):
     from lexphon import LexiconNotInstalledError

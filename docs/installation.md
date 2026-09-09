@@ -59,6 +59,14 @@ pip install "pykokoro[openvino]"  # OpenVINO Runtime
 pip install "pykokoro[directml]"  # DirectML
 ```
 
+
+For Lexphon Goruut provider fallback, install the supported extra:
+
+```bash
+pip install "pykokoro[goruut]"
+```
+
+This enables `fallback="goruut"` for the native `backend="kokorog2p"` path. It is distinct from `backend="goruut"`, which selects Goruut as the primary backend.
 For a custom ONNX Runtime distribution, install the base package and the provider
 package separately:
 
@@ -69,8 +77,10 @@ pip install onnxruntime-gpu==1.19.2
 
 ## Dependencies and optional spaCy
 
-PyKokoro v0.9 requires `kokorog2p[espeak,en]>=0.9.0,<1.0`, `phrasplit>=0.3.7,<0.4`,
-`ssmd>=0.8.6,<0.9`, and `spokenform>=0.3.6,<0.4`. The document language is explicit:
+PyKokoro v0.9 requires `kokorog2p[espeak,en]>=0.9.4,<1.0`,
+`lexphon>=0.2.1,<0.3`, `phrasplit>=0.3.7,<0.4`, `ssmd>=0.8.7,<0.9`, and
+`spokenform>=0.3.6,<0.4`.
+The document language is explicit:
 pass `GenerationConfig(lang="en-us")` or `run(..., lang="en-us")`. Voice and profile
 selection never supplies the document language. SSMD `lang` spans are the supported
 mechanism for explicit mixed-language documents.

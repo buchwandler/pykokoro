@@ -46,7 +46,15 @@ def test_german_short_u_cleanup_retokenizes_uncached_and_cached_results(
             return SimpleNamespace(
                 phonemes="bʏkə",
                 ids=[999],
-                tokens=[{"text": "Brücke", "phonemes": "bʏkə", "whitespace": ""}],
+                tokens=[
+                    {
+                        "text": "Brücke",
+                        "phonemes": "bʏkə",
+                        "whitespace": "",
+                        "pronunciation_source": "provider",
+                        "pronunciation_provider": "espeak",
+                    }
+                ],
                 warnings=[],
             )
 
@@ -76,11 +84,13 @@ def test_german_short_u_cleanup_retokenizes_uncached_and_cached_results(
     assert cached[0].tokens == uncached[0].tokens
     assert cached[0].alignment_tokens[0].phonemes == "bykə"
     assert cached[0].alignment_tokens[0].model_token_count == len("bykə")
+    assert cached[0].alignment_tokens[0].pronunciation_source == "provider"
+    assert cached[0].alignment_tokens[0].pronunciation_provider == "espeak"
 
     cache_files = list(tmp_path.glob("*.json"))
     assert len(cache_files) == 1
     payload = DiskCache(tmp_path).get(cache_files[0].stem)
-    assert payload["schema"] == 9
+    assert payload["schema"] == 10
     assert payload["phonemes"] == "bykə"
     assert payload["tokens"] == [ord(char) for char in "bykə"]
 
@@ -154,6 +164,6 @@ def test_previous_g2p_cache_schema_is_recomputed_with_cleaned_payload(
 
     assert calls["phonemize"] == 1
     assert result[0].phonemes == "bykə"
-    assert payload["schema"] == 9
+    assert payload["schema"] == 10
     assert payload["phonemes"] == "bykə"
     assert payload["tokens"] == [ord(char) for char in "bykə"]

@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 
 
 class KokoroG2PAdapter(G2PAdapter):
-    _cache_schema = 9
+    _cache_schema = 10
 
     def __init__(self) -> None:
         self._g2p: ModuleType | None = None
@@ -432,6 +432,24 @@ class KokoroG2PAdapter(G2PAdapter):
             whitespace = item.get("whitespace", "")
             if not isinstance(phoneme_text, str) or not isinstance(whitespace, str):
                 return None
+            provenance_keys = (
+                "pronunciation_source",
+                "pronunciation_provider",
+                "pronunciation_lexicon_id",
+                "pronunciation_requested_language",
+                "pronunciation_source_ipa",
+            )
+            if any(
+                item.get(key) is not None and not isinstance(item.get(key), str)
+                for key in provenance_keys
+            ):
+                return None
+            language_markers = item.get("pronunciation_language_markers")
+            if language_markers is not None and (
+                not isinstance(language_markers, list)
+                or not all(isinstance(marker, dict) for marker in language_markers)
+            ):
+                return None
             alignment.append(
                 G2PAlignmentToken(
                     text=item["text"],
@@ -440,6 +458,16 @@ class KokoroG2PAdapter(G2PAdapter):
                     char_start=item.get("char_start"),
                     char_end=item.get("char_end"),
                     model_token_count=item.get("model_token_count"),
+                    pronunciation_source=item.get("pronunciation_source"),
+                    pronunciation_provider=item.get("pronunciation_provider"),
+                    pronunciation_lexicon_id=item.get("pronunciation_lexicon_id"),
+                    pronunciation_requested_language=item.get("pronunciation_requested_language"),
+                    pronunciation_source_ipa=item.get("pronunciation_source_ipa"),
+                    pronunciation_language_markers=(
+                        [dict(marker) for marker in language_markers]
+                        if language_markers is not None
+                        else None
+                    ),
                 )
             )
         return phonemes, tokens, alignment, warnings, [dict(route) for route in raw_routes]
@@ -515,10 +543,36 @@ class KokoroG2PAdapter(G2PAdapter):
                 )
                 raw_start = getattr(raw_token, "char_start", None)
                 raw_end = getattr(raw_token, "char_end", None)
+            if isinstance(raw_token, dict):
+                metadata = raw_token
             if not isinstance(text, str) or not isinstance(phonemes, str):
                 continue
             if not isinstance(whitespace, str):
                 whitespace = str(whitespace)
+            pronunciation_source = metadata.get("pronunciation_source")
+            if not isinstance(pronunciation_source, str):
+                pronunciation_source = None
+            pronunciation_provider = metadata.get("pronunciation_provider")
+            if not isinstance(pronunciation_provider, str):
+                pronunciation_provider = None
+            pronunciation_lexicon_id = metadata.get("pronunciation_lexicon_id")
+            if not isinstance(pronunciation_lexicon_id, str):
+                pronunciation_lexicon_id = None
+            pronunciation_requested_language = metadata.get(
+                "pronunciation_requested_language"
+            )
+            if not isinstance(pronunciation_requested_language, str):
+                pronunciation_requested_language = None
+            pronunciation_source_ipa = metadata.get("pronunciation_source_ipa")
+            if not isinstance(pronunciation_source_ipa, str):
+                pronunciation_source_ipa = None
+            raw_language_markers = metadata.get("pronunciation_language_markers")
+            pronunciation_language_markers = (
+                [dict(marker) for marker in raw_language_markers]
+                if isinstance(raw_language_markers, list)
+                and all(isinstance(marker, dict) for marker in raw_language_markers)
+                else None
+            )
             if (
                 isinstance(raw_start, int)
                 and not isinstance(raw_start, bool)
@@ -548,6 +602,12 @@ class KokoroG2PAdapter(G2PAdapter):
                     char_start=char_start,
                     char_end=char_end,
                     model_token_count=model_token_count,
+                    pronunciation_source=pronunciation_source,
+                    pronunciation_provider=pronunciation_provider,
+                    pronunciation_lexicon_id=pronunciation_lexicon_id,
+                    pronunciation_requested_language=pronunciation_requested_language,
+                    pronunciation_source_ipa=pronunciation_source_ipa,
+                    pronunciation_language_markers=pronunciation_language_markers,
                 )
             )
         return normalized
@@ -609,7 +669,7 @@ class KokoroG2PAdapter(G2PAdapter):
         from kokorog2p.language_codes import normalize_language_code
         from kokorog2p.lexicons import normalize_lexicon_selection
 
-        from ...tokenizer import TokenizerConfig
+        from ...tokenizer import TokenizerConfig, _legacy_fallback_kwargs
 
         tokenizer_config = cfg.tokenizer_config or TokenizerConfig()
         kokorog2p_lang = SUPPORTED_LANGUAGES.get(lang, lang)
@@ -630,8 +690,7 @@ class KokoroG2PAdapter(G2PAdapter):
             "language": kokorog2p_lang,
             "version": "1.0" if model_version == "nabra-82m-v0.1" else model_version,
             "phoneme_quotes": "curly",
-            "use_goruut_fallback": tokenizer_config.use_goruut_fallback,
-            "use_espeak_fallback": tokenizer_config.use_espeak_fallback,
+            **_legacy_fallback_kwargs(tokenizer_config.fallback),
             "use_spacy": tokenizer_config.use_spacy,
             "spacy_model": request.model,
             "spacy_model_size": request.size,

@@ -25,7 +25,17 @@ from .spacy_models import SpacyModelSize, make_spacy_model_request
 
 N_TOKENS = _kokorog2p.N_TOKENS
 BackendType: TypeAlias = str
+FallbackMode: TypeAlias = Literal["none", "espeak", "goruut"]
+
 LexiconDataPolicy: TypeAlias = Literal["auto", "installed-only"]
+
+def _legacy_fallback_kwargs(mode: FallbackMode) -> dict[str, bool]:
+    if mode == "none":
+        return {"use_espeak_fallback": False, "use_goruut_fallback": False}
+    if mode == "espeak":
+        return {"use_espeak_fallback": True, "use_goruut_fallback": False}
+    return {"use_espeak_fallback": False, "use_goruut_fallback": True}
+
 GToken: TypeAlias = Any
 filter_for_kokoro = _kokorog2p.filter_for_kokoro
 get_g2p = _kokorog2p.get_g2p
@@ -47,7 +57,7 @@ def _normalize_lexicons(
     raw = (value,) if isinstance(value, str) else tuple(value)
 
     if not raw:
-        raise ValueError("lexicons must contain at least one lexicon name")
+        return ()
 
     normalized: list[str] = []
     for item in raw:
@@ -66,10 +76,10 @@ class TokenizerConfig:
     """Configuration for the tokenizer.
 
     Attributes:
-        use_espeak_fallback: Whether to use espeak for OOV words (default: True).
-            Only applies when backend='espeak'.
-        use_goruut_fallback: Whether to use goruut for OOV words (default: False).
-            Requires pygoruut to be installed. Only applies when backend='goruut'
+        fallback: Lexphon provider used by the native backend after selected
+            lexicon layers miss. One of "none", "espeak", or "goruut".
+            This is separate from backend="espeak"/"goruut", where that engine
+            is the primary G2P backend.
         use_spacy: Whether to use spaCy for POS tagging. ``False`` disables it,
             ``None`` selects the best compatible local model when available and
             otherwise falls back, and ``True`` requires a compatible local model.
@@ -96,8 +106,7 @@ class TokenizerConfig:
             over those legacy flags.
     """
 
-    use_espeak_fallback: bool = True
-    use_goruut_fallback: bool = False
+    fallback: FallbackMode = "espeak"
     use_spacy: bool | None = None
     spacy_model: str | None = None
     spacy_model_size: SpacyModelSize | None = None
@@ -119,6 +128,8 @@ class TokenizerConfig:
         )
         self.spacy_model = request.model
         self.spacy_model_size = request.size
+        if self.fallback not in {"none", "espeak", "goruut"}:
+            raise ValueError("fallback must be 'none', 'espeak', or 'goruut'")
         self.lexicons = _normalize_lexicons(self.lexicons)
         if self.lexicon_data_policy not in {"auto", "installed-only"}:
             raise ValueError("lexicon_data_policy must be 'auto' or 'installed-only'")
@@ -250,8 +261,7 @@ class Tokenizer:
             # kokorog2p uses dictionary + espeak fallback for all languages
             kwargs = {
                 "language": kokorog2p_lang,
-                "use_goruut_fallback": self.config.use_goruut_fallback,
-                "use_espeak_fallback": self.config.use_espeak_fallback,
+                **_legacy_fallback_kwargs(self.config.fallback),
                 "use_spacy": self.config.use_spacy,
                 "spacy_model": self.config.spacy_model,
                 "spacy_model_size": self.config.spacy_model_size,
@@ -515,8 +525,7 @@ class Tokenizer:
 
 # Convenience function for simple usage
 def create_tokenizer(
-    use_espeak_fallback: bool = True,
-    use_goruut_fallback: bool = False,
+    fallback: FallbackMode = "espeak",
     use_spacy: bool | None = None,
     spacy_model: str | None = None,
     spacy_model_size: SpacyModelSize | None = None,
@@ -524,8 +533,8 @@ def create_tokenizer(
     """Create a tokenizer with the specified configuration.
 
     Args:
-        use_espeak_fallback: Whether to use espeak for OOV words
-        use_goruut_fallback: Whether to use goruut for OOV words
+        fallback: Lexphon provider mode for native backend OOV words: "none",
+            "espeak", or "goruut".
         use_spacy: False to disable spaCy, None for local-only automatic selection,
             or True to require a compatible local model.
         spacy_model: Explicit spaCy model package, or None for automatic selection
@@ -536,8 +545,7 @@ def create_tokenizer(
         Configured Tokenizer instance
     """
     config = TokenizerConfig(
-        use_espeak_fallback=use_espeak_fallback,
-        use_goruut_fallback=use_goruut_fallback,
+        fallback=fallback,
         use_spacy=use_spacy,
         spacy_model=spacy_model,
         spacy_model_size=spacy_model_size,

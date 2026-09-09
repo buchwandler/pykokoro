@@ -22,7 +22,7 @@ from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAda
 from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
 from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
 from pykokoro.stages.phoneme_processing.noop import NoopPhonemeProcessorAdapter
-from pykokoro.tokenizer import TokenizerConfig
+from pykokoro.tokenizer import TokenizerConfig, _legacy_fallback_kwargs
 
 from .polynorm_data import (
     POLYNORM_COMMIT,
@@ -377,8 +377,7 @@ def collect_environment_fingerprint(
         "use_spacy": tokenizer_config.use_spacy,
         "load_gold": tokenizer_config.load_gold,
         "load_silver": tokenizer_config.load_silver,
-        "use_espeak_fallback": tokenizer_config.use_espeak_fallback,
-        "use_goruut_fallback": tokenizer_config.use_goruut_fallback,
+        "fallback": tokenizer_config.fallback,
         "model_variants": model_variants,
     }
     fingerprint["config_hash"] = hashlib.sha256(
@@ -432,8 +431,7 @@ def direct_kokorog2p_observer(
             language=kokorog2p_language,
             version=version,
             phoneme_quotes="curly",
-            use_goruut_fallback=tokenizer_config.use_goruut_fallback,
-            use_espeak_fallback=tokenizer_config.use_espeak_fallback,
+            **_legacy_fallback_kwargs(tokenizer_config.fallback),
             use_spacy=tokenizer_config.use_spacy,
             spacy_model=request.model,
             spacy_model_size=request.size,

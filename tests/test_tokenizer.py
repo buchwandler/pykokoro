@@ -40,7 +40,7 @@ class TestTokenizerConfig:
     def test_default_values(self):
         """Test default config values."""
         config = TokenizerConfig()
-        assert config.use_espeak_fallback is True
+        assert config.fallback == "espeak"
         assert config.use_spacy is None
         assert config.spacy_model is None
         assert config.spacy_model_size is None
@@ -69,6 +69,15 @@ class TestTokenizerConfig:
         with pytest.raises(ValueError):
             TokenizerConfig(lexicons=value)
 
+    def test_empty_lexicon_selection_is_explicit(self):
+        assert TokenizerConfig(lexicons=()).lexicons == ()
+
+    @pytest.mark.parametrize("mode", ["gruut", "ESPEAK", "", "auto"])
+    def test_invalid_fallback(self, mode):
+        with pytest.raises(ValueError, match="fallback"):
+            TokenizerConfig(fallback=mode)
+
+
     def test_named_lexicons_reject_non_string_names(self):
         with pytest.raises(TypeError):
             TokenizerConfig(lexicons=("gold", 1))
@@ -76,15 +85,13 @@ class TestTokenizerConfig:
     def test_custom_values(self):
         """Test config with custom values."""
         config = TokenizerConfig(
-            use_espeak_fallback=False,
-            use_goruut_fallback=True,
+            fallback="goruut",
             use_spacy=False,
             spacy_model="en_core_web_sm",
             spacy_model_size="sm",
             use_dictionary=False,
         )
-        assert config.use_espeak_fallback is False
-        assert config.use_goruut_fallback is True
+        assert config.fallback == "goruut"
         assert config.use_spacy is False
         assert config.spacy_model == "en_core_web_sm"
         assert config.spacy_model_size == "sm"
@@ -168,10 +175,10 @@ class TestTokenizer:
 
     def test_init_with_config(self):
         """Test initialization with TokenizerConfig."""
-        config = TokenizerConfig(use_spacy=False, use_espeak_fallback=True)
+        config = TokenizerConfig(use_spacy=False, fallback="espeak")
         tokenizer = Tokenizer(config=config)
         assert tokenizer.config.use_spacy is False
-        assert tokenizer.config.use_espeak_fallback is True
+        assert tokenizer.config.fallback == "espeak"
 
     def test_get_g2p_forwards_spacy_model(self, monkeypatch):
         """Test configured spaCy model is forwarded to get_g2p."""
@@ -434,7 +441,7 @@ class TestCreateTokenizer:
     def test_create_default(self):
         """Test creating tokenizer with defaults."""
         tokenizer = create_tokenizer()
-        assert tokenizer.config.use_espeak_fallback is True
+        assert tokenizer.config.fallback == "espeak"
         assert tokenizer.config.use_spacy is None
         assert tokenizer.config.spacy_model is None
         assert tokenizer.config.spacy_model_size is None
@@ -442,12 +449,12 @@ class TestCreateTokenizer:
     def test_create_custom(self):
         """Test creating tokenizer with custom settings."""
         tokenizer = create_tokenizer(
-            use_espeak_fallback=False,
+            fallback="none",
             use_spacy=False,
             spacy_model="en_core_web_sm",
             spacy_model_size="sm",
         )
-        assert tokenizer.config.use_espeak_fallback is False
+        assert tokenizer.config.fallback == "none"
         assert tokenizer.config.use_spacy is False
         assert tokenizer.config.spacy_model == "en_core_web_sm"
         assert tokenizer.config.spacy_model_size == "sm"

@@ -75,7 +75,7 @@ def main(argv: list[str] | None = None) -> int:
             cases = cases[: args.limit]
         if not cases:
             raise HardCaseError("no hard-cases matched the requested filters")
-        options = {"load_gold": True, "load_silver": True, "use_espeak_fallback": True}
+        options = {"load_gold": True, "load_silver": True, "fallback": "espeak"}
         if args.lexicon:
             options["lexicons"] = tuple(
                 item.strip() for item in args.lexicon.split(",") if item.strip()

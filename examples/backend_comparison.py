@@ -5,12 +5,11 @@ Backend Comparison Example for pykokoro.
 This example demonstrates how different phonemization backends affect
 the quality and pronunciation of synthesized speech. It compares:
 
-1. native kokorog2p (default) - Full dictionaries with espeak fallback and
-   Spokenform-backed semantic normalization on migrated locales
-2. gold_only_no_espeak - Gold dictionary only, no silver, no espeak
-3. espeak_only - Pure espeak without dictionary lookup
-4. goruut - Goruut backend (requires pygoruut)
-5. misaki - Misaki G2P with espeak-ng fallback (requires misaki)
+1. native kokorog2p with Lexphon eSpeak fallback
+2. native kokorog2p with selected gold dictionary and no provider fallback
+3. primary espeak backend without native lexicon-first behavior
+4. primary goruut backend (requires the Goruut runtime)
+5. misaki G2P with espeak-ng fallback (requires misaki)
 
 The example uses a phonetically rich text that includes various punctuation,
 abbreviations, numbers, and both common and rare words to thoroughly test
@@ -47,37 +46,29 @@ LANG = "en-us"
 # Backend configurations to test
 BACKENDS = [
     (
-        "gold plus silver plus espeak",
+        "native gold plus silver with espeak provider fallback",
         {
+            "backend": "kokorog2p",
             "load_gold": True,
             "load_silver": True,
-            "use_espeak_fallback": True,
+            "fallback": "espeak",
         },
     ),
     (
-        "gold only, no espeak fallback",
+        "native gold only with no provider fallback",
         {
-            "load_gold": True,
-            "load_silver": False,
-            "use_espeak_fallback": False,
+            "backend": "kokorog2p",
+            "lexicons": ("gold",),
+            "fallback": "none",
         },
     ),
     (
-        "espeak only, no dictionaries",
-        {
-            "load_gold": False,
-            "load_silver": False,
-            "use_espeak_fallback": True,
-        },
+        "primary espeak backend",
+        {"backend": "espeak"},
     ),
     (
-        "goruut only, no dictionaries",
-        {
-            "load_gold": False,
-            "load_silver": False,
-            "use_espeak_fallback": False,
-            "use_goruut_fallback": True,
-        },
+        "primary goruut backend",
+        {"backend": "goruut"},
     ),
     (
         "misaki with espeak fallback",
@@ -145,8 +136,7 @@ def main():
                 print(f"  backend: {config.backend}")
                 print(f"  load_gold: {config.load_gold}")
                 print(f"  load_silver: {config.load_silver}")
-                print(f"  use_espeak_fallback: {config.use_espeak_fallback}")
-                print(f"  use_goruut_fallback: {config.use_goruut_fallback}")
+                print(f"  fallback: {config.fallback}")
 
                 # Create tokenizer
                 tokenizer = Tokenizer(config=config)

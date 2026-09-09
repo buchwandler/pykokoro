@@ -81,7 +81,7 @@ jobs:
         python -m pip install pytest
         python -m pip install \
           "kokorog2p[all]==0.9.4" \
-          "lexphon==0.1.0" \
+          "lexphon==0.2.1" \
           "phrasplit==0.3.7" \
           "ssmd==0.8.7" \
           "spokenform==0.3.6" \

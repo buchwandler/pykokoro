@@ -23,7 +23,7 @@ authors = [
 keywords = ["tts", "text-to-speech", "kokoro", "phonemizer", "espeak"]
 dependencies = [
     "kokorog2p[espeak,en]>=0.9.4,<1.0",
-    "lexphon>=0.1.0,<0.2",
+    "lexphon>=0.2.1,<0.3",
     "phrasplit>=0.3.7,<0.4",
     "numpy",
     "audiosig>=0.1.1,<0.2",
@@ -74,6 +74,9 @@ openvino = ["onnxruntime-openvino>=1.17.0"]
 directml = ["onnxruntime-directml>=1.17.0"]
 coreml = ["onnxruntime>=1.17.0", "coremltools>=7.0"]
 playback = ["sounddevice"]
+goruut = [
+    "kokorog2p[goruut]>=0.9.4,<1.0",
+]
 sounddevice = ["sounddevice"]
 all = [
     "sounddevice",
