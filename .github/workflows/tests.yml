@@ -80,7 +80,7 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install pytest
         python -m pip install \
-          "kokorog2p[all]==0.9.3" \
+          "kokorog2p[all]==0.9.4" \
           "lexphon==0.1.0" \
           "phrasplit==0.3.7" \
           "ssmd==0.8.7" \
@@ -97,7 +97,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        kokorog2p-version: ["0.9.3"]
+        kokorog2p-version: ["0.9.4"]
     steps:
     - uses: actions/checkout@v4
     - name: Setup Python

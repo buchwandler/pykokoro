@@ -11,7 +11,7 @@ from pykokoro.pipeline_config import PipelineConfig
 from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
 from pykokoro.stages.protocols import DocumentResult
 from pykokoro.tokenizer import TokenizerConfig
-from pykokoro.types import Segment, Trace
+from pykokoro.types import AnnotationSpan, Segment, Trace
 
 TEXT = (
     "Dr. Smith will see you at 10:30 on 05/20/2023. "
@@ -98,6 +98,60 @@ def test_adapter_uses_prepared_entrypoint(monkeypatch) -> None:
     )
     KokoroG2PAdapter().phonemize([segment], doc, cfg, Trace())
     assert calls == ["prepared"]
+
+
+def test_prepared_annotations_preserve_metadata_without_language_override() -> None:
+    from pykokoro.runtime.language_plan import LanguageRun
+    from pykokoro.runtime.linguistics import (
+        LinguisticRequestState,
+        PreparedRunAnalysis,
+        TokenAnnotation,
+    )
+
+    text = "Haus File"
+    original = TokenAnnotation(
+        start=0,
+        end=4,
+        text="Haus",
+        pos="NOUN",
+        tag="NN",
+        lemma="Haus",
+        language="de",
+    )
+    doc = DocumentResult(
+        clean_text=text,
+        annotation_spans=[
+            AnnotationSpan(5, 9, {"language": "en", "scope": "pronunciation"}),
+            AnnotationSpan(0, len(text), {"ph": "h a u s f a i l", "scope": "pronunciation"}),
+        ],
+    )
+    doc.linguistic_state = LinguisticRequestState(
+        prepared_analysis=[
+            PreparedRunAnalysis(
+                run=LanguageRun(0, len(text), "de"),
+                text=text,
+                doc=None,
+                annotations=(original,),
+            )
+        ]
+    )
+    segment = Segment("seg", text, 0, len(text), {}, 0, 0)
+
+    forwarded = KokoroG2PAdapter._prepared_annotations(doc, segment)
+    assert len(forwarded) == 1
+    assert forwarded[0].language is None
+    assert forwarded[0].pos == original.pos
+    assert forwarded[0].tag == original.tag
+    assert forwarded[0].lemma == original.lemma
+    assert forwarded[0].start == original.start
+    assert forwarded[0].end == original.end
+    assert forwarded[0].text == original.text
+
+    overrides = KokoroG2PAdapter._prepared_overrides(doc.annotation_spans, segment, [])
+    assert [override.attrs for override in overrides] == [
+        {"lang": "en"},
+        {"ph": "h a u s f a i l"},
+    ]
 
 
 @pytest.mark.parametrize("source", ["gold", "crane", "espeak", "olaph"])

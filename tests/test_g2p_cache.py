@@ -80,12 +80,14 @@ def test_german_short_u_cleanup_retokenizes_uncached_and_cached_results(
     cache_files = list(tmp_path.glob("*.json"))
     assert len(cache_files) == 1
     payload = DiskCache(tmp_path).get(cache_files[0].stem)
-    assert payload["schema"] == 7
+    assert payload["schema"] == 9
     assert payload["phonemes"] == "bykə"
     assert payload["tokens"] == [ord(char) for char in "bykə"]
 
 
-def test_schema_three_crane_cache_is_recomputed_with_cleaned_payload(tmp_path, monkeypatch) -> None:
+def test_previous_g2p_cache_schema_is_recomputed_with_cleaned_payload(
+    tmp_path, monkeypatch
+) -> None:
     segment = Segment(
         id="segment-0",
         text="Brücke",
@@ -119,7 +121,7 @@ def test_schema_three_crane_cache_is_recomputed_with_cleaned_payload(tmp_path, m
     DiskCache(tmp_path).set(
         key,
         {
-            "schema": 3,
+            "schema": 8,
             "phonemes": "bʏkə",
             "tokens": [999],
             "alignment_tokens": [],
@@ -152,6 +154,6 @@ def test_schema_three_crane_cache_is_recomputed_with_cleaned_payload(tmp_path, m
 
     assert calls["phonemize"] == 1
     assert result[0].phonemes == "bykə"
-    assert payload["schema"] == 7
+    assert payload["schema"] == 9
     assert payload["phonemes"] == "bykə"
     assert payload["tokens"] == [ord(char) for char in "bykə"]

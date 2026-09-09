@@ -9,6 +9,7 @@ from ...constants import MAX_PHONEME_LENGTH, SUPPORTED_LANGUAGES
 from ...language_detection import ResolvedLanguageDetection, resolve_language_detection
 from ...lexicon_data import create_g2p_with_lexphon_retry
 from ...runtime.cache import cache_from_dir, make_g2p_key
+from ...runtime.language_plan import canonicalize_language
 from ...runtime.spans import slice_boundaries, slice_spans
 from ...spacy_models import SpacyModelSize, make_spacy_model_request, spacy_selection_metadata
 from ...types import (
@@ -29,7 +30,7 @@ if TYPE_CHECKING:
 
 
 class KokoroG2PAdapter(G2PAdapter):
-    _cache_schema = 7
+    _cache_schema = 9
 
     def __init__(self) -> None:
         self._g2p: ModuleType | None = None
@@ -276,6 +277,12 @@ class KokoroG2PAdapter(G2PAdapter):
         warnings: list[str],
     ) -> list[AnnotationSpan]:
         overrides: list[AnnotationSpan] = []
+        segment_language = segment.meta.get("language")
+        canonical_segment_language = (
+            canonicalize_language(segment_language)
+            if isinstance(segment_language, str) and segment_language
+            else None
+        )
         for span in spans:
             attrs = {
                 key: value
@@ -284,6 +291,16 @@ class KokoroG2PAdapter(G2PAdapter):
             }
             if "lang" not in attrs and "language" in attrs:
                 attrs["lang"] = attrs.pop("language")
+            if (
+                "ph" not in attrs
+                and "phonemes" not in attrs
+                and canonical_segment_language is not None
+                and span.char_start == segment.char_start
+                and span.char_end == segment.char_end
+                and "lang" in attrs
+                and canonicalize_language(attrs["lang"]) == canonical_segment_language
+            ):
+                continue
             if (
                 not attrs
                 or span.char_end <= segment.char_start
@@ -308,6 +325,7 @@ class KokoroG2PAdapter(G2PAdapter):
             return []
         annotations: list[Any] = []
         for analysis in getattr(state, "prepared_analysis", ()):
+            analysis_language = canonicalize_language(analysis.run.language)
             run = analysis.run
             if run.char_start > segment.char_start or run.char_end < segment.char_end:
                 continue
@@ -318,6 +336,12 @@ class KokoroG2PAdapter(G2PAdapter):
 
                 start = max(item.start, segment.char_start) - segment.char_start
                 end = min(item.end, segment.char_end) - segment.char_start
+                item_language = canonicalize_language(item.language) if item.language else None
+                forwarded_language = (
+                    item.language
+                    if item_language is not None and item_language != analysis_language
+                    else None
+                )
                 annotations.append(
                     TokenAnnotation(
                         start=start,
@@ -326,7 +350,7 @@ class KokoroG2PAdapter(G2PAdapter):
                         pos=item.pos,
                         tag=item.tag,
                         lemma=item.lemma,
-                        language=item.language,
+                        language=forwarded_language,
                     )
                 )
             break

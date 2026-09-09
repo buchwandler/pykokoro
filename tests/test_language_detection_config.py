@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pytest
+import ssmd
 
 from pykokoro import LanguageDetectionConfig
 from pykokoro.generation_config import GenerationConfig
@@ -43,6 +44,20 @@ def test_language_detection_precedence_is_api_then_header_then_default() -> None
     assert from_api.source == "pipeline"
     assert from_api.as_routing() is None
     assert resolve_language_detection(None, {}).source == "default"
+
+
+def test_ssmd_frontmatter_and_api_routing_configure_equivalently() -> None:
+    parsed = ssmd.parse_structure(
+        "---\nlanguage_detection:\n  mode: auto\n  languages:\n    - de\n    - en\n---\nFile",
+        default_lang="de",
+        parse_yaml_header=True,
+    )
+    from_header = resolve_language_detection(None, parsed.header)
+    from_api = resolve_language_detection(
+        LanguageDetectionConfig(mode="auto", languages=("de", "en")), {}
+    )
+
+    assert from_header.as_routing() == from_api.as_routing()
 
 
 def test_adapter_forwards_routing_and_split_overrides(monkeypatch) -> None:

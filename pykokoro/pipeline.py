@@ -267,6 +267,7 @@ class PreparedAudioUnits:
                 if prepared is None or self._closed:
                     raise RuntimeError("PreparedAudioUnits is closed")
                 result = self._pipeline._render_prepared_unit(prepared, index)
+                self._document_metadata.update(_copy_metadata_value(result.document_metadata))
                 previous = result
                 self._active_result = result
                 yield result
