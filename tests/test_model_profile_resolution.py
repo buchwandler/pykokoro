@@ -3,7 +3,12 @@ from __future__ import annotations
 import pytest
 
 from pykokoro.generation_config import GenerationConfig
-from pykokoro.model_profiles import GERMAN_MARTIN_V1_2, get_model_profile
+from pykokoro.model_profiles import (
+    GERMAN_MARTIN_V1_2,
+    IMPLEMENTED_FRONTENDS,
+    get_model_profile,
+    profile_for_language,
+)
 from pykokoro.pipeline import KokoroPipeline
 from pykokoro.pipeline_config import PipelineConfig, resolve_model_defaults
 
@@ -16,6 +21,73 @@ def test_martin_profile_contains_runtime_metadata_only():
     assert profile.quality_files == {}
     assert not hasattr(profile, "release_tag")
     assert not hasattr(profile, "model_sha256")
+
+
+@pytest.mark.parametrize(
+    ("variant", "voice", "language", "frontend"),
+    [
+        ("de-anna", "df_anna", "de", "phonemis-de-v1"),
+        ("pl-mateusz", "pm_mateusz", "pl", "phonemis-pl-v1"),
+    ],
+)
+def test_software_mansion_profiles_are_known_but_staged(variant, voice, language, frontend) -> None:
+    profile = get_model_profile(variant, "github")
+
+    assert profile.language_codes == (language,)
+    assert profile.default_voice == voice
+    assert profile.frontend == frontend
+    assert profile.runtime_available is False
+    assert profile.support_status == "registry-unavailable"
+    assert profile.onnx_inputs == {
+        "tokens": "int64",
+        "style": "float32",
+        "speed": "float32",
+    }
+    assert frontend not in IMPLEMENTED_FRONTENDS
+
+
+def test_staged_profiles_are_excluded_from_automatic_language_selection() -> None:
+    assert profile_for_language("de").variant == "v1.2-de-martin"
+    assert profile_for_language("pl") is None
+
+
+@pytest.mark.parametrize("variant", ["de-anna", "pl-mateusz"])
+def test_staged_profiles_report_missing_runtime_distribution(variant) -> None:
+    with pytest.raises(ValueError, match="present but has no runtime-ready distribution"):
+        resolve_model_defaults(
+            PipelineConfig(
+                model_source="github",
+                model_variant=variant,
+                generation=GenerationConfig(lang="de" if variant == "de-anna" else "pl"),
+            )
+        )
+
+
+def test_staged_profile_resolves_explicit_local_release_assets(tmp_path) -> None:
+    manifest = tmp_path / "release-manifest.json"
+    manifest.write_text(
+        '{"assets": ['
+        '{"name": "model.onnx", "role": "model"},'
+        '{"name": "voices.npz", "role": "voices", "format": "numpy-npz"},'
+        '{"name": "config.json", "role": "config"}'
+        "]}",
+        encoding="utf-8",
+    )
+
+    resolved = resolve_model_defaults(
+        PipelineConfig(
+            release_manifest_path=manifest,
+            model_source="github",
+            model_variant="de-anna",
+            generation=GenerationConfig(lang="de"),
+        )
+    )
+
+    assert resolved.model_variant == "de-anna"
+    assert resolved.voice == "df_anna"
+    assert resolved.model_path == tmp_path / "model.onnx"
+    assert resolved.voices_path == tmp_path / "voices.npz"
+    assert resolved.model_config_path == tmp_path / "config.json"
 
 
 @pytest.mark.parametrize("lang", ["de", "de-DE", "de_at", "de-ch"])

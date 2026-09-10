@@ -233,8 +233,45 @@ MODEL_PROFILES.update(
             False,
             voice_names=("dima",),
         ),
+        ("github", "de-anna"): RuntimeProfile(
+            source="github",
+            variant="de-anna",
+            language_codes=("de",),
+            default_voice="df_anna",
+            vocabulary_source="downloaded-config",
+            tokenizer_vocab_version="1.0",
+            frontend="phonemis-de-v1",
+            frontend_experimental=True,
+            onnx_inputs={
+                "tokens": "int64",
+                "style": "float32",
+                "speed": "float32",
+            },
+            voice_names=("df_anna",),
+            runtime_available=False,
+            support_status="registry-unavailable",
+        ),
+        ("github", "pl-mateusz"): RuntimeProfile(
+            source="github",
+            variant="pl-mateusz",
+            language_codes=("pl",),
+            default_voice="pm_mateusz",
+            vocabulary_source="downloaded-config",
+            tokenizer_vocab_version="1.0",
+            frontend="phonemis-pl-v1",
+            frontend_experimental=True,
+            onnx_inputs={
+                "tokens": "int64",
+                "style": "float32",
+                "speed": "float32",
+            },
+            voice_names=("pm_mateusz",),
+            runtime_available=False,
+            support_status="registry-unavailable",
+        ),
     }
 )
+
 
 GERMAN_MARTIN_V1_2 = MODEL_PROFILES[("github", "v1.2-de-martin")]
 
@@ -309,7 +346,11 @@ def normalize_language_code(lang: str) -> str:
 def profile_for_language(lang: str) -> RuntimeProfile | None:
     normalized = normalize_language_code(lang)
     for profile in MODEL_PROFILES.values():
-        if normalized in profile.language_codes:
+        if (
+            normalized in profile.language_codes
+            and profile.runtime_available
+            and profile.support_status == "ready"
+        ):
             return profile
     return None
 
