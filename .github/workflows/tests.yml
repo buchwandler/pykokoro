@@ -26,37 +26,36 @@ jobs:
         brew install espeak-ng
     - name: Install espeak-ng (Windows)
       if: matrix.os == 'windows-latest'
+      shell: pwsh
       run: |
-        $version = "1.52.0"
-        $msiPath = Join-Path $env:RUNNER_TEMP "espeak-ng-$version.msi"
-        $downloadUrl = "https://github.com/espeak-ng/espeak-ng/releases/download/$version/espeak-ng.msi"
-        $expectedHash = "7F673C709EA5DD579D3B5EBB98688CC575328A6AB7438D2BC405B88CEDAEAFB9"
-
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $msiPath
-        $actualHash = (Get-FileHash -Path $msiPath -Algorithm SHA256).Hash
-        if ($actualHash -ne $expectedHash) {
-          throw "Unexpected SHA-256 for espeak-ng MSI: $actualHash"
+        choco install espeak-ng --version=1.52.0 --yes --no-progress --retry-count=5 --retry-wait=10
+        $command = Get-Command espeak-ng -ErrorAction SilentlyContinue
+        if ($null -eq $command) {
+          $command = Get-Command espeak -ErrorAction SilentlyContinue
         }
-
-        $installer = Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" /quiet /norestart" -Wait -PassThru
-        if ($installer.ExitCode -notin @(0, 3010)) {
-          throw "espeak-ng MSI installation failed (exit code $($installer.ExitCode))."
+        if ($null -eq $command) {
+          $roots = @(
+            $env:ProgramFiles,
+            [Environment]::GetEnvironmentVariable('ProgramFiles(x86)'),
+            $env:ChocolateyInstall
+          ) | Where-Object { $_ -and (Test-Path $_) }
+          $file = Get-ChildItem -Path $roots -Filter 'espeak*.exe' -File -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($null -ne $file) {
+            $command = Get-Command $file.FullName
+          }
         }
-
-        $installPath = @(
-          (Join-Path ${env:ProgramFiles} "eSpeak NG"),
-          (Join-Path ${env:ProgramFiles(x86)} "eSpeak NG")
-        ) | Where-Object { Test-Path (Join-Path $_ "espeak-ng.exe") } | Select-Object -First 1
-        if (-not $installPath) {
-          throw "espeak-ng was not installed in either Program Files directory"
+        if ($null -eq $command) {
+          throw 'Chocolatey installed eSpeak NG, but no executable was found.'
         }
-        $executablePath = (Get-ChildItem -Path $installPath -File -Filter "*espeak*.exe" | Select-Object -First 1).FullName
-        $libraryPath = (Get-ChildItem -Path $installPath -File -Filter "*espeak*.dll" | Select-Object -First 1).FullName
-        $dataPath = Join-Path $installPath "espeak-ng-data"
-        if (-not $executablePath -or -not $libraryPath -or -not (Test-Path $dataPath)) {
-          throw "eSpeak NG installation is missing its executable, library, or data directory"
+        $executablePath = $command.Path
+        $installPath = Split-Path -Parent $executablePath
+        $dataPath = Join-Path $installPath 'espeak-ng-data'
+        $libraryPath = Get-ChildItem -Path $installPath -File -Filter '*espeak*.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -eq $libraryPath -or -not (Test-Path $dataPath)) {
+          throw "eSpeak NG installation is missing its library or data directory: $installPath"
         }
-        $env:Path = "$installPath;$env:Path"
+        $libraryPath = $libraryPath.FullName
+        $env:PATH = "$installPath;$env:PATH"
         $env:KOKOROG2P_ESPEAK_EXECUTABLE = $executablePath
         $env:KOKOROG2P_ESPEAK_LIBRARY = $libraryPath
         $env:KOKOROG2P_ESPEAK_DATA = $dataPath
@@ -65,11 +64,15 @@ jobs:
           "KOKOROG2P_ESPEAK_LIBRARY=$libraryPath",
           "KOKOROG2P_ESPEAK_DATA=$dataPath"
         ) | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-        & $executablePath -q -x --ipa "-vsem/ar" "--path=$dataPath" "مَرْحَبًا"
-        if ($LASTEXITCODE -ne 0) {
-          throw "The standard eSpeak NG Arabic voice sem/ar is unavailable"
-        }
         $installPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        & $executablePath --voices=ar --path=$dataPath | Tee-Object -Variable voices
+        if ($LASTEXITCODE -ne 0 -or -not ($voices -match '\bArabic\b')) {
+          throw 'The standard eSpeak NG Arabic voice is unavailable'
+        }
+        & $executablePath -q -x --ipa '-vArabic' "--path=$dataPath" 'مَرْحَبًا'
+        if ($LASTEXITCODE -ne 0) {
+          throw 'The standard eSpeak NG Arabic voice could not phonemize text'
+        }
     - name: Install packages
       run: |
         pip install pytest ruff mypy
@@ -141,7 +144,7 @@ jobs:
         python -m venv "$RUNNER_TEMP/pykokoro-wheel-venv"
         "$RUNNER_TEMP/pykokoro-wheel-venv/bin/python" -m pip install \
           "kokorog2p[all]==${{ matrix.kokorog2p-version }}" \
-          $RUNNER_TEMP/wheels/pykokoro-*.whl
+          "${RUNNER_TEMP}"/wheels/pykokoro-*.whl
     - name: Verify packaged resources outside checkout
       working-directory: ${{ runner.temp }}
       run: |
