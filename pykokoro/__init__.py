@@ -12,8 +12,8 @@ from .ssmd_config import SSMDPauseOverrides, SSMDRenderConfig
 try:
     from ._version import __version__, __version_tuple__
 except ImportError:
-    __version__ = "0.9.0"
-    __version_tuple__ = (0, 9, 0)
+    __version__ = "0.9.2"
+    __version_tuple__ = (0, 9, 2)
 
 
 def __getattr__(name: str) -> Any:

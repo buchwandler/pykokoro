@@ -41,8 +41,7 @@ def test_nabra_frontend_is_release_ready():
     g2p = get_g2p(
         language=fixture.language,
         model_profile="nabra-82m-v0.1",
-        load_gold=False,
-        load_silver=False,
+        lexicons=(),
     )
     assert g2p.get_target_model() == "nabra-82m-v0.1"
     assert g2p.phonemize(fixture.text) == fixture.diagnostic_phonemes

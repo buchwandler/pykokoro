@@ -1,0 +1,1008 @@
+ .github/workflows/tests.yml                     |  2 +-
+ README.md                                       | 32 ++++++------
+ benchmarks/hard_cases/__main__.py               |  2 +-
+ benchmarks/polynorm_eval.py                     |  8 ++-
+ benchmarks/polynorm_phoneme.py                  |  2 +-
+ docs/installation.md                            | 14 +++++-
+ examples/backend_comparison.py                  | 44 +++++++---------
+ examples/german_fallback_control.py             | 53 +++++++++++++++++++
+ pykokoro/stages/g2p/kokorog2p.py                | 67 +++++++++++++++++++++++--
+ pykokoro/tokenizer.py                           | 38 ++++++++------
+ pykokoro/types.py                               | 13 ++++-
+ pyproject.toml                                  |  5 +-
+ requirements-test.txt                           |  2 +-
+ tests/test_cache_keys.py                        |  9 ++++
+ tests/test_g2p_adapter_spacy_model.py           | 27 ++++++++--
+ tests/test_g2p_cache.py                         | 16 ++++--
+ tests/test_lexphon_provisioning.py              | 13 +++++
+ tests/test_maintainer_review4_download_cache.py |  2 +-
+ tests/test_maintainer_review4_reproductions.py  |  2 +-
+ tests/test_packaging_metadata.py                | 11 +++-
+ tests/test_tokenizer.py                         | 27 ++++++----
+ tests/test_word_timings.py                      | 38 +++++++++++++-
+ 22 files changed, 331 insertions(+), 96 deletions(-)
+
+diff --git a/.github/workflows/tests.yml b/.github/workflows/tests.yml
+index dfa3a2d..2cc8bd1 100644
+--- a/.github/workflows/tests.yml
++++ b/.github/workflows/tests.yml
+@@ -81,7 +81,7 @@ jobs:
+         python -m pip install pytest
+         python -m pip install \
+           "kokorog2p[all]==0.9.4" \
+-          "lexphon==0.1.0" \
++          "lexphon==0.2.1" \
+           "phrasplit==0.3.7" \
+           "ssmd==0.8.7" \
+           "spokenform==0.3.6" \
+diff --git a/README.md b/README.md
+index 86368e8..c908e69 100644
+--- a/README.md
++++ b/README.md
+@@ -1417,31 +1417,32 @@ Control which phonemization backend and dictionaries to use:
+ from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
+ from pykokoro.tokenizer import TokenizerConfig
+ 
+-# Default: Full dictionaries with espeak fallback (best quality)
++# Native KokoroG2P: selected dictionaries, then Lexphon eSpeak on misses.
+ tokenizer_config = TokenizerConfig(
+-    backend="espeak", load_gold=True, load_silver=True, use_espeak_fallback=True
+-)
+-
+-# Memory-optimized: Gold dictionary only
+-tokenizer_config = TokenizerConfig(
+-    backend="espeak",
++    backend="kokorog2p",
+     load_gold=True,
+-    load_silver=False,  # Saves ~22-31 MB
+-    use_espeak_fallback=True,
++    load_silver=True,
++    fallback="espeak",
+ )
+ 
+-# Fastest initialization: Pure espeak
++# Native KokoroG2P with no provider fallback.
+ tokenizer_config = TokenizerConfig(
+-    backend="espeak", load_gold=False, load_silver=False, use_espeak_fallback=True
++    backend="kokorog2p",
++    lexicons=("gold",),
++    fallback="none",
+ )
+ 
+-# Alternative backend (requires pygoruut)
+-tokenizer_config = TokenizerConfig(backend="goruut")
++# Primary eSpeak backend. This is not lexicon-first fallback behavior.
++tokenizer_config = TokenizerConfig(backend="espeak")
+ 
++# Primary Goruut backend (requires the Goruut extra/runtime).
++tokenizer_config = TokenizerConfig(backend="goruut")
+ pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_sarah", tokenizer_config=tokenizer_config))
+ res = pipe.run("Hello")
+ ```
+ 
++`backend="kokorog2p"` selects the native lexicon-first stack. Its `fallback` chooses the optional Lexphon provider after selected lexicons miss: `none`, `espeak`, or `goruut`. `backend="espeak"` and `backend="goruut"` select those engines as the primary backend instead.
++
+ **Note**: `use_dictionary` parameter is deprecated. Use `load_gold` and `load_silver`
+ instead for finer control.
+ 
+@@ -1453,9 +1454,8 @@ The native KokoroG2P backend also supports explicit named lexicon selection thro
+ ```python
+ from pykokoro.tokenizer import TokenizerConfig
+ 
+-# Compatibility behavior, controlled by KokoroG2P and legacy switches.
++# Compatibility behavior, with language defaults selected by KokoroG2P.
+ default_config = TokenizerConfig()
+-
+ # German Gold lexicon only.
+ gold_config = TokenizerConfig(lexicons="gold")
+ 
+@@ -1470,6 +1470,8 @@ layered lookup, where the first matching layer wins. That layered lookup is not
+ Gold-versus-Crane A/B comparison. For an A/B comparison, render separately with
+ `("gold",)` and `("crane",)` and combine the results yourself.
+ 
++
++Provider-only operation is explicit with `lexicons=()`; it selects no static Lexphon layers and can use `fallback="espeak"` or `fallback="goruut"`. A static lexicon named `espeak` is still a lexical resource and does not mean the dynamic eSpeak provider.
+ The named lexicons are KokoroG2P/G2Lex resources consumed by PyKokoro; they are not
+ PyKokoro-owned datasets.
+ 
+diff --git a/benchmarks/hard_cases/__main__.py b/benchmarks/hard_cases/__main__.py
+index c34ba96..17e2a26 100644
+--- a/benchmarks/hard_cases/__main__.py
++++ b/benchmarks/hard_cases/__main__.py
+@@ -75,7 +75,7 @@ def main(argv: list[str] | None = None) -> int:
+             cases = cases[: args.limit]
+         if not cases:
+             raise HardCaseError("no hard-cases matched the requested filters")
+-        options = {"load_gold": True, "load_silver": True, "use_espeak_fallback": True}
++        options = {"load_gold": True, "load_silver": True, "fallback": "espeak"}
+         if args.lexicon:
+             options["lexicons"] = tuple(
+                 item.strip() for item in args.lexicon.split(",") if item.strip()
+diff --git a/benchmarks/polynorm_eval.py b/benchmarks/polynorm_eval.py
+index 093836c..9d0ae0f 100644
+--- a/benchmarks/polynorm_eval.py
++++ b/benchmarks/polynorm_eval.py
+@@ -22,7 +22,7 @@ from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAda
+ from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
+ from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
+ from pykokoro.stages.phoneme_processing.noop import NoopPhonemeProcessorAdapter
+-from pykokoro.tokenizer import TokenizerConfig
++from pykokoro.tokenizer import TokenizerConfig, _legacy_fallback_kwargs
+ 
+ from .polynorm_data import (
+     POLYNORM_COMMIT,
+@@ -377,8 +377,7 @@ def collect_environment_fingerprint(
+         "use_spacy": tokenizer_config.use_spacy,
+         "load_gold": tokenizer_config.load_gold,
+         "load_silver": tokenizer_config.load_silver,
+-        "use_espeak_fallback": tokenizer_config.use_espeak_fallback,
+-        "use_goruut_fallback": tokenizer_config.use_goruut_fallback,
++        "fallback": tokenizer_config.fallback,
+         "model_variants": model_variants,
+     }
+     fingerprint["config_hash"] = hashlib.sha256(
+@@ -432,8 +431,7 @@ def direct_kokorog2p_observer(
+             language=kokorog2p_language,
+             version=version,
+             phoneme_quotes="curly",
+-            use_goruut_fallback=tokenizer_config.use_goruut_fallback,
+-            use_espeak_fallback=tokenizer_config.use_espeak_fallback,
++            **_legacy_fallback_kwargs(tokenizer_config.fallback),
+             use_spacy=tokenizer_config.use_spacy,
+             spacy_model=request.model,
+             spacy_model_size=request.size,
+diff --git a/benchmarks/polynorm_phoneme.py b/benchmarks/polynorm_phoneme.py
+index ce229a7..fa2bb75 100644
+--- a/benchmarks/polynorm_phoneme.py
++++ b/benchmarks/polynorm_phoneme.py
+@@ -82,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
+         use_spacy=False,
+         load_gold=True,
+         load_silver=True,
+-        use_espeak_fallback=True,
++        fallback="espeak",
+     )
+     environment = collect_environment_fingerprint(
+         backend=args.backend,
+diff --git a/docs/installation.md b/docs/installation.md
+index ccc2d9d..3fb8db9 100644
+--- a/docs/installation.md
++++ b/docs/installation.md
+@@ -59,6 +59,14 @@ pip install "pykokoro[openvino]"  # OpenVINO Runtime
+ pip install "pykokoro[directml]"  # DirectML
+ ```
+ 
++
++For Lexphon Goruut provider fallback, install the supported extra:
++
++```bash
++pip install "pykokoro[goruut]"
++```
++
++This enables `fallback="goruut"` for the native `backend="kokorog2p"` path. It is distinct from `backend="goruut"`, which selects Goruut as the primary backend.
+ For a custom ONNX Runtime distribution, install the base package and the provider
+ package separately:
+ 
+@@ -69,8 +77,10 @@ pip install onnxruntime-gpu==1.19.2
+ 
+ ## Dependencies and optional spaCy
+ 
+-PyKokoro v0.9 requires `kokorog2p[espeak,en]>=0.9.0,<1.0`, `phrasplit>=0.3.7,<0.4`,
+-`ssmd>=0.8.6,<0.9`, and `spokenform>=0.3.6,<0.4`. The document language is explicit:
++PyKokoro v0.9 requires `kokorog2p[espeak,en]>=0.9.4,<1.0`,
++`lexphon>=0.2.1,<0.3`, `phrasplit>=0.3.7,<0.4`, `ssmd>=0.8.7,<0.9`, and
++`spokenform>=0.3.6,<0.4`.
++The document language is explicit:
+ pass `GenerationConfig(lang="en-us")` or `run(..., lang="en-us")`. Voice and profile
+ selection never supplies the document language. SSMD `lang` spans are the supported
+ mechanism for explicit mixed-language documents.
+diff --git a/examples/backend_comparison.py b/examples/backend_comparison.py
+index 5f04f05..363b436 100644
+--- a/examples/backend_comparison.py
++++ b/examples/backend_comparison.py
+@@ -5,12 +5,11 @@ Backend Comparison Example for pykokoro.
+ This example demonstrates how different phonemization backends affect
+ the quality and pronunciation of synthesized speech. It compares:
+ 
+-1. native kokorog2p (default) - Full dictionaries with espeak fallback and
+-   Spokenform-backed semantic normalization on migrated locales
+-2. gold_only_no_espeak - Gold dictionary only, no silver, no espeak
+-3. espeak_only - Pure espeak without dictionary lookup
+-4. goruut - Goruut backend (requires pygoruut)
+-5. misaki - Misaki G2P with espeak-ng fallback (requires misaki)
++1. native kokorog2p with Lexphon eSpeak fallback
++2. native kokorog2p with selected gold dictionary and no provider fallback
++3. primary espeak backend without native lexicon-first behavior
++4. primary goruut backend (requires the Goruut runtime)
++5. misaki G2P with espeak-ng fallback (requires misaki)
+ 
+ The example uses a phonetically rich text that includes various punctuation,
+ abbreviations, numbers, and both common and rare words to thoroughly test
+@@ -47,37 +46,29 @@ LANG = "en-us"
+ # Backend configurations to test
+ BACKENDS = [
+     (
+-        "gold plus silver plus espeak",
++        "native gold plus silver with espeak provider fallback",
+         {
++            "backend": "kokorog2p",
+             "load_gold": True,
+             "load_silver": True,
+-            "use_espeak_fallback": True,
++            "fallback": "espeak",
+         },
+     ),
+     (
+-        "gold only, no espeak fallback",
++        "native gold only with no provider fallback",
+         {
+-            "load_gold": True,
+-            "load_silver": False,
+-            "use_espeak_fallback": False,
++            "backend": "kokorog2p",
++            "lexicons": ("gold",),
++            "fallback": "none",
+         },
+     ),
+     (
+-        "espeak only, no dictionaries",
+-        {
+-            "load_gold": False,
+-            "load_silver": False,
+-            "use_espeak_fallback": True,
+-        },
++        "primary espeak backend",
++        {"backend": "espeak"},
+     ),
+     (
+-        "goruut only, no dictionaries",
+-        {
+-            "load_gold": False,
+-            "load_silver": False,
+-            "use_espeak_fallback": False,
+-            "use_goruut_fallback": True,
+-        },
++        "primary goruut backend",
++        {"backend": "goruut"},
+     ),
+     (
+         "misaki with espeak fallback",
+@@ -145,8 +136,7 @@ def main():
+                 print(f"  backend: {config.backend}")
+                 print(f"  load_gold: {config.load_gold}")
+                 print(f"  load_silver: {config.load_silver}")
+-                print(f"  use_espeak_fallback: {config.use_espeak_fallback}")
+-                print(f"  use_goruut_fallback: {config.use_goruut_fallback}")
++                print(f"  fallback: {config.fallback}")
+ 
+                 # Create tokenizer
+                 tokenizer = Tokenizer(config=config)
+diff --git a/examples/german_fallback_control.py b/examples/german_fallback_control.py
+new file mode 100644
+index 0000000..6208297
+--- /dev/null
++++ b/examples/german_fallback_control.py
+@@ -0,0 +1,53 @@
++#!/usr/bin/env python3
++"""Inspect German Lexphon lexicon and provider fallback ownership."""
++
++from __future__ import annotations
++
++from pykokoro.tokenizer import Tokenizer, TokenizerConfig
++
++CASES = (
++    ("gold/none", ("gold",), "none"),
++    ("gold/espeak", ("gold",), "espeak"),
++    ("gold/goruut", ("gold",), "goruut"),
++    ("olaph/none", ("olaph",), "none"),
++    ("provider-only/espeak", (), "espeak"),
++)
++
++
++def main() -> None:
++    for label, lexicons, fallback in CASES:
++        config = TokenizerConfig(
++            backend="kokorog2p",
++            lexicons=lexicons,
++            fallback=fallback,
++            use_spacy=False,
++        )
++        tokenizer = Tokenizer(config=config)
++        g2p = tokenizer._get_g2p("de")
++        result = g2p.phonemize(
++            "File",
++            language="de",
++            return_phonemes=True,
++            return_ids=True,
++            alignment="span",
++        )
++
++        print(f"[{label}]")
++        print(f"selected lexicons: {lexicons}")
++        print(f"fallback: {fallback}")
++        print(f"final phonemes: {result.phonemes}")
++        for token in result.tokens:
++            metadata = getattr(token, "meta", {})
++            print(
++                "token: "
++                f"{token.text!r}, "
++                f"source={metadata.get('pronunciation_source')!r}, "
++                f"lexicon={metadata.get('pronunciation_lexicon_id')!r}, "
++                f"provider={metadata.get('pronunciation_provider')!r}, "
++                f"language={metadata.get('pronunciation_requested_language')!r}"
++            )
++        print()
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/pykokoro/stages/g2p/kokorog2p.py b/pykokoro/stages/g2p/kokorog2p.py
+index be5458b..104a45b 100644
+--- a/pykokoro/stages/g2p/kokorog2p.py
++++ b/pykokoro/stages/g2p/kokorog2p.py
+@@ -30,7 +30,7 @@ if TYPE_CHECKING:
+ 
+ 
+ class KokoroG2PAdapter(G2PAdapter):
+-    _cache_schema = 9
++    _cache_schema = 10
+ 
+     def __init__(self) -> None:
+         self._g2p: ModuleType | None = None
+@@ -432,6 +432,24 @@ class KokoroG2PAdapter(G2PAdapter):
+             whitespace = item.get("whitespace", "")
+             if not isinstance(phoneme_text, str) or not isinstance(whitespace, str):
+                 return None
++            provenance_keys = (
++                "pronunciation_source",
++                "pronunciation_provider",
++                "pronunciation_lexicon_id",
++                "pronunciation_requested_language",
++                "pronunciation_source_ipa",
++            )
++            if any(
++                item.get(key) is not None and not isinstance(item.get(key), str)
++                for key in provenance_keys
++            ):
++                return None
++            language_markers = item.get("pronunciation_language_markers")
++            if language_markers is not None and (
++                not isinstance(language_markers, list)
++                or not all(isinstance(marker, dict) for marker in language_markers)
++            ):
++                return None
+             alignment.append(
+                 G2PAlignmentToken(
+                     text=item["text"],
+@@ -440,6 +458,16 @@ class KokoroG2PAdapter(G2PAdapter):
+                     char_start=item.get("char_start"),
+                     char_end=item.get("char_end"),
+                     model_token_count=item.get("model_token_count"),
++                    pronunciation_source=item.get("pronunciation_source"),
++                    pronunciation_provider=item.get("pronunciation_provider"),
++                    pronunciation_lexicon_id=item.get("pronunciation_lexicon_id"),
++                    pronunciation_requested_language=item.get("pronunciation_requested_language"),
++                    pronunciation_source_ipa=item.get("pronunciation_source_ipa"),
++                    pronunciation_language_markers=(
++                        [dict(marker) for marker in language_markers]
++                        if language_markers is not None
++                        else None
++                    ),
+                 )
+             )
+         return phonemes, tokens, alignment, warnings, [dict(route) for route in raw_routes]
+@@ -515,10 +543,36 @@ class KokoroG2PAdapter(G2PAdapter):
+                 )
+                 raw_start = getattr(raw_token, "char_start", None)
+                 raw_end = getattr(raw_token, "char_end", None)
++            if isinstance(raw_token, dict):
++                metadata = raw_token
+             if not isinstance(text, str) or not isinstance(phonemes, str):
+                 continue
+             if not isinstance(whitespace, str):
+                 whitespace = str(whitespace)
++            pronunciation_source = metadata.get("pronunciation_source")
++            if not isinstance(pronunciation_source, str):
++                pronunciation_source = None
++            pronunciation_provider = metadata.get("pronunciation_provider")
++            if not isinstance(pronunciation_provider, str):
++                pronunciation_provider = None
++            pronunciation_lexicon_id = metadata.get("pronunciation_lexicon_id")
++            if not isinstance(pronunciation_lexicon_id, str):
++                pronunciation_lexicon_id = None
++            pronunciation_requested_language = metadata.get(
++                "pronunciation_requested_language"
++            )
++            if not isinstance(pronunciation_requested_language, str):
++                pronunciation_requested_language = None
++            pronunciation_source_ipa = metadata.get("pronunciation_source_ipa")
++            if not isinstance(pronunciation_source_ipa, str):
++                pronunciation_source_ipa = None
++            raw_language_markers = metadata.get("pronunciation_language_markers")
++            pronunciation_language_markers = (
++                [dict(marker) for marker in raw_language_markers]
++                if isinstance(raw_language_markers, list)
++                and all(isinstance(marker, dict) for marker in raw_language_markers)
++                else None
++            )
+             if (
+                 isinstance(raw_start, int)
+                 and not isinstance(raw_start, bool)
+@@ -548,6 +602,12 @@ class KokoroG2PAdapter(G2PAdapter):
+                     char_start=char_start,
+                     char_end=char_end,
+                     model_token_count=model_token_count,
++                    pronunciation_source=pronunciation_source,
++                    pronunciation_provider=pronunciation_provider,
++                    pronunciation_lexicon_id=pronunciation_lexicon_id,
++                    pronunciation_requested_language=pronunciation_requested_language,
++                    pronunciation_source_ipa=pronunciation_source_ipa,
++                    pronunciation_language_markers=pronunciation_language_markers,
+                 )
+             )
+         return normalized
+@@ -609,7 +669,7 @@ class KokoroG2PAdapter(G2PAdapter):
+         from kokorog2p.language_codes import normalize_language_code
+         from kokorog2p.lexicons import normalize_lexicon_selection
+ 
+-        from ...tokenizer import TokenizerConfig
++        from ...tokenizer import TokenizerConfig, _legacy_fallback_kwargs
+ 
+         tokenizer_config = cfg.tokenizer_config or TokenizerConfig()
+         kokorog2p_lang = SUPPORTED_LANGUAGES.get(lang, lang)
+@@ -630,8 +690,7 @@ class KokoroG2PAdapter(G2PAdapter):
+             "language": kokorog2p_lang,
+             "version": "1.0" if model_version == "nabra-82m-v0.1" else model_version,
+             "phoneme_quotes": "curly",
+-            "use_goruut_fallback": tokenizer_config.use_goruut_fallback,
+-            "use_espeak_fallback": tokenizer_config.use_espeak_fallback,
++            **_legacy_fallback_kwargs(tokenizer_config.fallback),
+             "use_spacy": tokenizer_config.use_spacy,
+             "spacy_model": request.model,
+             "spacy_model_size": request.size,
+diff --git a/pykokoro/tokenizer.py b/pykokoro/tokenizer.py
+index 3d59e26..39d5f85 100644
+--- a/pykokoro/tokenizer.py
++++ b/pykokoro/tokenizer.py
+@@ -25,7 +25,17 @@ from .spacy_models import SpacyModelSize, make_spacy_model_request
+ 
+ N_TOKENS = _kokorog2p.N_TOKENS
+ BackendType: TypeAlias = str
++FallbackMode: TypeAlias = Literal["none", "espeak", "goruut"]
++
+ LexiconDataPolicy: TypeAlias = Literal["auto", "installed-only"]
++
++def _legacy_fallback_kwargs(mode: FallbackMode) -> dict[str, bool]:
++    if mode == "none":
++        return {"use_espeak_fallback": False, "use_goruut_fallback": False}
++    if mode == "espeak":
++        return {"use_espeak_fallback": True, "use_goruut_fallback": False}
++    return {"use_espeak_fallback": False, "use_goruut_fallback": True}
++
+ GToken: TypeAlias = Any
+ filter_for_kokoro = _kokorog2p.filter_for_kokoro
+ get_g2p = _kokorog2p.get_g2p
+@@ -47,7 +57,7 @@ def _normalize_lexicons(
+     raw = (value,) if isinstance(value, str) else tuple(value)
+ 
+     if not raw:
+-        raise ValueError("lexicons must contain at least one lexicon name")
++        return ()
+ 
+     normalized: list[str] = []
+     for item in raw:
+@@ -66,10 +76,10 @@ class TokenizerConfig:
+     """Configuration for the tokenizer.
+ 
+     Attributes:
+-        use_espeak_fallback: Whether to use espeak for OOV words (default: True).
+-            Only applies when backend='espeak'.
+-        use_goruut_fallback: Whether to use goruut for OOV words (default: False).
+-            Requires pygoruut to be installed. Only applies when backend='goruut'
++        fallback: Lexphon provider used by the native backend after selected
++            lexicon layers miss. One of "none", "espeak", or "goruut".
++            This is separate from backend="espeak"/"goruut", where that engine
++            is the primary G2P backend.
+         use_spacy: Whether to use spaCy for POS tagging. ``False`` disables it,
+             ``None`` selects the best compatible local model when available and
+             otherwise falls back, and ``True`` requires a compatible local model.
+@@ -96,8 +106,7 @@ class TokenizerConfig:
+             over those legacy flags.
+     """
+ 
+-    use_espeak_fallback: bool = True
+-    use_goruut_fallback: bool = False
++    fallback: FallbackMode = "espeak"
+     use_spacy: bool | None = None
+     spacy_model: str | None = None
+     spacy_model_size: SpacyModelSize | None = None
+@@ -119,6 +128,8 @@ class TokenizerConfig:
+         )
+         self.spacy_model = request.model
+         self.spacy_model_size = request.size
++        if self.fallback not in {"none", "espeak", "goruut"}:
++            raise ValueError("fallback must be 'none', 'espeak', or 'goruut'")
+         self.lexicons = _normalize_lexicons(self.lexicons)
+         if self.lexicon_data_policy not in {"auto", "installed-only"}:
+             raise ValueError("lexicon_data_policy must be 'auto' or 'installed-only'")
+@@ -250,8 +261,7 @@ class Tokenizer:
+             # kokorog2p uses dictionary + espeak fallback for all languages
+             kwargs = {
+                 "language": kokorog2p_lang,
+-                "use_goruut_fallback": self.config.use_goruut_fallback,
+-                "use_espeak_fallback": self.config.use_espeak_fallback,
++                **_legacy_fallback_kwargs(self.config.fallback),
+                 "use_spacy": self.config.use_spacy,
+                 "spacy_model": self.config.spacy_model,
+                 "spacy_model_size": self.config.spacy_model_size,
+@@ -515,8 +525,7 @@ class Tokenizer:
+ 
+ # Convenience function for simple usage
+ def create_tokenizer(
+-    use_espeak_fallback: bool = True,
+-    use_goruut_fallback: bool = False,
++    fallback: FallbackMode = "espeak",
+     use_spacy: bool | None = None,
+     spacy_model: str | None = None,
+     spacy_model_size: SpacyModelSize | None = None,
+@@ -524,8 +533,8 @@ def create_tokenizer(
+     """Create a tokenizer with the specified configuration.
+ 
+     Args:
+-        use_espeak_fallback: Whether to use espeak for OOV words
+-        use_goruut_fallback: Whether to use goruut for OOV words
++        fallback: Lexphon provider mode for native backend OOV words: "none",
++            "espeak", or "goruut".
+         use_spacy: False to disable spaCy, None for local-only automatic selection,
+             or True to require a compatible local model.
+         spacy_model: Explicit spaCy model package, or None for automatic selection
+@@ -536,8 +545,7 @@ def create_tokenizer(
+         Configured Tokenizer instance
+     """
+     config = TokenizerConfig(
+-        use_espeak_fallback=use_espeak_fallback,
+-        use_goruut_fallback=use_goruut_fallback,
++        fallback=fallback,
+         use_spacy=use_spacy,
+         spacy_model=spacy_model,
+         spacy_model_size=spacy_model_size,
+diff --git a/pykokoro/types.py b/pykokoro/types.py
+index a20d9de..a377531 100644
+--- a/pykokoro/types.py
++++ b/pykokoro/types.py
+@@ -84,7 +84,12 @@ class G2PAlignmentToken:
+     char_start: int | None = None
+     char_end: int | None = None
+     model_token_count: int | None = None
+-
++    pronunciation_source: str | None = None
++    pronunciation_provider: str | None = None
++    pronunciation_lexicon_id: str | None = None
++    pronunciation_requested_language: str | None = None
++    pronunciation_source_ipa: str | None = None
++    pronunciation_language_markers: list[dict[str, Any]] | None = None
+     def to_dict(self) -> dict[str, Any]:
+         return {
+             "text": self.text,
+@@ -93,6 +98,12 @@ class G2PAlignmentToken:
+             "char_start": self.char_start,
+             "char_end": self.char_end,
+             "model_token_count": self.model_token_count,
++            "pronunciation_source": self.pronunciation_source,
++            "pronunciation_provider": self.pronunciation_provider,
++            "pronunciation_lexicon_id": self.pronunciation_lexicon_id,
++            "pronunciation_requested_language": self.pronunciation_requested_language,
++            "pronunciation_source_ipa": self.pronunciation_source_ipa,
++            "pronunciation_language_markers": self.pronunciation_language_markers,
+         }
+ 
+ 
+diff --git a/pyproject.toml b/pyproject.toml
+index 638bbee..bb3eeb2 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -23,7 +23,7 @@ authors = [
+ keywords = ["tts", "text-to-speech", "kokoro", "phonemizer", "espeak"]
+ dependencies = [
+     "kokorog2p[espeak,en]>=0.9.4,<1.0",
+-    "lexphon>=0.1.0,<0.2",
++    "lexphon>=0.2.1,<0.3",
+     "phrasplit>=0.3.7,<0.4",
+     "numpy",
+     "audiosig>=0.1.1,<0.2",
+@@ -74,6 +74,9 @@ openvino = ["onnxruntime-openvino>=1.17.0"]
+ directml = ["onnxruntime-directml>=1.17.0"]
+ coreml = ["onnxruntime>=1.17.0", "coremltools>=7.0"]
+ playback = ["sounddevice"]
++goruut = [
++    "kokorog2p[goruut]>=0.9.4,<1.0",
++]
+ sounddevice = ["sounddevice"]
+ all = [
+     "sounddevice",
+diff --git a/requirements-test.txt b/requirements-test.txt
+index 907077c..3234d11 100644
+--- a/requirements-test.txt
++++ b/requirements-test.txt
+@@ -9,7 +9,7 @@ tomli>=2.0.1; python_version < '3.11'
+ coverage
+ tox
+ kokorog2p[all]>=0.9.4,<1.0
+-lexphon>=0.1.0,<0.2
++lexphon>=0.2.1,<0.3
+ phrasplit>=0.3.7,<0.4
+ ssmd>=0.8.7,<0.9
+ spokenform>=0.3.6,<0.4
+diff --git a/tests/test_cache_keys.py b/tests/test_cache_keys.py
+index d1ff746..c2df9f6 100644
+--- a/tests/test_cache_keys.py
++++ b/tests/test_cache_keys.py
+@@ -71,12 +71,21 @@ def test_make_g2p_key_changes_with_named_lexicons():
+         **base,
+         tokenizer_config=asdict(TokenizerConfig(lexicons=("gold",))),
+     )
++    gold_none = make_g2p_key(
++        **base,
++        tokenizer_config=asdict(TokenizerConfig(lexicons=("gold",), fallback="none")),
++    )
++    gold_espeak = make_g2p_key(
++        **base,
++        tokenizer_config=asdict(TokenizerConfig(lexicons=("gold",), fallback="espeak")),
++    )
+     crane = make_g2p_key(
+         **base,
+         tokenizer_config=asdict(TokenizerConfig(lexicons=("crane",))),
+     )
+ 
+     assert gold != crane
++    assert gold_none != gold_espeak
+ 
+ 
+ def test_annotation_fingerprint_includes_language_and_pos() -> None:
+diff --git a/tests/test_g2p_adapter_spacy_model.py b/tests/test_g2p_adapter_spacy_model.py
+index 50c822a..72185d3 100644
+--- a/tests/test_g2p_adapter_spacy_model.py
++++ b/tests/test_g2p_adapter_spacy_model.py
+@@ -154,11 +154,14 @@ def test_kokorog2p_adapter_forwards_named_lexicons(monkeypatch):
+ 
+     adapter = KokoroG2PAdapter()
+     monkeypatch.setattr(adapter, "_load", lambda: FakeG2PModule())
+-    cfg = PipelineConfig(tokenizer_config=TokenizerConfig(lexicons=("crane",)))
+-
++    cfg = PipelineConfig(
++        tokenizer_config=TokenizerConfig(lexicons=("crane",), fallback="goruut")
++    )
+     adapter._get_g2p_instance("de", cfg)
+ 
+     assert captured["lexicons"] == ("crane",)
++    assert captured["use_espeak_fallback"] is False
++    assert captured["use_goruut_fallback"] is True
+ 
+ 
+ def test_g2p_instance_cache_distinguishes_named_lexicons(monkeypatch):
+@@ -172,25 +175,37 @@ def test_g2p_instance_cache_distinguishes_named_lexicons(monkeypatch):
+ 
+     adapter = KokoroG2PAdapter()
+     monkeypatch.setattr(adapter, "_load", lambda: FakeG2PModule())
+-    gold_cfg = PipelineConfig(tokenizer_config=TokenizerConfig(lexicons=("gold",)))
++    gold_cfg = PipelineConfig(
++        tokenizer_config=TokenizerConfig(lexicons=("gold",), fallback="none")
++    )
+     crane_cfg = PipelineConfig(tokenizer_config=TokenizerConfig(lexicons=("crane",)))
++    espeak_cfg = PipelineConfig(
++        tokenizer_config=TokenizerConfig(lexicons=("gold",), fallback="espeak")
++    )
+ 
+     installed_only_cfg = PipelineConfig(
+         tokenizer_config=replace(gold_cfg.tokenizer_config, lexicon_data_policy="installed-only")
+     )
+     gold = adapter._get_g2p_instance("de", gold_cfg)
++    espeak = adapter._get_g2p_instance("de", espeak_cfg)
+     crane = adapter._get_g2p_instance("de", crane_cfg)
+     installed_only = adapter._get_g2p_instance("de", installed_only_cfg)
+     gold_again = adapter._get_g2p_instance("de", gold_cfg)
+ 
+     assert gold is not crane
++    assert gold is not espeak
+     assert gold is gold_again
+     assert gold is not installed_only
+     assert [entry["lexicons"] for entry in created] == [
++        ("gold",),
+         ("gold",),
+         ("crane",),
+         ("gold",),
+     ]
++    assert created[0]["use_espeak_fallback"] is False
++    assert created[0]["use_goruut_fallback"] is False
++    assert created[1]["use_espeak_fallback"] is True
++    assert created[1]["use_goruut_fallback"] is False
+ 
+ 
+ def test_adapter_retries_after_lexphon_provisioning(monkeypatch):
+@@ -235,12 +250,16 @@ def test_tokenizer_forwards_named_lexicons(monkeypatch):
+     import pykokoro.tokenizer as tokenizer_module
+ 
+     monkeypatch.setattr(tokenizer_module, "get_g2p", fake_get_g2p)
+-    tokenizer = tokenizer_module.Tokenizer(vocab={}, config=TokenizerConfig(lexicons=("gold",)))
++    tokenizer = tokenizer_module.Tokenizer(
++        vocab={}, config=TokenizerConfig(lexicons=("gold",), fallback="none")
++    )
+ 
+     tokenizer._get_g2p("de")
+ 
+     assert captured["lexicons"] == ("gold",)
+ 
++    assert captured["use_espeak_fallback"] is False
++    assert captured["use_goruut_fallback"] is False
+ 
+ def test_legacy_tokenizer_retries_after_lexphon_provisioning(monkeypatch):
+     from lexphon import LexiconNotInstalledError
+diff --git a/tests/test_g2p_cache.py b/tests/test_g2p_cache.py
+index a080979..e8dfce0 100644
+--- a/tests/test_g2p_cache.py
++++ b/tests/test_g2p_cache.py
+@@ -46,7 +46,15 @@ def test_german_short_u_cleanup_retokenizes_uncached_and_cached_results(
+             return SimpleNamespace(
+                 phonemes="bʏkə",
+                 ids=[999],
+-                tokens=[{"text": "Brücke", "phonemes": "bʏkə", "whitespace": ""}],
++                tokens=[
++                    {
++                        "text": "Brücke",
++                        "phonemes": "bʏkə",
++                        "whitespace": "",
++                        "pronunciation_source": "provider",
++                        "pronunciation_provider": "espeak",
++                    }
++                ],
+                 warnings=[],
+             )
+ 
+@@ -76,11 +84,13 @@ def test_german_short_u_cleanup_retokenizes_uncached_and_cached_results(
+     assert cached[0].tokens == uncached[0].tokens
+     assert cached[0].alignment_tokens[0].phonemes == "bykə"
+     assert cached[0].alignment_tokens[0].model_token_count == len("bykə")
++    assert cached[0].alignment_tokens[0].pronunciation_source == "provider"
++    assert cached[0].alignment_tokens[0].pronunciation_provider == "espeak"
+ 
+     cache_files = list(tmp_path.glob("*.json"))
+     assert len(cache_files) == 1
+     payload = DiskCache(tmp_path).get(cache_files[0].stem)
+-    assert payload["schema"] == 9
++    assert payload["schema"] == 10
+     assert payload["phonemes"] == "bykə"
+     assert payload["tokens"] == [ord(char) for char in "bykə"]
+ 
+@@ -154,6 +164,6 @@ def test_previous_g2p_cache_schema_is_recomputed_with_cleaned_payload(
+ 
+     assert calls["phonemize"] == 1
+     assert result[0].phonemes == "bykə"
+-    assert payload["schema"] == 9
++    assert payload["schema"] == 10
+     assert payload["phonemes"] == "bykə"
+     assert payload["tokens"] == [ord(char) for char in "bykə"]
+diff --git a/tests/test_lexphon_provisioning.py b/tests/test_lexphon_provisioning.py
+index a47a1c9..76c0a99 100644
+--- a/tests/test_lexphon_provisioning.py
++++ b/tests/test_lexphon_provisioning.py
+@@ -94,6 +94,19 @@ def test_required_lexphon_ids_resolves_selected_metadata() -> None:
+     assert required_lexphon_ids("de", config) == ("de-de:gold", "de-de:crane")
+ 
+ 
++def test_provider_only_configuration_skips_lexphon_assets(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    config = TokenizerConfig(lexicons=(), fallback="espeak")
++
++    monkeypatch.setattr(
++        "lexphon.catalog.load_catalog",
++        lambda: pytest.fail("provider-only fallback must not load the catalog"),
++    )
++
++    assert required_lexphon_ids("de", config) == ()
++    assert install_missing_lexphon_data("de", config) == ()
++
+ def test_install_checks_missing_assets_and_skips_catalog_when_warm(
+     monkeypatch: pytest.MonkeyPatch,
+ ) -> None:
+diff --git a/tests/test_maintainer_review4_download_cache.py b/tests/test_maintainer_review4_download_cache.py
+index 4bf782d..8203785 100644
+--- a/tests/test_maintainer_review4_download_cache.py
++++ b/tests/test_maintainer_review4_download_cache.py
+@@ -213,7 +213,7 @@ def test_g2p_cache_schema_recomputes_and_preserves_warnings(tmp_path, monkeypatc
+     assert second_trace.warnings == ["fallback"]
+     cached = DiskCache(tmp_path).get(key)
+     assert cached == {
+-        "schema": 9,
++        "schema": 10,
+         "g2p_input_mode": "prepared",
+         "preparation_backend": "spokenform",
+         "preparation_version": None,
+diff --git a/tests/test_maintainer_review4_reproductions.py b/tests/test_maintainer_review4_reproductions.py
+index affe254..aa72d01 100644
+--- a/tests/test_maintainer_review4_reproductions.py
++++ b/tests/test_maintainer_review4_reproductions.py
+@@ -182,7 +182,7 @@ def test_backend_cache_key_snapshots_mutable_nested_configuration() -> None:
+ 
+ def test_backend_cache_key_snapshots_mutable_spokenform_sensitive_tokenizer_flags() -> None:
+     pipeline = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us")))
+-    tokenizer_config = TokenizerConfig(load_gold=True, load_silver=True, use_espeak_fallback=True)
++    tokenizer_config = TokenizerConfig(load_gold=True, load_silver=True, fallback="espeak")
+     cfg = replace(pipeline.config, tokenizer_config=tokenizer_config)
+ 
+     initial_key = pipeline._kokoro_key(cfg)
+diff --git a/tests/test_packaging_metadata.py b/tests/test_packaging_metadata.py
+index 109092a..c21a4d6 100644
+--- a/tests/test_packaging_metadata.py
++++ b/tests/test_packaging_metadata.py
+@@ -42,14 +42,14 @@ def test_companion_dependency_floors_match_current_integration_contract() -> Non
+     ]
+ 
+     assert "kokorog2p[espeak,en]>=0.9.4,<1.0" in dependencies
+-    assert "lexphon>=0.1.0,<0.2" in dependencies
++    assert "lexphon>=0.2.1,<0.3" in dependencies
+     assert "phrasplit>=0.3.7,<0.4" in dependencies
+ 
+ 
+ def test_test_requirements_keep_kokorog2p_in_supported_window() -> None:
+     requirements = (ROOT / "requirements-test.txt").read_text(encoding="utf-8")
+     assert "kokorog2p[all]>=0.9.4,<1.0" in requirements
+-    assert "lexphon>=0.1.0,<0.2" in requirements
++    assert "lexphon>=0.2.1,<0.3" in requirements
+ 
+ 
+ def test_provider_extras_do_not_install_every_runtime_distribution() -> None:
+@@ -72,6 +72,13 @@ def test_provider_extras_do_not_install_every_runtime_distribution() -> None:
+         "onnxruntime-directml",
+     }
+ 
++def test_goruut_extra_uses_companion_provider_contract() -> None:
++    optional = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
++        "optional-dependencies"
++    ]
++
++    assert optional["goruut"] == ["kokorog2p[goruut]>=0.9.4,<1.0"]
++
+ 
+ def test_ssmd_dependency_targets_current_contract() -> None:
+     dependencies = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+diff --git a/tests/test_tokenizer.py b/tests/test_tokenizer.py
+index 926f260..aa05c33 100644
+--- a/tests/test_tokenizer.py
++++ b/tests/test_tokenizer.py
+@@ -40,7 +40,7 @@ class TestTokenizerConfig:
+     def test_default_values(self):
+         """Test default config values."""
+         config = TokenizerConfig()
+-        assert config.use_espeak_fallback is True
++        assert config.fallback == "espeak"
+         assert config.use_spacy is None
+         assert config.spacy_model is None
+         assert config.spacy_model_size is None
+@@ -69,6 +69,15 @@ class TestTokenizerConfig:
+         with pytest.raises(ValueError):
+             TokenizerConfig(lexicons=value)
+ 
++    def test_empty_lexicon_selection_is_explicit(self):
++        assert TokenizerConfig(lexicons=()).lexicons == ()
++
++    @pytest.mark.parametrize("mode", ["gruut", "ESPEAK", "", "auto"])
++    def test_invalid_fallback(self, mode):
++        with pytest.raises(ValueError, match="fallback"):
++            TokenizerConfig(fallback=mode)
++
++
+     def test_named_lexicons_reject_non_string_names(self):
+         with pytest.raises(TypeError):
+             TokenizerConfig(lexicons=("gold", 1))
+@@ -76,15 +85,13 @@ class TestTokenizerConfig:
+     def test_custom_values(self):
+         """Test config with custom values."""
+         config = TokenizerConfig(
+-            use_espeak_fallback=False,
+-            use_goruut_fallback=True,
++            fallback="goruut",
+             use_spacy=False,
+             spacy_model="en_core_web_sm",
+             spacy_model_size="sm",
+             use_dictionary=False,
+         )
+-        assert config.use_espeak_fallback is False
+-        assert config.use_goruut_fallback is True
++        assert config.fallback == "goruut"
+         assert config.use_spacy is False
+         assert config.spacy_model == "en_core_web_sm"
+         assert config.spacy_model_size == "sm"
+@@ -168,10 +175,10 @@ class TestTokenizer:
+ 
+     def test_init_with_config(self):
+         """Test initialization with TokenizerConfig."""
+-        config = TokenizerConfig(use_spacy=False, use_espeak_fallback=True)
++        config = TokenizerConfig(use_spacy=False, fallback="espeak")
+         tokenizer = Tokenizer(config=config)
+         assert tokenizer.config.use_spacy is False
+-        assert tokenizer.config.use_espeak_fallback is True
++        assert tokenizer.config.fallback == "espeak"
+ 
+     def test_get_g2p_forwards_spacy_model(self, monkeypatch):
+         """Test configured spaCy model is forwarded to get_g2p."""
+@@ -434,7 +441,7 @@ class TestCreateTokenizer:
+     def test_create_default(self):
+         """Test creating tokenizer with defaults."""
+         tokenizer = create_tokenizer()
+-        assert tokenizer.config.use_espeak_fallback is True
++        assert tokenizer.config.fallback == "espeak"
+         assert tokenizer.config.use_spacy is None
+         assert tokenizer.config.spacy_model is None
+         assert tokenizer.config.spacy_model_size is None
+@@ -442,12 +449,12 @@ class TestCreateTokenizer:
+     def test_create_custom(self):
+         """Test creating tokenizer with custom settings."""
+         tokenizer = create_tokenizer(
+-            use_espeak_fallback=False,
++            fallback="none",
+             use_spacy=False,
+             spacy_model="en_core_web_sm",
+             spacy_model_size="sm",
+         )
+-        assert tokenizer.config.use_espeak_fallback is False
++        assert tokenizer.config.fallback == "none"
+         assert tokenizer.config.use_spacy is False
+         assert tokenizer.config.spacy_model == "en_core_web_sm"
+         assert tokenizer.config.spacy_model_size == "sm"
+diff --git a/tests/test_word_timings.py b/tests/test_word_timings.py
+index 74f40be..865aca4 100644
+--- a/tests/test_word_timings.py
++++ b/tests/test_word_timings.py
+@@ -149,7 +149,15 @@ def test_kokorog2p_alignment_reads_token_metadata() -> None:
+         text="Hello",
+         char_start=0,
+         char_end=5,
+-        meta={"phonemes": "həˈloʊ", "whitespace": ""},
++        meta={
++            "phonemes": "həˈloʊ",
++            "whitespace": "",
++            "pronunciation_source": "provider",
++            "pronunciation_provider": "espeak",
++            "pronunciation_requested_language": "de-de",
++            "pronunciation_source_ipa": "fˈaɪl",
++            "pronunciation_language_markers": [{"language": "en", "ipa_offset": 0}],
++        },
+     )
+ 
+     tokens = KokoroG2PAdapter._normalize_alignment_tokens([raw_token], segment, G2P(), "1.0")
+@@ -159,6 +167,34 @@ def test_kokorog2p_alignment_reads_token_metadata() -> None:
+     assert tokens[0].phonemes == "həˈloʊ"
+     assert tokens[0].char_start == 0
+     assert tokens[0].char_end == 5
++    assert tokens[0].pronunciation_source == "provider"
++    assert tokens[0].pronunciation_provider == "espeak"
++    assert tokens[0].pronunciation_requested_language == "de-de"
++    assert tokens[0].pronunciation_source_ipa == "fˈaɪl"
++    assert tokens[0].pronunciation_language_markers == [{"language": "en", "ipa_offset": 0}]
++    assert tokens[0].to_dict()["pronunciation_provider"] == "espeak"
++
++def test_kokorog2p_alignment_preserves_static_lexicon_provenance() -> None:
++    class G2P:
++        @staticmethod
++        def phonemes_to_ids(phonemes: str, *, model: str) -> list[int]:
++            _ = model
++            return list(range(len(phonemes)))
++
++    segment = Segment(id="segment-lexicon", text="File", char_start=0, char_end=4)
++    raw_token = {
++        "text": "File",
++        "phonemes": "fˈiːlə",
++        "whitespace": "",
++        "pronunciation_source": "lexicon",
++        "pronunciation_lexicon_id": "de-de:espeak",
++    }
++
++    tokens = KokoroG2PAdapter._normalize_alignment_tokens([raw_token], segment, G2P(), "1.0")
++
++    assert tokens[0].pronunciation_source == "lexicon"
++    assert tokens[0].pronunciation_lexicon_id == "de-de:espeak"
++    assert tokens[0].pronunciation_provider is None
+ 
+ 
+ def test_alignment_offsets_are_rebased_to_document_clean_text() -> None:

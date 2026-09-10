@@ -669,13 +669,13 @@ class KokoroG2PAdapter(G2PAdapter):
         from kokorog2p.language_codes import normalize_language_code
         from kokorog2p.lexicons import normalize_lexicon_selection
 
-        from ...tokenizer import TokenizerConfig, _legacy_fallback_kwargs
+        from ...tokenizer import TokenizerConfig, _effective_lexicons, _legacy_fallback_kwargs
 
         tokenizer_config = cfg.tokenizer_config or TokenizerConfig()
         kokorog2p_lang = SUPPORTED_LANGUAGES.get(lang, lang)
         default_language = normalize_language_code(cfg.generation.lang or lang)
         candidate_language = normalize_language_code(kokorog2p_lang)
-        lexicons = tokenizer_config.lexicons
+        lexicons = _effective_lexicons(tokenizer_config)
         if candidate_language != default_language and lexicons is not None:
             try:
                 lexicons = normalize_lexicon_selection(candidate_language, lexicons)
@@ -695,8 +695,6 @@ class KokoroG2PAdapter(G2PAdapter):
             "spacy_model": request.model,
             "spacy_model_size": request.size,
             "backend": candidate_backend,
-            "load_gold": tokenizer_config.load_gold,
-            "load_silver": tokenizer_config.load_silver,
             "lexicons": lexicons,
         }
         if profile is not None and profile.variant == "ar-nabra":

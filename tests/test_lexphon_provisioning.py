@@ -89,23 +89,19 @@ def _local_catalog(tmp_path: Path) -> Any:
 
 
 def test_required_lexphon_ids_resolves_selected_metadata() -> None:
-    config = TokenizerConfig(lexicons=("gold", "crane"))
-
-    assert required_lexphon_ids("de", config) == ("de-de:gold", "de-de:crane")
+    assert required_lexphon_ids("de", ("gold", "crane")) == ("de-de:gold", "de-de:crane")
 
 
 def test_provider_only_configuration_skips_lexphon_assets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    config = TokenizerConfig(lexicons=(), fallback="espeak")
-
     monkeypatch.setattr(
         "lexphon.catalog.load_catalog",
         lambda: pytest.fail("provider-only fallback must not load the catalog"),
     )
 
-    assert required_lexphon_ids("de", config) == ()
-    assert install_missing_lexphon_data("de", config) == ()
+    assert required_lexphon_ids("de", ()) == ()
+    assert install_missing_lexphon_data("de", ()) == ()
 
 def test_install_checks_missing_assets_and_skips_catalog_when_warm(
     monkeypatch: pytest.MonkeyPatch,
@@ -132,7 +128,7 @@ def test_install_checks_missing_assets_and_skips_catalog_when_warm(
         lambda: pytest.fail("warm provisioning must not load the catalog"),
     )
 
-    assert install_missing_lexphon_data("de", TokenizerConfig(lexicons=("gold",))) == ()
+    assert install_missing_lexphon_data("de", ("gold",)) == ()
     assert store.installed_calls == ["de-de:gold"]
 
 
@@ -160,7 +156,7 @@ def test_install_rechecks_under_lock_after_another_installer_wins(
         lambda: pytest.fail("the in-lock recheck should avoid catalog access"),
     )
 
-    assert install_missing_lexphon_data("de", TokenizerConfig(lexicons=("gold",))) == ()
+    assert install_missing_lexphon_data("de", ("gold",)) == ()
     assert store.calls == 2
 
 
@@ -174,7 +170,7 @@ def test_install_uses_local_catalog_and_g2lex_asset(
     monkeypatch.setattr(lexphon, "DataStore", lambda: store)
     monkeypatch.setattr("lexphon.catalog.load_catalog", lambda: catalog)
 
-    installed = install_missing_lexphon_data("de", TokenizerConfig(lexicons=("gold",)))
+    installed = install_missing_lexphon_data("de", ("gold",))
 
     assert installed == ("de-de:gold",)
     assert store.path("de-de:gold").is_file()
@@ -185,7 +181,7 @@ def test_retry_provisions_once_and_retries_once(monkeypatch: pytest.MonkeyPatch)
     from lexphon import LexiconNotInstalledError
 
     calls = 0
-    installations: list[tuple[str, str]] = []
+    installations: list[tuple[str, object]] = []
 
     def get_g2p(**kwargs: object) -> object:
         nonlocal calls
@@ -196,8 +192,8 @@ def test_retry_provisions_once_and_retries_once(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(
         "pykokoro.lexicon_data.install_missing_lexphon_data",
-        lambda language, config: (
-            installations.append((language, config.lexicon_data_policy)) or ("de-de:gold",)
+        lambda language, lexicons: (
+            installations.append((language, lexicons)) or ("de-de:gold",)
         ),
     )
 
@@ -205,12 +201,17 @@ def test_retry_provisions_once_and_retries_once(monkeypatch: pytest.MonkeyPatch)
         SimpleNamespace(get_g2p=get_g2p),
         language="de",
         config=TokenizerConfig(lexicons=("gold",)),
-        kwargs={"language": "de"},
+        kwargs={"language": "de", "backend": "kokorog2p", "lexicons": ("gold",)},
     )
 
-    assert result.kwargs == {"language": "de"}
+    assert result.kwargs == {
+        "language": "de",
+        "backend": "kokorog2p",
+        "lexicons": ("gold",),
+    }
     assert calls == 2
-    assert installations == [("de", "auto")]
+    assert installations == [("de", ("gold",)), ("de", ("gold",))]
+
 
 
 def test_installed_only_propagates_missing_error_without_install(
@@ -258,7 +259,7 @@ def test_retry_propagates_non_install_errors_and_does_not_retry(
             SimpleNamespace(get_g2p=get_g2p),
             language="de",
             config=TokenizerConfig(lexicons=("gold",)),
-            kwargs={},
+            kwargs={"backend": "espeak"},
         )
     assert caught.value is error
     assert calls == 1
@@ -290,3 +291,49 @@ def test_retry_does_not_attempt_a_third_g2p_construction(
         )
     assert caught.value is error
     assert calls == 2
+
+
+@pytest.mark.parametrize("backend", ["espeak", "goruut"])
+def test_primary_provider_skips_static_lexphon_provisioning(
+    monkeypatch: pytest.MonkeyPatch, backend: str
+) -> None:
+    monkeypatch.setattr(
+        "pykokoro.lexicon_data.install_missing_lexphon_data",
+        lambda *args: pytest.fail("primary providers must not provision static lexicons"),
+    )
+
+    result = create_g2p_with_lexphon_retry(
+        SimpleNamespace(get_g2p=lambda **kwargs: kwargs),
+        language="de",
+        config=TokenizerConfig(),
+        kwargs={"backend": backend, "lexicons": None},
+    )
+
+    assert result["backend"] == backend
+
+
+def test_native_provisioning_runs_before_g2p_construction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    monkeypatch.setattr(
+        "pykokoro.lexicon_data.install_missing_lexphon_data",
+        lambda *args: events.append("install") or ("de-de:gold",),
+    )
+
+    create_g2p_with_lexphon_retry(
+        SimpleNamespace(get_g2p=lambda **kwargs: events.append("get_g2p") or kwargs),
+        language="de",
+        config=TokenizerConfig(),
+        kwargs={"backend": "kokorog2p", "lexicons": None},
+    )
+
+    assert events == ["install", "get_g2p"]
+
+
+@pytest.mark.parametrize(
+    ("language", "expected"),
+    [("de", "de-de:gold"), ("en-us", "en-us:gold"), ("fr-fr", "fr-fr:gold")],
+)
+def test_default_lexphon_ids_follow_kokorog2p_registry(language: str, expected: str) -> None:
+    assert required_lexphon_ids(language, None) == (expected,)

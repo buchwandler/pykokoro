@@ -71,6 +71,21 @@ def _normalize_lexicons(
     return tuple(normalized)
 
 
+def _effective_lexicons(config: TokenizerConfig) -> tuple[str, ...] | None:
+    """Resolve legacy dictionary flags into the current named-lexicon selection."""
+    if config.lexicons is not None:
+        return config.lexicons
+    if not config.use_dictionary:
+        return ()
+    if not config.load_gold and config.load_silver:
+        raise ValueError(
+            "load_gold=False and load_silver=True has no KokoroG2P 0.9.4 equivalent; "
+            "use explicit lexicons instead"
+        )
+    if not config.load_gold and not config.load_silver:
+        return ()
+    return None
+
 @dataclass
 class TokenizerConfig:
     """Configuration for the tokenizer.
@@ -88,7 +103,7 @@ class TokenizerConfig:
             ``"auto"`` remains accepted as a compatibility alias for None.
         spacy_model_size: Exact spaCy package tier, or None to select the highest
             installed compatible model. One of: "sm", "md", "lg", "trf".
-        use_dictionary: DEPRECATED. Use load_gold and load_silver instead.
+        use_dictionary: Legacy compatibility input. New code should use lexicons.
         phoneme_dictionary_path: Path to custom phoneme dictionary JSON file.
             Format: {"word": "/phoneme/"} where phonemes are in IPA format.
         phoneme_dict_case_sensitive: Whether phoneme dictionary matching should
@@ -96,14 +111,10 @@ class TokenizerConfig:
         backend: Phonemization backend: "kokorog2p" (default), "espeak", or "goruut".
             Integrated PyKokoro preparation is provided by Spokenform before G2P.
             Requires pygoruut for goruut backend.
-        load_gold: Load gold-tier dictionary (~170k common words). Only applies
-            to languages with dictionaries (English, French, German). Default: True.
-        load_silver: Load silver-tier dictionary (~100k extra entries). Only applies
-            to English. Saves ~22-31 MB memory if False. Default: True.
-        lexicons: Explicit ordered named KokoroG2P lexicon selection. None preserves
-            the compatibility behavior controlled by KokoroG2P and the legacy
-            load_gold/load_silver flags. Explicit named selection takes precedence
-            over those legacy flags.
+        load_gold: Legacy compatibility input. Explicit lexicons take precedence.
+        load_silver: Legacy compatibility input. No current Silver layer is defined.
+        lexicons: Explicit ordered named KokoroG2P lexicon selection. None uses language
+            defaults, and an empty tuple disables static lexicon layers.
     """
 
     fallback: FallbackMode = "espeak"
@@ -210,8 +221,7 @@ class Tokenizer:
             import warnings
 
             warnings.warn(
-                "TokenizerConfig.use_dictionary is deprecated. "
-                "Use load_gold=False and load_silver=False instead.",
+                "TokenizerConfig.use_dictionary is deprecated. Use lexicons instead.",
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -266,9 +276,7 @@ class Tokenizer:
                 "spacy_model": self.config.spacy_model,
                 "spacy_model_size": self.config.spacy_model_size,
                 "backend": self.config.backend,
-                "load_gold": self.config.load_gold,
-                "load_silver": self.config.load_silver,
-                "lexicons": self.config.lexicons,
+                "lexicons": _effective_lexicons(self.config),
                 "version": self._kokorog2p_model,
                 "phoneme_quotes": "curly",
             }
@@ -346,7 +354,7 @@ class Tokenizer:
         processed_text = self._apply_phoneme_dictionary(text)
         g2p = self._get_g2p(lang)
         result = phonemize(processed_text, language=lang, g2p=g2p)
-        return result.phonemes
+        return filter_for_kokoro(result.phonemes, model=self._kokorog2p_model)
 
     def phonemize_detailed(
         self,

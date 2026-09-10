@@ -1417,18 +1417,17 @@ Control which phonemization backend and dictionaries to use:
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.tokenizer import TokenizerConfig
 
-# Native KokoroG2P: selected dictionaries, then Lexphon eSpeak on misses.
-tokenizer_config = TokenizerConfig(
-    backend="kokorog2p",
-    load_gold=True,
-    load_silver=True,
-    fallback="espeak",
-)
-
-# Native KokoroG2P with no provider fallback.
+# Native KokoroG2P with explicit Gold lexicon and eSpeak provider fallback.
 tokenizer_config = TokenizerConfig(
     backend="kokorog2p",
     lexicons=("gold",),
+    fallback="espeak",
+)
+
+# Native KokoroG2P with no static Lexphon layer and no provider fallback.
+tokenizer_config = TokenizerConfig(
+    backend="kokorog2p",
+    lexicons=(),
     fallback="none",
 )
 
@@ -1441,10 +1440,15 @@ pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), 
 res = pipe.run("Hello")
 ```
 
-`backend="kokorog2p"` selects the native lexicon-first stack. Its `fallback` chooses the optional Lexphon provider after selected lexicons miss: `none`, `espeak`, or `goruut`. `backend="espeak"` and `backend="goruut"` select those engines as the primary backend instead.
+`backend="kokorog2p"` selects the native lexicon-first stack. Its `fallback` chooses the
+optional Lexphon provider after selected lexicons miss: `none`, `espeak`, or `goruut`.
+`backend="espeak"` and `backend="goruut"` select those engines as the primary backend.
 
-**Note**: `use_dictionary` parameter is deprecated. Use `load_gold` and `load_silver`
-instead for finer control.
+
+**Note**: `use_dictionary`, `load_gold`, and `load_silver` are legacy compatibility inputs.
+New code should use `TokenizerConfig.lexicons`. Explicit named selections take precedence;
+the only legacy combination without a faithful current mapping is Gold disabled with Silver
+enabled, which raises an actionable error.
 
 ### Named KokoroG2P Lexicons
 
@@ -1463,12 +1467,11 @@ gold_config = TokenizerConfig(lexicons="gold")
 crane_config = TokenizerConfig(lexicons="crane")
 ```
 
-`lexicons=None` preserves the compatibility behavior. An explicit selection takes
-precedence over `load_gold` and `load_silver`, because KokoroG2P owns the named-lexicon
-policy. Ordered selections such as `lexicons=("gold", "crane")` are supported for
-layered lookup, where the first matching layer wins. That layered lookup is not a
-Gold-versus-Crane A/B comparison. For an A/B comparison, render separately with
-`("gold",)` and `("crane",)` and combine the results yourself.
+`lexicons=None` delegates to KokoroG2P's language defaults. An explicit selection takes
+precedence over legacy dictionary flags. Ordered selections such as `lexicons=("gold",
+"crane")` are supported for layered lookup, where the first matching layer wins. That
+layered lookup is not a Gold-versus-Crane A/B comparison. For an A/B comparison, render
+separately with `("gold",)` and `("crane",)` and combine the results yourself.
 
 
 Provider-only operation is explicit with `lexicons=()`; it selects no static Lexphon layers and can use `fallback="espeak"` or `fallback="goruut"`. A static lexicon named `espeak` is still a lexical resource and does not mean the dynamic eSpeak provider.
@@ -1477,15 +1480,17 @@ PyKokoro-owned datasets.
 
 #### Automatic Lexphon data provisioning
 
-German named lexicons are provisioned by Lexphon. `TokenizerConfig.lexicon_data_policy`
-defaults to `"auto"`: PyKokoro checks the selected logical IDs locally, installs only
-missing assets on the first required construction, and retries G2P construction once.
-Warm paths use the installed store without loading the catalog or accessing the network.
+Before native KokoroG2P construction, PyKokoro resolves the effective named lexicons for
+the routed language and checks the local Lexphon store. In `auto` mode only missing
+Lexphon-backed assets are installed. Warm runs require no catalog access or network access.
+Provisioning applies only to the native `backend="kokorog2p"` path; primary eSpeak and
+Goruut backends do not download static lexicons.
 
-Use `"installed-only"` for offline or pre-provisioned deployments. In that mode a
-missing asset raises Lexphon's original installation error and PyKokoro does not consult
-the catalog. Catalog, download, integrity, alphabet, and other G2P errors are propagated
-unchanged.
+
+Use `"installed-only"` for offline or pre-provisioned deployments. In that mode PyKokoro
+never installs or consults the catalog. A missing asset raises Lexphon's original
+installation error. Catalog, download, integrity, alphabet, and other G2P errors are
+propagated unchanged.
 
 ```python
 from pykokoro.tokenizer import TokenizerConfig

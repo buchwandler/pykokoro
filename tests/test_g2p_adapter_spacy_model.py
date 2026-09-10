@@ -2,9 +2,21 @@ from dataclasses import replace
 
 import pytest
 
+from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline_config import PipelineConfig
 from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
-from pykokoro.tokenizer import TokenizerConfig
+from pykokoro.tokenizer import TokenizerConfig, _effective_lexicons
+
+
+def test_legacy_dictionary_flags_map_to_current_lexicon_selection() -> None:
+    assert _effective_lexicons(TokenizerConfig(load_gold=False, load_silver=False)) == ()
+    assert _effective_lexicons(TokenizerConfig(load_gold=True, load_silver=False)) is None
+    assert _effective_lexicons(TokenizerConfig(lexicons=("gold",), load_gold=False)) == ("gold",)
+
+
+def test_legacy_silver_only_selection_is_actionable() -> None:
+    with pytest.raises(ValueError, match="no KokoroG2P 0.9.4 equivalent"):
+        _effective_lexicons(TokenizerConfig(load_gold=False, load_silver=True))
 
 
 def test_kokorog2p_adapter_forwards_spacy_model(monkeypatch):
@@ -212,21 +224,22 @@ def test_adapter_retries_after_lexphon_provisioning(monkeypatch):
     from lexphon import LexiconNotInstalledError
 
     calls = 0
-    installed: list[str] = []
+    installed: list[tuple[str, object]] = []
 
     class FakeG2PModule:
         @staticmethod
         def get_g2p(**kwargs):
             nonlocal calls
             calls += 1
+            assert "load_gold" not in kwargs
+            assert "load_silver" not in kwargs
             if calls == 1:
                 raise LexiconNotInstalledError("de-de:gold")
-            assert "lexicon_data_policy" not in kwargs
             return object()
 
     monkeypatch.setattr(
         "pykokoro.lexicon_data.install_missing_lexphon_data",
-        lambda language, config: installed.append(language) or ("de-de:gold",),
+        lambda language, lexicons: installed.append((language, lexicons)) or ("de-de:gold",)
     )
     adapter = KokoroG2PAdapter()
     monkeypatch.setattr(adapter, "_load", lambda: FakeG2PModule())
@@ -237,7 +250,7 @@ def test_adapter_retries_after_lexphon_provisioning(monkeypatch):
 
     assert result is adapter._g2p_instances[next(iter(adapter._g2p_instances))]
     assert calls == 2
-    assert installed == ["de"]
+    assert installed == [("de", ("gold",)), ("de", ("gold",))]
 
 
 def test_tokenizer_forwards_named_lexicons(monkeypatch):
@@ -267,20 +280,21 @@ def test_legacy_tokenizer_retries_after_lexphon_provisioning(monkeypatch):
     import pykokoro.tokenizer as tokenizer_module
 
     calls = 0
-    installed: list[str] = []
+    installed: list[tuple[str, object]] = []
 
     def fake_get_g2p(**kwargs):
         nonlocal calls
         calls += 1
+        assert "load_gold" not in kwargs
+        assert "load_silver" not in kwargs
         if calls == 1:
             raise LexiconNotInstalledError("de-de:gold")
-        assert "lexicon_data_policy" not in kwargs
         return object()
 
     monkeypatch.setattr(tokenizer_module, "get_g2p", fake_get_g2p)
     monkeypatch.setattr(
         "pykokoro.lexicon_data.install_missing_lexphon_data",
-        lambda language, config: installed.append(language) or ("de-de:gold",),
+        lambda language, lexicons: installed.append((language, lexicons)) or ("de-de:gold",)
     )
     tokenizer = tokenizer_module.Tokenizer(vocab={}, config=TokenizerConfig(lexicons=("gold",)))
 
@@ -288,4 +302,32 @@ def test_legacy_tokenizer_retries_after_lexphon_provisioning(monkeypatch):
 
     assert result is tokenizer._g2p_cache["de"]
     assert calls == 2
-    assert installed == ["de"]
+    assert installed == [("de", ("gold",)), ("de", ("gold",))]
+
+
+def test_routed_language_uses_effective_default_lexicons(monkeypatch):
+    captured: dict[str, object] = {}
+    provisioned: list[tuple[str, object]] = []
+
+    class FakeG2PModule:
+        @staticmethod
+        def get_g2p(**kwargs):
+            captured.update(kwargs)
+            return object()
+
+    monkeypatch.setattr(
+        "pykokoro.lexicon_data.install_missing_lexphon_data",
+        lambda language, lexicons: provisioned.append((language, lexicons)) or (),
+    )
+    adapter = KokoroG2PAdapter()
+    monkeypatch.setattr(adapter, "_load", lambda: FakeG2PModule())
+
+    cfg = PipelineConfig(
+        generation=GenerationConfig(lang="de"),
+        tokenizer_config=TokenizerConfig(lexicons=("crane",)),
+    )
+    adapter._get_g2p_instance("en-us", cfg)
+
+    assert captured["language"] == "en-us"
+    assert captured["lexicons"] is None
+    assert provisioned == [("en-us", None)]

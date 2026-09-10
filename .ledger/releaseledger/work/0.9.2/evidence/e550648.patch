@@ -1,0 +1,1211 @@
+ .github/workflows/tests.yml                     |   6 +-
+ README.md                                       |  26 +++-
+ docs/basic_usage.md                             |  27 +++-
+ docs/languages.md                               |  21 +++
+ examples/mixed_language_auto.py                 |  51 +++++++
+ pykokoro/__init__.py                            |   2 +
+ pykokoro/language_detection.py                  |  88 ++++++++++++
+ pykokoro/pipeline.py                            |  32 +++++
+ pykokoro/pipeline_config.py                     |   2 +
+ pykokoro/runtime/cache.py                       |   2 +
+ pykokoro/runtime/language_plan.py               |   4 +-
+ pykokoro/stages/doc_parsers/ssmd.py             |   6 +
+ pykokoro/stages/g2p/kokorog2p.py                | 172 ++++++++++++++++++++----
+ pykokoro/stages/segmentation/phrasplit.py       |  33 ++++-
+ pyproject.toml                                  |   4 +-
+ requirements-test.txt                           |   4 +-
+ tests/test_g2p_cache.py                         |   4 +-
+ tests/test_language_detection_config.py         | 151 +++++++++++++++++++++
+ tests/test_language_plan.py                     |  18 +++
+ tests/test_maintainer_review4_download_cache.py |   4 +-
+ tests/test_packaging_metadata.py                |   8 +-
+ 21 files changed, 615 insertions(+), 50 deletions(-)
+
+diff --git a/.github/workflows/tests.yml b/.github/workflows/tests.yml
+index 6f52d25..8a4ff39 100644
+--- a/.github/workflows/tests.yml
++++ b/.github/workflows/tests.yml
+@@ -80,10 +80,10 @@ jobs:
+         python -m pip install --upgrade pip
+         python -m pip install pytest
+         python -m pip install \
+-          "kokorog2p[all]==0.9.2" \
++          "kokorog2p[all]==0.9.3" \
+           "lexphon==0.1.0" \
+           "phrasplit==0.3.7" \
+-          "ssmd==0.8.6" \
++          "ssmd==0.8.7" \
+           "spokenform==0.3.6" \
+           "audiosig==0.1.1" \
+           platformdirs
+@@ -97,7 +97,7 @@ jobs:
+     runs-on: ubuntu-latest
+     strategy:
+       matrix:
+-        kokorog2p-version: ["0.9.2"]
++        kokorog2p-version: ["0.9.3"]
+     steps:
+     - uses: actions/checkout@v4
+     - name: Setup Python
+diff --git a/README.md b/README.md
+index 493e040..86368e8 100644
+--- a/README.md
++++ b/README.md
+@@ -740,16 +740,30 @@ res = pipe.run(text)
+ 
+ ## Explicit mixed-language text
+ 
+-Automatic language detection is not part of PyKokoro v0.9. Set the document language
+-explicitly and mark language changes with SSMD spans:
++Automatic routing is optional and remains separate from the explicit document language.
++Set the document language explicitly and mark semantic or pronunciation-only language
++spans with SSMD:
+ 
+ ```python
+-text = 'Hello [Welt]{lang="de"} and [bonjour]{lang="fr"}.'
+-result = pipe.run(text, lang="en-us")
++from pykokoro import (
++    GenerationConfig,
++    LanguageDetectionConfig,
++    KokoroPipeline,
++    PipelineConfig,
++)
++
++config = PipelineConfig(
++    generation=GenerationConfig(lang="de"),
++    language_detection=LanguageDetectionConfig(mode="auto", languages=("de", "en")),
++)
++pipe = KokoroPipeline(config)
++text = 'Die [File]{lang="en" scope="pronunciation"} wird gecancelt.'
++result = pipe.run(text)
+ ```
+ 
+-Voice metadata selects a voice only. Applications needing detection must run an external
+-detector and convert its result to explicit language spans before calling PyKokoro.
++`scope="pronunciation"` changes only G2P. Automatic KokoroG2P routing also changes only
++pronunciation fragments. The selected PyKokoro acoustic model, voice, ONNX provider, and
++document language remain German.
+ 
+ ### Automatic Spoken-Form Normalization
+ 
+diff --git a/docs/basic_usage.md b/docs/basic_usage.md
+index 500b372..e8be8e4 100644
+--- a/docs/basic_usage.md
++++ b/docs/basic_usage.md
+@@ -215,7 +215,8 @@ result = pipe.run("Hello from the UK!")
+ 
+ ## Language Settings
+ 
+-PyKokoro defaults language from the voice prefix, but you can override it:
++PyKokoro requires an explicit document language. Set it with `GenerationConfig.lang`;
++the voice prefix does not select the language:
+ 
+ ```python
+ from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
+@@ -227,6 +228,30 @@ result = pipe.run("Bonjour le monde")
+ 
+ Supported languages: `en-us`, `en-gb`, `es`, `fr`, `de`, `it`, `pt`, `hi`, `ja`, `zh`
+ 
++### Automatic pronunciation routing
++
++Keep `GenerationConfig.lang` as the explicit semantic and acoustic-model language. To
++let KokoroG2P route eligible words between selected pronunciation languages, configure
++candidates explicitly:
++
++```python
++from pykokoro import GenerationConfig, LanguageDetectionConfig, KokoroPipeline, PipelineConfig
++
++config = PipelineConfig(
++    generation=GenerationConfig(lang="de"),
++    language_detection=LanguageDetectionConfig(mode="auto", languages=("de", "en")),
++)
++result = KokoroPipeline(config).run(
++    'Die [File]{lang="en" scope="pronunciation"} wird gecancelt.'
++)
++```
++
++The precedence is per-run override, pipeline configuration, SSMD `language_detection`
++header, then disabled. Pronunciation-only SSMD spans and automatic routes affect G2P
++only. They do not select a foreign voice, acoustic model, ONNX session, Spokenform
++language, or linguistic-analysis language. Use `scope="semantic"` (or omit `scope`) when
++a language span should affect the semantic pipeline.
++
+ ## Language-Aware spaCy Models
+ 
+ When both spaCy settings are unset (the default), PyKokoro asks each backend to select
+diff --git a/docs/languages.md b/docs/languages.md
+index 4397c58..cb01f7b 100644
+--- a/docs/languages.md
++++ b/docs/languages.md
+@@ -57,3 +57,24 @@ invalid files are removed and downloaded again. Explicit custom paths are valida
+ place and are never replaced by managed downloads. The profile's `suggested_speed`
+ metadata is advisory only, so callers should set `GenerationConfig(speed=1.125)` when
+ they want the demonstration speed.
++
++## Fixed-model multilingual pronunciation
++
++Automatic routing is an optional G2P policy. Configure
++`LanguageDetectionConfig(mode="auto", languages=("de", "en"))` while keeping
++`GenerationConfig(lang="de")` as the document and acoustic-model language. KokoroG2P
++supplies the lexical evidence and route diagnostics; PyKokoro reuses its existing
++per-language G2P instances and passes every route through the already selected model
++vocabulary.
++
++SSMD spans with `scope="pronunciation"`, such as
++`[File]{lang="en" scope="pronunciation"}`, constrain only the pronunciation of that
++source range. They do not change Spokenform, spaCy analysis, Phrasplit, voice, model
++source, model variant, model quality, or ONNX session. Omit `scope` or use
++`scope="semantic"` when the language should own the semantic pipeline run.
++
++The effective policy precedence is per-run override,
++`PipelineConfig.language_detection`, the SSMD `language_detection` header hint, then
++disabled. `is_phonemes=True` bypasses routing because the input already contains model
++phonemes. Route and alignment diagnostics are retained in document metadata and use
++clean-text offsets.
+diff --git a/examples/mixed_language_auto.py b/examples/mixed_language_auto.py
+new file mode 100644
+index 0000000..49d5067
+--- /dev/null
++++ b/examples/mixed_language_auto.py
+@@ -0,0 +1,51 @@
++#!/usr/bin/env python3
++"""Fixed-model multilingual pronunciation with KokoroG2P routing."""
++
++from __future__ import annotations
++
++from typing import Any
++
++import soundfile as sf
++
++try:
++    from ._output import artifact_path
++except ImportError:
++    from _output import artifact_path
++
++from pykokoro import GenerationConfig, KokoroPipeline, LanguageDetectionConfig, PipelineConfig
++
++SOURCE = "Die Manpowerdiskussion wird gecancelt, du kannst das File downloaden."
++
++
++def print_phonemes(label: str, result: Any) -> None:
++    """Print the text, detected language, and phonemes for each segment."""
++    print(f"\n{label} phonemes:")
++    for segment in result.phoneme_segments:
++        print(f"  {segment.text!r} ({segment.lang}): {segment.phonemes}")
++
++
++def main() -> None:
++    """Render and play the sentence with language detection off and on."""
++    detection_off = LanguageDetectionConfig(mode="off")
++    detection_auto = LanguageDetectionConfig(mode="auto", languages=("de", "en"))
++    config = PipelineConfig(
++        voice="martin",
++        generation=GenerationConfig(lang="de"),
++        language_detection=detection_off,
++    )
++    with KokoroPipeline(config) as pipe:
++        for label, detection, filename in (
++            ("Language detection off", detection_off, "mixed_language_off.wav"),
++            ("Language detection on", detection_auto, "mixed_language_auto.wav"),
++        ):
++            result = pipe.run(SOURCE, language_detection=detection)
++            print_phonemes(label, result)
++            output_path = artifact_path(filename)
++            sf.write(output_path, result.audio, result.sample_rate)
++            print(f"Created {output_path}")
++            print(f"Playing {label.lower()}...")
++            result.play()
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/pykokoro/__init__.py b/pykokoro/__init__.py
+index b7e9535..9d78ce7 100644
+--- a/pykokoro/__init__.py
++++ b/pykokoro/__init__.py
+@@ -5,6 +5,7 @@ from __future__ import annotations
+ from typing import Any
+ 
+ from .generation_config import GenerationConfig
++from .language_detection import LanguageDetectionConfig
+ from .prosody_config import ProsodyConfig, ProsodyMethod
+ from .ssmd_config import SSMDPauseOverrides, SSMDRenderConfig
+ 
+@@ -95,6 +96,7 @@ __all__ = [
+     "ModelCapabilities",
+     "ModelDiscoveryResult",
+     "GenerationConfig",
++    "LanguageDetectionConfig",
+     "ProsodyConfig",
+     "ProsodyMethod",
+     "SSMDPauseOverrides",
+diff --git a/pykokoro/language_detection.py b/pykokoro/language_detection.py
+new file mode 100644
+index 0000000..4e1b04b
+--- /dev/null
++++ b/pykokoro/language_detection.py
+@@ -0,0 +1,88 @@
++"""Configuration for optional automatic pronunciation-language routing."""
++
++from __future__ import annotations
++
++from collections.abc import Mapping
++from dataclasses import dataclass
++from typing import Any, Literal
++
++from kokorog2p.language_codes import normalize_language_code, supported_languages
++
++LanguageDetectionMode = Literal["off", "auto"]
++LanguageDetectionSource = Literal["run", "pipeline", "header", "default"]
++
++
++@dataclass(frozen=True, slots=True)
++class LanguageDetectionConfig:
++    """Configure optional automatic language routing in the G2P stage."""
++
++    mode: LanguageDetectionMode = "off"
++    languages: tuple[str, ...] = ()
++
++    def __post_init__(self) -> None:
++        if self.mode not in ("off", "auto"):
++            raise ValueError("language detection mode must be 'off' or 'auto'")
++        raw_languages: Any = self.languages
++        if isinstance(raw_languages, str):
++            raise TypeError("language detection languages must be a sequence, not a string")
++        supported = set(supported_languages())
++        normalized: list[str] = []
++        for language in raw_languages:
++            if not isinstance(language, str):
++                raise TypeError("language detection languages must contain strings")
++            canonical = normalize_language_code(language)
++            if canonical not in supported:
++                raise ValueError(f"unsupported language for detection: {language!r}")
++            if canonical not in normalized:
++                normalized.append(canonical)
++        if self.mode == "auto" and len(normalized) < 2:
++            raise ValueError("automatic language detection requires at least two languages")
++        object.__setattr__(self, "languages", tuple(normalized))
++
++
++def resolve_language_detection(
++    config: LanguageDetectionConfig | None,
++    header: Mapping[str, object],
++) -> ResolvedLanguageDetection:
++    """Resolve API configuration before a document header hint."""
++    if config is not None:
++        return ResolvedLanguageDetection(
++            mode=config.mode,
++            languages=config.languages,
++            source="pipeline",
++        )
++    import ssmd
++
++    hint = ssmd.language_detection_hint(header)
++    if hint is None:
++        return ResolvedLanguageDetection()
++    normalized = LanguageDetectionConfig(mode=hint.mode, languages=tuple(hint.languages))
++    return ResolvedLanguageDetection(
++        mode=normalized.mode,
++        languages=normalized.languages,
++        source="header",
++    )
++
++
++@dataclass(frozen=True, slots=True)
++class ResolvedLanguageDetection:
++    """Effective routing configuration for one synthesis request."""
++
++    mode: LanguageDetectionMode = "off"
++    languages: tuple[str, ...] = ()
++    source: LanguageDetectionSource = "default"
++
++    def as_routing(self) -> dict[str, object] | None:
++        """Return the KokoroG2P routing mapping, or ``None`` when disabled."""
++        if self.mode == "off":
++            return None
++        return {"mode": self.mode, "languages": self.languages}
++
++
++__all__ = [
++    "LanguageDetectionConfig",
++    "LanguageDetectionMode",
++    "LanguageDetectionSource",
++    "ResolvedLanguageDetection",
++    "resolve_language_detection",
++]
+diff --git a/pykokoro/pipeline.py b/pykokoro/pipeline.py
+index 934c999..a3cca65 100644
+--- a/pykokoro/pipeline.py
++++ b/pykokoro/pipeline.py
+@@ -16,6 +16,7 @@ from typing_extensions import Self
+ from .constants import SAMPLE_RATE
+ from .emphasis import apply_emphasis_policy
+ from .generation_config import GenerationConfig
++from .language_detection import LanguageDetectionConfig
+ from .pipeline_config import PipelineConfig, require_document_language, resolve_model_defaults
+ from .runtime.language_plan import build_language_plan
+ from .runtime.linguistics import (
+@@ -347,6 +348,23 @@ def _coerce_tokenizer(base: TokenizerConfig | None, value: Any) -> TokenizerConf
+     )
+ 
+ 
++def _coerce_language_detection(
++    value: Any,
++) -> LanguageDetectionConfig | None:
++    if value is None:
++        return None
++    if isinstance(value, LanguageDetectionConfig):
++        return value
++    if isinstance(value, Mapping):
++        return LanguageDetectionConfig(
++            mode=value.get("mode", "off"),
++            languages=tuple(value.get("languages", ())),
++        )
++    raise TypeError(
++        f"language_detection must be LanguageDetectionConfig | Mapping | None, got {type(value)!r}"
++    )
++
++
+ def _coerce_paths_inplace(data: dict[str, Any]) -> None:
+     # Convenience: accept str paths in config dict.
+     for key in ("model_path", "voices_path", "model_config_path", "release_manifest_path"):
+@@ -369,6 +387,7 @@ def _coerce_pipeline_config(
+         gen_value = data.pop("generation", None)
+         ssmd_value = data.pop("ssmd", None)
+         tokenizer_value = data.pop("tokenizer_config", None)
++        language_detection_value = data.pop("language_detection", None)
+ 
+         _coerce_paths_inplace(data)
+         cfg = PipelineConfig(**data)
+@@ -383,6 +402,12 @@ def _coerce_pipeline_config(
+                 tokenizer_config=_coerce_tokenizer(cfg.tokenizer_config, tokenizer_value),
+             )
+ 
++        if language_detection_value is not None:
++            cfg = replace(
++                cfg,
++                language_detection=_coerce_language_detection(language_detection_value),
++            )
++
+         return cfg
+ 
+     raise TypeError(f"config must be PipelineConfig | Mapping | None, got {type(value)!r}")
+@@ -399,6 +424,7 @@ def _merge_config(
+     gen_value = data.pop("generation", None)
+     ssmd_value = data.pop("ssmd", None)
+     tokenizer_value = data.pop("tokenizer_config", None)
++    language_detection_value = data.pop("language_detection", None)
+ 
+     _coerce_paths_inplace(data)
+     cfg = replace(base, **data)
+@@ -413,6 +439,12 @@ def _merge_config(
+             tokenizer_config=_coerce_tokenizer(cfg.tokenizer_config, tokenizer_value),
+         )
+ 
++    if language_detection_value is not None:
++        cfg = replace(
++            cfg,
++            language_detection=_coerce_language_detection(language_detection_value),
++        )
++
+     return cfg
+ 
+ 
+diff --git a/pykokoro/pipeline_config.py b/pykokoro/pipeline_config.py
+index d505ec5..6b32978 100644
+--- a/pykokoro/pipeline_config.py
++++ b/pykokoro/pipeline_config.py
+@@ -12,6 +12,7 @@ from .config_types import (
+     ProviderType,
+ )
+ from .generation_config import GenerationConfig
++from .language_detection import LanguageDetectionConfig
+ from .prosody_config import ProsodyConfig
+ from .short_sentence_handler import ShortSentenceConfig
+ from .ssmd_config import SSMDRenderConfig
+@@ -25,6 +26,7 @@ class PipelineConfig:
+ 
+     voice: str | VoiceBlend | None = None
+     generation: GenerationConfig = field(default_factory=GenerationConfig)
++    language_detection: LanguageDetectionConfig | None = None
+     ssmd: SSMDRenderConfig = field(default_factory=SSMDRenderConfig)
+     prosody: ProsodyConfig = field(default_factory=ProsodyConfig)
+ 
+diff --git a/pykokoro/runtime/cache.py b/pykokoro/runtime/cache.py
+index f000c8c..e64de8c 100644
+--- a/pykokoro/runtime/cache.py
++++ b/pykokoro/runtime/cache.py
+@@ -75,6 +75,7 @@ def make_g2p_key(
+     input_mode: str = "prepared",
+     preparation_backend: str | None = "spokenform",
+     preparation_version: str | None = None,
++    language_routing: dict[str, Any] | None = None,
+ ) -> str:
+     return make_cache_key(
+         {
+@@ -94,6 +95,7 @@ def make_g2p_key(
+             "input_mode": input_mode,
+             "preparation_backend": preparation_backend,
+             "preparation_version": preparation_version,
++            "language_routing": language_routing,
+         }
+     )
+ 
+diff --git a/pykokoro/runtime/language_plan.py b/pykokoro/runtime/language_plan.py
+index 5350f94..2009fa3 100644
+--- a/pykokoro/runtime/language_plan.py
++++ b/pykokoro/runtime/language_plan.py
+@@ -69,7 +69,9 @@ def build_language_plan(
+     default = canonicalize_language(default_language)
+     explicit: list[tuple[int, int, str]] = []
+     for annotation in annotations:
+-        language = annotation.attrs.get("lang")
++        language = annotation.attrs.get("lang") or annotation.attrs.get("language")
++        if annotation.attrs.get("scope", "semantic") == "pronunciation":
++            continue
+         if language is None:
+             continue
+         start = annotation.char_start
+diff --git a/pykokoro/stages/doc_parsers/ssmd.py b/pykokoro/stages/doc_parsers/ssmd.py
+index 19f8337..4442a84 100644
+--- a/pykokoro/stages/doc_parsers/ssmd.py
++++ b/pykokoro/stages/doc_parsers/ssmd.py
+@@ -50,6 +50,7 @@ class SsmdDocumentParser:
+         for diagnostic in diagnostics:
+             self._warn_once(trace, f"{diagnostic.code}: {diagnostic.message}")
+ 
++        language_hint = ssmd.language_detection_hint(parsed.header)
+         annotations = [
+             AnnotationSpan(
+                 char_start=start,
+@@ -68,6 +69,11 @@ class SsmdDocumentParser:
+                 resolved_pause_defaults.to_dict() if resolved_pause_defaults is not None else None
+             ),
+             "ssmd_structure": True,
++            "language_detection_hint": (
++                {"mode": language_hint.mode, "languages": list(language_hint.languages)}
++                if language_hint is not None
++                else None
++            ),
+         }
+         if parse_ssmd_document is not _legacy_parse_ssmd_document:
+             compatibility: Any = parse_ssmd_document(text)
+diff --git a/pykokoro/stages/g2p/kokorog2p.py b/pykokoro/stages/g2p/kokorog2p.py
+index a3cee5b..200ca3f 100644
+--- a/pykokoro/stages/g2p/kokorog2p.py
++++ b/pykokoro/stages/g2p/kokorog2p.py
+@@ -6,11 +6,18 @@ from types import ModuleType
+ from typing import TYPE_CHECKING, Any, cast
+ 
+ from ...constants import MAX_PHONEME_LENGTH, SUPPORTED_LANGUAGES
++from ...language_detection import ResolvedLanguageDetection, resolve_language_detection
+ from ...lexicon_data import create_g2p_with_lexphon_retry
+ from ...runtime.cache import cache_from_dir, make_g2p_key
+ from ...runtime.spans import slice_boundaries, slice_spans
+ from ...spacy_models import SpacyModelSize, make_spacy_model_request, spacy_selection_metadata
+-from ...types import AnnotationSpan, G2PAlignmentToken, PhonemeSegment, _model_span_token_count
++from ...types import (
++    AnnotationSpan,
++    G2PAlignmentToken,
++    PhonemeSegment,
++    TraceEvent,
++    _model_span_token_count,
++)
+ from ..protocols import DocumentResult, G2PAdapter
+ 
+ if TYPE_CHECKING:
+@@ -22,7 +29,7 @@ if TYPE_CHECKING:
+ 
+ 
+ class KokoroG2PAdapter(G2PAdapter):
+-    _cache_schema = 6
++    _cache_schema = 7
+ 
+     def __init__(self) -> None:
+         self._g2p: ModuleType | None = None
+@@ -59,6 +66,20 @@ class KokoroG2PAdapter(G2PAdapter):
+         model_version = self._get_model_version(cfg)
+         profile, resolved_backend, phoneme_postprocess = self._resolve_frontend_contract(cfg)
+         frontend = profile.frontend if profile is not None else None
++        resolved_routing = resolve_language_detection(cfg.language_detection, doc.header)
++        if generation.is_phonemes:
++            effective_routing = ResolvedLanguageDetection(
++                source=resolved_routing.source,
++            )
++        else:
++            effective_routing = resolved_routing
++        doc.metadata["language_detection"] = {
++            "mode": resolved_routing.mode,
++            "languages": list(resolved_routing.languages),
++            "source": resolved_routing.source,
++        }
++        route_diagnostics: list[dict[str, Any]] = []
++        doc.metadata["g2p_language_routes"] = route_diagnostics
+         out: list[PhonemeSegment] = []
+ 
+         for segment in segments:
+@@ -85,14 +106,11 @@ class KokoroG2PAdapter(G2PAdapter):
+             trace.warnings.extend(span_warnings)
+             annotations = self._prepared_annotations(doc, segment)
+ 
+-            lang = generation.lang
++            lang = segment.meta.get("language") or generation.lang
+             ssmd_metadata: dict[str, str] = {}
+             for span in span_list:
+-                span_lang = span.attrs.get("lang")
+-                if span_lang:
+-                    lang = span_lang
+                 self._apply_span_metadata(span.attrs, ssmd_metadata)
+-            if lang is None:
++            if not isinstance(lang, str) or not lang:
+                 raise ValueError("A language is required for each G2P segment")
+ 
+             cache_key = make_g2p_key(
+@@ -112,13 +130,17 @@ class KokoroG2PAdapter(G2PAdapter):
+                 input_mode="prepared",
+                 preparation_backend=doc.preparation.backend if doc.preparation else "spokenform",
+                 preparation_version=doc.preparation.version if doc.preparation else None,
++                language_routing=effective_routing.as_routing(),
+             )
+             cached = cache.get(cache_key)
+             cached_payload = self._read_cache_payload(cached)
+             alignment_tokens: list[G2PAlignmentToken] = []
++            language_routes: list[dict[str, Any]] = []
+             result_warnings: list[str] = []
+             if cached_payload is not None:
+-                phonemes, tokens, alignment_tokens, result_warnings = cached_payload
++                phonemes, tokens, alignment_tokens, result_warnings, language_routes = (
++                    cached_payload
++                )
+                 trace.warnings.extend(result_warnings)
+             else:
+                 if cached is not None:
+@@ -129,6 +151,12 @@ class KokoroG2PAdapter(G2PAdapter):
+                 else:
+                     g2p_instance = self._get_g2p_instance(lang, cfg)
+                     self._record_selection(doc, lang, cfg, g2p_instance)
++
++                    def resolve_language_g2p(candidate: str) -> Any:
++                        instance = self._get_g2p_instance(candidate, cfg)
++                        self._record_selection(doc, candidate, cfg, instance)
++                        return instance
++
+                     result = self._phonemize_prepared(
+                         g2p,
+                         segment.text,
+@@ -136,6 +164,9 @@ class KokoroG2PAdapter(G2PAdapter):
+                         overrides,
+                         annotations,
+                         g2p_instance,
++                        g2p_resolver=resolve_language_g2p,
++                        language_routing=effective_routing.as_routing(),
++                        target_model=model_version,
+                     )
+                     phonemes = str(
+                         getattr(result, "phonemes", None) or getattr(result, "phoneme", "")
+@@ -145,8 +176,13 @@ class KokoroG2PAdapter(G2PAdapter):
+                         getattr(result, "tokens", []), segment, g2p, model_version
+                     )
+                     result_warnings = [str(warning) for warning in getattr(result, "warnings", [])]
++                    language_routes = [
++                        asdict(route) for route in getattr(result, "language_routes", [])
++                    ]
+                     if result_warnings:
+                         trace.warnings.extend(result_warnings)
++            global_routes = self._globalize_language_routes(language_routes, segment.char_start)
++            route_diagnostics.extend(global_routes)
+             if cfg.model_variant in {"de-thorsten", "de-crane"}:
+                 phonemes, tokens, alignment_tokens = self._normalize_german_short_u_payload(
+                     str(phonemes), alignment_tokens, g2p, model_version
+@@ -165,6 +201,8 @@ class KokoroG2PAdapter(G2PAdapter):
+                     "tokens": tokens,
+                     "alignment_tokens": [token.to_dict() for token in alignment_tokens],
+                     "warnings": result_warnings,
++                    "language_routes": language_routes,
++                    "effective_language_routing": effective_routing.as_routing(),
+                 },
+             )
+ 
+@@ -214,6 +252,21 @@ class KokoroG2PAdapter(G2PAdapter):
+                     )
+                 )
+ 
++        trace.events.append(
++            TraceEvent(
++                stage="g2p",
++                name="language_routing",
++                ms=0.0,
++                details={
++                    "mode": effective_routing.mode,
++                    "languages": list(effective_routing.languages),
++                    "route_count": len(route_diagnostics),
++                    "mixed_token_count": sum(
++                        1 for route in route_diagnostics if len(route.get("fragments", ())) > 1
++                    ),
++                },
++            )
++        )
+         return out
+ 
+     @staticmethod
+@@ -225,8 +278,12 @@ class KokoroG2PAdapter(G2PAdapter):
+         overrides: list[AnnotationSpan] = []
+         for span in spans:
+             attrs = {
+-                key: value for key, value in span.attrs.items() if key in {"ph", "phonemes", "lang"}
++                key: value
++                for key, value in span.attrs.items()
++                if key in {"ph", "phonemes", "lang", "language"}
+             }
++            if "lang" not in attrs and "language" in attrs:
++                attrs["lang"] = attrs.pop("language")
+             if (
+                 not attrs
+                 or span.char_end <= segment.char_start
+@@ -283,6 +340,10 @@ class KokoroG2PAdapter(G2PAdapter):
+         overrides: list[AnnotationSpan],
+         annotations: list[Any],
+         g2p_instance: Any,
++        *,
++        g2p_resolver: Any = None,
++        language_routing: dict[str, object] | None = None,
++        target_model: str | None = None,
+     ) -> Any:
+         prepared = getattr(g2p, "phonemize_prepared", None)
+         if callable(prepared):
+@@ -295,6 +356,10 @@ class KokoroG2PAdapter(G2PAdapter):
+                 return_ids=True,
+                 alignment="span",
+                 g2p=g2p_instance,
++                overlap="split",
++                g2p_resolver=g2p_resolver,
++                language_routing=language_routing,
++                target_model=target_model,
+             )
+         # Compatibility for test doubles and old installations; released PyKokoro
+         # dependencies always provide the prepared entry point.
+@@ -309,7 +374,7 @@ class KokoroG2PAdapter(G2PAdapter):
+     @classmethod
+     def _read_cache_payload(
+         cls, cached: Any
+-    ) -> tuple[str, list[int], list[G2PAlignmentToken], list[str]] | None:
++    ) -> tuple[str, list[int], list[G2PAlignmentToken], list[str], list[dict[str, Any]]] | None:
+         if (
+             not isinstance(cached, dict)
+             or cached.get("schema") != cls._cache_schema
+@@ -321,11 +386,17 @@ class KokoroG2PAdapter(G2PAdapter):
+         tokens = cached.get("tokens")
+         raw_alignment = cached.get("alignment_tokens")
+         warnings = cached.get("warnings")
++        raw_routes = cached.get("language_routes")
+         if not isinstance(phonemes, str) or not isinstance(tokens, list):
+             return None
+         if not all(isinstance(token, int) and not isinstance(token, bool) for token in tokens):
+             return None
+-        if not isinstance(raw_alignment, list) or not isinstance(warnings, list):
++        if (
++            not isinstance(raw_alignment, list)
++            or not isinstance(warnings, list)
++            or not isinstance(raw_routes, list)
++            or not all(isinstance(route, dict) for route in raw_routes)
++        ):
+             return None
+         if not all(isinstance(warning, str) for warning in warnings):
+             return None
+@@ -347,7 +418,30 @@ class KokoroG2PAdapter(G2PAdapter):
+                     model_token_count=item.get("model_token_count"),
+                 )
+             )
+-        return phonemes, tokens, alignment, warnings
++        return phonemes, tokens, alignment, warnings, [dict(route) for route in raw_routes]
++
++    @staticmethod
++    def _globalize_language_routes(
++        routes: list[dict[str, Any]], offset: int
++    ) -> list[dict[str, Any]]:
++        global_routes: list[dict[str, Any]] = []
++        for raw_route in routes:
++            route = dict(raw_route)
++            for key in ("char_start", "char_end"):
++                if isinstance(route.get(key), int):
++                    route[key] += offset
++            fragments = []
++            for raw_fragment in route.get("fragments", []):
++                if not isinstance(raw_fragment, dict):
++                    continue
++                fragment = dict(raw_fragment)
++                for key in ("char_start", "char_end"):
++                    if isinstance(fragment.get(key), int):
++                        fragment[key] += offset
++                fragments.append(fragment)
++            route["fragments"] = fragments
++            global_routes.append(route)
++        return global_routes
+ 
+     @staticmethod
+     def _normalize_german_short_u_payload(
+@@ -356,7 +450,7 @@ class KokoroG2PAdapter(G2PAdapter):
+         g2p: Any,
+         model_version: str,
+     ) -> tuple[str, list[int], list[G2PAlignmentToken]]:
+-        """Keep German short-u phonemes, model IDs, and alignment spans consistent."""
++        """Apply the model-vocabulary compatibility transform to every route."""
+         cleaned_phonemes = phonemes.replace("ʏ", "y")
+         tokens = list(g2p.phonemes_to_ids(cleaned_phonemes, model=model_version))
+         cleaned_alignment = [
+@@ -480,41 +574,65 @@ class KokoroG2PAdapter(G2PAdapter):
+         )
+         return profile, backend, postprocess
+ 
+-    def _get_g2p_instance(self, lang: str, cfg: PipelineConfig) -> G2PBase:
+-        from ...frontend_contracts import require_frontend
++    @staticmethod
++    def _g2p_kwargs_for_language(
++        lang: str,
++        cfg: PipelineConfig,
++        backend: str,
++        profile: Any | None,
++        model_version: str,
++    ) -> dict[str, Any]:
++        from kokorog2p.language_codes import normalize_language_code
++        from kokorog2p.lexicons import normalize_lexicon_selection
++
+         from ...tokenizer import TokenizerConfig
+ 
+         tokenizer_config = cfg.tokenizer_config or TokenizerConfig()
+         kokorog2p_lang = SUPPORTED_LANGUAGES.get(lang, lang)
+-        profile, backend, _ = self._resolve_frontend_contract(cfg)
+-        model_version = self._get_model_version(cfg, lang)
+-        version = "1.0" if model_version == "nabra-82m-v0.1" else model_version
+-        if profile is not None:
+-            require_frontend(profile.variant, allow_experimental=cfg.allow_experimental_frontend)
++        default_language = normalize_language_code(cfg.generation.lang or lang)
++        candidate_language = normalize_language_code(kokorog2p_lang)
++        lexicons = tokenizer_config.lexicons
++        if candidate_language != default_language and lexicons is not None:
++            try:
++                lexicons = normalize_lexicon_selection(candidate_language, lexicons)
++            except ValueError:
++                lexicons = None
++        candidate_backend = backend if candidate_language == default_language else "kokorog2p"
+         request = make_spacy_model_request(
+             model=tokenizer_config.spacy_model,
+             size=tokenizer_config.spacy_model_size,
+         )
+-
+         kwargs: dict[str, Any] = {
+             "language": kokorog2p_lang,
+-            "version": version,
++            "version": "1.0" if model_version == "nabra-82m-v0.1" else model_version,
+             "phoneme_quotes": "curly",
+             "use_goruut_fallback": tokenizer_config.use_goruut_fallback,
+             "use_espeak_fallback": tokenizer_config.use_espeak_fallback,
+             "use_spacy": tokenizer_config.use_spacy,
+             "spacy_model": request.model,
+             "spacy_model_size": request.size,
+-            "backend": backend,
++            "backend": candidate_backend,
+             "load_gold": tokenizer_config.load_gold,
+             "load_silver": tokenizer_config.load_silver,
+-            "lexicons": tokenizer_config.lexicons,
++            "lexicons": lexicons,
+         }
+-
+         if profile is not None and profile.variant == "ar-nabra":
+             kwargs["model_profile"] = "nabra-82m-v0.1"
++        return kwargs
++
++    def _get_g2p_instance(self, lang: str, cfg: PipelineConfig) -> G2PBase:
++        from ...frontend_contracts import require_frontend
++        from ...tokenizer import TokenizerConfig
++
++        profile, backend, _ = self._resolve_frontend_contract(cfg)
++        model_version = self._get_model_version(cfg, lang)
++        if profile is not None:
++            require_frontend(profile.variant, allow_experimental=cfg.allow_experimental_frontend)
++        kwargs = self._g2p_kwargs_for_language(lang, cfg, backend, profile, model_version)
++        tokenizer_config = cfg.tokenizer_config or TokenizerConfig()
++        lexicon_data_policy = tokenizer_config.lexicon_data_policy
+         cache_key = tuple(sorted(kwargs.items())) + (
+-            ("__pykokoro_lexicon_data_policy", tokenizer_config.lexicon_data_policy),
++            ("__pykokoro_lexicon_data_policy", lexicon_data_policy),
+         )
+         if cache_key in self._g2p_instances:
+             return self._g2p_instances[cache_key]
+@@ -522,7 +640,7 @@ class KokoroG2PAdapter(G2PAdapter):
+         g2p_module = self._load()
+         g2p_instance = create_g2p_with_lexphon_retry(
+             g2p_module,
+-            language=kokorog2p_lang,
++            language=kwargs["language"],
+             config=tokenizer_config,
+             kwargs=kwargs,
+         )
+diff --git a/pykokoro/stages/segmentation/phrasplit.py b/pykokoro/stages/segmentation/phrasplit.py
+index 6ffeffb..44101f3 100644
+--- a/pykokoro/stages/segmentation/phrasplit.py
++++ b/pykokoro/stages/segmentation/phrasplit.py
+@@ -8,6 +8,7 @@ from dataclasses import replace
+ from typing import Any
+ 
+ from ...pipeline_config import PipelineConfig
++from ...runtime.language_plan import canonicalize_language
+ from ...types import Segment, Trace, TraceEvent
+ from ..doc_parsers.plain import PhrasplitSentenceSplitter
+ from ..protocols import DocumentResult, SentenceSegmenter
+@@ -39,6 +40,7 @@ class PhrasplitSentenceSegmenter(PhrasplitSentenceSplitter, SentenceSegmenter):
+         else:
+             segments = self._split_prepared_runs(doc, cfg, trace, state.prepared_analysis)
+         segments = self._repair_closing_quote_boundaries(doc, segments)
++        segments = [self._with_semantic_language(doc, segment, cfg) for segment in segments]
+         refined: list[Segment] = []
+         for segment in segments:
+             boundaries = self._structural_cuts(segment, doc)
+@@ -62,6 +64,24 @@ class PhrasplitSentenceSegmenter(PhrasplitSentenceSplitter, SentenceSegmenter):
+         self._record_diagnostics(doc, trace, refined, cfg)
+         return refined
+ 
++    @staticmethod
++    def _with_semantic_language(
++        doc: DocumentResult, segment: Segment, cfg: PipelineConfig
++    ) -> Segment:
++        state = doc.linguistic_state
++        language = None
++        plans = getattr(state, "prepared_plan", ()) if state is not None else ()
++        covering = [
++            run
++            for run in plans
++            if run.char_start <= segment.char_start and segment.char_end <= run.char_end
++        ]
++        if covering:
++            language = min(covering, key=lambda run: run.char_end - run.char_start).language
++        if language is None:
++            language = canonicalize_language(cfg.generation.lang or "en-us")
++        return replace(segment, meta={**segment.meta, "language": language})
++
+     def _split_prepared_runs(
+         self, doc: DocumentResult, cfg: PipelineConfig, trace: Trace, analyses: list[Any]
+     ) -> list[Segment]:
+@@ -217,11 +237,22 @@ class PhrasplitSentenceSegmenter(PhrasplitSentenceSplitter, SentenceSegmenter):
+             next_sentence[paragraph_idx] = sentence_idx + 1
+         return repaired
+ 
++    @staticmethod
++    def _hard_metadata_keys_for_span(span: Any) -> set[str]:
++        attrs = dict(span.attrs)
++        if attrs.get("scope", "semantic") == "pronunciation":
++            attrs.pop("lang", None)
++            attrs.pop("language", None)
++        return set(_HARD_METADATA_KEYS.intersection(attrs))
++
+     @staticmethod
+     def _structural_cuts(segment: Segment, doc: DocumentResult) -> list[int]:
+         cuts: set[int] = set()
+         for span in doc.annotation_spans:
+-            if _HARD_METADATA_KEYS.intersection(span.attrs) and span.char_start < span.char_end:
++            if (
++                PhrasplitSentenceSegmenter._hard_metadata_keys_for_span(span)
++                and span.char_start < span.char_end
++            ):
+                 if segment.char_start < span.char_start < segment.char_end:
+                     cuts.add(span.char_start)
+                 if segment.char_start < span.char_end < segment.char_end:
+diff --git a/pyproject.toml b/pyproject.toml
+index 69b2d7f..8791d48 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -22,7 +22,7 @@ authors = [
+ ]
+ keywords = ["tts", "text-to-speech", "kokoro", "phonemizer", "espeak"]
+ dependencies = [
+-    "kokorog2p[espeak,en]>=0.9.2,<1.0",
++    "kokorog2p[espeak,en]>=0.9.3,<1.0",
+     "lexphon>=0.1.0,<0.2",
+     "phrasplit>=0.3.7,<0.4",
+     "numpy",
+@@ -30,7 +30,7 @@ dependencies = [
+     "platformdirs",
+     "chardet",
+     "charset-normalizer",
+-    "ssmd>=0.8.6,<0.9",
++    "ssmd>=0.8.7,<0.9",
+     "spokenform>=0.3.6,<0.4",
+     "soundfile",
+     "typing_extensions>=4.0"
+diff --git a/requirements-test.txt b/requirements-test.txt
+index 8c7c471..9bee7f6 100644
+--- a/requirements-test.txt
++++ b/requirements-test.txt
+@@ -8,8 +8,8 @@ pytest-cov
+ tomli>=2.0.1; python_version < '3.11'
+ coverage
+ tox
+-kokorog2p[all]>=0.9.2,<1.0
++kokorog2p[all]>=0.9.3,<1.0
+ lexphon>=0.1.0,<0.2
+ phrasplit>=0.3.7,<0.4
+-ssmd>=0.8.6,<0.9
++ssmd>=0.8.7,<0.9
+ spokenform>=0.3.6,<0.4
+diff --git a/tests/test_g2p_cache.py b/tests/test_g2p_cache.py
+index 3117063..6dda7a8 100644
+--- a/tests/test_g2p_cache.py
++++ b/tests/test_g2p_cache.py
+@@ -80,7 +80,7 @@ def test_german_short_u_cleanup_retokenizes_uncached_and_cached_results(
+     cache_files = list(tmp_path.glob("*.json"))
+     assert len(cache_files) == 1
+     payload = DiskCache(tmp_path).get(cache_files[0].stem)
+-    assert payload["schema"] == 6
++    assert payload["schema"] == 7
+     assert payload["phonemes"] == "bykə"
+     assert payload["tokens"] == [ord(char) for char in "bykə"]
+ 
+@@ -152,6 +152,6 @@ def test_schema_three_crane_cache_is_recomputed_with_cleaned_payload(tmp_path, m
+ 
+     assert calls["phonemize"] == 1
+     assert result[0].phonemes == "bykə"
+-    assert payload["schema"] == 6
++    assert payload["schema"] == 7
+     assert payload["phonemes"] == "bykə"
+     assert payload["tokens"] == [ord(char) for char in "bykə"]
+diff --git a/tests/test_language_detection_config.py b/tests/test_language_detection_config.py
+new file mode 100644
+index 0000000..824deec
+--- /dev/null
++++ b/tests/test_language_detection_config.py
+@@ -0,0 +1,151 @@
++from __future__ import annotations
++
++import pytest
++
++from pykokoro import LanguageDetectionConfig
++from pykokoro.generation_config import GenerationConfig
++from pykokoro.language_detection import resolve_language_detection
++from pykokoro.pipeline import _coerce_pipeline_config, _merge_config
++from pykokoro.pipeline_config import PipelineConfig
++
++
++def test_language_detection_config_normalizes_candidates() -> None:
++    config = LanguageDetectionConfig(mode="auto", languages=("de", "en", "en-us"))
++    assert config.languages == ("de-de", "en-us")
++
++
++def test_language_detection_config_requires_two_auto_candidates() -> None:
++    with pytest.raises(ValueError, match="at least two"):
++        LanguageDetectionConfig(mode="auto", languages=("de",))
++
++
++def test_pipeline_mapping_coercion_and_explicit_off() -> None:
++    config = _coerce_pipeline_config(
++        {
++            "language_detection": {"mode": "auto", "languages": ["de", "en"]},
++        }
++    )
++    assert config.language_detection == LanguageDetectionConfig(
++        mode="auto", languages=("de-de", "en-us")
++    )
++    assert PipelineConfig().language_detection is None
++    disabled = _merge_config(config, {"language_detection": {"mode": "off"}})
++    assert disabled.language_detection == LanguageDetectionConfig()
++
++
++def test_language_detection_precedence_is_api_then_header_then_default() -> None:
++    header = {"language_detection": {"mode": "auto", "languages": ["de", "en"]}}
++    from_header = resolve_language_detection(None, header)
++    assert from_header.source == "header"
++    assert from_header.as_routing() == {"mode": "auto", "languages": ("de-de", "en-us")}
++
++    from_api = resolve_language_detection(LanguageDetectionConfig(mode="off"), header)
++    assert from_api.source == "pipeline"
++    assert from_api.as_routing() is None
++    assert resolve_language_detection(None, {}).source == "default"
++
++
++def test_adapter_forwards_routing_and_split_overrides(monkeypatch) -> None:
++    from types import SimpleNamespace
++
++    from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
++    from pykokoro.stages.protocols import DocumentResult
++    from pykokoro.types import AnnotationSpan, Segment, Trace
++
++    calls = []
++
++    class FakeModule:
++        __version__ = "test"
++
++        @staticmethod
++        def phonemize_prepared(*args, **kwargs):
++            calls.append(kwargs)
++            return SimpleNamespace(
++                phonemes="a", ids=[1], tokens=[], warnings=[], language_routes=[]
++            )
++
++        @staticmethod
++        def phonemes_to_ids(phonemes, model=None):
++            return [len(phonemes), model]
++
++    text = "gecanceltt"
++    segment = Segment("seg", text, 0, len(text), {"language": "de"})
++    doc = DocumentResult(
++        clean_text=text,
++        annotation_spans=[AnnotationSpan(2, 8, {"language": "en", "scope": "pronunciation"})],
++    )
++    config = PipelineConfig(
++        generation=GenerationConfig(lang="de"),
++        language_detection=LanguageDetectionConfig(mode="auto", languages=("de", "en")),
++    )
++    adapter = KokoroG2PAdapter()
++    monkeypatch.setattr(adapter, "_load", lambda: FakeModule())
++    monkeypatch.setattr(adapter, "_get_g2p_instance", lambda lang, cfg: object())
++
++    adapter.phonemize([segment], doc, config, Trace())
++
++    assert calls[0]["overlap"] == "split"
++    assert calls[0]["target_model"] == "1.0"
++    assert calls[0]["language_routing"] == {"mode": "auto", "languages": ("de-de", "en-us")}
++    override = calls[0]["overrides"][0]
++    assert (override.char_start, override.char_end) == (2, 8)
++    assert override.attrs == {"lang": "en"}
++
++
++def test_routing_policy_is_in_g2p_key_but_not_acoustic_key() -> None:
++    from pykokoro.pipeline import KokoroPipeline
++    from pykokoro.runtime.cache import make_g2p_key
++
++    base = {
++        "text": "Hello",
++        "lang": "de",
++        "is_phonemes": False,
++        "tokenizer_config": None,
++        "phoneme_override": None,
++    }
++    assert make_g2p_key(
++        **base, language_routing={"mode": "auto", "languages": ("de", "en")}
++    ) != make_g2p_key(**base, language_routing=None)
++
++    first = PipelineConfig(
++        generation=GenerationConfig(lang="de"),
++        language_detection=LanguageDetectionConfig(mode="auto", languages=("de", "en")),
++    )
++    second = PipelineConfig(
++        generation=GenerationConfig(lang="de"),
++        language_detection=LanguageDetectionConfig(mode="auto", languages=("de", "fr")),
++    )
++    assert KokoroPipeline(first)._kokoro_key(first) == KokoroPipeline(second)._kokoro_key(second)
++
++
++def test_phoneme_input_does_not_resolve_foreign_g2p(monkeypatch) -> None:
++
++    from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
++    from pykokoro.stages.protocols import DocumentResult
++    from pykokoro.types import Segment, Trace
++
++    class FakeModule:
++        __version__ = "test"
++
++        @staticmethod
++        def phonemes_to_ids(phonemes, model=None):
++            return [len(phonemes)]
++
++    text = "a b"
++    segment = Segment("seg", text, 0, len(text), {"language": "de"})
++    doc = DocumentResult(clean_text=text)
++    config = PipelineConfig(
++        generation=GenerationConfig(lang="de", is_phonemes=True),
++        language_detection=LanguageDetectionConfig(mode="auto", languages=("de", "en")),
++    )
++    adapter = KokoroG2PAdapter()
++    monkeypatch.setattr(adapter, "_load", lambda: FakeModule())
++    monkeypatch.setattr(
++        adapter,
++        "_get_g2p_instance",
++        lambda lang, cfg: (_ for _ in ()).throw(AssertionError("foreign G2P was resolved")),
++    )
++
++    result = adapter.phonemize([segment], doc, config, Trace())
++    assert result[0].phonemes == text
++    assert doc.metadata["language_detection"]["mode"] == "auto"
+diff --git a/tests/test_language_plan.py b/tests/test_language_plan.py
+index 4a5c43a..8ce23e6 100644
+--- a/tests/test_language_plan.py
++++ b/tests/test_language_plan.py
+@@ -117,3 +117,21 @@ def test_language_plan_accepts_hindi_as_espeak_fallback() -> None:
+     assert _languages(build_language_plan("नमस्ते", (), default_language="hi")) == [
+         (0, len("नमस्ते"), "hi"),
+     ]
++
++
++def test_language_plan_ignores_pronunciation_language_scope() -> None:
++    text = "Manpowerdiskussion"
++    annotations = [
++        AnnotationSpan(0, 8, {"lang": "en", "scope": "pronunciation"}),
++    ]
++    assert _languages(build_language_plan(text, annotations, default_language="de")) == [
++        (0, len(text), "de"),
++    ]
++
++
++def test_language_plan_accepts_language_alias() -> None:
++    text = "hello"
++    annotations = [AnnotationSpan(0, len(text), {"language": "en"})]
++    assert _languages(build_language_plan(text, annotations, default_language="de")) == [
++        (0, len(text), "en-us"),
++    ]
+diff --git a/tests/test_maintainer_review4_download_cache.py b/tests/test_maintainer_review4_download_cache.py
+index fc468bc..5d9b934 100644
+--- a/tests/test_maintainer_review4_download_cache.py
++++ b/tests/test_maintainer_review4_download_cache.py
+@@ -213,7 +213,7 @@ def test_g2p_cache_schema_recomputes_and_preserves_warnings(tmp_path, monkeypatc
+     assert second_trace.warnings == ["fallback"]
+     cached = DiskCache(tmp_path).get(key)
+     assert cached == {
+-        "schema": 6,
++        "schema": 7,
+         "g2p_input_mode": "prepared",
+         "preparation_backend": "spokenform",
+         "preparation_version": None,
+@@ -221,4 +221,6 @@ def test_g2p_cache_schema_recomputes_and_preserves_warnings(tmp_path, monkeypatc
+         "tokens": [1, 2],
+         "alignment_tokens": [],
+         "warnings": ["fallback"],
++        "language_routes": [],
++        "effective_language_routing": None,
+     }
+diff --git a/tests/test_packaging_metadata.py b/tests/test_packaging_metadata.py
+index c95ca1a..a38c086 100644
+--- a/tests/test_packaging_metadata.py
++++ b/tests/test_packaging_metadata.py
+@@ -41,14 +41,14 @@ def test_companion_dependency_floors_match_current_integration_contract() -> Non
+         "dependencies"
+     ]
+ 
+-    assert "kokorog2p[espeak,en]>=0.9.2,<1.0" in dependencies
++    assert "kokorog2p[espeak,en]>=0.9.3,<1.0" in dependencies
+     assert "lexphon>=0.1.0,<0.2" in dependencies
+     assert "phrasplit>=0.3.7,<0.4" in dependencies
+ 
+ 
+ def test_test_requirements_keep_kokorog2p_in_supported_window() -> None:
+     requirements = (ROOT / "requirements-test.txt").read_text(encoding="utf-8")
+-    assert "kokorog2p[all]>=0.9.2,<1.0" in requirements
++    assert "kokorog2p[all]>=0.9.3,<1.0" in requirements
+     assert "lexphon>=0.1.0,<0.2" in requirements
+ 
+ 
+@@ -77,7 +77,7 @@ def test_ssmd_dependency_targets_current_contract() -> None:
+     dependencies = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+         "dependencies"
+     ]
+-    assert "ssmd>=0.8.6,<0.9" in dependencies
++    assert "ssmd>=0.8.7,<0.9" in dependencies
+     assert "spokenform>=0.3.6,<0.4" in dependencies
+ 
+ 
+@@ -185,6 +185,6 @@ def test_lower_bound_workflow_pins_match_project_floors() -> None:
+ def test_package_resource_workflow_covers_kokorog2p_window() -> None:
+     workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
+ 
+-    assert 'kokorog2p-version: ["0.9.2"]' in workflow
++    assert 'kokorog2p-version: ["0.9.3"]' in workflow
+     assert "working-directory: ${{ runner.temp }}" in workflow
+     assert "pykokoro-*.whl" in workflow

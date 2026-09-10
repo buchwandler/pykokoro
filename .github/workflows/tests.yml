@@ -81,7 +81,7 @@ jobs:
         python -m pip install pytest
         python -m pip install \
           "kokorog2p[all]==0.9.4" \
-          "lexphon==0.2.1" \
+          "lexphon==0.2.2" \
           "phrasplit==0.3.7" \
           "ssmd==0.8.7" \
           "spokenform==0.3.6" \
@@ -90,7 +90,11 @@ jobs:
         python -m pip install -e .
     - name: Lower-bound contract tests
       run: |
-        python -m pytest tests/test_packaging_metadata.py tests/test_import_boundaries.py
+        python -m pytest -q \
+          tests/test_packaging_metadata.py \
+          tests/test_import_boundaries.py \
+          tests/test_frontend_contracts.py \
+          tests/test_lexphon_provisioning.py
 
 
   package-resources:
@@ -100,6 +104,10 @@ jobs:
         kokorog2p-version: ["0.9.4"]
     steps:
     - uses: actions/checkout@v4
+    - name: Install espeak-ng
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y espeak-ng
     - name: Setup Python
       uses: actions/setup-python@v5
       with:
@@ -119,3 +127,19 @@ jobs:
       run: |
         "$RUNNER_TEMP/pykokoro-wheel-venv/bin/python" -c \
           "import kokorog2p; assert kokorog2p.get_kokoro_vocab()"
+    - name: Verify frontend phonemization outside checkout
+      working-directory: ${{ runner.temp }}
+      run: |
+        "$RUNNER_TEMP/pykokoro-wheel-venv/bin/python" - <<'PY'
+        from pykokoro.tokenizer import Tokenizer, TokenizerConfig
+
+        tokenizer = Tokenizer(
+            config=TokenizerConfig(
+                backend="kokorog2p",
+                lexicons=(),
+                fallback="espeak",
+                use_spacy=False,
+            )
+        )
+        assert tokenizer._get_g2p("en-us").phonemize("Hello world")
+        PY

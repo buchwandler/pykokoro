@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from threading import Lock
 from typing import TYPE_CHECKING, Any
 
@@ -16,19 +17,16 @@ _LEXPHON_INSTALL_LOCK = Lock()
 
 def required_lexphon_ids(
     language: str,
-    config: TokenizerConfig,
+    lexicons: str | Sequence[str] | None,
 ) -> tuple[str, ...]:
-    """Return selected Lexphon logical IDs for a KokoroG2P configuration."""
+    """Return selected Lexphon logical IDs for a KokoroG2P selection."""
     from kokorog2p.lexicons import get_lexicon_spec, normalize_lexicon_selection
 
-    names = normalize_lexicon_selection(
-        language,
-        config.lexicons,
-        load_gold=config.load_gold,
-        load_silver=config.load_silver,
-    )
+    names = normalize_lexicon_selection(language, lexicons)
     return tuple(
-        spec.id for name in names if (spec := get_lexicon_spec(language, name)).backend == "lexphon"
+        spec.id
+        for name in names
+        if (spec := get_lexicon_spec(language, name)).backend == "lexphon"
     )
 
 
@@ -46,13 +44,13 @@ def _missing_lexphon_ids(store: Any, required: tuple[str, ...]) -> list[str]:
 
 def install_missing_lexphon_data(
     language: str,
-    config: TokenizerConfig,
+    lexicons: str | Sequence[str] | None,
 ) -> tuple[str, ...]:
     """Install selected Lexphon assets that are absent from the local store."""
     from lexphon import DataStore
     from lexphon.catalog import load_catalog
 
-    required = required_lexphon_ids(language, config)
+    required = required_lexphon_ids(language, lexicons)
     if not required:
         return ()
 
@@ -81,16 +79,23 @@ def create_g2p_with_lexphon_retry(
     config: TokenizerConfig,
     kwargs: dict[str, Any],
 ) -> Any:
-    """Construct G2P, provisioning selected Lexphon data once when needed."""
+    """Construct G2P after provisioning native Lexphon data when configured."""
     from lexphon import LexiconNotInstalledError
+
+    backend = str(kwargs.get("backend", "kokorog2p")).lower()
+    lexicons = kwargs.get("lexicons")
+    can_provision = backend == "kokorog2p"
+
+    if can_provision and config.lexicon_data_policy == "auto":
+        install_missing_lexphon_data(language, lexicons)
 
     try:
         return g2p_module.get_g2p(**kwargs)
     except LexiconNotInstalledError:
-        if config.lexicon_data_policy != "auto":
+        if not can_provision or config.lexicon_data_policy != "auto":
             raise
-        if not required_lexphon_ids(language, config):
+        if not required_lexphon_ids(language, lexicons):
             raise
-        install_missing_lexphon_data(language, config)
 
-    return g2p_module.get_g2p(**kwargs)
+        install_missing_lexphon_data(language, lexicons)
+        return g2p_module.get_g2p(**kwargs)

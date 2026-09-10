@@ -4,34 +4,34 @@ import spokenform
 GERMAN_GOLDEN_CASES = {
     "14.05.2026": (
         "vierzehnte Mai zweitausendsechsundzwanzig",
-        "fiːɾʦeːntə mI ʦvˈItWzˌɛnʣɛksˌʊntʦvanʦˌɪç",
+        "fˈiːɾʦeːntə mˈI ʦvItWzɛnʣeːksʊndʦvanʦɪç",
     ),
     "18:20 Uhr": (
         "achtzehn Uhr zwanzig",
-        "axʦeːn uːɾ ʦvanʦɪç",
+        "ˈaxʦeːn ˈuːɾ ʦvˈanʦɪç",
     ),
     "1,5 kg": (
         "eins Komma fünf Kilogramm",
-        "Ins kɔmɑː fynf kiːlɔɡɾam",
+        "ˈIns kˈɔmɑː fˈynf kˌiːlɔɡɾˈam",
     ),
     "500 g": (
         "fünfhundert Gramm",
-        "fynfhʊndɜt ɡɾam",
+        "fˈynfhʊndɜt ɡɾˈam",
     ),
     "1 ltr.": (
         "ein Liter.",
-        "In liːtɜ.",
+        "ˈIn lˈiːtɜ.",
     ),
     "45 Min.": (
         "fünfundvierzig Minuten.",
-        "fynfʊndviːɾʦɪç miːnuːtən.",
+        "fˈynfʊndvˌiːɾʦɪç miːnˈuːtən.",
     ),
     "12,80 EUR": (
         "zwölf Euro achtzig Cent",
-        "ʦvœlf ɔøroː axʦɪç sɛnt",
+        "ʦvˈœlf ˈɔøroː ˈaxʦɪç sˈɛnt",
     ),
-    "Prof.": ("Professor", "pɾoːfɛsoːɾ"),
-    "zzgl.": ("zuzüglich", "ʦuːʦyːklɪç"),
+    "Prof.": ("Professor", "pɾoːfˈɛsoːɾ"),
+    "zzgl.": ("zuzüglich", "ʦuːʦˈyːklɪç"),
 }
 
 

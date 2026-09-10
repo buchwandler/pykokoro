@@ -1,0 +1,46 @@
+rows:
+- sha: e550648b7cf8ca83bd8881e0ff6da61434cf226c
+  inspected: true
+  inspected_paths:
+  - pykokoro/pipeline.py
+  - pykokoro/stages/g2p/kokorog2p.py
+  - pykokoro/pipeline_config.py
+  - tests/test_language_detection_config.py
+  - tests/test_language_plan.py
+  observed_behavior: "Reviewed the language-planning and frontend-routing changes. They add an automatic mixed-language routing mode that selects per-language G2P frontends while retaining explicit document-language semantics and associated regression coverage."
+  public_impact: public
+  decision: accepted
+  target_entry_key: mixed-language-frontend-routing
+  target_entry_id: null
+  notes: ""
+  stale: false
+- sha: 4d0f5feba14eb650a7f6c57101d5fb67b2fa0505
+  inspected: true
+  inspected_paths:
+  - pykokoro/pipeline.py
+  - pykokoro/stages/g2p/kokorog2p.py
+  - tests/test_g2p_language_routing.py
+  - tests/test_g2p_spokenform.py
+  observed_behavior: "Reviewed the routing and prepared-text integration changes. They improve mixed-language frontend selection and cache behavior while preserving Spokenform preparation and add focused routing tests."
+  public_impact: public
+  decision: accepted
+  target_entry_key: mixed-language-frontend-routing
+  target_entry_id: null
+  notes: ""
+  stale: false
+- sha: 93f5bac3032d8d6c06a1949694b59ee7c621069b
+  inspected: true
+  inspected_paths:
+  - pykokoro/stages/g2p/kokorog2p.py
+  - pykokoro/tokenizer.py
+  - tests/test_g2p_adapter_spacy_model.py
+  - tests/test_lexphon_provisioning.py
+  - pyproject.toml
+  - requirements-test.txt
+  observed_behavior: "Reviewed the fallback-control, named-lexicon, cache, timing, and packaging changes. They add explicit fallback and named-lexicon configuration, Lexphon provisioning policy, and related tests and dependency declarations."
+  public_impact: public
+  decision: accepted
+  target_entry_key: named-lexicon-fallback-controls
+  target_entry_id: null
+  notes: ""
+  stale: false

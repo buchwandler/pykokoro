@@ -33,7 +33,7 @@ def test_license_and_release_fallback_version_are_present() -> None:
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
     assert "Apache License" in license_text
-    assert pyproject["tool"]["setuptools_scm"]["fallback_version"] == "0.9.0"
+    assert pyproject["tool"]["setuptools_scm"]["fallback_version"] == "0.9.2"
 
 
 def test_companion_dependency_floors_match_current_integration_contract() -> None:
@@ -42,14 +42,14 @@ def test_companion_dependency_floors_match_current_integration_contract() -> Non
     ]
 
     assert "kokorog2p[espeak,en]>=0.9.4,<1.0" in dependencies
-    assert "lexphon>=0.2.1,<0.3" in dependencies
+    assert "lexphon>=0.2.2,<0.3" in dependencies
     assert "phrasplit>=0.3.7,<0.4" in dependencies
 
 
 def test_test_requirements_keep_kokorog2p_in_supported_window() -> None:
     requirements = (ROOT / "requirements-test.txt").read_text(encoding="utf-8")
     assert "kokorog2p[all]>=0.9.4,<1.0" in requirements
-    assert "lexphon>=0.2.1,<0.3" in requirements
+    assert "lexphon>=0.2.2,<0.3" in requirements
 
 
 def test_provider_extras_do_not_install_every_runtime_distribution() -> None:
@@ -154,8 +154,8 @@ def test_playback_extra_is_optional_and_keeps_compatibility_alias() -> None:
 def test_version_fallbacks_target_release() -> None:
     source = (ROOT / "pykokoro" / "__init__.py").read_text(encoding="utf-8")
 
-    assert re.search(r'__version__ = "0\.9\.0"', source)
-    assert re.search(r"__version_tuple__ = \(0, 9, 0\)", source)
+    assert re.search(r'__version__ = "0\.9\.2"', source)
+    assert re.search(r"__version_tuple__ = \(0, 9, 2\)", source)
 
 
 def test_lower_bound_workflow_pins_match_project_floors() -> None:
@@ -195,3 +195,15 @@ def test_package_resource_workflow_covers_kokorog2p_window() -> None:
     assert 'kokorog2p-version: ["0.9.4"]' in workflow
     assert "working-directory: ${{ runner.temp }}" in workflow
     assert "pykokoro-*.whl" in workflow
+    assert "Verify frontend phonemization outside checkout" in workflow
+
+
+def test_publish_workflow_validates_artifacts_before_upload() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "python-publish.yml").read_text(encoding="utf-8")
+
+    assert "build twine" in workflow
+    assert "python -m twine check dist/*" in workflow
+    assert "len(wheels) == 1" in workflow
+    assert "len(sdists) == 1" in workflow
+    assert "RELEASE_TAG" in workflow
+    assert "lexphon>=0.2.2" in workflow
