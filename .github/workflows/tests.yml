@@ -60,6 +60,8 @@ jobs:
         pip install spacy
         python -m spacy download en_core_web_sm
         python -m compileall -q benchmarks pykokoro tests
+    - name: Install Lexphon data
+      run: lexphon data install en-us:gold
     - name: Tests
       run: pytest -m "not slow"
 
