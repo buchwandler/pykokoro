@@ -20,6 +20,7 @@ jobs:
         pip install spacy
         python -m spacy download en_core_web_sm
         pip install -e ".[cpu,dev]"
+        lexphon data install en-us:gold
         pytest --cov --junitxml=junit.xml 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v5
