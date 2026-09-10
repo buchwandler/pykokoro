@@ -1444,11 +1444,10 @@ res = pipe.run("Hello")
 optional Lexphon provider after selected lexicons miss: `none`, `espeak`, or `goruut`.
 `backend="espeak"` and `backend="goruut"` select those engines as the primary backend.
 
-
-**Note**: `use_dictionary`, `load_gold`, and `load_silver` are legacy compatibility inputs.
-New code should use `TokenizerConfig.lexicons`. Explicit named selections take precedence;
-the only legacy combination without a faithful current mapping is Gold disabled with Silver
-enabled, which raises an actionable error.
+**Note**: `use_dictionary`, `load_gold`, and `load_silver` are legacy compatibility
+inputs. New code should use `TokenizerConfig.lexicons`. Explicit named selections take
+precedence; the only legacy combination without a faithful current mapping is Gold
+disabled with Silver enabled, which raises an actionable error.
 
 ### Named KokoroG2P Lexicons
 
@@ -1468,24 +1467,25 @@ crane_config = TokenizerConfig(lexicons="crane")
 ```
 
 `lexicons=None` delegates to KokoroG2P's language defaults. An explicit selection takes
-precedence over legacy dictionary flags. Ordered selections such as `lexicons=("gold",
-"crane")` are supported for layered lookup, where the first matching layer wins. That
-layered lookup is not a Gold-versus-Crane A/B comparison. For an A/B comparison, render
-separately with `("gold",)` and `("crane",)` and combine the results yourself.
+precedence over legacy dictionary flags. Ordered selections such as
+`lexicons=("gold", "crane")` are supported for layered lookup, where the first matching
+layer wins. That layered lookup is not a Gold-versus-Crane A/B comparison. For an A/B
+comparison, render separately with `("gold",)` and `("crane",)` and combine the results
+yourself.
 
-
-Provider-only operation is explicit with `lexicons=()`; it selects no static Lexphon layers and can use `fallback="espeak"` or `fallback="goruut"`. A static lexicon named `espeak` is still a lexical resource and does not mean the dynamic eSpeak provider.
-The named lexicons are KokoroG2P/G2Lex resources consumed by PyKokoro; they are not
+Provider-only operation is explicit with `lexicons=()`; it selects no static Lexphon
+layers and can use `fallback="espeak"` or `fallback="goruut"`. A static lexicon named
+`espeak` is still a lexical resource and does not mean the dynamic eSpeak provider. The
+named lexicons are KokoroG2P/G2Lex resources consumed by PyKokoro; they are not
 PyKokoro-owned datasets.
 
 #### Automatic Lexphon data provisioning
 
 Before native KokoroG2P construction, PyKokoro resolves the effective named lexicons for
 the routed language and checks the local Lexphon store. In `auto` mode only missing
-Lexphon-backed assets are installed. Warm runs require no catalog access or network access.
-Provisioning applies only to the native `backend="kokorog2p"` path; primary eSpeak and
-Goruut backends do not download static lexicons.
-
+Lexphon-backed assets are installed. Warm runs require no catalog access or network
+access. Provisioning applies only to the native `backend="kokorog2p"` path; primary
+eSpeak and Goruut backends do not download static lexicons.
 
 Use `"installed-only"` for offline or pre-provisioned deployments. In that mode PyKokoro
 never installs or consults the catalog. A missing asset raises Lexphon's original

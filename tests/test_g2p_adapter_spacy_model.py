@@ -166,9 +166,7 @@ def test_kokorog2p_adapter_forwards_named_lexicons(monkeypatch):
 
     adapter = KokoroG2PAdapter()
     monkeypatch.setattr(adapter, "_load", lambda: FakeG2PModule())
-    cfg = PipelineConfig(
-        tokenizer_config=TokenizerConfig(lexicons=("crane",), fallback="goruut")
-    )
+    cfg = PipelineConfig(tokenizer_config=TokenizerConfig(lexicons=("crane",), fallback="goruut"))
     adapter._get_g2p_instance("de", cfg)
 
     assert captured["lexicons"] == ("crane",)
@@ -187,9 +185,7 @@ def test_g2p_instance_cache_distinguishes_named_lexicons(monkeypatch):
 
     adapter = KokoroG2PAdapter()
     monkeypatch.setattr(adapter, "_load", lambda: FakeG2PModule())
-    gold_cfg = PipelineConfig(
-        tokenizer_config=TokenizerConfig(lexicons=("gold",), fallback="none")
-    )
+    gold_cfg = PipelineConfig(tokenizer_config=TokenizerConfig(lexicons=("gold",), fallback="none"))
     crane_cfg = PipelineConfig(tokenizer_config=TokenizerConfig(lexicons=("crane",)))
     espeak_cfg = PipelineConfig(
         tokenizer_config=TokenizerConfig(lexicons=("gold",), fallback="espeak")
@@ -239,7 +235,7 @@ def test_adapter_retries_after_lexphon_provisioning(monkeypatch):
 
     monkeypatch.setattr(
         "pykokoro.lexicon_data.install_missing_lexphon_data",
-        lambda language, lexicons: installed.append((language, lexicons)) or ("de-de:gold",)
+        lambda language, lexicons: installed.append((language, lexicons)) or ("de-de:gold",),
     )
     adapter = KokoroG2PAdapter()
     monkeypatch.setattr(adapter, "_load", lambda: FakeG2PModule())
@@ -274,6 +270,7 @@ def test_tokenizer_forwards_named_lexicons(monkeypatch):
     assert captured["use_espeak_fallback"] is False
     assert captured["use_goruut_fallback"] is False
 
+
 def test_legacy_tokenizer_retries_after_lexphon_provisioning(monkeypatch):
     from lexphon import LexiconNotInstalledError
 
@@ -294,7 +291,7 @@ def test_legacy_tokenizer_retries_after_lexphon_provisioning(monkeypatch):
     monkeypatch.setattr(tokenizer_module, "get_g2p", fake_get_g2p)
     monkeypatch.setattr(
         "pykokoro.lexicon_data.install_missing_lexphon_data",
-        lambda language, lexicons: installed.append((language, lexicons)) or ("de-de:gold",)
+        lambda language, lexicons: installed.append((language, lexicons)) or ("de-de:gold",),
     )
     tokenizer = tokenizer_module.Tokenizer(vocab={}, config=TokenizerConfig(lexicons=("gold",)))
 

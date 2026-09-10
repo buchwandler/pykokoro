@@ -24,9 +24,7 @@ def required_lexphon_ids(
 
     names = normalize_lexicon_selection(language, lexicons)
     return tuple(
-        spec.id
-        for name in names
-        if (spec := get_lexicon_spec(language, name)).backend == "lexphon"
+        spec.id for name in names if (spec := get_lexicon_spec(language, name)).backend == "lexphon"
     )
 
 

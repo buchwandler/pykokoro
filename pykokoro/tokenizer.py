@@ -29,12 +29,14 @@ FallbackMode: TypeAlias = Literal["none", "espeak", "goruut"]
 
 LexiconDataPolicy: TypeAlias = Literal["auto", "installed-only"]
 
+
 def _legacy_fallback_kwargs(mode: FallbackMode) -> dict[str, bool]:
     if mode == "none":
         return {"use_espeak_fallback": False, "use_goruut_fallback": False}
     if mode == "espeak":
         return {"use_espeak_fallback": True, "use_goruut_fallback": False}
     return {"use_espeak_fallback": False, "use_goruut_fallback": True}
+
 
 GToken: TypeAlias = Any
 filter_for_kokoro = _kokorog2p.filter_for_kokoro
@@ -85,6 +87,7 @@ def _effective_lexicons(config: TokenizerConfig) -> tuple[str, ...] | None:
     if not config.load_gold and not config.load_silver:
         return ()
     return None
+
 
 @dataclass
 class TokenizerConfig:

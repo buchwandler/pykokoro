@@ -60,7 +60,7 @@ jobs:
               )
               requirements = metadata.get_all("Requires-Dist", [])
               assert any(requirement.startswith("kokorog2p") for requirement in requirements)
-              assert any("lexphon>=0.2.2" in requirement for requirement in requirements)
+              assert any("lexphon>=0.2.3" in requirement for requirement in requirements)
               assert any(name.endswith("pykokoro/py.typed") for name in archive.namelist())
           PY
 

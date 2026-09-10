@@ -59,16 +59,16 @@ pip install "pykokoro[openvino]"  # OpenVINO Runtime
 pip install "pykokoro[directml]"  # DirectML
 ```
 
-
 For Lexphon Goruut provider fallback, install the supported extra:
 
 ```bash
 pip install "pykokoro[goruut]"
 ```
 
-This enables `fallback="goruut"` for the native `backend="kokorog2p"` path. It is distinct from `backend="goruut"`, which selects Goruut as the primary backend.
-For a custom ONNX Runtime distribution, install the base package and the provider
-package separately:
+This enables `fallback="goruut"` for the native `backend="kokorog2p"` path. It is
+distinct from `backend="goruut"`, which selects Goruut as the primary backend. For a
+custom ONNX Runtime distribution, install the base package and the provider package
+separately:
 
 ```bash
 pip install pykokoro
@@ -77,29 +77,28 @@ pip install onnxruntime-gpu==1.19.2
 
 ## Dependencies and optional spaCy
 
-PyKokoro v0.9 requires `kokorog2p[espeak,en]>=0.9.4,<1.0`,
-`lexphon>=0.2.2,<0.3`, `phrasplit>=0.3.7,<0.4`, `ssmd>=0.8.7,<0.9`, and
-`spokenform>=0.3.6,<0.4`. The native KokoroG2P frontend uses named lexicons:
-`lexicons=None` selects KokoroG2P language defaults, while `lexicons=()` disables static
-Lexphon layers. New code should use named lexicons rather than the legacy `use_dictionary`,
-`load_gold`, and `load_silver` compatibility inputs.
+PyKokoro v0.9 requires `kokorog2p[espeak,en]>=0.9.4,<1.0`, `lexphon>=0.2.3,<0.3`,
+`phrasplit>=0.3.7,<0.4`, `ssmd>=0.8.7,<0.9`, and `spokenform>=0.3.6,<0.4`. The native
+KokoroG2P frontend uses named lexicons: `lexicons=None` selects KokoroG2P language
+defaults, while `lexicons=()` disables static Lexphon layers. New code should use named
+lexicons rather than the legacy `use_dictionary`, `load_gold`, and `load_silver`
+compatibility inputs.
 
 ### Lexphon data provisioning
 
 Before native `backend="kokorog2p"` construction, PyKokoro resolves the effective named
 lexicons for the routed language and checks the local Lexphon store. The default
-`lexicon_data_policy="auto"` installs only missing Lexphon-backed assets. Warm runs do not
-consult the catalog or network. Primary `backend="espeak"` and `backend="goruut"` paths
-never download static lexicons.
+`lexicon_data_policy="auto"` installs only missing Lexphon-backed assets. Warm runs do
+not consult the catalog or network. Primary `backend="espeak"` and `backend="goruut"`
+paths never download static lexicons.
 
 Use `lexicon_data_policy="installed-only"` for offline or pre-provisioned deployments.
-PyKokoro will not install or consult the catalog in that mode, and a missing asset raises
-Lexphon's original installation error. Set `LEXPHON_DATA_HOME` for a persistent store and
-`LEXPHON_CATALOG_URL` for a pinned local or remote catalog.
-The document language is explicit:
-pass `GenerationConfig(lang="en-us")` or `run(..., lang="en-us")`. Voice and profile
-selection never supplies the document language. SSMD `lang` spans are the supported
-mechanism for explicit mixed-language documents.
+PyKokoro will not install or consult the catalog in that mode, and a missing asset
+raises Lexphon's original installation error. Set `LEXPHON_DATA_HOME` for a persistent
+store and `LEXPHON_CATALOG_URL` for a pinned local or remote catalog. The document
+language is explicit: pass `GenerationConfig(lang="en-us")` or `run(..., lang="en-us")`.
+Voice and profile selection never supplies the document language. SSMD `lang` spans are
+the supported mechanism for explicit mixed-language documents.
 
 The pipeline owns reusable spaCy resources for integrated Pass A and Pass B analysis:
 

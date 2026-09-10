@@ -558,9 +558,7 @@ class KokoroG2PAdapter(G2PAdapter):
             pronunciation_lexicon_id = metadata.get("pronunciation_lexicon_id")
             if not isinstance(pronunciation_lexicon_id, str):
                 pronunciation_lexicon_id = None
-            pronunciation_requested_language = metadata.get(
-                "pronunciation_requested_language"
-            )
+            pronunciation_requested_language = metadata.get("pronunciation_requested_language")
             if not isinstance(pronunciation_requested_language, str):
                 pronunciation_requested_language = None
             pronunciation_source_ipa = metadata.get("pronunciation_source_ipa")

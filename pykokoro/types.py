@@ -90,6 +90,7 @@ class G2PAlignmentToken:
     pronunciation_requested_language: str | None = None
     pronunciation_source_ipa: str | None = None
     pronunciation_language_markers: list[dict[str, Any]] | None = None
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "text": self.text,

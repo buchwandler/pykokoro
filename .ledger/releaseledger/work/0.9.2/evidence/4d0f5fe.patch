@@ -42,21 +42,21 @@ index 49d5067..ec122db 100644
  #!/usr/bin/env python3
 -"""Fixed-model multilingual pronunciation with KokoroG2P routing."""
 +"""Compare fixed-model multilingual pronunciation across German lexica."""
- 
+
  from __future__ import annotations
- 
+
  from typing import Any
- 
+
 +import numpy as np
  import soundfile as sf
- 
+
  try:
 @@ -13,8 +14,17 @@ except ImportError:
      from _output import artifact_path
- 
+
  from pykokoro import GenerationConfig, KokoroPipeline, LanguageDetectionConfig, PipelineConfig
 +from pykokoro.tokenizer import TokenizerConfig
- 
+
  SOURCE = "Die Manpowerdiskussion wird gecancelt, du kannst das File downloaden."
 +OUTPUT_FILE = "mixed_language_auto.wav"
 +LEXICON_SEPARATOR_SECONDS = 1.0
@@ -66,13 +66,13 @@ index 49d5067..ec122db 100644
 +    ("de-de:espeak", "espeak"),
 +    ("de-de:lexhint", "lexhint"),
 +)
- 
- 
+
+
  def print_phonemes(label: str, result: Any) -> None:
 @@ -24,8 +34,50 @@ def print_phonemes(label: str, result: Any) -> None:
          print(f"  {segment.text!r} ({segment.lang}): {segment.phonemes}")
- 
- 
+
+
 +def print_language_routes(result: Any) -> None:
 +    """Print structured selected-lexicon routing diagnostics."""
 +    routes = result.document_metadata.get("g2p_language_routes", [])
@@ -155,8 +155,8 @@ index 49d5067..ec122db 100644
 +    output_path = artifact_path(OUTPUT_FILE)
 +    sf.write(output_path, combine_audio(results), results[0].sample_rate)
 +    print(f"Created {output_path}")
- 
- 
+
+
  if __name__ == "__main__":
 diff --git a/pykokoro/pipeline.py b/pykokoro/pipeline.py
 index a3cca65..dd42fd8 100644
@@ -183,12 +183,12 @@ index 200ca3f..be5458b 100644
  from ...spacy_models import SpacyModelSize, make_spacy_model_request, spacy_selection_metadata
  from ...types import (
 @@ -29,7 +30,7 @@ if TYPE_CHECKING:
- 
- 
+
+
  class KokoroG2PAdapter(G2PAdapter):
 -    _cache_schema = 7
 +    _cache_schema = 9
- 
+
      def __init__(self) -> None:
          self._g2p: ModuleType | None = None
 @@ -276,6 +277,12 @@ class KokoroG2PAdapter(G2PAdapter):
@@ -230,7 +230,7 @@ index 200ca3f..be5458b 100644
              if run.char_start > segment.char_start or run.char_end < segment.char_end:
                  continue
 @@ -318,6 +336,12 @@ class KokoroG2PAdapter(G2PAdapter):
- 
+
                  start = max(item.start, segment.char_start) - segment.char_start
                  end = min(item.end, segment.char_end) - segment.char_start
 +                item_language = canonicalize_language(item.language) if item.language else None
@@ -289,8 +289,8 @@ index 6dda7a8..a080979 100644
 +    assert payload["schema"] == 9
      assert payload["phonemes"] == "bykə"
      assert payload["tokens"] == [ord(char) for char in "bykə"]
- 
- 
+
+
 -def test_schema_three_crane_cache_is_recomputed_with_cleaned_payload(tmp_path, monkeypatch) -> None:
 +def test_previous_g2p_cache_schema_is_recomputed_with_cleaned_payload(
 +    tmp_path, monkeypatch
@@ -308,7 +308,7 @@ index 6dda7a8..a080979 100644
              "tokens": [999],
              "alignment_tokens": [],
 @@ -152,6 +154,6 @@ def test_schema_three_crane_cache_is_recomputed_with_cleaned_payload(tmp_path, m
- 
+
      assert calls["phonemize"] == 1
      assert result[0].phonemes == "bykə"
 -    assert payload["schema"] == 7
@@ -441,13 +441,13 @@ index 53840f2..a504c8b 100644
  from pykokoro.tokenizer import TokenizerConfig
 -from pykokoro.types import Segment, Trace
 +from pykokoro.types import AnnotationSpan, Segment, Trace
- 
+
  TEXT = (
      "Dr. Smith will see you at 10:30 on 05/20/2023. "
 @@ -100,6 +100,60 @@ def test_adapter_uses_prepared_entrypoint(monkeypatch) -> None:
      assert calls == ["prepared"]
- 
- 
+
+
 +def test_prepared_annotations_preserve_metadata_without_language_override() -> None:
 +    from pykokoro.runtime.language_plan import LanguageRun
 +    from pykokoro.runtime.linguistics import (
@@ -511,16 +511,16 @@ index 824deec..6548b70 100644
 +++ b/tests/test_language_detection_config.py
 @@ -1,6 +1,7 @@
  from __future__ import annotations
- 
+
  import pytest
 +import ssmd
- 
+
  from pykokoro import LanguageDetectionConfig
  from pykokoro.generation_config import GenerationConfig
 @@ -45,6 +46,20 @@ def test_language_detection_precedence_is_api_then_header_then_default() -> None
      assert resolve_language_detection(None, {}).source == "default"
- 
- 
+
+
 +def test_ssmd_frontmatter_and_api_routing_configure_equivalently() -> None:
 +    parsed = ssmd.parse_structure(
 +        "---\nlanguage_detection:\n  mode: auto\n  languages:\n    - de\n    - en\n---\nFile",
@@ -537,7 +537,7 @@ index 824deec..6548b70 100644
 +
  def test_adapter_forwards_routing_and_split_overrides(monkeypatch) -> None:
      from types import SimpleNamespace
- 
+
 diff --git a/tests/test_maintainer_review4_download_cache.py b/tests/test_maintainer_review4_download_cache.py
 index 5d9b934..4bf782d 100644
 --- a/tests/test_maintainer_review4_download_cache.py
@@ -558,24 +558,24 @@ index a38c086..109092a 100644
 @@ -41,14 +41,14 @@ def test_companion_dependency_floors_match_current_integration_contract() -> Non
          "dependencies"
      ]
- 
+
 -    assert "kokorog2p[espeak,en]>=0.9.3,<1.0" in dependencies
 +    assert "kokorog2p[espeak,en]>=0.9.4,<1.0" in dependencies
      assert "lexphon>=0.1.0,<0.2" in dependencies
      assert "phrasplit>=0.3.7,<0.4" in dependencies
- 
- 
+
+
  def test_test_requirements_keep_kokorog2p_in_supported_window() -> None:
      requirements = (ROOT / "requirements-test.txt").read_text(encoding="utf-8")
 -    assert "kokorog2p[all]>=0.9.3,<1.0" in requirements
 +    assert "kokorog2p[all]>=0.9.4,<1.0" in requirements
      assert "lexphon>=0.1.0,<0.2" in requirements
- 
- 
+
+
 @@ -185,6 +185,6 @@ def test_lower_bound_workflow_pins_match_project_floors() -> None:
  def test_package_resource_workflow_covers_kokorog2p_window() -> None:
      workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
- 
+
 -    assert 'kokorog2p-version: ["0.9.3"]' in workflow
 +    assert 'kokorog2p-version: ["0.9.4"]' in workflow
      assert "working-directory: ${{ runner.temp }}" in workflow

@@ -103,6 +103,7 @@ def test_provider_only_configuration_skips_lexphon_assets(
     assert required_lexphon_ids("de", ()) == ()
     assert install_missing_lexphon_data("de", ()) == ()
 
+
 def test_install_checks_missing_assets_and_skips_catalog_when_warm(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -192,9 +193,7 @@ def test_retry_provisions_once_and_retries_once(monkeypatch: pytest.MonkeyPatch)
 
     monkeypatch.setattr(
         "pykokoro.lexicon_data.install_missing_lexphon_data",
-        lambda language, lexicons: (
-            installations.append((language, lexicons)) or ("de-de:gold",)
-        ),
+        lambda language, lexicons: installations.append((language, lexicons)) or ("de-de:gold",),
     )
 
     result = create_g2p_with_lexphon_retry(
@@ -211,7 +210,6 @@ def test_retry_provisions_once_and_retries_once(monkeypatch: pytest.MonkeyPatch)
     }
     assert calls == 2
     assert installations == [("de", ("gold",)), ("de", ("gold",))]
-
 
 
 def test_installed_only_propagates_missing_error_without_install(

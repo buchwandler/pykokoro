@@ -9,7 +9,7 @@ tomli>=2.0.1; python_version < '3.11'
 coverage
 tox
 kokorog2p[all]>=0.9.4,<1.0
-lexphon>=0.2.2,<0.3
+lexphon>=0.2.3,<0.3
 phrasplit>=0.3.7,<0.4
 ssmd>=0.8.7,<0.9
 spokenform>=0.3.6,<0.4

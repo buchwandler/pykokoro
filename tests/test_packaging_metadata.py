@@ -42,14 +42,14 @@ def test_companion_dependency_floors_match_current_integration_contract() -> Non
     ]
 
     assert "kokorog2p[espeak,en]>=0.9.4,<1.0" in dependencies
-    assert "lexphon>=0.2.2,<0.3" in dependencies
+    assert "lexphon>=0.2.3,<0.3" in dependencies
     assert "phrasplit>=0.3.7,<0.4" in dependencies
 
 
 def test_test_requirements_keep_kokorog2p_in_supported_window() -> None:
     requirements = (ROOT / "requirements-test.txt").read_text(encoding="utf-8")
     assert "kokorog2p[all]>=0.9.4,<1.0" in requirements
-    assert "lexphon>=0.2.2,<0.3" in requirements
+    assert "lexphon>=0.2.3,<0.3" in requirements
 
 
 def test_provider_extras_do_not_install_every_runtime_distribution() -> None:
@@ -71,6 +71,7 @@ def test_provider_extras_do_not_install_every_runtime_distribution() -> None:
         "onnxruntime-openvino",
         "onnxruntime-directml",
     }
+
 
 def test_goruut_extra_uses_companion_provider_contract() -> None:
     optional = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
@@ -206,4 +207,4 @@ def test_publish_workflow_validates_artifacts_before_upload() -> None:
     assert "len(wheels) == 1" in workflow
     assert "len(sdists) == 1" in workflow
     assert "RELEASE_TAG" in workflow
-    assert "lexphon>=0.2.2" in workflow
+    assert "lexphon>=0.2.3" in workflow

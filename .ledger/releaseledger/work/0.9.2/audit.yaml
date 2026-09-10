@@ -11,103 +11,103 @@ git_head_sha: 93f5bac3032d8d6c06a1949694b59ee7c621069b
 git_range: 73674dd2ba1e957bd8421fab61f08b6d541af5c2..93f5bac3032d8d6c06a1949694b59ee7c621069b
 commit_count: 3
 rows:
-- sha: e550648b7cf8ca83bd8881e0ff6da61434cf226c
-  source_ref: git:e550648b7cf8ca83bd8881e0ff6da61434cf226c
-  short_sha: e550648
-  changed_paths:
-  - .github/workflows/tests.yml
-  - README.md
-  - docs/basic_usage.md
-  - docs/languages.md
-  - examples/mixed_language_auto.py
-  - pykokoro/__init__.py
-  - pykokoro/language_detection.py
-  - pykokoro/pipeline.py
-  - pykokoro/pipeline_config.py
-  - pykokoro/runtime/cache.py
-  - pykokoro/runtime/language_plan.py
-  - pykokoro/stages/doc_parsers/ssmd.py
-  - pykokoro/stages/g2p/kokorog2p.py
-  - pykokoro/stages/segmentation/phrasplit.py
-  - pyproject.toml
-  - requirements-test.txt
-  - tests/test_g2p_cache.py
-  - tests/test_language_detection_config.py
-  - tests/test_language_plan.py
-  - tests/test_maintainer_review4_download_cache.py
-  - tests/test_packaging_metadata.py
-  stats:
-    files_changed: 0
-    insertions: 615
-    deletions: 50
-  inspected: false
-  inspected_paths: []
-  observed_behavior: ''
-  public_impact: unknown
-  decision: needs_review
-  stale: false
-  evidence_subject: 'feat: mixed languange auto mode'
-- sha: 4d0f5feba14eb650a7f6c57101d5fb67b2fa0505
-  source_ref: git:4d0f5feba14eb650a7f6c57101d5fb67b2fa0505
-  short_sha: 4d0f5fe
-  changed_paths:
-  - .github/workflows/tests.yml
-  - examples/mixed_language_auto.py
-  - pykokoro/pipeline.py
-  - pykokoro/stages/g2p/kokorog2p.py
-  - pyproject.toml
-  - requirements-test.txt
-  - tests/test_g2p_cache.py
-  - tests/test_g2p_language_routing.py
-  - tests/test_g2p_spokenform.py
-  - tests/test_language_detection_config.py
-  - tests/test_maintainer_review4_download_cache.py
-  - tests/test_packaging_metadata.py
-  stats:
-    files_changed: 0
-    insertions: 293
-    deletions: 27
-  inspected: false
-  inspected_paths: []
-  observed_behavior: ''
-  public_impact: unknown
-  decision: needs_review
-  stale: false
-  evidence_subject: 'feat: imporved mixed languange performance'
-- sha: 93f5bac3032d8d6c06a1949694b59ee7c621069b
-  source_ref: git:93f5bac3032d8d6c06a1949694b59ee7c621069b
-  short_sha: 93f5bac
-  changed_paths:
-  - .github/workflows/tests.yml
-  - README.md
-  - benchmarks/hard_cases/__main__.py
-  - benchmarks/polynorm_eval.py
-  - benchmarks/polynorm_phoneme.py
-  - docs/installation.md
-  - examples/backend_comparison.py
-  - examples/german_fallback_control.py
-  - pykokoro/stages/g2p/kokorog2p.py
-  - pykokoro/tokenizer.py
-  - pykokoro/types.py
-  - pyproject.toml
-  - requirements-test.txt
-  - tests/test_cache_keys.py
-  - tests/test_g2p_adapter_spacy_model.py
-  - tests/test_g2p_cache.py
-  - tests/test_lexphon_provisioning.py
-  - tests/test_maintainer_review4_download_cache.py
-  - tests/test_maintainer_review4_reproductions.py
-  - tests/test_packaging_metadata.py
-  - tests/test_tokenizer.py
-  - tests/test_word_timings.py
-  stats:
-    files_changed: 0
-    insertions: 331
-    deletions: 96
-  inspected: false
-  inspected_paths: []
-  observed_behavior: ''
-  public_impact: unknown
-  decision: needs_review
-  stale: false
-  evidence_subject: 'feat: use new lexphon with included fallback'
+  - sha: e550648b7cf8ca83bd8881e0ff6da61434cf226c
+    source_ref: git:e550648b7cf8ca83bd8881e0ff6da61434cf226c
+    short_sha: e550648
+    changed_paths:
+      - .github/workflows/tests.yml
+      - README.md
+      - docs/basic_usage.md
+      - docs/languages.md
+      - examples/mixed_language_auto.py
+      - pykokoro/__init__.py
+      - pykokoro/language_detection.py
+      - pykokoro/pipeline.py
+      - pykokoro/pipeline_config.py
+      - pykokoro/runtime/cache.py
+      - pykokoro/runtime/language_plan.py
+      - pykokoro/stages/doc_parsers/ssmd.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/stages/segmentation/phrasplit.py
+      - pyproject.toml
+      - requirements-test.txt
+      - tests/test_g2p_cache.py
+      - tests/test_language_detection_config.py
+      - tests/test_language_plan.py
+      - tests/test_maintainer_review4_download_cache.py
+      - tests/test_packaging_metadata.py
+    stats:
+      files_changed: 0
+      insertions: 615
+      deletions: 50
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: mixed languange auto mode"
+  - sha: 4d0f5feba14eb650a7f6c57101d5fb67b2fa0505
+    source_ref: git:4d0f5feba14eb650a7f6c57101d5fb67b2fa0505
+    short_sha: 4d0f5fe
+    changed_paths:
+      - .github/workflows/tests.yml
+      - examples/mixed_language_auto.py
+      - pykokoro/pipeline.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pyproject.toml
+      - requirements-test.txt
+      - tests/test_g2p_cache.py
+      - tests/test_g2p_language_routing.py
+      - tests/test_g2p_spokenform.py
+      - tests/test_language_detection_config.py
+      - tests/test_maintainer_review4_download_cache.py
+      - tests/test_packaging_metadata.py
+    stats:
+      files_changed: 0
+      insertions: 293
+      deletions: 27
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: imporved mixed languange performance"
+  - sha: 93f5bac3032d8d6c06a1949694b59ee7c621069b
+    source_ref: git:93f5bac3032d8d6c06a1949694b59ee7c621069b
+    short_sha: 93f5bac
+    changed_paths:
+      - .github/workflows/tests.yml
+      - README.md
+      - benchmarks/hard_cases/__main__.py
+      - benchmarks/polynorm_eval.py
+      - benchmarks/polynorm_phoneme.py
+      - docs/installation.md
+      - examples/backend_comparison.py
+      - examples/german_fallback_control.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/tokenizer.py
+      - pykokoro/types.py
+      - pyproject.toml
+      - requirements-test.txt
+      - tests/test_cache_keys.py
+      - tests/test_g2p_adapter_spacy_model.py
+      - tests/test_g2p_cache.py
+      - tests/test_lexphon_provisioning.py
+      - tests/test_maintainer_review4_download_cache.py
+      - tests/test_maintainer_review4_reproductions.py
+      - tests/test_packaging_metadata.py
+      - tests/test_tokenizer.py
+      - tests/test_word_timings.py
+    stats:
+      files_changed: 0
+      insertions: 331
+      deletions: 96
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: use new lexphon with included fallback"

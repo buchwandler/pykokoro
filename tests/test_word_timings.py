@@ -174,6 +174,7 @@ def test_kokorog2p_alignment_reads_token_metadata() -> None:
     assert tokens[0].pronunciation_language_markers == [{"language": "en", "ipa_offset": 0}]
     assert tokens[0].to_dict()["pronunciation_provider"] == "espeak"
 
+
 def test_kokorog2p_alignment_preserves_static_lexicon_provenance() -> None:
     class G2P:
         @staticmethod

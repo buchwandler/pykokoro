@@ -77,7 +77,6 @@ class TestTokenizerConfig:
         with pytest.raises(ValueError, match="fallback"):
             TokenizerConfig(fallback=mode)
 
-
     def test_named_lexicons_reject_non_string_names(self):
         with pytest.raises(TypeError):
             TokenizerConfig(lexicons=("gold", 1))
