@@ -81,6 +81,21 @@ jobs:
         pip install spacy
         python -m spacy download en_core_web_sm
         python -m compileall -q benchmarks pykokoro tests
+    - name: Verify kokorog2p Arabic frontend (Windows)
+      if: matrix.os == 'windows-latest'
+      shell: pwsh
+      run: |
+        @'
+        from kokorog2p import get_g2p
+
+        g2p = get_g2p(
+            language="ar",
+            model_profile="nabra-82m-v0.1",
+            lexicons=(),
+        )
+        assert g2p.get_target_model() == "nabra-82m-v0.1"
+        assert g2p.phonemize("مَرْحَبًا") == "mˈarħabˌan"
+        '@ | python -
     - name: Install Lexphon data
       run: lexphon data install en-us:gold
     - name: Tests
@@ -103,7 +118,7 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install pytest
         python -m pip install \
-          "kokorog2p[all]==0.9.4" \
+          "kokorog2p[all]==0.9.5" \
           "lexphon==0.2.3" \
           "phrasplit==0.3.7" \
           "ssmd==0.8.7" \
@@ -124,7 +139,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        kokorog2p-version: ["0.9.4"]
+        kokorog2p-version: ["0.9.5"]
     steps:
     - uses: actions/checkout@v4
     - name: Install espeak-ng
