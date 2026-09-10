@@ -69,7 +69,7 @@ jobs:
         if ($LASTEXITCODE -ne 0 -or -not ($voices -match '\bArabic\b')) {
           throw 'The standard eSpeak NG Arabic voice is unavailable'
         }
-        & $executablePath -q -x --ipa '-vArabic' "--path=$dataPath" 'مَرْحَبًا'
+        & $executablePath -q -x --ipa '-vsem/ar' "--path=$dataPath" 'مَرْحَبًا'
         if ($LASTEXITCODE -ne 0) {
           throw 'The standard eSpeak NG Arabic voice could not phonemize text'
         }
