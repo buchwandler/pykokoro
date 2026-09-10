@@ -50,7 +50,25 @@ jobs:
         if (-not $installPath) {
           throw "espeak-ng was not installed in either Program Files directory"
         }
+        $executablePath = (Get-ChildItem -Path $installPath -File -Filter "*espeak*.exe" | Select-Object -First 1).FullName
+        $libraryPath = (Get-ChildItem -Path $installPath -File -Filter "*espeak*.dll" | Select-Object -First 1).FullName
+        $dataPath = Join-Path $installPath "espeak-ng-data"
+        if (-not $executablePath -or -not $libraryPath -or -not (Test-Path $dataPath)) {
+          throw "eSpeak NG installation is missing its executable, library, or data directory"
+        }
         $env:Path = "$installPath;$env:Path"
+        $env:KOKOROG2P_ESPEAK_EXECUTABLE = $executablePath
+        $env:KOKOROG2P_ESPEAK_LIBRARY = $libraryPath
+        $env:KOKOROG2P_ESPEAK_DATA = $dataPath
+        @(
+          "KOKOROG2P_ESPEAK_EXECUTABLE=$executablePath",
+          "KOKOROG2P_ESPEAK_LIBRARY=$libraryPath",
+          "KOKOROG2P_ESPEAK_DATA=$dataPath"
+        ) | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        & $executablePath -q -x --ipa "-vsem/ar" "--path=$dataPath" "مَرْحَبًا"
+        if ($LASTEXITCODE -ne 0) {
+          throw "The standard eSpeak NG Arabic voice sem/ar is unavailable"
+        }
         $installPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
     - name: Install packages
       run: |
