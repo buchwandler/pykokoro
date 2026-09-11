@@ -1,0 +1,200 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: 0.9.5
+git_base_ref: v0.9.4
+git_base_sha: 4d2c617a472809b0923aaca42e52a5eb59f476e2
+git_head_ref: HEAD
+git_head_sha: a9005ed5438712fec330b5db50624bc4651d884f
+git_range: 4d2c617a472809b0923aaca42e52a5eb59f476e2..a9005ed5438712fec330b5db50624bc4651d884f
+commit_count: 4
+rows:
+  - sha: b3d11c9d834544c006fcfc985d1f289ee0977382
+    source_ref: git:b3d11c9d834544c006fcfc985d1f289ee0977382
+    short_sha: b3d11c9
+    changed_paths:
+      - .ledger/releaseledger/data/ledgers/main/events/events.jsonl
+      - .ledger/releaseledger/data/ledgers/main/releases/0.9.4/release.md
+      - .ledger/releaseledger/data/ledgers/main/releases/0.9.5/entries/entry-0003.md
+      - .ledger/releaseledger/data/ledgers/main/releases/0.9.5/release.md
+      - README.md
+      - docs/changelog.md
+      - docs/installation.md
+      - docs/quickstart.md
+      - examples/english.py
+      - examples/german_tts_samples.py
+      - pykokoro/__init__.py
+      - pykokoro/asset_progress.py
+      - pykokoro/model_registry.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/pipeline.py
+      - pykokoro/pipeline_config.py
+      - pykokoro/runtime/model_assets.py
+      - tests/test_model_registry.py
+      - tests/test_pipeline_lifecycle.py
+      - tests/test_runtime_model_assets.py
+    stats:
+      files_changed: 0
+      insertions: 641
+      deletions: 15
+    inspected: true
+    inspected_paths:
+      - pykokoro/asset_progress.py
+      - pykokoro/runtime/model_assets.py
+      - pykokoro/pipeline_config.py
+      - pykokoro/pipeline.py
+      - pykokoro/__init__.py
+      - README.md
+      - docs/installation.md
+      - docs/quickstart.md
+      - tests/test_model_registry.py
+      - tests/test_pipeline_lifecycle.py
+      - tests/test_runtime_model_assets.py
+    observed_behavior:
+      Managed runtime assets are provisioned lazily and emit structured lifecycle and
+      byte-progress events through a public callback, with a console reporter and quiet
+      valid cache hits; tests cover download, verification, cache, offline, and failure
+      behavior.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: asset progress event added"
+    target_entry_key: asset-progress
+    target_entry_id: entry-0003
+    notes: Existing accepted entry extended with git provenance.
+  - sha: 9afa3f487cfa7ed46552f8af7cc67990355a74e6
+    source_ref: git:9afa3f487cfa7ed46552f8af7cc67990355a74e6
+    short_sha: 9afa3f4
+    changed_paths:
+      - docs/examples.md
+      - examples/README.md
+      - examples/all_voices.py
+      - examples/run_all.py
+      - pykokoro/__init__.py
+      - pykokoro/discovery.py
+      - pykokoro/model_registry.py
+      - tests/test_all_voices_example.py
+      - tests/test_model_discovery.py
+    stats:
+      files_changed: 0
+      insertions: 773
+      deletions: 3
+    inspected: true
+    inspected_paths:
+      - docs/examples.md
+      - examples/README.md
+      - examples/all_voices.py
+      - examples/run_all.py
+      - pykokoro/__init__.py
+      - pykokoro/discovery.py
+      - pykokoro/model_registry.py
+      - tests/test_all_voices_example.py
+      - tests/test_model_discovery.py
+    observed_behavior:
+      Model discovery exposes structured per-voice metadata, and the new all-voices
+      example lists the dynamic registry inventory or synthesizes one labeled WAV for
+      runnable voices while reporting skipped models.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: all voices showcase"
+    target_entry_key: all-voices-showcase
+    target_entry_id: entry-0004
+    notes: Adds a public discovery capability and documented showcase workflow.
+  - sha: 62edb42c831416796c559842b47adac8147d2df9
+    source_ref: git:62edb42c831416796c559842b47adac8147d2df9
+    short_sha: 62edb42
+    changed_paths:
+      - README.md
+      - pykokoro/audio_generator.py
+      - pykokoro/model_registry.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/onnx_session.py
+      - pykokoro/pipeline.py
+      - pykokoro/runtime/model_assets.py
+      - pykokoro/runtime/tracing.py
+      - pykokoro/voice_manager.py
+      - tests/test_audio_generator_logging.py
+      - tests/test_model_assets_logging.py
+      - tests/test_pipeline_logging.py
+      - tests/test_runtime_tracing_logging.py
+    stats:
+      files_changed: 0
+      insertions: 426
+      deletions: 47
+    inspected: true
+    inspected_paths:
+      - README.md
+      - pykokoro/audio_generator.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/onnx_session.py
+      - pykokoro/pipeline.py
+      - pykokoro/runtime/model_assets.py
+      - pykokoro/runtime/tracing.py
+      - pykokoro/voice_manager.py
+      - tests/test_audio_generator_logging.py
+      - tests/test_model_assets_logging.py
+      - tests/test_pipeline_logging.py
+      - tests/test_runtime_tracing_logging.py
+    observed_behavior:
+      Standard Python logging now reports backend, asset, session, voice, stage,
+      inference, and audio-unit lifecycle details, while structured trace output remains
+      separate and routine logs omit document and phoneme payloads.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: add logging"
+    target_entry_key: runtime-logging
+    target_entry_id: entry-0005
+    notes:
+      Logging behavior and separation from returned traces are documented and tested.
+  - sha: a9005ed5438712fec330b5db50624bc4651d884f
+    source_ref: git:a9005ed5438712fec330b5db50624bc4651d884f
+    short_sha: a9005ed
+    changed_paths:
+      - README.md
+      - pykokoro/constants.py
+      - pykokoro/frontend_contracts.py
+      - pykokoro/model_profiles.py
+      - pykokoro/model_registry.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/release_catalog.py
+      - pyproject.toml
+      - tests/test_frontend_contracts.py
+      - tests/test_lexphon_provisioning.py
+      - tests/test_model_discovery.py
+      - tests/test_release_catalog.py
+      - tests/test_runtime_model_assets.py
+      - tests/test_runtime_tracing_logging.py
+      - tests/test_tokenizer.py
+    stats:
+      files_changed: 0
+      insertions: 343
+      deletions: 18
+    inspected: true
+    inspected_paths:
+      - README.md
+      - pykokoro/constants.py
+      - pykokoro/frontend_contracts.py
+      - pykokoro/model_profiles.py
+      - pykokoro/model_registry.py
+      - pykokoro/release_catalog.py
+      - pyproject.toml
+      - tests/test_frontend_contracts.py
+      - tests/test_lexphon_provisioning.py
+      - tests/test_model_discovery.py
+      - tests/test_release_catalog.py
+      - tests/test_runtime_model_assets.py
+    observed_behavior:
+      Adds a runtime-ready European Portuguese model profile with pt-PT routing,
+      regional Lexphon provisioning, legacy frontend alias support, manifest-based asset
+      downloads, and catalog, discovery, frontend, and provisioning tests.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: add support for pt-eu-logus2k"
+    target_entry_key: european-portuguese-model
+    target_entry_id: entry-0006
+    notes: Dependency minimums are raised to the companion kokorog2p 0.9.7 release.
