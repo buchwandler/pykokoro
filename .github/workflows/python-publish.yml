@@ -49,7 +49,7 @@ jobs:
           assert len(wheels) == 1, wheels
           assert len(sdists) == 1, sdists
           wheel_version = re.match(r"pykokoro-([^-]+)-", wheels[0].name).group(1)
-          sdist_version = re.match(r"pykokoro-([^-]+)\\.tar\\.gz$", sdists[0].name).group(1)
+          sdist_version = re.match(r"pykokoro-([^-]+)\.tar\.gz$", sdists[0].name).group(1)
           assert wheel_version == tag_version, (wheel_version, tag_version)
           assert sdist_version == tag_version, (sdist_version, tag_version)
 
