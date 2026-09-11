@@ -31,6 +31,7 @@ from .asset_constants import (
     MODEL_QUALITY_FILES,
     MODEL_QUALITY_FILES_HF,
 )
+from .asset_progress import AssetProgressCallback
 from .audio_generator import AudioGenerator
 from .config_types import (
     DEFAULT_MODEL_QUALITY,
@@ -1785,6 +1786,7 @@ class Kokoro:
         inference_audio_diagnostics: bool = False,
         inference_cache_enabled: bool = True,
         inference_cache_max_bytes: int = 128 * 1024 * 1024,
+        asset_progress: AssetProgressCallback | None = None,
     ) -> None:
         """
         Initialize the Kokoro ONNX backend.
@@ -1927,6 +1929,7 @@ class Kokoro:
         self._resolved_runtime_assets: ResolvedRuntimeAssets | None = None
         self._model_path = model_path
         self._voices_path = voices_path
+        self._asset_progress = asset_progress
 
         # Voice database connection (for kokovoicelab integration)
         self._voice_db: sqlite3.Connection | None = None
@@ -2052,6 +2055,7 @@ class Kokoro:
                     model_id=self._model_variant,
                     quality=self._model_quality,
                     preference=preference,
+                    progress_callback=self._asset_progress,
                 )
             except (ModelRegistryError, OSError, ArtifactValidationError) as exc:
                 raise ConfigurationError(

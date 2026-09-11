@@ -36,6 +36,28 @@ result = pipe.run("Hello! Welcome to PyKokoro text-to-speech.")
 sf.write("hello.wav", result.audio, result.sample_rate)
 ```
 
+### First-run model downloads
+
+Model and voice assets are downloaded lazily on the first synthesis that needs them. To
+make a cold-cache run visible, install the dependency-free console reporter:
+
+```python
+from pykokoro import ConsoleAssetProgress, GenerationConfig, KokoroPipeline, PipelineConfig
+
+pipe = KokoroPipeline(
+    PipelineConfig(
+        voice="af_bella",
+        generation=GenerationConfig(lang="en-us"),
+        asset_progress=ConsoleAssetProgress(),
+    )
+)
+```
+
+The reporter shows each asset, its expected size, transfer progress when running in a
+terminal, and verification before the asset is ready. Warm-cache runs stay quiet.
+Library applications can provide their own callback to receive structured
+`AssetProgressEvent` values.
+
 That's it! You've generated your first audio file.
 
 ### German speech

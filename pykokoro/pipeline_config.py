@@ -5,6 +5,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal, cast
 
+from .asset_progress import AssetProgressCallback
 from .config_types import (
     ModelQuality,
     ModelSource,
@@ -43,6 +44,7 @@ class PipelineConfig:
     provider_options: dict[str, Any] | None = None
     session_options: Any | None = None
 
+    asset_progress: AssetProgressCallback | None = None
     # Tokenizer configuration
     tokenizer_config: TokenizerConfig | None = None
     espeak_config: EspeakConfig | None = None

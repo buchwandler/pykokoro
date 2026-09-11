@@ -10,7 +10,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -62,6 +62,10 @@ class RuntimeArtifact:
     component: str | None = None
     voice: str | None = None
     handling: Mapping[str, Any] | None = None
+
+
+ArtifactByteProgress = Callable[[RuntimeArtifact, int, int], None]
+ArtifactPhaseProgress = Callable[[str], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -454,22 +458,43 @@ def verify_artifact(path: Path, artifact: RuntimeArtifact) -> None:
         )
 
 
-def download_artifact(artifact: RuntimeArtifact, target: Path) -> Path:
+def download_artifact(
+    artifact: RuntimeArtifact,
+    target: Path,
+    *,
+    progress_callback: ArtifactByteProgress | None = None,
+    phase_callback: ArtifactPhaseProgress | None = None,
+) -> Path:
     """Download one artifact and replace the target only after verification."""
+    logger.info(
+        "Downloading runtime artifact %s (%s, %d bytes)",
+        artifact.local_name,
+        artifact.role,
+        artifact.size,
+    )
     target.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("wb", dir=target.parent, delete=False) as file:
         temporary = Path(file.name)
     try:
         request = urllib.request.Request(artifact.url, headers={"User-Agent": "pykokoro/registry"})
+        downloaded = 0
         with (
             urllib.request.urlopen(request, timeout=120) as response,
             temporary.open("wb") as output,
         ):
             while chunk := response.read(1024 * 1024):
                 output.write(chunk)
+                downloaded += len(chunk)
+                if progress_callback is not None:
+                    progress_callback(artifact, downloaded, artifact.size)
+        if phase_callback is not None:
+            phase_callback("verify")
         verify_artifact(temporary, artifact)
         temporary.replace(target)
-    except (OSError, urllib.error.URLError, ModelRegistryError):
+        logger.info(
+            "Downloaded and verified runtime artifact %s -> %s", artifact.local_name, target
+        )
+    except BaseException:
         temporary.unlink(missing_ok=True)
         raise
     return target

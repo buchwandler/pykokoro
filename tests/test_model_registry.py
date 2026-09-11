@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+from io import StringIO
 from pathlib import Path
 
 import pytest
 
+from pykokoro.asset_progress import AssetProgressEvent, ConsoleAssetProgress
 from pykokoro.model_registry import (
     ArtifactIntegrityError,
     ModelRegistryError,
@@ -263,3 +265,77 @@ def test_verify_artifact_detects_same_size_sha_change(tmp_path: Path) -> None:
 
     assert exc_info.value.expected == hashlib.sha256(b"old!!").hexdigest()
     assert exc_info.value.actual == hashlib.sha256(b"new!!").hexdigest()
+
+
+def test_download_artifact_reports_byte_progress(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = b"model-payload"
+    artifact = RuntimeArtifact(
+        "model",
+        "model",
+        "onnx",
+        "https://example.test/model",
+        "model.onnx",
+        len(payload),
+        hashlib.sha256(payload).hexdigest(),
+    )
+    monkeypatch.setattr("urllib.request.urlopen", lambda *args, **kwargs: Response(payload))
+    events: list[tuple[int, int]] = []
+    target = tmp_path / "model.onnx"
+
+    result = download_artifact(
+        artifact,
+        target,
+        progress_callback=lambda _artifact, done, total: events.append((done, total)),
+    )
+
+    assert result == target
+    assert events
+    assert [done for done, _total in events] == sorted(done for done, _total in events)
+    assert all(total == artifact.size for _done, total in events)
+    assert events[-1][0] == artifact.size
+    assert target.read_bytes() == payload
+    assert list(tmp_path.glob("tmp*")) == []
+
+
+def test_console_asset_progress_reports_lifecycle() -> None:
+    stream = StringIO()
+    reporter = ConsoleAssetProgress(stream)
+    base = {
+        "model_id": "v1.0",
+        "distribution_id": "github-v1",
+        "artifact_id": "model",
+        "role": "model",
+        "filename": "model.onnx",
+        "bytes_total": 13 * 1024 * 1024,
+        "target": "/cache/model.onnx",
+    }
+    reporter(AssetProgressEvent(phase="download-start", bytes_done=0, **base))
+    reporter(
+        AssetProgressEvent(
+            phase="download-progress",
+            bytes_done=base["bytes_total"] // 2,
+            **base,
+        )
+    )
+    reporter(
+        AssetProgressEvent(
+            phase="verify-start",
+            bytes_done=base["bytes_total"],
+            **base,
+        )
+    )
+    reporter(
+        AssetProgressEvent(
+            phase="download-complete",
+            bytes_done=base["bytes_total"],
+            **base,
+        )
+    )
+
+    text = stream.getvalue()
+    assert "Downloading model:" in text
+    assert "13.0 MiB" in text
+    assert "Verifying model:" in text
+    assert "Ready: model.onnx" in text

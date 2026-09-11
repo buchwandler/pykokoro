@@ -30,7 +30,7 @@ try:
 except ImportError:
     from _output import artifact_path
 
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import ConsoleAssetProgress, KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.tokenizer import Tokenizer
 
@@ -48,9 +48,16 @@ LANG = "en-us"  # American English
 
 def main():
     """Generate English speech audio."""
-    print("Initializing TTS engine...")
+    print("Preparing TTS pipeline...")
+    progress = ConsoleAssetProgress()
     generation = GenerationConfig(lang=LANG, speed=1.0)
-    pipe = KokoroPipeline(PipelineConfig(voice=VOICE, generation=generation))
+    pipe = KokoroPipeline(
+        PipelineConfig(
+            voice=VOICE,
+            generation=generation,
+            asset_progress=progress,
+        )
+    )
 
     # Example 1: Generate from text
     print("\n=== Example 1: Text-to-Speech ===")

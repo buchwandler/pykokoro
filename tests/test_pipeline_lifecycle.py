@@ -206,3 +206,43 @@ def test_kokoro_close_is_safe_after_partial_initialization():
     assert kokoro._tokenizer is None
     assert kokoro._voice_manager is None
     assert kokoro._session is None
+
+
+def test_pipeline_propagates_asset_progress_to_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    callbacks = []
+    instances = []
+
+    class TrackingKokoro(DummyKokoro):
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            callbacks.append(kwargs["asset_progress"])
+            instances.append(self)
+
+    monkeypatch.setattr("pykokoro.onnx_backend.Kokoro", TrackingKokoro)
+
+    def first(event):
+        pass
+
+    def second(event):
+        pass
+
+    pipeline = KokoroPipeline(
+        PipelineConfig(
+            voice="af",
+            generation=GenerationConfig(lang="en-us"),
+            asset_progress=first,
+        ),
+        g2p=DummyG2PAdapter(),
+    )
+
+    pipeline._ensure_kokoro(pipeline.config)
+    pipeline._ensure_kokoro(
+        PipelineConfig(
+            voice="af",
+            generation=GenerationConfig(lang="en-us"),
+            asset_progress=second,
+        )
+    )
+
+    assert callbacks == [first]
+    assert instances[0]._asset_progress is second

@@ -432,3 +432,133 @@ def test_thorsten_style_stale_registry_refreshes_and_retries(
 
     assert resolved.artifact("github-model").read_bytes() == b"new-data"
     assert client.refresh_loads == 1
+
+
+def _download_with_progress(artifact, target, *, progress_callback=None, phase_callback=None):
+    payload = artifact.id.encode()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(payload)
+    if progress_callback is not None:
+        progress_callback(artifact, len(payload), artifact.size)
+    if phase_callback is not None:
+        phase_callback("verify")
+    verify_artifact(target, artifact)
+    return target
+
+
+def test_resolver_reports_download_event_sequence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "pykokoro.runtime.model_assets.download_artifact",
+        _download_with_progress,
+    )
+    events = []
+
+    resolve_runtime_assets(
+        model_id="test-model",
+        quality="fp32",
+        registry=_registry(),
+        cache_dir=tmp_path,
+        progress_callback=events.append,
+    )
+
+    assert [event.phase for event in events] == [
+        "download-start",
+        "download-progress",
+        "verify-start",
+        "download-complete",
+        "download-start",
+        "download-progress",
+        "verify-start",
+        "download-complete",
+    ]
+    assert all(event.target for event in events)
+
+
+def test_resolver_does_not_report_valid_cache_hits(tmp_path: Path) -> None:
+    registry = _registry()
+    distribution = registry.model("test-model").distribution()
+    for artifact in distribution.artifacts:
+        target = tmp_path / "test-model" / distribution.id / artifact.local_name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(artifact.id.encode())
+
+    events = []
+    resolve_runtime_assets(
+        model_id="test-model",
+        quality="fp32",
+        registry=registry,
+        cache_dir=tmp_path,
+        progress_callback=events.append,
+    )
+
+    assert events == []
+
+
+def test_resolver_reports_invalid_cache_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "test-model" / "github-dist" / "model.onnx"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"invalid")
+    monkeypatch.setattr(
+        "pykokoro.runtime.model_assets.download_artifact",
+        _download_with_progress,
+    )
+    events = []
+
+    resolve_runtime_assets(
+        model_id="test-model",
+        quality="fp32",
+        registry=_registry(),
+        cache_dir=tmp_path,
+        progress_callback=events.append,
+    )
+
+    assert events[0].phase == "download-start"
+    assert events[-1].phase == "download-complete"
+    assert target.read_bytes() == b"github-model"
+
+
+def test_resolver_offline_does_not_report_download_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "pykokoro.runtime.model_assets.download_artifact",
+        lambda *args, **kwargs: pytest.fail("offline resolution must not download"),
+    )
+    events = []
+
+    with pytest.raises(ModelRegistryError, match="Offline mode"):
+        resolve_runtime_assets(
+            model_id="test-model",
+            quality="fp32",
+            registry=_registry(),
+            cache_dir=tmp_path,
+            offline=True,
+            progress_callback=events.append,
+        )
+
+    assert events == []
+
+
+def test_resolver_failed_download_has_no_completion_event(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail_download(*args, **kwargs):
+        raise OSError("network failed")
+
+    monkeypatch.setattr("pykokoro.runtime.model_assets.download_artifact", fail_download)
+    events = []
+
+    with pytest.raises(OSError, match="network failed"):
+        resolve_runtime_assets(
+            model_id="test-model",
+            quality="fp32",
+            registry=_registry(),
+            cache_dir=tmp_path,
+            progress_callback=events.append,
+        )
+
+    assert [event.phase for event in events] == ["download-start"]

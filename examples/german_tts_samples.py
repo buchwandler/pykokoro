@@ -14,7 +14,13 @@ try:
 except ImportError:
     from _output import artifact_path
 
-from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
+from pykokoro import (
+    AssetProgressCallback,
+    ConsoleAssetProgress,
+    GenerationConfig,
+    KokoroPipeline,
+    PipelineConfig,
+)
 from pykokoro.model_profiles import MODEL_PROFILES, normalize_language_code
 from pykokoro.tokenizer import TokenizerConfig
 
@@ -75,7 +81,12 @@ def _profile_for_model(model_id: str) -> Any:
     raise ValueError(f"Unknown or unavailable German model: {model_id!r}")
 
 
-def make_config(*, model_id: str, lexicon: str) -> PipelineConfig:
+def make_config(
+    *,
+    model_id: str,
+    lexicon: str,
+    asset_progress: AssetProgressCallback | None = None,
+) -> PipelineConfig:
     """Build the explicit pipeline configuration for one German sample run."""
     if lexicon not in LEXICON_CHOICES:
         raise ValueError(f"Unknown German lexicon: {lexicon!r}")
@@ -90,6 +101,7 @@ def make_config(*, model_id: str, lexicon: str) -> PipelineConfig:
         generation=GenerationConfig(lang="de", speed=1.0),
         tokenizer_config=TokenizerConfig(lexicons=(lexicon,)),
         return_trace=True,
+        asset_progress=asset_progress,
     )
 
 
@@ -104,8 +116,9 @@ def _print_trace_warnings(result: Any) -> None:
 
 def synthesize_samples(*, model_id: str, lexicon: str) -> list[Path]:
     """Synthesize each canonical sentence through one shared pipeline."""
-    config = make_config(model_id=model_id, lexicon=lexicon)
     outputs: list[Path] = []
+    progress = ConsoleAssetProgress()
+    config = make_config(model_id=model_id, lexicon=lexicon, asset_progress=progress)
 
     with KokoroPipeline(config) as pipeline:
         for sample_id, text in SAMPLES:

@@ -85,10 +85,21 @@ def __getattr__(name: str) -> Any:
             "AudioUnitResult": AudioUnitResult,
             "WordTiming": WordTiming,
         }[name]
+    if name in {"AssetProgressEvent", "AssetProgressCallback", "ConsoleAssetProgress"}:
+        from .asset_progress import AssetProgressCallback, AssetProgressEvent, ConsoleAssetProgress
+
+        return {
+            "AssetProgressEvent": AssetProgressEvent,
+            "AssetProgressCallback": AssetProgressCallback,
+            "ConsoleAssetProgress": ConsoleAssetProgress,
+        }[name]
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [
+    "AssetProgressEvent",
+    "AssetProgressCallback",
+    "ConsoleAssetProgress",
     "available_model_releases",
     "download_model_release",
     "resolve_model_release",

@@ -141,6 +141,14 @@ stale catalog metadata, the catalog is refreshed once without falling back to th
 cache, then asset resolution is retried. Offline mode never refreshes over the network,
 and manual deletion of the registry catalog or model directory is not required.
 
+### Observing first-run downloads
+
+Managed runtime assets are provisioned lazily during the first synthesis. Pass
+`asset_progress=ConsoleAssetProgress()` to show cold-cache downloads, byte progress, and
+verification, or pass a callable to `PipelineConfig.asset_progress` to consume
+structured `AssetProgressEvent` values. Valid cache hits remain quiet. Offline mode
+raises the existing cache error without emitting a download-start event.
+
 ## Model capability discovery
 
 Use the public discovery API to inspect models, voices, languages, qualities, frontends,

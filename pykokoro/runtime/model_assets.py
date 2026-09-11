@@ -12,6 +12,7 @@ from typing import Any
 
 import numpy as np
 
+from ..asset_progress import AssetProgressCallback, AssetProgressEvent, AssetProgressPhase
 from ..model_registry import (
     ArtifactIntegrityError,
     DownloadPreference,
@@ -152,14 +153,21 @@ def _materialize_artifact(
     artifact: RuntimeArtifact,
     target: Path,
     *,
+    model_id: str,
+    distribution_id: str,
     force: bool,
     offline: bool,
+    progress_callback: AssetProgressCallback | None,
 ) -> Path:
     if target.is_file() and not force:
         try:
             verify_artifact(target, artifact)
             return target
         except ArtifactIntegrityError:
+            logger.info(
+                "Cached runtime artifact %s failed verification; downloading a replacement.",
+                artifact.local_name,
+            )
             target.unlink(missing_ok=True)
 
     if offline:
@@ -168,7 +176,41 @@ def _materialize_artifact(
             f"distribution {target.parent.name!r}"
         )
 
-    return download_artifact(artifact, target)
+    def emit(phase: AssetProgressPhase, bytes_done: int) -> None:
+        if progress_callback is not None:
+            progress_callback(
+                AssetProgressEvent(
+                    phase=phase,
+                    model_id=model_id,
+                    distribution_id=distribution_id,
+                    artifact_id=artifact.id,
+                    role=artifact.role,
+                    filename=artifact.local_name,
+                    bytes_done=bytes_done,
+                    bytes_total=artifact.size,
+                    target=str(target),
+                )
+            )
+
+    def on_bytes(_artifact: RuntimeArtifact, bytes_done: int, _bytes_total: int) -> None:
+        emit("download-progress", bytes_done)
+
+    def on_phase(phase: str) -> None:
+        if phase == "verify":
+            emit("verify-start", artifact.size)
+
+    emit("download-start", 0)
+    if progress_callback is None:
+        result = download_artifact(artifact, target)
+    else:
+        result = download_artifact(
+            artifact,
+            target,
+            progress_callback=on_bytes,
+            phase_callback=on_phase,
+        )
+    emit("download-complete", artifact.size)
+    return result
 
 
 def _resolve_runtime_assets_once(
@@ -180,6 +222,7 @@ def _resolve_runtime_assets_once(
     force: bool,
     registry: ModelRegistry,
     cache_dir: Path | None,
+    progress_callback: AssetProgressCallback | None,
 ) -> ResolvedRuntimeAssets:
     model = registry.model(model_id)
     if model.data.get("runtime_available", True) is False:
@@ -219,6 +262,9 @@ def _resolve_runtime_assets_once(
             target,
             force=force,
             offline=offline,
+            model_id=model_id,
+            distribution_id=distribution.id,
+            progress_callback=progress_callback,
         )
 
     runtime = model.runtime
@@ -246,6 +292,7 @@ def resolve_runtime_assets(
     registry: ModelRegistry | None = None,
     registry_client: RegistryClient | None = None,
     cache_dir: Path | None = None,
+    progress_callback: AssetProgressCallback | None = None,
 ) -> ResolvedRuntimeAssets:
     """Select and materialize every runtime artifact from one distribution."""
     if registry is not None:
@@ -257,6 +304,7 @@ def resolve_runtime_assets(
             force=force,
             registry=registry,
             cache_dir=cache_dir,
+            progress_callback=progress_callback,
         )
 
     client = registry_client or RegistryClient()
@@ -270,6 +318,7 @@ def resolve_runtime_assets(
             force=force,
             registry=selected_registry,
             cache_dir=cache_dir,
+            progress_callback=progress_callback,
         )
     except ArtifactIntegrityError:
         if offline:
@@ -299,6 +348,7 @@ def resolve_runtime_assets(
                 force=force,
                 registry=fresh_registry,
                 cache_dir=cache_dir,
+                progress_callback=progress_callback,
             )
         except ArtifactIntegrityError as second_error:
             raise ModelRegistryError(

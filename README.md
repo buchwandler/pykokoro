@@ -207,6 +207,28 @@ res = pipe.run("Hello")
 audio = res.audio
 ```
 
+### First-run model downloads
+
+Managed runtime assets are provisioned lazily when synthesis first needs them. On a cold
+cache, user-facing examples can show the asset name, expected size, byte progress, and
+checksum verification with the built-in reporter:
+
+```python
+from pykokoro import ConsoleAssetProgress, GenerationConfig, KokoroPipeline, PipelineConfig
+
+config = PipelineConfig(
+    voice="af_sarah",
+    generation=GenerationConfig(lang="en-us"),
+    asset_progress=ConsoleAssetProgress(),
+)
+pipe = KokoroPipeline(config)
+result = pipe.run("Hello")
+```
+
+Applications can receive structured `AssetProgressEvent` values instead by passing a
+callable as `asset_progress`. Valid managed assets are reused silently from the local
+cache, and offline mode never starts a download.
+
 ### Managing Result Memory
 
 By default, `AudioResult` retains the raw and processed waveform for each phoneme

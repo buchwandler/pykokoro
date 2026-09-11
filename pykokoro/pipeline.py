@@ -794,6 +794,7 @@ class KokoroPipeline:
         cfg = resolve_model_defaults(cfg)
         kokoro_key = self._kokoro_key(cfg)
         if self._kokoro is not None and self._kokoro_config_key == kokoro_key:
+            self._kokoro._asset_progress = cfg.asset_progress
             return self._kokoro, False
         try:
             from .onnx_backend import Kokoro
@@ -827,6 +828,7 @@ class KokoroPipeline:
             inference_audio_diagnostics=cfg.inference_audio_diagnostics,
             inference_cache_enabled=cfg.inference_cache_enabled,
             inference_cache_max_bytes=cfg.inference_cache_max_bytes,
+            asset_progress=cfg.asset_progress,
         )
         self._kokoro = new_kokoro
         self._kokoro_config_key = kokoro_key
