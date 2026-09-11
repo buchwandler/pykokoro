@@ -118,7 +118,7 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install pytest
         python -m pip install \
-          "kokorog2p[all]==0.9.5" \
+          "kokorog2p[all]==0.9.7" \
           "lexphon==0.2.3" \
           "phrasplit==0.3.7" \
           "ssmd==0.8.7" \
@@ -139,7 +139,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        kokorog2p-version: ["0.9.5"]
+        kokorog2p-version: ["0.9.7"]
     steps:
     - uses: actions/checkout@v4
     - name: Install espeak-ng

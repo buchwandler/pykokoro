@@ -142,9 +142,7 @@ def test_registry_uses_fresh_cache_without_network(
     assert registry.cache_fallback is False
 
 
-def test_registry_refreshes_stale_cache(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_registry_refreshes_stale_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     cache = tmp_path / "models.json"
     cache.write_text(json.dumps(_registry()), encoding="utf-8")
     stale_time = time.time() - 2 * 24 * 60 * 60

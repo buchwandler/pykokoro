@@ -51,14 +51,15 @@ def _add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--voices-path", type=Path)
     parser.add_argument("--scenario", choices=tuple(item.name for item in SCENARIOS))
     parser.add_argument("--child", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--dry-run", action="store_true", help="print scenarios without starting subprocesses")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="print scenarios without starting subprocesses"
+    )
 
 
 def _scenario(name: str | None) -> Scenario:
     if name is None:
         return SCENARIOS[0]
     return next(item for item in SCENARIOS if item.name == name)
-
 
 
 def _phase_total_matching(records: list[logging.LogRecord], prefixes: tuple[str, ...]) -> float:
@@ -95,7 +96,11 @@ def _child(args: argparse.Namespace) -> int:
     logger.addHandler(handler)
     started = time.perf_counter()
     try:
-        tokenizer_config = None if scenario.spacy == "auto" else TokenizerConfig(use_spacy=scenario.spacy == "required")
+        tokenizer_config = (
+            None
+            if scenario.spacy == "auto"
+            else TokenizerConfig(use_spacy=scenario.spacy == "required")
+        )
         short_config = ShortSentenceConfig()
         if scenario.short_mode == "phrase":
             short_config = ShortSentenceConfig(
@@ -138,7 +143,9 @@ def _child(args: argparse.Namespace) -> int:
             "final_audio_ms": render_ms,
             "frontend_ms": _frontend_metrics(trace),
             "registry_ms": _phase_total_matching(records, ("registry.load.",)),
-            "artifact_ms": _phase_total_matching(records, ("artifact.materialize.", "artifact.cache.verify.")),
+            "artifact_ms": _phase_total_matching(
+                records, ("artifact.materialize.", "artifact.cache.verify.")
+            ),
             "onnx_ms": _phase_total_matching(records, ("onnx.session.",)),
             "inference_ms": inference_ms,
             "audio_samples": int(result.audio.size),
@@ -168,7 +175,10 @@ def _parent(args: argparse.Namespace) -> int:
             "--model-source",
             args.model_source,
         ]
-        for option, value in (("--model-path", args.model_path), ("--voices-path", args.voices_path)):
+        for option, value in (
+            ("--model-path", args.model_path),
+            ("--voices-path", args.voices_path),
+        ):
             if value is not None:
                 command.extend((option, str(value)))
         completed = subprocess.run(command, check=False, text=True, capture_output=True)

@@ -346,6 +346,7 @@ def phonemize_short_sentence_phrase(
     )
     if context_phonemizer is None:
         import kokorog2p
+
         result = kokorog2p.phonemize(
             phrase_text,
             language=lang,

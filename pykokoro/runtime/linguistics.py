@@ -13,6 +13,7 @@ from .language_plan import LanguageRun
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass(frozen=True, slots=True)
 class TokenAnnotation:
     """Provider-neutral lexical annotation aligned to one input text."""

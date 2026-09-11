@@ -67,6 +67,7 @@ def _quality_registry() -> ModelRegistry:
     ]
     return ModelRegistry(data, "quality-fixture")
 
+
 def _registry() -> ModelRegistry:
     return ModelRegistry(
         {
@@ -462,6 +463,7 @@ class RefreshingClient:
         self.normal_loads += 1
         return self.initial
 
+
 def test_resolver_refreshes_once_when_cached_registry_lacks_model(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -526,7 +528,6 @@ def test_resolver_does_not_loop_after_resolution_refresh_failure(
 
     assert client.normal_loads == 1
     assert client.refresh_loads == 1
-
 
 
 def _download_payload(artifact: RuntimeArtifact) -> bytes:

@@ -262,6 +262,7 @@ def test_preprocess_phrase_mode_uses_phrase_phonemes_and_metadata(monkeypatch):
     assert metadata["original_token_count"] == 3
     assert metadata["generated_token_count"] == 8
 
+
 def test_preprocess_phrase_mode_uses_pipeline_context_phonemizer() -> None:
     tokenizer = DummyTokenizer(factor=1)
     config = ShortSentenceConfig(

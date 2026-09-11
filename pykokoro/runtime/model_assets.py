@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 class RuntimeResolutionError(ModelRegistryError):
     """Registry data cannot resolve the requested runtime assets."""
 
+
 @dataclass(frozen=True, slots=True)
 class ResolvedRuntimeAssets:
     """All files selected for one model and one registry distribution."""
@@ -167,9 +168,7 @@ def _materialize_artifact(
     started = time.perf_counter()
     if target.is_file() and not force:
         try:
-            logger.debug(
-                "artifact.cache.verify.start artifact_id=%s path=%s", artifact.id, target
-            )
+            logger.debug("artifact.cache.verify.start artifact_id=%s path=%s", artifact.id, target)
             verify_artifact(target, artifact)
         except ArtifactIntegrityError:
             logger.debug(
@@ -249,6 +248,7 @@ def _materialize_artifact(
     )
     emit("download-complete", artifact.size)
     return result
+
 
 def _runtime_artifacts_for_quality(
     distribution: RuntimeDistribution, *, quality: str | None

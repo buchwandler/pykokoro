@@ -75,7 +75,7 @@ jobs:
               requirements = [
                   Requirement(value) for value in metadata.get_all("Requires-Dist", [])
               ]
-              assert has_minimum(requirements, "kokorog2p", "0.9.5")
+              assert has_minimum(requirements, "kokorog2p", "0.9.7")
               assert has_minimum(requirements, "lexphon", "0.2.3")
               assert any(name.endswith("pykokoro/py.typed") for name in archive.namelist())
           PY

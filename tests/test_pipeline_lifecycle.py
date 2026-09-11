@@ -50,7 +50,6 @@ class DummyKokoro:
     def close(self) -> None:
         self.close_calls += 1
 
-
     def warmup(self) -> None:
         self.warmup_calls += 1
 

@@ -1261,9 +1261,7 @@ class AudioGenerator:
             )
 
             retry = (
-                build_short_sentence_phrase_retry(
-                    segment, template, short_sentence_metadata
-                )
+                build_short_sentence_phrase_retry(segment, template, short_sentence_metadata)
                 if context_phonemizer is None
                 else build_short_sentence_phrase_retry(
                     segment,
