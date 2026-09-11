@@ -19,6 +19,7 @@ _EXCLUDED_FILES = {"__init__.py", "run_all.py", "_output.py"}
 _PLAYBACK_EXAMPLES = {"play_audio.py", "play_paragraphs.py", "play_streaming.py"}
 _OPTIONAL_EXAMPLES = {
     "backend_comparison.py",
+    "all_voices.py",
     "cpu_benchmark.py",
     "provider_info.py",
     "spokenform_phoneme_equivalence.py",

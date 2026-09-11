@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal, cast
 
 from .model_profiles import (
     canonical_voice_name,
@@ -18,6 +19,19 @@ from .model_registry import (
     RuntimeModel,
     distribution_source,
 )
+
+VoiceGender = Literal["female", "male", "neutral", "unknown"]
+
+
+@dataclass(frozen=True, slots=True)
+class VoiceCapabilities:
+    """Canonical identity metadata for one registry voice."""
+
+    name: str
+    gender: VoiceGender
+    language: str
+    locale: str
+    language_label: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +55,7 @@ class ModelCapabilities:
     provider: str | None = None
     sample_rate: int | None = None
     max_tokens: int | None = None
+    voice_details: tuple[VoiceCapabilities, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +100,22 @@ def discover_models(
     )
 
 
+def _voice_details(model: RuntimeModel) -> tuple[VoiceCapabilities, ...]:
+    metadata = model.voice_metadata
+    if not metadata or not all(voice in metadata for voice in model.voices):
+        return ()
+    return tuple(
+        VoiceCapabilities(
+            name=voice,
+            gender=cast(VoiceGender, metadata[voice]["gender"]),
+            language=metadata[voice]["language"],
+            locale=metadata[voice]["locale"],
+            language_label=metadata[voice]["language_label"],
+        )
+        for voice in model.voices
+    )
+
+
 def _capabilities_for_model(
     model: RuntimeModel,
     *,
@@ -126,6 +157,7 @@ def _capabilities_for_model(
         languages=tuple(normalize_language_code(language) for language in model.language_codes),
         voices=voices,
         default_voice=default_voice,
+        voice_details=_voice_details(model),
         qualities=qualities,
         g2p_backend=profile.g2p_backend if profile is not None else None,
         lexicons=profile.named_lexicons if profile is not None else None,
@@ -161,4 +193,9 @@ def _source_for_model(model: RuntimeModel, distribution: RuntimeDistribution | N
     return str(configured) if configured is not None else ""
 
 
-__all__ = ["ModelCapabilities", "ModelDiscoveryResult", "discover_models"]
+__all__ = [
+    "ModelCapabilities",
+    "ModelDiscoveryResult",
+    "VoiceCapabilities",
+    "discover_models",
+]

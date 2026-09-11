@@ -122,6 +122,17 @@ class RuntimeModel:
         return tuple(self.runtime["voices"])
 
     @property
+    def voice_metadata(self) -> Mapping[str, Mapping[str, str]]:
+        metadata = self.runtime.get("voice_metadata", {})
+        if not isinstance(metadata, Mapping):
+            return {}
+        return {
+            str(name): {str(key): str(value) for key, value in detail.items()}
+            for name, detail in metadata.items()
+            if isinstance(detail, Mapping)
+        }
+
+    @property
     def default_voice(self) -> str:
         return str(self.runtime["default_voice"])
 

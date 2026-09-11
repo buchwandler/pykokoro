@@ -90,6 +90,25 @@ result = pipe.run(text)
 sf.write("pauses_demo.wav", result.audio, result.sample_rate)
 ```
 
+## All-voices showcase
+
+Discover every runnable registry voice and write one streamed identification WAV:
+
+```bash
+python examples/all_voices.py
+```
+
+To inspect the dynamic inventory without downloading model assets or synthesizing audio:
+
+```bash
+python examples/all_voices.py --list-only
+```
+
+The full showcase can download multiple model and voice assets on its first run and may
+take substantial time on CPU. Runnable experimental frontends are included and labeled.
+Models classified as unavailable, restricted, or unsupported are listed separately and
+skipped. The registry determines the voice count, so it can change over time.
+
 ### Custom Pause Durations
 
 ```python

@@ -219,6 +219,25 @@ def test_discovery_returns_complete_sorted_contract(monkeypatch: pytest.MonkeyPa
         thorsten.status = "changed"  # type: ignore[misc]
 
 
+def test_discovery_exposes_voice_details_in_roster_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = _registry()
+    registry.data["models"]["de-anna"]["runtime"]["voice_metadata"] = {
+        "df_anna": {
+            "gender": "female",
+            "language": "de",
+            "locale": "de",
+            "language_label": "German",
+        }
+    }
+    client = RegistryClientStub(registry)
+    monkeypatch.setattr(discovery, "RegistryClient", lambda: client)
+    model = next(item for item in discovery.discover_models().models if item.model_id == "de-anna")
+    assert tuple(detail.name for detail in model.voice_details) == model.voices
+    assert model.voice_details[0].locale == "de"
+
+
 def test_discovery_uses_selected_distribution(monkeypatch: pytest.MonkeyPatch) -> None:
     registry = _registry()
     registry.data["models"]["de-thorsten"]["distributions"] = [

@@ -26,6 +26,28 @@ scripts below use the current pipeline-first API.
 
 ## Canonical German TTS samples
 
+## All-voices showcase
+
+Discover the current runnable registry voices and synthesize one long WAV in table
+order:
+
+```bash
+python examples/all_voices.py
+```
+
+Use `--list-only` to print the exact dynamic catalog without downloading model assets or
+running inference:
+
+```bash
+python examples/all_voices.py --list-only
+```
+
+The full command may download several model and voice assets on first use and can take
+substantial time on CPU. It includes runnable experimental frontends, labels them in the
+table, writes one long WAV below `example-artifacts/`, and skips models classified as
+unavailable, restricted, or unsupported. The voice count follows the registry and is not
+fixed.
+
 Generate the three benchmark sentences from https://ttssamples.syntheticspeech.de/ as
 separate WAV files:
 
