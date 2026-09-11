@@ -257,7 +257,12 @@ class RegistryClient:
             data = _read_json(self.cache_path)
             _validate_registry(data)
             return ModelRegistry(data, str(self.cache_path))
-        if not refresh and max_cache_age_s is not None and self.cache_path.is_file():
+        if (
+            not refresh
+            and max_cache_age_s is not None
+            and max_cache_age_s > 0
+            and self.cache_path.is_file()
+        ):
             try:
                 age_s = max(0.0, time.time() - self.cache_path.stat().st_mtime)
                 if age_s <= max_cache_age_s:
