@@ -1,0 +1,125 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: v0.9.3
+git_base_ref: v0.9.2
+git_base_sha: d45824873fa0913d83e589f5324dd39e318f5cb9
+git_head_ref: HEAD
+git_head_sha: 11247a99f26e5a68dd711bbe4df11b4f77340738
+git_range: d45824873fa0913d83e589f5324dd39e318f5cb9..11247a99f26e5a68dd711bbe4df11b4f77340738
+commit_count: 4
+rows:
+  - sha: 58d4a90e27a19fb4db0e34f62a5a98a0d29b1da2
+    source_ref: git:58d4a90e27a19fb4db0e34f62a5a98a0d29b1da2
+    short_sha: 58d4a90
+    changed_paths:
+      - pykokoro/model_profiles.py
+      - tests/test_model_profile_resolution.py
+    stats:
+      files_changed: 0
+      insertions: 115
+      deletions: 2
+    inspected: true
+    inspected_paths:
+      - pykokoro/model_profiles.py
+      - tests/test_model_profile_resolution.py
+    observed_behavior:
+      Added registry metadata for the de-anna and pl-mateusz profiles and prevented
+      automatic language routing from selecting profiles without runtime-ready support.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: add missing models"
+    target_entry_id: entry-0001
+    notes: Reviewed the profile and routing changes in the commit diff.
+  - sha: 16a4fdda5755102ff34cca413c2437c3ebb12a97
+    source_ref: git:16a4fdda5755102ff34cca413c2437c3ebb12a97
+    short_sha: 16a4fdd
+    changed_paths:
+      - .github/workflows/python-publish.yml
+    stats:
+      files_changed: 0
+      insertions: 1
+      deletions: 1
+    inspected: true
+    inspected_paths:
+      - .github/workflows/python-publish.yml
+    observed_behavior:
+      Corrected the CI publish check to parse .tar.gz source distribution filenames
+      correctly.
+    public_impact: internal
+    decision: internal
+    stale: false
+    evidence_subject: "chore: fix ci"
+    target_entry_id: entry-0002
+    notes: CI-only validation correction with no user-facing release note.
+  - sha: 53b3cccd9fc53d7ecc5321a1268bb28fa52cdacc
+    source_ref: git:53b3cccd9fc53d7ecc5321a1268bb28fa52cdacc
+    short_sha: 53b3ccc
+    changed_paths:
+      - examples/german4.py
+      - examples/german_tts_samples.py
+      - pykokoro/frontend_contracts.py
+      - pykokoro/model_profiles.py
+      - tests/test_frontend_contracts.py
+      - tests/test_german_examples.py
+      - tests/test_german_tts_samples_example.py
+      - tests/test_model_discovery.py
+      - tests/test_model_profile_resolution.py
+      - tests/test_runtime_model_assets.py
+    stats:
+      files_changed: 0
+      insertions: 235
+      deletions: 45
+    inspected: true
+    inspected_paths:
+      - examples/german4.py
+      - examples/german_tts_samples.py
+      - pykokoro/frontend_contracts.py
+      - pykokoro/model_profiles.py
+      - tests/test_frontend_contracts.py
+      - tests/test_german_examples.py
+      - tests/test_german_tts_samples_example.py
+      - tests/test_model_discovery.py
+      - tests/test_model_profile_resolution.py
+      - tests/test_runtime_model_assets.py
+    observed_behavior:
+      Promoted de-anna to a runtime-ready German model using german-ipa-v1 and
+      kokorog2p, with discovery, examples, frontend contracts, asset registry, and
+      resolution coverage.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: adapt de-anna"
+    target_entry_id: entry-0001
+    notes:
+      Reviewed the model profile, example, discovery, frontend, and runtime asset
+      changes in the commit diff.
+  - sha: 11247a99f26e5a68dd711bbe4df11b4f77340738
+    source_ref: git:11247a99f26e5a68dd711bbe4df11b4f77340738
+    short_sha: 11247a9
+    changed_paths:
+      - pykokoro/model_profiles.py
+      - tests/test_frontend_contracts.py
+      - tests/test_model_profile_resolution.py
+      - tests/test_runtime_model_assets.py
+    stats:
+      files_changed: 0
+      insertions: 27
+      deletions: 31
+    inspected: true
+    inspected_paths:
+      - pykokoro/model_profiles.py
+      - tests/test_frontend_contracts.py
+      - tests/test_model_profile_resolution.py
+      - tests/test_runtime_model_assets.py
+    observed_behavior:
+      Applied formatting-only cleanup to the de-anna profile and related tests.
+    public_impact: internal
+    decision: internal
+    stale: false
+    evidence_subject: "chore: pre-commit"
+    target_entry_id: entry-0003
+    notes: Formatting-only cleanup with no user-facing behavior change.
