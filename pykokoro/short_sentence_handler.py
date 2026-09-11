@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import random
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -328,20 +329,34 @@ def is_segment_short(
 
 
 def phonemize_short_sentence_phrase(
-    segment: PhonemeSegment, phrase_template: str
+    segment: PhonemeSegment,
+    phrase_template: str,
+    context_phonemizer: Callable[[str, str], Any] | None = None,
 ) -> tuple[str, list[int], list[dict[str, object]]]:
     """Phonemize a phrase containing the short segment text."""
-    import kokorog2p
-
     phrase_text = phrase_template.replace("{segment}", segment.text)
     segment_start = phrase_template.find("{segment}")
     segment_end = segment_start + len(segment.text) if segment_start >= 0 else -1
     lang = SUPPORTED_LANGUAGES.get(segment.lang, segment.lang)
-    result = kokorog2p.phonemize(
-        phrase_text,
-        language=lang,
-        return_phonemes=True,
-        return_ids=True,
+    started = time.perf_counter()
+    logger.debug(
+        "short_sentence.context_g2p.start mode=phrase language=%s reuse=%s",
+        lang,
+        context_phonemizer is not None,
+    )
+    if context_phonemizer is None:
+        import kokorog2p
+        result = kokorog2p.phonemize(
+            phrase_text,
+            language=lang,
+            return_phonemes=True,
+            return_ids=True,
+        )
+    else:
+        result = context_phonemizer(phrase_text, lang)
+    logger.debug(
+        "short_sentence.context_g2p.finish elapsed_ms=%.3f",
+        (time.perf_counter() - started) * 1000.0,
     )
     phonemes = getattr(result, "phonemes", None) or getattr(result, "phoneme", "")
     tokens = getattr(result, "ids", None) or getattr(result, "token_ids", [])
@@ -360,6 +375,7 @@ def apply_short_sentence_mode(
     config: ShortSentenceConfig,
     tokenize: Callable[[str], list[int]],
     rng: random.Random | None = None,
+    context_phonemizer: Callable[[str, str], Any] | None = None,
 ) -> ShortSentenceApplication:
     """Apply the configured short sentence resolve mode to a segment."""
     mode_name = config.get_resolve_mode_name(len(tokens))
@@ -403,7 +419,13 @@ def apply_short_sentence_mode(
         limit=config.phrase_fallback_tries,
     )
     try:
-        phrase_result = phonemize_short_sentence_phrase(segment, phrase_template)
+        phrase_result = (
+            phonemize_short_sentence_phrase(segment, phrase_template)
+            if context_phonemizer is None
+            else phonemize_short_sentence_phrase(
+                segment, phrase_template, context_phonemizer=context_phonemizer
+            )
+        )
     except (RuntimeError, ValueError, KeyError) as exc:
         logger.warning(
             "Failed to phonemize short sentence phrase for '%s': %s",
@@ -452,10 +474,17 @@ def build_short_sentence_phrase_retry(
     segment: PhonemeSegment,
     phrase_template: str,
     base_metadata: dict[str, object],
+    context_phonemizer: Callable[[str, str], Any] | None = None,
 ) -> ShortSentenceApplication | None:
     """Build a retry phrase application using the original phrase-cut settings."""
     try:
-        phrase_result = phonemize_short_sentence_phrase(segment, phrase_template)
+        phrase_result = (
+            phonemize_short_sentence_phrase(segment, phrase_template)
+            if context_phonemizer is None
+            else phonemize_short_sentence_phrase(
+                segment, phrase_template, context_phonemizer=context_phonemizer
+            )
+        )
     except (RuntimeError, ValueError, KeyError) as exc:
         logger.warning(
             "Failed to phonemize short sentence fallback phrase for '%s': %s",

@@ -45,8 +45,14 @@ class DummyKokoro:
         _ = kwargs
         self.close_calls = 0
 
+        self.warmup_calls = 0
+
     def close(self) -> None:
         self.close_calls += 1
+
+
+    def warmup(self) -> None:
+        self.warmup_calls += 1
 
     def preprocess_segments(self, phoneme_segments, enable_short_sentence):
         _ = enable_short_sentence
@@ -102,6 +108,28 @@ def test_pipeline_context_manager_closes_kokoro(monkeypatch):
 
     assert instances
     assert instances[0].close_calls == 1
+
+
+def test_pipeline_warmup_reuses_backend(monkeypatch) -> None:
+    instances = []
+
+    class TrackingKokoro(DummyKokoro):
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            instances.append(self)
+
+    monkeypatch.setattr("pykokoro.onnx_backend.Kokoro", TrackingKokoro)
+    pipeline = KokoroPipeline(
+        PipelineConfig(voice="af", generation=GenerationConfig(lang="en-us")),
+        g2p=DummyG2PAdapter(),
+    )
+
+    pipeline.warmup()
+    pipeline.warmup()
+
+    assert len(instances) == 1
+    assert instances[0].warmup_calls == 2
+    pipeline.close()
 
 
 def test_pipeline_context_manager_closes_on_exception(monkeypatch):

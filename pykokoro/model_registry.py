@@ -22,7 +22,7 @@ MODEL_REGISTRY_URL = (
     "https://raw.githubusercontent.com/buchwandler/kokoro-onnx-models/main/catalog/models.json"
 )
 logger = logging.getLogger(__name__)
-
+DEFAULT_REGISTRY_MAX_AGE_S = 24 * 60 * 60
 DownloadPreference = Literal["auto", "github", "huggingface", "upstream"]
 
 
@@ -239,9 +239,16 @@ class RegistryClient:
         offline: bool = False,
         refresh: bool = False,
         allow_cache_fallback: bool = True,
+        max_cache_age_s: float | None = DEFAULT_REGISTRY_MAX_AGE_S,
     ) -> ModelRegistry:
         if offline and refresh:
             raise ValueError("offline and refresh cannot be combined")
+        logger.debug(
+            "registry.load.start path=%s offline=%s refresh=%s",
+            self.path or self.cache_path,
+            offline,
+            refresh,
+        )
         if self.path is not None:
             data = _read_json(self.path)
             _validate_registry(data)
@@ -250,10 +257,26 @@ class RegistryClient:
             data = _read_json(self.cache_path)
             _validate_registry(data)
             return ModelRegistry(data, str(self.cache_path))
+        if not refresh and max_cache_age_s is not None and self.cache_path.is_file():
+            try:
+                age_s = max(0.0, time.time() - self.cache_path.stat().st_mtime)
+                if age_s <= max_cache_age_s:
+                    data = _read_json(self.cache_path)
+                    _validate_registry(data)
+                    logger.debug(
+                        "registry.load.cache_hit path=%s age_ms=%.3f",
+                        self.cache_path,
+                        age_s * 1000.0,
+                    )
+                    return ModelRegistry(data, str(self.cache_path))
+            except (OSError, json.JSONDecodeError, ModelRegistryError):
+                pass
         request_url = _cache_busted_url(self.url) if refresh else self.url
         headers = {"User-Agent": "pykokoro-model-registry/1"}
         if refresh:
             headers.update({"Cache-Control": "no-cache", "Pragma": "no-cache"})
+            logger.info("registry.load.refresh reason=explicit")
+        remote_started = time.perf_counter()
         try:
             with urllib.request.urlopen(
                 urllib.request.Request(request_url, headers=headers),
@@ -278,7 +301,15 @@ class RegistryClient:
                 exc,
                 self.cache_path,
             )
+            logger.debug(
+                "registry.load.remote.finish elapsed_ms=%.3f",
+                (time.perf_counter() - remote_started) * 1000.0,
+            )
             return ModelRegistry(data, str(self.cache_path), cache_fallback=True)
+        logger.debug(
+            "registry.load.remote.finish elapsed_ms=%.3f",
+            (time.perf_counter() - remote_started) * 1000.0,
+        )
         _write_json_atomically(self.cache_path, data)
         return ModelRegistry(data, self.url)
 
@@ -531,7 +562,11 @@ def load_registry(
     offline: bool = False,
     refresh: bool = False,
     allow_cache_fallback: bool = True,
+    max_cache_age_s: float | None = DEFAULT_REGISTRY_MAX_AGE_S,
 ) -> ModelRegistry:
     return RegistryClient(url=url, path=path, cache_path=cache_path).load(
-        offline=offline, refresh=refresh, allow_cache_fallback=allow_cache_fallback
+        offline=offline,
+        refresh=refresh,
+        allow_cache_fallback=allow_cache_fallback,
+        max_cache_age_s=max_cache_age_s,
     )

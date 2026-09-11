@@ -726,6 +726,21 @@ class KokoroG2PAdapter(G2PAdapter):
         self._g2p_instances[cache_key] = g2p_instance
         return g2p_instance
 
+    def phonemize_context(self, text: str, language: str, cfg: PipelineConfig) -> Any:
+        """Phonemize synthetic short-sentence context with the configured G2P instance."""
+        g2p_module = self._load()
+        g2p_instance = self._get_g2p_instance(language, cfg)
+        model_version = self._get_model_version(cfg, language)
+        return self._phonemize_prepared(
+            g2p_module,
+            text,
+            language,
+            [],
+            [],
+            g2p_instance,
+            target_model=model_version,
+        )
+
     def _record_selection(
         self, doc: DocumentResult, lang: str, cfg: PipelineConfig, g2p_instance: G2PBase
     ) -> None:

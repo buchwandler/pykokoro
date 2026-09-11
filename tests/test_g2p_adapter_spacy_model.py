@@ -45,6 +45,34 @@ def test_kokorog2p_adapter_forwards_spacy_model(monkeypatch):
     assert captured["spacy_model"] == "en_core_web_trf"
 
 
+def test_kokorog2p_adapter_phonemizes_context_with_cached_instance(monkeypatch) -> None:
+    adapter = KokoroG2PAdapter()
+    g2p_module = object()
+    g2p_instance = object()
+    captured: dict[str, object] = {}
+    cfg = PipelineConfig()
+
+    monkeypatch.setattr(adapter, "_load", lambda: g2p_module)
+    monkeypatch.setattr(adapter, "_get_g2p_instance", lambda language, config: g2p_instance)
+    monkeypatch.setattr(
+        adapter,
+        "_get_model_version",
+        lambda config, language=None: "model-version",
+    )
+
+    def fake_prepared(*args: object, **kwargs: object) -> object:
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr(adapter, "_phonemize_prepared", fake_prepared)
+    result = adapter.phonemize_context("Say Go.", "en-us", cfg)
+
+    assert result is not None
+    assert captured["args"] == (g2p_module, "Say Go.", "en-us", [], [], g2p_instance)
+    assert captured["kwargs"] == {"target_model": "model-version"}
+
+
 def test_hindi_fallback_uses_explicit_espeak_backend(monkeypatch):
     captured: dict[str, object] = {}
 

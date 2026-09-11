@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import threading
 from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
 from copy import copy, deepcopy
 from dataclasses import dataclass, fields, is_dataclass, replace
@@ -655,7 +656,10 @@ def build_pipeline(
             onnx_audio_postprocessing,
         ) = _load_default_onnx_adapters()
         if pipeline.phoneme_processing is None:
-            pipeline.phoneme_processing = onnx_phoneme_processor(backend)
+            pipeline.phoneme_processing = onnx_phoneme_processor(
+                backend,
+                context_phonemizer=getattr(pipeline.g2p, "phonemize_context", None),
+            )
         if pipeline.audio_generation is None:
             pipeline.audio_generation = onnx_audio_generation(backend)
         if pipeline.audio_postprocessing is None:
@@ -672,7 +676,10 @@ def build_pipeline(
         ) = _load_default_onnx_adapters()
 
         if pipeline.phoneme_processing is None:
-            pipeline.phoneme_processing = onnx_phoneme_processor(kokoro)
+            pipeline.phoneme_processing = onnx_phoneme_processor(
+                kokoro,
+                context_phonemizer=getattr(pipeline.g2p, "phonemize_context", None),
+            )
             pipeline._owns_phoneme_processing = True
 
         if pipeline.audio_generation is None:
@@ -716,6 +723,8 @@ class KokoroPipeline:
         self._prepared_objects: list[PreparedAudioUnits] = []
         self.linguistic_resources = LinguisticResourcePool()
 
+        self._backend_lock = threading.RLock()
+
     def __enter__(self) -> Self:
         return self
 
@@ -726,6 +735,11 @@ class KokoroPipeline:
         tb: TracebackType | None,
     ) -> None:
         self.close()
+
+    def warmup(self) -> None:
+        """Synchronously initialize the configured backend and reuse it thereafter."""
+        kokoro, _ = self._ensure_kokoro(self.config)
+        kokoro.warmup()
 
     def close(self) -> None:
         for prepared in tuple(self._prepared_objects):
@@ -791,6 +805,11 @@ class KokoroPipeline:
             close()
 
     def _ensure_kokoro(self, cfg: PipelineConfig) -> tuple[Kokoro, bool]:
+        """Return a backend, creating it at most once concurrently."""
+        with self._backend_lock:
+            return self._ensure_kokoro_locked(cfg)
+
+    def _ensure_kokoro_locked(self, cfg: PipelineConfig) -> tuple[Kokoro, bool]:
         cfg = resolve_model_defaults(cfg)
         kokoro_key = self._kokoro_key(cfg)
         if self._kokoro is not None and self._kokoro_config_key == kokoro_key:
@@ -1327,7 +1346,10 @@ class KokoroPipeline:
                 onnx_audio_postprocessing,
             ) = _load_default_onnx_adapters()
             if phoneme_processor is None or (kokoro_changed and self._owns_phoneme_processing):
-                phoneme_processor = onnx_phoneme_processor(kokoro)
+                phoneme_processor = onnx_phoneme_processor(
+                    kokoro,
+                    context_phonemizer=getattr(self.g2p, "phonemize_context", None),
+                )
                 if self.phoneme_processing is None or self._owns_phoneme_processing:
                     self.phoneme_processing = phoneme_processor
                     self._owns_phoneme_processing = True

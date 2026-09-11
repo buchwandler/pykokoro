@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import time
 from io import StringIO
 from pathlib import Path
 
@@ -124,6 +126,59 @@ def test_registry_fetches_and_caches_valid_data(
     assert registry.cache_fallback is False
 
 
+def test_registry_uses_fresh_cache_without_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache = tmp_path / "models.json"
+    cache.write_text(json.dumps(_registry()), encoding="utf-8")
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda *args, **kwargs: pytest.fail("fresh cache unexpectedly used the network"),
+    )
+
+    registry = RegistryClient(cache_path=cache).load()
+
+    assert registry.source == str(cache)
+    assert registry.cache_fallback is False
+
+
+def test_registry_refreshes_stale_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache = tmp_path / "models.json"
+    cache.write_text(json.dumps(_registry()), encoding="utf-8")
+    stale_time = time.time() - 2 * 24 * 60 * 60
+    os.utime(cache, (stale_time, stale_time))
+    payload = json.dumps(_registry()).encode()
+    calls = 0
+
+    def open_url(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return Response(payload)
+
+    monkeypatch.setattr("urllib.request.urlopen", open_url)
+    RegistryClient(cache_path=cache).load()
+
+    assert calls == 1
+
+
+def test_registry_offline_uses_cache_without_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache = tmp_path / "models.json"
+    cache.write_text(json.dumps(_registry()), encoding="utf-8")
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda *args, **kwargs: pytest.fail("offline registry unexpectedly used the network"),
+    )
+
+    registry = RegistryClient(cache_path=cache).load(offline=True)
+
+    assert registry.source == str(cache)
+    assert registry.cache_fallback is False
+
+
 def test_registry_uses_last_valid_cache_after_bad_remote(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -131,7 +186,7 @@ def test_registry_uses_last_valid_cache_after_bad_remote(
     cache.write_text(json.dumps(_registry()), encoding="utf-8")
     monkeypatch.setattr("urllib.request.urlopen", lambda *args, **kwargs: Response(b"invalid"))
 
-    registry = RegistryClient(cache_path=cache).load()
+    registry = RegistryClient(cache_path=cache).load(max_cache_age_s=0)
 
     assert registry.cache_fallback is True
     assert registry.source == str(cache)

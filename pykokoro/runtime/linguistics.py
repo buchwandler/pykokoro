@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import importlib.util
+import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any, cast
 
 from ..spacy_models import SpacyModelSize, resolve_spacy_model
 from .language_plan import LanguageRun
 
+logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class TokenAnnotation:
@@ -80,24 +83,59 @@ class LinguisticResourcePool:
         require: bool = False,
     ) -> object | None:
         """Load or reuse a local spaCy pipeline without downloading models."""
+        selection_started = time.perf_counter()
         model_name = self._resolve_model_name(language, model, model_size, require=require)
+        logger.debug(
+            "linguistics.spacy.selection.finish language=%s model=%s elapsed_ms=%.3f",
+            language,
+            model_name,
+            (time.perf_counter() - selection_started) * 1000.0,
+        )
         if model_name is None:
             return None
         key = (language.lower().replace("_", "-"), model_name)
         if key in self._spacy:
+            logger.debug(
+                "linguistics.spacy.load.finish language=%s model=%s cache_hit=True elapsed_ms=0.000",
+                language,
+                model_name,
+            )
             return self._spacy[key]
+        import_started = time.perf_counter()
         try:
             import spacy
         except ImportError as exc:
+            logger.debug(
+                "linguistics.spacy.import.finish success=False elapsed_ms=%.3f",
+                (time.perf_counter() - import_started) * 1000.0,
+            )
             if require:
                 raise RuntimeError("spaCy is required but is not installed") from exc
             return None
+        logger.debug(
+            "linguistics.spacy.import.finish success=True elapsed_ms=%.3f",
+            (time.perf_counter() - import_started) * 1000.0,
+        )
+        load_started = time.perf_counter()
+        logger.debug("linguistics.spacy.load.start language=%s model=%s", language, model_name)
         try:
             pipeline = spacy.load(model_name)
         except (OSError, ImportError, ValueError) as exc:
+            logger.debug(
+                "linguistics.spacy.load.finish language=%s model=%s success=False elapsed_ms=%.3f",
+                language,
+                model_name,
+                (time.perf_counter() - load_started) * 1000.0,
+            )
             if require:
                 raise RuntimeError(f"Requested spaCy model {model_name!r} is unavailable") from exc
             return None
+        logger.debug(
+            "linguistics.spacy.load.finish language=%s model=%s success=True elapsed_ms=%.3f",
+            language,
+            model_name,
+            (time.perf_counter() - load_started) * 1000.0,
+        )
         self._spacy[key] = pipeline
         return pipeline
 
@@ -111,6 +149,12 @@ class LinguisticResourcePool:
         require: bool = False,
     ) -> LinguisticAnalysis | None:
         """Analyze text with a cached local pipeline, or return no-model fallback."""
+        started = time.perf_counter()
+        logger.debug(
+            "linguistics.spacy.analyze.start language=%s characters=%d",
+            language,
+            len(text),
+        )
         pipeline = self.get_spacy_pipeline(
             language=language,
             model=model,
@@ -118,8 +162,20 @@ class LinguisticResourcePool:
             require=require,
         )
         if pipeline is None:
+            logger.debug(
+                "linguistics.spacy.analyze.finish language=%s tokens=0 fallback=True elapsed_ms=%.3f",
+                language,
+                (time.perf_counter() - started) * 1000.0,
+            )
             return None
+        pipeline_started = time.perf_counter()
         doc = cast(Any, pipeline)(text)
+        logger.debug(
+            "linguistics.spacy.pipeline.finish language=%s tokens=%d elapsed_ms=%.3f",
+            language,
+            len(doc),
+            (time.perf_counter() - pipeline_started) * 1000.0,
+        )
         annotations = tuple(
             TokenAnnotation(
                 start=int(token.idx),
@@ -131,6 +187,12 @@ class LinguisticResourcePool:
                 language=language,
             )
             for token in doc
+        )
+        logger.debug(
+            "linguistics.spacy.analyze.finish language=%s tokens=%d fallback=False elapsed_ms=%.3f",
+            language,
+            len(annotations),
+            (time.perf_counter() - started) * 1000.0,
         )
         return LinguisticAnalysis(
             language=language,

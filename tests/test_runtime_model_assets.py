@@ -55,6 +55,18 @@ def _anna_artifact(
     return artifact
 
 
+def _quality_registry() -> ModelRegistry:
+    data = copy.deepcopy(_registry().data)
+    data["models"]["test-model"]["distributions"][0]["artifacts"] = [
+        _anna_artifact("fp32-model", "model", "onnx", "model-fp32.onnx", "fp32"),
+        _anna_artifact("fp16-model", "model", "onnx", "model-fp16.onnx", "fp16"),
+        _anna_artifact("q8-model", "model", "onnx", "model-q8.onnx", "q8"),
+        _anna_artifact("quality-voices", "voices", "numpy-npz", "voices.npz"),
+        _anna_artifact("quality-config", "config", "json", "config.json"),
+        _anna_artifact("quality-metadata", "metadata", "json", "metadata.json"),
+    ]
+    return ModelRegistry(data, "quality-fixture")
+
 def _registry() -> ModelRegistry:
     return ModelRegistry(
         {
@@ -206,6 +218,65 @@ def _portuguese_registry() -> ModelRegistry:
         },
         "portuguese-fixture",
     )
+
+
+def test_resolver_materializes_only_selected_model_quality(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[str] = []
+
+    def materialize(artifact, target):
+        calls.append(artifact.id)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(artifact.id.encode())
+        return target
+
+    monkeypatch.setattr("pykokoro.runtime.model_assets.download_artifact", materialize)
+
+    resolved = resolve_runtime_assets(
+        model_id="test-model", quality="fp32", registry=_quality_registry(), cache_dir=tmp_path
+    )
+
+    assert set(calls) == {
+        "fp32-model",
+        "quality-voices",
+        "quality-config",
+        "quality-metadata",
+    }
+    assert "fp16-model" not in resolved.artifacts
+    assert "q8-model" not in resolved.artifacts
+
+
+def test_resolver_warm_cache_verifies_only_selected_quality(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry = _quality_registry()
+    distribution = registry.model("test-model").distribution()
+    selected = [
+        artifact
+        for artifact in distribution.artifacts
+        if artifact.role != "model" or artifact.quality == "fp32"
+    ]
+    for artifact in selected:
+        target = tmp_path / "test-model" / distribution.id / artifact.local_name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(artifact.id.encode())
+
+    verified: list[str] = []
+    original_verify = verify_artifact
+
+    def record_verify(path, artifact):
+        verified.append(artifact.id)
+        original_verify(path, artifact)
+
+    monkeypatch.setattr("pykokoro.runtime.model_assets.verify_artifact", record_verify)
+    resolve_runtime_assets(
+        model_id="test-model", quality="fp32", registry=registry, cache_dir=tmp_path
+    )
+
+    assert set(verified) == {artifact.id for artifact in selected}
+    assert "fp16-model" not in verified
+    assert "q8-model" not in verified
 
 
 def test_resolver_materializes_one_atomic_distribution(
@@ -390,6 +461,72 @@ class RefreshingClient:
             return self.refreshed
         self.normal_loads += 1
         return self.initial
+
+def test_resolver_refreshes_once_when_cached_registry_lacks_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    initial_data = copy.deepcopy(_registry().data)
+    del initial_data["models"]["test-model"]
+    client = RefreshingClient(ModelRegistry(initial_data, "cached"), _registry())
+
+    def download(artifact, path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(artifact.id.encode())
+        verify_artifact(path, artifact)
+        return path
+
+    monkeypatch.setattr("pykokoro.runtime.model_assets.download_artifact", download)
+    resolved = resolve_runtime_assets(
+        model_id="test-model", registry_client=client, cache_dir=tmp_path
+    )
+
+    assert resolved.model_id == "test-model"
+    assert client.normal_loads == 1
+    assert client.refresh_loads == 1
+
+
+def test_resolver_refreshes_once_when_cached_registry_lacks_quality(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    initial_data = copy.deepcopy(_registry().data)
+    initial_data["models"]["test-model"]["distributions"][0]["artifacts"][0]["quality"] = "q8"
+    client = RefreshingClient(ModelRegistry(initial_data, "cached"), _registry())
+
+    def download(artifact, path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(artifact.id.encode())
+        verify_artifact(path, artifact)
+        return path
+
+    monkeypatch.setattr("pykokoro.runtime.model_assets.download_artifact", download)
+    resolved = resolve_runtime_assets(
+        model_id="test-model", quality="fp32", registry_client=client, cache_dir=tmp_path
+    )
+
+    assert resolved.artifact("github-model").is_file()
+    assert client.normal_loads == 1
+    assert client.refresh_loads == 1
+
+
+def test_resolver_does_not_loop_after_resolution_refresh_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    initial_data = copy.deepcopy(_registry().data)
+    del initial_data["models"]["test-model"]
+    client = RefreshingClient(
+        ModelRegistry(initial_data, "cached"), ModelRegistry(initial_data, "still-cached")
+    )
+    monkeypatch.setattr(
+        "pykokoro.runtime.model_assets.download_artifact",
+        lambda *args, **kwargs: pytest.fail("resolution failure must not download"),
+    )
+
+    with pytest.raises(ModelRegistryError, match="after one registry refresh"):
+        resolve_runtime_assets(model_id="test-model", registry_client=client, cache_dir=tmp_path)
+
+    assert client.normal_loads == 1
+    assert client.refresh_loads == 1
+
 
 
 def _download_payload(artifact: RuntimeArtifact) -> bytes:

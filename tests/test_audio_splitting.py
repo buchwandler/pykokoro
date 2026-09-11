@@ -262,6 +262,43 @@ def test_preprocess_phrase_mode_uses_phrase_phonemes_and_metadata(monkeypatch):
     assert metadata["original_token_count"] == 3
     assert metadata["generated_token_count"] == 8
 
+def test_preprocess_phrase_mode_uses_pipeline_context_phonemizer() -> None:
+    tokenizer = DummyTokenizer(factor=1)
+    config = ShortSentenceConfig(
+        resolve_modes={"phrase": PhraseResolveMode(neutral_phrase="Say {segment}.")},
+        resolve_mode="phrase",
+    )
+    calls: list[tuple[str, str]] = []
+
+    def context_phonemizer(text: str, language: str) -> Any:
+        calls.append((text, language))
+        return SimpleNamespace(phonemes="context phonemes", ids=[1, 2], tokens=[])
+
+    generator = AudioGenerator(
+        session=cast(Any, TimestampSession()),
+        tokenizer=cast(Any, tokenizer),
+        short_sentence_config=config,
+    )
+    segment = PhonemeSegment(
+        id="seg_1",
+        segment_id="seg_1",
+        phoneme_id=0,
+        text="Go",
+        lang="en-us",
+        phonemes="abc",
+        tokens=[],
+    )
+
+    processed = generator._preprocess_segments(
+        [segment],
+        enable_short_sentence_override=True,
+        context_phonemizer=context_phonemizer,
+    )
+
+    assert calls == [("Say Go.", "en-us")]
+    assert processed[0].phonemes == "context phonemes"
+    assert processed[0].tokens == [1, 2]
+
 
 def test_preprocess_randomized_phrase_mode_uses_configured_phrases(monkeypatch):
     tokenizer = DummyTokenizer(factor=1)

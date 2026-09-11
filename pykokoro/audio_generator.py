@@ -309,6 +309,7 @@ class AudioGenerator:
         self._tokenizer = tokenizer
         self._model_source = model_source
         self._short_sentence_config = short_sentence_config
+        self._context_phonemizer: Callable[[str, str], Any] | None = None
         if waveform_validation not in {"off", "warn", "strict"}:
             raise ValueError(f"Unsupported waveform validation mode: {waveform_validation!r}")
         self._waveform_validation = waveform_validation
@@ -851,10 +852,12 @@ class AudioGenerator:
         segments: list[PhonemeSegment],
         enable_short_sentence_override: bool | None,
         random_seed: int | None = None,
+        context_phonemizer: Callable[[str, str], Any] | None = None,
     ) -> list[PhonemeSegment]:
         from .short_sentence_handler import is_segment_empty, is_segment_short
 
         effective_config = self._resolve_short_sentence_config(enable_short_sentence_override)
+        self._context_phonemizer = context_phonemizer
         phrase_rng = random.Random(random_seed) if random_seed is not None else None
         processed: list[PhonemeSegment] = []
 
@@ -889,6 +892,7 @@ class AudioGenerator:
                         effective_config,
                         self._tokenizer.tokenize,
                         rng=phrase_rng,
+                        context_phonemizer=context_phonemizer,
                     )
                     phonemes = short_sentence.phonemes
                     tokens = short_sentence.tokens
@@ -1173,6 +1177,7 @@ class AudioGenerator:
             voice_style,
             speed,
             trace=trace,
+            context_phonemizer=self._context_phonemizer,
         )
         if retry_audio is not None:
             return retry_audio
@@ -1216,6 +1221,7 @@ class AudioGenerator:
         speed: float,
         *,
         trace: Trace | None = None,
+        context_phonemizer: Callable[[str, str], Any] | None = None,
     ) -> np.ndarray | None:
         templates = short_sentence_metadata.get("phrase_fallback_templates")
         if not isinstance(templates, list):
@@ -1254,10 +1260,17 @@ class AudioGenerator:
                 failed_template if isinstance(failed_template, str) else "",
             )
 
-            retry = build_short_sentence_phrase_retry(
-                segment,
-                template,
-                short_sentence_metadata,
+            retry = (
+                build_short_sentence_phrase_retry(
+                    segment, template, short_sentence_metadata
+                )
+                if context_phonemizer is None
+                else build_short_sentence_phrase_retry(
+                    segment,
+                    template,
+                    short_sentence_metadata,
+                    context_phonemizer=context_phonemizer,
+                )
             )
             if retry is None or retry.metadata is None:
                 continue

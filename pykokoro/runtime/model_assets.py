@@ -31,6 +31,9 @@ from ..utils import get_user_cache_path
 logger = logging.getLogger(__name__)
 
 
+class RuntimeResolutionError(ModelRegistryError):
+    """Registry data cannot resolve the requested runtime assets."""
+
 @dataclass(frozen=True, slots=True)
 class ResolvedRuntimeAssets:
     """All files selected for one model and one registry distribution."""
@@ -67,13 +70,14 @@ class ResolvedRuntimeAssets:
         candidates = [
             artifact
             for artifact in self.distribution.artifacts
-            if artifact.role == role
+            if artifact.id in self.artifacts
+            and artifact.role == role
             and (quality is None or artifact.quality == quality)
             and (component is None or artifact.component == component)
         ]
         if not candidates:
             raise ModelRegistryError(
-                f"Distribution {self.distribution_id!r} has no matching {role} artifact"
+                f"Distribution {self.distribution_id!r} has no matching materialized {role} artifact"
             )
         return self.artifacts[candidates[0].id]
 
@@ -163,14 +167,10 @@ def _materialize_artifact(
     started = time.perf_counter()
     if target.is_file() and not force:
         try:
-            verify_artifact(target, artifact)
             logger.debug(
-                "artifact.cache.hit artifact_id=%s role=%s path=%s",
-                artifact.id,
-                artifact.role,
-                target,
+                "artifact.cache.verify.start artifact_id=%s path=%s", artifact.id, target
             )
-            return target
+            verify_artifact(target, artifact)
         except ArtifactIntegrityError:
             logger.debug(
                 "artifact.cache.invalid artifact_id=%s role=%s path=%s; redownloading",
@@ -183,7 +183,20 @@ def _materialize_artifact(
                 artifact.local_name,
             )
             target.unlink(missing_ok=True)
-
+        else:
+            logger.debug(
+                "artifact.cache.hit artifact_id=%s role=%s path=%s",
+                artifact.id,
+                artifact.role,
+                target,
+            )
+            return target
+        finally:
+            logger.debug(
+                "artifact.cache.verify.finish artifact_id=%s elapsed_ms=%.3f",
+                artifact.id,
+                (time.perf_counter() - started) * 1000.0,
+            )
     logger.debug(
         "artifact.download.required artifact_id=%s role=%s size=%d",
         artifact.id,
@@ -237,6 +250,27 @@ def _materialize_artifact(
     emit("download-complete", artifact.size)
     return result
 
+def _runtime_artifacts_for_quality(
+    distribution: RuntimeDistribution, *, quality: str | None
+) -> tuple[RuntimeArtifact, ...]:
+    """Return the artifacts needed by a selected runtime quality."""
+    if quality is None:
+        return distribution.artifacts
+    model_artifacts = tuple(
+        artifact
+        for artifact in distribution.artifacts
+        if artifact.role == "model" and artifact.quality == quality
+    )
+    if not model_artifacts:
+        raise RuntimeResolutionError(
+            f"Distribution {distribution.id!r} has no model artifact for quality {quality!r}"
+        )
+    return tuple(
+        artifact
+        for artifact in distribution.artifacts
+        if artifact.role != "model" or artifact.quality == quality
+    )
+
 
 def _resolve_runtime_assets_once(
     *,
@@ -249,9 +283,12 @@ def _resolve_runtime_assets_once(
     cache_dir: Path | None,
     progress_callback: AssetProgressCallback | None,
 ) -> ResolvedRuntimeAssets:
-    model = registry.model(model_id)
+    try:
+        model = registry.model(model_id)
+    except ModelRegistryError as exc:
+        raise RuntimeResolutionError(str(exc)) from exc
     if model.data.get("runtime_available", True) is False:
-        raise ModelRegistryError(
+        raise RuntimeResolutionError(
             f"Model profile {model_id!r} is present in the registry but has no runtime-ready distribution"
         )
     if not model.redistribution_allowed:
@@ -259,19 +296,11 @@ def _resolve_runtime_assets_once(
             f"Model profile {model_id!r} is restricted by its redistribution policy"
         )
 
-    distribution = model.distribution(preference)
-    artifacts = list(distribution.artifacts)
-    if quality is not None:
-        model_artifacts = [
-            artifact
-            for artifact in artifacts
-            if artifact.role == "model" and artifact.quality == quality
-        ]
-        if not model_artifacts:
-            raise ModelRegistryError(
-                f"Distribution {distribution.id!r} has no model artifact for quality {quality!r}"
-            )
-
+    try:
+        distribution = model.distribution(preference)
+        artifacts = _runtime_artifacts_for_quality(distribution, quality=quality)
+    except ModelRegistryError as exc:
+        raise RuntimeResolutionError(str(exc)) from exc
     materialized: dict[str, Path] = {}
     for artifact in artifacts:
         if artifact.id in materialized:
@@ -353,6 +382,37 @@ def resolve_runtime_assets(
                 cache_dir=cache_dir,
                 progress_callback=progress_callback,
             )
+        except RuntimeResolutionError as resolution_error:
+            if offline:
+                raise
+            logger.warning(
+                "Runtime asset resolution failed using registry %s; forcing one registry refresh: %s",
+                selected_registry.source,
+                resolution_error,
+            )
+            logger.info("registry.load.refresh reason=resolution_miss")
+            try:
+                fresh_registry = client.load(refresh=True, allow_cache_fallback=False)
+            except ModelRegistryError as refresh_error:
+                raise ModelRegistryError(
+                    f"Runtime asset resolution failed using registry {selected_registry.source}; "
+                    f"a fresh registry could not be obtained: {refresh_error}"
+                ) from refresh_error
+            try:
+                result = _resolve_runtime_assets_once(
+                    model_id=model_id,
+                    quality=quality,
+                    preference=preference,
+                    offline=offline,
+                    force=force,
+                    registry=fresh_registry,
+                    cache_dir=cache_dir,
+                    progress_callback=progress_callback,
+                )
+            except RuntimeResolutionError as second_error:
+                raise ModelRegistryError(
+                    f"Runtime asset resolution still failed after one registry refresh: {second_error}"
+                ) from second_error
         except ArtifactIntegrityError:
             if offline:
                 raise

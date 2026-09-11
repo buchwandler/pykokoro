@@ -9,6 +9,7 @@ import os
 import shutil
 import sqlite3
 import tempfile
+import threading
 import time
 import urllib.request
 from collections.abc import Callable
@@ -1955,6 +1956,8 @@ class Kokoro:
         self._inference_cache_enabled = inference_cache_enabled
         self._inference_cache_max_bytes = inference_cache_max_bytes
 
+        self._init_lock = threading.RLock()
+
     def _get_vocabulary(self) -> dict[str, int]:
         """Get vocabulary for the current model variant.
 
@@ -2203,7 +2206,12 @@ class Kokoro:
                 logger.debug(f"Set SessionOptions.{attr_name} = {value}")
 
     def _init_kokoro(self) -> None:
-        """Initialize the ONNX session and load voices."""
+        """Initialize the ONNX session and load voices once, safely across threads."""
+        with self._init_lock:
+            self._init_kokoro_locked()
+
+    def _init_kokoro_locked(self) -> None:
+        """Initialize the ONNX session and load voices while holding the init lock."""
         if self._session is not None or self._runtime is not None:
             return
 
@@ -2285,6 +2293,10 @@ class Kokoro:
             (time.perf_counter() - started) * 1000.0,
         )
 
+    def warmup(self) -> None:
+        """Synchronously initialize backend assets, session, voices, and tokenizer."""
+        self._init_kokoro()
+
     def get_voices(self) -> list[str]:
         self._init_kokoro()
         if self._runtime is not None:
@@ -2345,6 +2357,7 @@ class Kokoro:
         segments: list["PhonemeSegment"],
         enable_short_sentence_override: bool | None,
         random_seed: int | None = None,
+        context_phonemizer: Callable[[str, str], Any] | None = None,
     ) -> list["PhonemeSegment"]:
         """Preprocess phoneme segments for short sentence handling."""
         self._init_kokoro()
@@ -2352,7 +2365,10 @@ class Kokoro:
             return segments
         assert self._audio_generator is not None
         return self._audio_generator._preprocess_segments(
-            segments, enable_short_sentence_override, random_seed
+            segments,
+            enable_short_sentence_override,
+            random_seed,
+            context_phonemizer=context_phonemizer,
         )
 
     def generate_raw_audio_segments(
