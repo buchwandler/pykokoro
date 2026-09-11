@@ -32,6 +32,7 @@ def _artifact(artifact_id: str, url: str, local_name: str) -> dict[str, object]:
         "sha256": hashlib.sha256(payload).hexdigest(),
     }
 
+
 def _anna_artifact(
     artifact_id: str,
     role: str,
@@ -106,6 +107,7 @@ def _registry() -> ModelRegistry:
         "test",
     )
 
+
 def _anna_registry() -> ModelRegistry:
     return ModelRegistry(
         {
@@ -133,18 +135,10 @@ def _anna_registry() -> ModelRegistry:
                             "release_key": "de-anna",
                             "release_tag": "model-files-german-software-mansion-anna-v1",
                             "artifacts": [
-                                _anna_artifact(
-                                    "anna-model", "model", "onnx", "model.onnx", "fp32"
-                                ),
-                                _anna_artifact(
-                                    "anna-voices", "voices", "numpy-npz", "voices.npz"
-                                ),
-                                _anna_artifact(
-                                    "anna-config", "config", "json", "config.json"
-                                ),
-                                _anna_artifact(
-                                    "anna-bundle", "bundle", "json", "bundle.json"
-                                ),
+                                _anna_artifact("anna-model", "model", "onnx", "model.onnx", "fp32"),
+                                _anna_artifact("anna-voices", "voices", "numpy-npz", "voices.npz"),
+                                _anna_artifact("anna-config", "config", "json", "config.json"),
+                                _anna_artifact("anna-bundle", "bundle", "json", "bundle.json"),
                             ],
                         }
                     ],
@@ -198,6 +192,7 @@ def test_registry_profile_uses_canonical_runtime_metadata() -> None:
     assert profile.frontend == "test-frontend"
     assert profile.layout == "single-onnx-v1"
     assert profile.support_status == "unsupported-frontend"
+
 
 def test_anna_registry_profile_and_runtime_assets_are_ready(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

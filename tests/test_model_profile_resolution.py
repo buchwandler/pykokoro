@@ -41,7 +41,6 @@ def test_software_mansion_anna_is_ready() -> None:
     assert profile.frontend in IMPLEMENTED_FRONTENDS
 
 
-
 def test_software_mansion_mateusz_is_known_but_staged() -> None:
     profile = get_model_profile("pl-mateusz", "github")
 
@@ -51,6 +50,8 @@ def test_software_mansion_mateusz_is_known_but_staged() -> None:
     assert profile.runtime_available is False
     assert profile.support_status == "registry-unavailable"
     assert profile.frontend not in IMPLEMENTED_FRONTENDS
+
+
 def test_automatic_language_selection_keeps_martin_and_excludes_mateusz() -> None:
     assert profile_for_language("de").variant == "v1.2-de-martin"
     assert profile_for_language("pl") is None
@@ -65,6 +66,7 @@ def test_mateusz_reports_missing_runtime_distribution() -> None:
                 generation=GenerationConfig(lang="pl"),
             )
         )
+
 
 def test_anna_resolves_explicit_local_release_assets(tmp_path) -> None:
     manifest = tmp_path / "release-manifest.json"
@@ -92,6 +94,7 @@ def test_anna_resolves_explicit_local_release_assets(tmp_path) -> None:
     assert resolved.voices_path == tmp_path / "voices.npz"
     assert resolved.model_config_path == tmp_path / "config.json"
 
+
 def test_anna_resolves_as_a_normal_github_model() -> None:
     resolved = resolve_model_defaults(
         PipelineConfig(
@@ -106,7 +109,6 @@ def test_anna_resolves_as_a_normal_github_model() -> None:
     assert resolved.model_quality == "fp32"
     assert resolved.voice == "df_anna"
     assert resolved.allow_experimental_frontend is False
-
 
 
 @pytest.mark.parametrize("lang", ["de", "de-DE", "de_at", "de-ch"])

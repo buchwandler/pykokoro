@@ -64,7 +64,6 @@ def test_anna_german_ipa_frontend_is_release_ready() -> None:
     assert require_frontend("de-anna", allow_experimental=False) == "german-ipa-v1"
 
 
-
 def test_native_profiles_are_not_marked_experimental():
     assert not get_model_profile("v1.2-de-martin", "github").frontend_experimental
 
