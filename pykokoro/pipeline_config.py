@@ -85,34 +85,27 @@ def _manifest_model_name(
     manifest_path: Path,
 ) -> str | None:
     models = [
-        item
-        for item in assets
-        if item.get("role") == "model" and isinstance(item.get("name"), str)
+        item for item in assets if item.get("role") == "model" and isinstance(item.get("name"), str)
     ]
     matching = [item for item in models if item.get("quality") == quality]
     if len(matching) == 1:
         return str(matching[0]["name"])
     if len(matching) > 1:
         raise ValueError(
-            f"Release manifest {manifest_path} has multiple model assets "
-            f"for quality {quality!r}"
+            f"Release manifest {manifest_path} has multiple model assets for quality {quality!r}"
         )
     if len(models) == 1 and models[0].get("quality") in {None, quality}:
         return str(models[0]["name"])
     if models:
         available = sorted(
-            {
-                str(item["quality"])
-                for item in models
-                if isinstance(item.get("quality"), str)
-            }
+            {str(item["quality"]) for item in models if isinstance(item.get("quality"), str)}
         )
         suffix = f" Available: {', '.join(available)}" if available else ""
         raise ValueError(
-            f"Release manifest {manifest_path} has no model asset "
-            f"for quality {quality!r}.{suffix}"
+            f"Release manifest {manifest_path} has no model asset for quality {quality!r}.{suffix}"
         )
     return None
+
 
 def _resolve_manifest_paths(cfg: PipelineConfig) -> PipelineConfig:
     if cfg.release_manifest_path is None:
@@ -123,9 +116,7 @@ def _resolve_manifest_paths(cfg: PipelineConfig) -> PipelineConfig:
     assets = [item for item in data.get("assets", []) if isinstance(item, dict)]
     quality = cfg.model_quality
     if quality is None:
-        raise ValueError(
-            "Manifest model resolution requires an effective model quality"
-        )
+        raise ValueError("Manifest model resolution requires an effective model quality")
     model = _manifest_model_name(
         assets,
         quality=quality,

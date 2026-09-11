@@ -94,6 +94,7 @@ def test_release_manifest_selects_requested_model_quality(tmp_path):
     assert resolved.model_quality == "q8"
     assert resolved.model_path == tmp_path / "model-q8.onnx"
 
+
 def test_release_manifest_automatic_quality_ignores_asset_order(tmp_path):
     manifest = tmp_path / "release-manifest.json"
     manifest.write_text(
@@ -121,6 +122,7 @@ def test_release_manifest_automatic_quality_ignores_asset_order(tmp_path):
 
     assert resolved.model_quality == "fp32"
     assert resolved.model_path == tmp_path / "model-fp32.onnx"
+
 
 def test_release_manifest_rejects_unavailable_quality(tmp_path):
     manifest = tmp_path / "release-manifest.json"
@@ -151,6 +153,7 @@ def test_release_manifest_rejects_unavailable_quality(tmp_path):
             )
         )
 
+
 def test_release_manifest_rejects_duplicate_quality(tmp_path):
     manifest = tmp_path / "release-manifest.json"
     manifest.write_text(
@@ -178,6 +181,7 @@ def test_release_manifest_rejects_duplicate_quality(tmp_path):
             )
         )
 
+
 def test_release_manifest_preserves_single_unqualified_model(tmp_path):
     manifest = tmp_path / "release-manifest.json"
     manifest.write_text(
@@ -203,6 +207,7 @@ def test_release_manifest_preserves_single_unqualified_model(tmp_path):
 
     assert resolved.model_quality == "fp32"
     assert resolved.model_path == tmp_path / "model.onnx"
+
 
 def test_release_manifest_preserves_explicit_model_path_and_other_assets(tmp_path):
     manifest = tmp_path / "release-manifest.json"
