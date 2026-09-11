@@ -1,0 +1,38 @@
+{
+  "candidate_count": 2,
+  "candidates": [
+    {
+      "additions": 245,
+      "deletions": 6,
+      "patch_file": "5e50a8a.patch",
+      "patch_sha256": "fa041d6a2be524c347884f0fc8518a11c9eff61228432148cdfc0fb9736ef50c",
+      "paths": [
+        ".github/workflows/python-publish.yml",
+        "pykokoro/pipeline_config.py",
+        "tests/test_packaging_metadata.py",
+        "tests/test_release_profiles.py"
+      ],
+      "sha": "5e50a8ac6076fb36c6a3552ad700dfc00414b7cf",
+      "short_sha": "5e50a8a",
+      "source_ref": "git:5e50a8ac6076fb36c6a3552ad700dfc00414b7cf"
+    },
+    {
+      "additions": 11,
+      "deletions": 15,
+      "patch_file": "e891f2c.patch",
+      "patch_sha256": "4a220e8bb553dbce48d68fe1e4fe73a6c060922f9e8ed76495140b30b1b6f708",
+      "paths": ["pykokoro/pipeline_config.py", "tests/test_release_profiles.py"],
+      "sha": "e891f2cbef27e6141b16dbde6efe722ec6db8d3b",
+      "short_sha": "e891f2c",
+      "source_ref": "git:e891f2cbef27e6141b16dbde6efe722ec6db8d3b"
+    }
+  ],
+  "git_base_ref": "c4b27e7331e33fc3b9095d36c561919d0f53178e",
+  "git_base_sha": "c4b27e7331e33fc3b9095d36c561919d0f53178e",
+  "git_head_ref": "e891f2cbef27e6141b16dbde6efe722ec6db8d3b",
+  "git_head_sha": "e891f2cbef27e6141b16dbde6efe722ec6db8d3b",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "0.9.4",
+  "schema_version": 1
+}

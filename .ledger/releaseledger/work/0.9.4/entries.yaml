@@ -1,0 +1,44 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: 0.9.4
+git_base_ref: c4b27e7331e33fc3b9095d36c561919d0f53178e
+git_base_sha: c4b27e7331e33fc3b9095d36c561919d0f53178e
+git_head_ref: e891f2cbef27e6141b16dbde6efe722ec6db8d3b
+git_head_sha: e891f2cbef27e6141b16dbde6efe722ec6db8d3b
+include_merges: nontrivial
+entries:
+  - kind: changed
+    summary:
+      Changed release manifest resolution to select model assets by quality and validate
+      package dependency versions
+    status: accepted
+    source_refs:
+      - git:5e50a8ac6076fb36c6a3552ad700dfc00414b7cf
+    paths:
+      - .github/workflows/python-publish.yml
+      - pykokoro/pipeline_config.py
+      - tests/test_packaging_metadata.py
+      - tests/test_release_profiles.py
+    sources:
+      - git:5e50a8ac6076fb36c6a3552ad700dfc00414b7cf
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: internal
+    internal: true
+    summary: Changed manifest-resolution formatting without altering behavior
+    status: accepted
+    source_refs:
+      - git:e891f2cbef27e6141b16dbde6efe722ec6db8d3b
+    paths:
+      - pykokoro/pipeline_config.py
+      - tests/test_release_profiles.py
+    sources:
+      - git:e891f2cbef27e6141b16dbde6efe722ec6db8d3b
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

@@ -305,3 +305,10 @@
 {"data":{"fields":["previous_version"]},"event":"release.updated","event_id":"event-0305","record_revisions":{"release:v0.9.3":4},"release_version":"v0.9.3","schema_version":2}
 {"data":{"old_release_version":"v0.9.3","reason":null,"replace_canceled_target":false,"rewrote_successors":false},"event":"release.renamed","event_id":"event-0306","record_revisions":{"entry:0.9.3/entry-0001":2,"entry:0.9.3/entry-0002":2,"entry:0.9.3/entry-0003":2,"release:0.9.3":5},"release_version":"0.9.3","schema_version":2}
 {"data":{"fields":["git_base_ref","git_base_sha","git_commit_count","git_head_ref","git_head_sha","git_range"]},"event":"release.updated","event_id":"event-0307","record_revisions":{"release:0.9.3":6},"release_version":"0.9.3","schema_version":2}
+{"data":{"released_at":"2026-09-10"},"event":"release.finalized","event_id":"event-0308","record_revisions":{"release:0.9.2":4},"release_version":"0.9.2","schema_version":2}
+{"data":{"released_at":"2026-09-11"},"event":"release.finalized","event_id":"event-0309","record_revisions":{"release:0.9.3":7},"release_version":"0.9.3","schema_version":2}
+{"data":{"status":"planned"},"event":"release.created","event_id":"event-0310","record_revisions":{"release:0.9.4":1},"release_version":"0.9.4","schema_version":2}
+{"data":{"fields":["git_base_ref","git_base_sha","git_commit_count","git_head_ref","git_head_sha","git_range"]},"event":"release.updated","event_id":"event-0311","record_revisions":{"release:0.9.4":2},"release_version":"0.9.4","schema_version":2}
+{"data":{"row_count":2},"event":"audit.created","event_id":"event-0312","record_revisions":{"commit_audit_sheet":1},"release_version":"0.9.4","schema_version":2}
+{"data":{"updated_rows":2},"event":"audit.updated","event_id":"event-0313","record_revisions":{"commit_audit_sheet":2},"release_version":"0.9.4","schema_version":2}
+{"data":{"entry_ids":["entry-0001","entry-0002"],"synced_audit_rows":2},"event":"entry.batch_added","event_id":"event-0314","record_revisions":{"commit_audit_sheet":3,"entry:0.9.4/entry-0001":1,"entry:0.9.4/entry-0002":1,"release:0.9.4":3},"release_version":"0.9.4","schema_version":2}

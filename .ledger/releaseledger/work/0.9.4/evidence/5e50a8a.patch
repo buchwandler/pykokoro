@@ -1,0 +1,331 @@
+ .github/workflows/python-publish.yml |  22 ++++-
+ pykokoro/pipeline_config.py          |  49 +++++++++-
+ tests/test_packaging_metadata.py     |   6 +-
+ tests/test_release_profiles.py       | 174 +++++++++++++++++++++++++++++++++++
+ 4 files changed, 245 insertions(+), 6 deletions(-)
+
+diff --git a/.github/workflows/python-publish.yml b/.github/workflows/python-publish.yml
+index 78d7780..bac7155 100644
+--- a/.github/workflows/python-publish.yml
++++ b/.github/workflows/python-publish.yml
+@@ -41,6 +41,20 @@ jobs:
+           from email import policy
+           from email.parser import Parser
+           from pathlib import Path
++          from packaging.requirements import Requirement
++          from packaging.version import Version
++
++          def has_minimum(requirements, name, minimum):
++              minimum_version = Version(minimum)
++              return any(
++                  requirement.name == name
++                  and any(
++                      spec.operator in (">=", ">", "==")
++                      and Version(spec.version) >= minimum_version
++                      for spec in requirement.specifier
++                  )
++                  for requirement in requirements
++              )
+
+           tag_version = os.environ["RELEASE_TAG"].removeprefix("v")
+           artifacts = list(Path("dist").iterdir())
+@@ -58,9 +72,11 @@ jobs:
+               metadata = Parser(policy=policy.default).parsestr(
+                   archive.read(metadata_name).decode("utf-8")
+               )
+-              requirements = metadata.get_all("Requires-Dist", [])
+-              assert any(requirement.startswith("kokorog2p") for requirement in requirements)
+-              assert any("lexphon>=0.2.3" in requirement for requirement in requirements)
++              requirements = [
++                  Requirement(value) for value in metadata.get_all("Requires-Dist", [])
++              ]
++              assert has_minimum(requirements, "kokorog2p", "0.9.5")
++              assert has_minimum(requirements, "lexphon", "0.2.3")
+               assert any(name.endswith("pykokoro/py.typed") for name in archive.namelist())
+           PY
+
+diff --git a/pykokoro/pipeline_config.py b/pykokoro/pipeline_config.py
+index 6b32978..3220a06 100644
+--- a/pykokoro/pipeline_config.py
++++ b/pykokoro/pipeline_config.py
+@@ -78,6 +78,42 @@ def require_document_language(cfg: PipelineConfig) -> str:
+     return normalize_language_code(language)
+
+
++def _manifest_model_name(
++    assets: list[dict[str, Any]],
++    *,
++    quality: ModelQuality,
++    manifest_path: Path,
++) -> str | None:
++    models = [
++        item
++        for item in assets
++        if item.get("role") == "model" and isinstance(item.get("name"), str)
++    ]
++    matching = [item for item in models if item.get("quality") == quality]
++    if len(matching) == 1:
++        return str(matching[0]["name"])
++    if len(matching) > 1:
++        raise ValueError(
++            f"Release manifest {manifest_path} has multiple model assets "
++            f"for quality {quality!r}"
++        )
++    if len(models) == 1 and models[0].get("quality") in {None, quality}:
++        return str(models[0]["name"])
++    if models:
++        available = sorted(
++            {
++                str(item["quality"])
++                for item in models
++                if isinstance(item.get("quality"), str)
++            }
++        )
++        suffix = f" Available: {', '.join(available)}" if available else ""
++        raise ValueError(
++            f"Release manifest {manifest_path} has no model asset "
++            f"for quality {quality!r}.{suffix}"
++        )
++    return None
++
+ def _resolve_manifest_paths(cfg: PipelineConfig) -> PipelineConfig:
+     if cfg.release_manifest_path is None:
+         return cfg
+@@ -85,7 +121,16 @@ def _resolve_manifest_paths(cfg: PipelineConfig) -> PipelineConfig:
+     data = json.loads(manifest_path.read_text(encoding="utf-8"))
+     base = manifest_path.parent
+     assets = [item for item in data.get("assets", []) if isinstance(item, dict)]
+-    model = next((str(item["name"]) for item in assets if item.get("role") == "model"), None)
++    quality = cfg.model_quality
++    if quality is None:
++        raise ValueError(
++            "Manifest model resolution requires an effective model quality"
++        )
++    model = _manifest_model_name(
++        assets,
++        quality=quality,
++        manifest_path=manifest_path,
++    )
+     voices = next(
+         (
+             str(item["name"])
+@@ -136,7 +181,6 @@ def resolve_model_defaults(cfg: PipelineConfig) -> PipelineConfig:
+     paths, are preserved and incompatible combinations fail before backend or
+     G2P construction.
+     """
+-    cfg = _resolve_manifest_paths(cfg)
+     require_document_language(cfg)
+     from .model_profiles import (
+         get_model_profile,
+@@ -178,6 +222,7 @@ def resolve_model_defaults(cfg: PipelineConfig) -> PipelineConfig:
+     quality = cfg.model_quality or cast(
+         ModelQuality, (profile.available_qualities[0] if profile.available_qualities else "fp32")
+     )
++    cfg = _resolve_manifest_paths(replace(cfg, model_quality=quality))
+     if source == "huggingface" and profile.quality_files and quality not in profile.quality_files:
+         available = ", ".join(profile.quality_files) or "none"
+         raise ValueError(
+diff --git a/tests/test_packaging_metadata.py b/tests/test_packaging_metadata.py
+index 67339be..fcc9482 100644
+--- a/tests/test_packaging_metadata.py
++++ b/tests/test_packaging_metadata.py
+@@ -207,4 +207,8 @@ def test_publish_workflow_validates_artifacts_before_upload() -> None:
+     assert "len(wheels) == 1" in workflow
+     assert "len(sdists) == 1" in workflow
+     assert "RELEASE_TAG" in workflow
+-    assert "lexphon>=0.2.3" in workflow
++    assert "from packaging.requirements import Requirement" in workflow
++    assert "from packaging.version import Version" in workflow
++    assert "def has_minimum(requirements, name, minimum):" in workflow
++    assert 'has_minimum(requirements, "kokorog2p", "0.9.5")' in workflow
++    assert 'has_minimum(requirements, "lexphon", "0.2.3")' in workflow
+diff --git a/tests/test_release_profiles.py b/tests/test_release_profiles.py
+index 4702d24..9674c11 100644
+--- a/tests/test_release_profiles.py
++++ b/tests/test_release_profiles.py
+@@ -1,5 +1,7 @@
+ import json
+
++import pytest
++
+ from pykokoro.generation_config import GenerationConfig
+ from pykokoro.model_profiles import get_model_profile
+ from pykokoro.pipeline_config import PipelineConfig, resolve_model_defaults
+@@ -63,6 +65,178 @@ def test_release_manifest_resolves_explicit_assets(tmp_path):
+     assert resolved.model_config_path == tmp_path / "config.json"
+
+
++def test_release_manifest_selects_requested_model_quality(tmp_path):
++    manifest = tmp_path / "release-manifest.json"
++    manifest.write_text(
++        json.dumps(
++            {
++                "schema": 2,
++                "assets": [
++                    {"name": "model-fp32.onnx", "role": "model", "quality": "fp32"},
++                    {"name": "model-q8.onnx", "role": "model", "quality": "q8"},
++                    {"name": "voices.npz", "role": "voices", "format": "numpy-npz"},
++                ],
++            }
++        ),
++        encoding="utf-8",
++    )
++
++    resolved = resolve_model_defaults(
++        PipelineConfig(
++            release_manifest_path=manifest,
++            model_source="github",
++            model_variant="v1.0",
++            model_quality="q8",
++            generation=GenerationConfig(lang="en"),
++        )
++    )
++
++    assert resolved.model_quality == "q8"
++    assert resolved.model_path == tmp_path / "model-q8.onnx"
++
++def test_release_manifest_automatic_quality_ignores_asset_order(tmp_path):
++    manifest = tmp_path / "release-manifest.json"
++    manifest.write_text(
++        json.dumps(
++            {
++                "schema": 2,
++                "assets": [
++                    {"name": "model-q8.onnx", "role": "model", "quality": "q8"},
++                    {"name": "model-fp32.onnx", "role": "model", "quality": "fp32"},
++                    {"name": "voices.npz", "role": "voices", "format": "numpy-npz"},
++                ],
++            }
++        ),
++        encoding="utf-8",
++    )
++
++    resolved = resolve_model_defaults(
++        PipelineConfig(
++            release_manifest_path=manifest,
++            model_source="github",
++            model_variant="v1.0",
++            generation=GenerationConfig(lang="en"),
++        )
++    )
++
++    assert resolved.model_quality == "fp32"
++    assert resolved.model_path == tmp_path / "model-fp32.onnx"
++
++def test_release_manifest_rejects_unavailable_quality(tmp_path):
++    manifest = tmp_path / "release-manifest.json"
++    manifest.write_text(
++        json.dumps(
++            {
++                "schema": 2,
++                "assets": [
++                    {"name": "model-fp32.onnx", "role": "model", "quality": "fp32"},
++                    {"name": "voices.npz", "role": "voices", "format": "numpy-npz"},
++                ],
++            }
++        ),
++        encoding="utf-8",
++    )
++
++    with pytest.raises(
++        ValueError,
++        match=r"no model asset for quality 'q8'.*Available: fp32",
++    ):
++        resolve_model_defaults(
++            PipelineConfig(
++                release_manifest_path=manifest,
++                model_source="github",
++                model_variant="v1.0",
++                model_quality="q8",
++                generation=GenerationConfig(lang="en"),
++            )
++        )
++
++def test_release_manifest_rejects_duplicate_quality(tmp_path):
++    manifest = tmp_path / "release-manifest.json"
++    manifest.write_text(
++        json.dumps(
++            {
++                "schema": 2,
++                "assets": [
++                    {"name": "model-q8-a.onnx", "role": "model", "quality": "q8"},
++                    {"name": "model-q8-b.onnx", "role": "model", "quality": "q8"},
++                    {"name": "voices.npz", "role": "voices", "format": "numpy-npz"},
++                ],
++            }
++        ),
++        encoding="utf-8",
++    )
++
++    with pytest.raises(ValueError, match=r"multiple model assets for quality 'q8'"):
++        resolve_model_defaults(
++            PipelineConfig(
++                release_manifest_path=manifest,
++                model_source="github",
++                model_variant="v1.0",
++                model_quality="q8",
++                generation=GenerationConfig(lang="en"),
++            )
++        )
++
++def test_release_manifest_preserves_single_unqualified_model(tmp_path):
++    manifest = tmp_path / "release-manifest.json"
++    manifest.write_text(
++        json.dumps(
++            {
++                "assets": [
++                    {"name": "model.onnx", "role": "model"},
++                    {"name": "voices.npz", "role": "voices", "format": "numpy-npz"},
++                ],
++            }
++        ),
++        encoding="utf-8",
++    )
++
++    resolved = resolve_model_defaults(
++        PipelineConfig(
++            release_manifest_path=manifest,
++            model_source="github",
++            model_variant="v1.0",
++            generation=GenerationConfig(lang="en"),
++        )
++    )
++
++    assert resolved.model_quality == "fp32"
++    assert resolved.model_path == tmp_path / "model.onnx"
++
++def test_release_manifest_preserves_explicit_model_path_and_other_assets(tmp_path):
++    manifest = tmp_path / "release-manifest.json"
++    manifest.write_text(
++        json.dumps(
++            {
++                "schema": 2,
++                "assets": [
++                    {"name": "model-q8.onnx", "role": "model", "quality": "q8"},
++                    {"name": "voices.npz", "role": "voices", "format": "numpy-npz"},
++                    {"name": "config.json", "role": "config"},
++                ],
++            }
++        ),
++        encoding="utf-8",
++    )
++    custom_model = tmp_path / "custom.onnx"
++
++    resolved = resolve_model_defaults(
++        PipelineConfig(
++            release_manifest_path=manifest,
++            model_source="github",
++            model_variant="v1.0",
++            model_quality="q8",
++            model_path=custom_model,
++            generation=GenerationConfig(lang="en"),
++        )
++    )
++
++    assert resolved.model_path == custom_model
++    assert resolved.voices_path == tmp_path / "voices.npz"
++    assert resolved.model_config_path == tmp_path / "config.json"
++
++
+ def test_nabra_loads_direct_release_vocabulary(tmp_path):
+     from pykokoro.onnx_backend import load_vocab_from_config

@@ -1,0 +1,31 @@
+rows:
+  - sha: 5e50a8ac6076fb36c6a3552ad700dfc00414b7cf
+    inspected: true
+    inspected_paths:
+      - .github/workflows/python-publish.yml
+      - pykokoro/pipeline_config.py
+      - tests/test_packaging_metadata.py
+      - tests/test_release_profiles.py
+    observed_behavior:
+      Manifest-backed model resolution now selects the effective quality, rejects
+      ambiguous or unavailable model assets, and preserves explicit model paths; publish
+      validation parses dependency requirements and enforces minimum kokorog2p and
+      lexphon versions
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: Reviewed the implementation and focused regression tests
+    stale: false
+  - sha: e891f2cbef27e6141b16dbde6efe722ec6db8d3b
+    inspected: true
+    inspected_paths:
+      - pykokoro/pipeline_config.py
+      - tests/test_release_profiles.py
+    observed_behavior: Pre-commit formatting only; no runtime or test behavior change
+    public_impact: internal
+    decision: internal
+    target_entry_key: null
+    target_entry_id: null
+    notes: Reviewed the formatting-only diff
+    stale: false
