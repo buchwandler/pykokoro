@@ -78,6 +78,42 @@ def require_document_language(cfg: PipelineConfig) -> str:
     return normalize_language_code(language)
 
 
+def _manifest_model_name(
+    assets: list[dict[str, Any]],
+    *,
+    quality: ModelQuality,
+    manifest_path: Path,
+) -> str | None:
+    models = [
+        item
+        for item in assets
+        if item.get("role") == "model" and isinstance(item.get("name"), str)
+    ]
+    matching = [item for item in models if item.get("quality") == quality]
+    if len(matching) == 1:
+        return str(matching[0]["name"])
+    if len(matching) > 1:
+        raise ValueError(
+            f"Release manifest {manifest_path} has multiple model assets "
+            f"for quality {quality!r}"
+        )
+    if len(models) == 1 and models[0].get("quality") in {None, quality}:
+        return str(models[0]["name"])
+    if models:
+        available = sorted(
+            {
+                str(item["quality"])
+                for item in models
+                if isinstance(item.get("quality"), str)
+            }
+        )
+        suffix = f" Available: {', '.join(available)}" if available else ""
+        raise ValueError(
+            f"Release manifest {manifest_path} has no model asset "
+            f"for quality {quality!r}.{suffix}"
+        )
+    return None
+
 def _resolve_manifest_paths(cfg: PipelineConfig) -> PipelineConfig:
     if cfg.release_manifest_path is None:
         return cfg
@@ -85,7 +121,16 @@ def _resolve_manifest_paths(cfg: PipelineConfig) -> PipelineConfig:
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
     base = manifest_path.parent
     assets = [item for item in data.get("assets", []) if isinstance(item, dict)]
-    model = next((str(item["name"]) for item in assets if item.get("role") == "model"), None)
+    quality = cfg.model_quality
+    if quality is None:
+        raise ValueError(
+            "Manifest model resolution requires an effective model quality"
+        )
+    model = _manifest_model_name(
+        assets,
+        quality=quality,
+        manifest_path=manifest_path,
+    )
     voices = next(
         (
             str(item["name"])
@@ -136,7 +181,6 @@ def resolve_model_defaults(cfg: PipelineConfig) -> PipelineConfig:
     paths, are preserved and incompatible combinations fail before backend or
     G2P construction.
     """
-    cfg = _resolve_manifest_paths(cfg)
     require_document_language(cfg)
     from .model_profiles import (
         get_model_profile,
@@ -178,6 +222,7 @@ def resolve_model_defaults(cfg: PipelineConfig) -> PipelineConfig:
     quality = cfg.model_quality or cast(
         ModelQuality, (profile.available_qualities[0] if profile.available_qualities else "fp32")
     )
+    cfg = _resolve_manifest_paths(replace(cfg, model_quality=quality))
     if source == "huggingface" and profile.quality_files and quality not in profile.quality_files:
         available = ", ".join(profile.quality_files) or "none"
         raise ValueError(

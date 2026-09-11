@@ -41,6 +41,20 @@ jobs:
           from email import policy
           from email.parser import Parser
           from pathlib import Path
+          from packaging.requirements import Requirement
+          from packaging.version import Version
+
+          def has_minimum(requirements, name, minimum):
+              minimum_version = Version(minimum)
+              return any(
+                  requirement.name == name
+                  and any(
+                      spec.operator in (">=", ">", "==")
+                      and Version(spec.version) >= minimum_version
+                      for spec in requirement.specifier
+                  )
+                  for requirement in requirements
+              )
 
           tag_version = os.environ["RELEASE_TAG"].removeprefix("v")
           artifacts = list(Path("dist").iterdir())
@@ -58,9 +72,11 @@ jobs:
               metadata = Parser(policy=policy.default).parsestr(
                   archive.read(metadata_name).decode("utf-8")
               )
-              requirements = metadata.get_all("Requires-Dist", [])
-              assert any(requirement.startswith("kokorog2p") for requirement in requirements)
-              assert any("lexphon>=0.2.3" in requirement for requirement in requirements)
+              requirements = [
+                  Requirement(value) for value in metadata.get_all("Requires-Dist", [])
+              ]
+              assert has_minimum(requirements, "kokorog2p", "0.9.5")
+              assert has_minimum(requirements, "lexphon", "0.2.3")
               assert any(name.endswith("pykokoro/py.typed") for name in archive.namelist())
           PY
 

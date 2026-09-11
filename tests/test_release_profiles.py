@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.model_profiles import get_model_profile
 from pykokoro.pipeline_config import PipelineConfig, resolve_model_defaults
@@ -59,6 +61,178 @@ def test_release_manifest_resolves_explicit_assets(tmp_path):
     )
 
     assert resolved.model_path == tmp_path / "model.onnx"
+    assert resolved.voices_path == tmp_path / "voices.npz"
+    assert resolved.model_config_path == tmp_path / "config.json"
+
+
+def test_release_manifest_selects_requested_model_quality(tmp_path):
+    manifest = tmp_path / "release-manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema": 2,
+                "assets": [
+                    {"name": "model-fp32.onnx", "role": "model", "quality": "fp32"},
+                    {"name": "model-q8.onnx", "role": "model", "quality": "q8"},
+                    {"name": "voices.npz", "role": "voices", "format": "numpy-npz"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    resolved = resolve_model_defaults(
+        PipelineConfig(
+            release_manifest_path=manifest,
+            model_source="github",
+            model_variant="v1.0",
+            model_quality="q8",
+            generation=GenerationConfig(lang="en"),
+        )
+    )
+
+    assert resolved.model_quality == "q8"
+    assert resolved.model_path == tmp_path / "model-q8.onnx"
+
+def test_release_manifest_automatic_quality_ignores_asset_order(tmp_path):
+    manifest = tmp_path / "release-manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema": 2,
+                "assets": [
+                    {"name": "model-q8.onnx", "role": "model", "quality": "q8"},
+                    {"name": "model-fp32.onnx", "role": "model", "quality": "fp32"},
+                    {"name": "voices.npz", "role": "voices", "format": "numpy-npz"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    resolved = resolve_model_defaults(
+        PipelineConfig(
+            release_manifest_path=manifest,
+            model_source="github",
+            model_variant="v1.0",
+            generation=GenerationConfig(lang="en"),
+        )
+    )
+
+    assert resolved.model_quality == "fp32"
+    assert resolved.model_path == tmp_path / "model-fp32.onnx"
+
+def test_release_manifest_rejects_unavailable_quality(tmp_path):
+    manifest = tmp_path / "release-manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema": 2,
+                "assets": [
+                    {"name": "model-fp32.onnx", "role": "model", "quality": "fp32"},
+                    {"name": "voices.npz", "role": "voices", "format": "numpy-npz"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"no model asset for quality 'q8'.*Available: fp32",
+    ):
+        resolve_model_defaults(
+            PipelineConfig(
+                release_manifest_path=manifest,
+                model_source="github",
+                model_variant="v1.0",
+                model_quality="q8",
+                generation=GenerationConfig(lang="en"),
+            )
+        )
+
+def test_release_manifest_rejects_duplicate_quality(tmp_path):
+    manifest = tmp_path / "release-manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema": 2,
+                "assets": [
+                    {"name": "model-q8-a.onnx", "role": "model", "quality": "q8"},
+                    {"name": "model-q8-b.onnx", "role": "model", "quality": "q8"},
+                    {"name": "voices.npz", "role": "voices", "format": "numpy-npz"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=r"multiple model assets for quality 'q8'"):
+        resolve_model_defaults(
+            PipelineConfig(
+                release_manifest_path=manifest,
+                model_source="github",
+                model_variant="v1.0",
+                model_quality="q8",
+                generation=GenerationConfig(lang="en"),
+            )
+        )
+
+def test_release_manifest_preserves_single_unqualified_model(tmp_path):
+    manifest = tmp_path / "release-manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "assets": [
+                    {"name": "model.onnx", "role": "model"},
+                    {"name": "voices.npz", "role": "voices", "format": "numpy-npz"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    resolved = resolve_model_defaults(
+        PipelineConfig(
+            release_manifest_path=manifest,
+            model_source="github",
+            model_variant="v1.0",
+            generation=GenerationConfig(lang="en"),
+        )
+    )
+
+    assert resolved.model_quality == "fp32"
+    assert resolved.model_path == tmp_path / "model.onnx"
+
+def test_release_manifest_preserves_explicit_model_path_and_other_assets(tmp_path):
+    manifest = tmp_path / "release-manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema": 2,
+                "assets": [
+                    {"name": "model-q8.onnx", "role": "model", "quality": "q8"},
+                    {"name": "voices.npz", "role": "voices", "format": "numpy-npz"},
+                    {"name": "config.json", "role": "config"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    custom_model = tmp_path / "custom.onnx"
+
+    resolved = resolve_model_defaults(
+        PipelineConfig(
+            release_manifest_path=manifest,
+            model_source="github",
+            model_variant="v1.0",
+            model_quality="q8",
+            model_path=custom_model,
+            generation=GenerationConfig(lang="en"),
+        )
+    )
+
+    assert resolved.model_path == custom_model
     assert resolved.voices_path == tmp_path / "voices.npz"
     assert resolved.model_config_path == tmp_path / "config.json"
 

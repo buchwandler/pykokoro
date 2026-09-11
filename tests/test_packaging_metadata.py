@@ -207,4 +207,8 @@ def test_publish_workflow_validates_artifacts_before_upload() -> None:
     assert "len(wheels) == 1" in workflow
     assert "len(sdists) == 1" in workflow
     assert "RELEASE_TAG" in workflow
-    assert "lexphon>=0.2.3" in workflow
+    assert "from packaging.requirements import Requirement" in workflow
+    assert "from packaging.version import Version" in workflow
+    assert "def has_minimum(requirements, name, minimum):" in workflow
+    assert 'has_minimum(requirements, "kokorog2p", "0.9.5")' in workflow
+    assert 'has_minimum(requirements, "lexphon", "0.2.3")' in workflow
