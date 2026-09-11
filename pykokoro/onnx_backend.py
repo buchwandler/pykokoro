@@ -2206,12 +2206,36 @@ class Kokoro:
         if self._session is not None or self._runtime is not None:
             return
 
+        started = time.perf_counter()
+        logger.info(
+            "tts.init.start model=%s source=%s quality=%s provider=%s",
+            self._model_variant,
+            self._model_source,
+            self._model_quality,
+            self._provider,
+        )
         self._ensure_models()
         assert self._model_path is not None
         assert self._voices_path is not None
+        logger.info(
+            "tts.assets.ready model=%s source=%s quality=%s",
+            self._model_variant,
+            self._model_source,
+            self._model_quality,
+        )
         if self._resolved_runtime_assets is not None:
             self._runtime = create_runtime(self._resolved_runtime_assets)
             if self._runtime is not None:
+                logger.info(
+                    "tts.runtime.ready model=%s voices=%d",
+                    self._model_variant,
+                    len(self._runtime.voices),
+                )
+                logger.info(
+                    "tts.init.finish model=%s elapsed_ms=%.3f",
+                    self._model_variant,
+                    (time.perf_counter() - started) * 1000.0,
+                )
                 return
 
         # Use OnnxSessionManager to create session
@@ -2223,6 +2247,7 @@ class Kokoro:
             model_quality=self._model_quality,
         )
         self._session = session_manager.create_session(model_path=self._model_path)
+        logger.info("tts.session.ready providers=%s", self._session.get_providers())
 
         # Use VoiceManager to load voices
         voice_manager = VoiceManager(model_source=self._model_source)
@@ -2240,6 +2265,7 @@ class Kokoro:
             assert self._voices_path is not None
             voice_manager.load_voices(voices_path=self._voices_path)
         self._voice_manager = voice_manager
+        logger.info("tts.voices.ready count=%d", len(voice_manager.get_voices()))
 
         # Create AudioGenerator
         self._audio_generator = AudioGenerator(
@@ -2251,6 +2277,11 @@ class Kokoro:
             inference_audio_diagnostics=self._inference_audio_diagnostics,
             inference_cache_enabled=self._inference_cache_enabled,
             inference_cache_max_bytes=self._inference_cache_max_bytes,
+        )
+        logger.info(
+            "tts.init.finish model=%s elapsed_ms=%.3f",
+            self._model_variant,
+            (time.perf_counter() - started) * 1000.0,
         )
 
     def get_voices(self) -> list[str]:

@@ -2,6 +2,7 @@
 
 import logging
 import os
+import time
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, Final
@@ -164,6 +165,13 @@ class OnnxSessionManager:
         Raises:
             RuntimeError: If session creation fails
         """
+        started = time.perf_counter()
+        provider_request = self._provider or ("auto" if self._use_gpu else "cpu")
+        logger.info(
+            "onnx.session.start provider_request=%s model=%s",
+            provider_request,
+            model_path.name,
+        )
         sess_options = self._create_session_options()
         providers = self._select_providers(self._provider, self._use_gpu)
 
@@ -211,6 +219,11 @@ class OnnxSessionManager:
                 # Log what was actually loaded
                 actual_providers = session.get_providers()
                 logger.info(f"Loaded ONNX session with providers: {actual_providers}")
+                logger.info(
+                    "onnx.session.finish providers=%s elapsed_ms=%.3f",
+                    actual_providers,
+                    (time.perf_counter() - started) * 1000.0,
+                )
 
                 # Warn if we had to fallback
                 if attempt == 1:

@@ -122,6 +122,31 @@ importing ONNX Runtime, creating an ONNX session, loading assets, or synthesizin
 It does not replace `discover_models()`, which provides runtime capability and model
 inventory metadata.
 
+## Logging and runtime diagnostics
+
+PyKokoro uses standard Python logging for streaming operational visibility. It does not configure global logging, install handlers or formatters, set logger levels, or add timestamps. The embedding application owns logging presentation and decides whether lifecycle records are shown.
+
+For local diagnostics, configure logging before constructing a pipeline:
+
+```python
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
+
+from pykokoro import KokoroPipeline
+```
+
+Production applications should configure the `pykokoro` logger through their existing logging setup instead of relying on `basicConfig`:
+
+```python
+import logging
+
+logging.getLogger("pykokoro").setLevel(logging.INFO)
+```
+
+INFO records cover major milestones such as model and distribution selection, artifact downloads, ONNX session creation, backend readiness, and voice loading. DEBUG records add stage timings, cache decisions, inference counts and runtimes, and audio-unit completion. Records contain no application-provided timestamps, so the host formatter can apply its own timestamp format.
+
+Streaming logs and `PipelineConfig(return_trace=True)` serve different purposes. Logging reports lifecycle events while synthesis is running. `return_trace=True` attaches structured diagnostics to returned audio results for programmatic inspection. Enabling one does not enable or print the other. Routine lifecycle logs avoid complete user documents, phoneme streams, audio arrays, credentials, and model contents.
 ## Installation
 
 ### Basic Installation (CPU only)

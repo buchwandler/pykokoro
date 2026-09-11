@@ -794,6 +794,13 @@ class KokoroPipeline:
         cfg = resolve_model_defaults(cfg)
         kokoro_key = self._kokoro_key(cfg)
         if self._kokoro is not None and self._kokoro_config_key == kokoro_key:
+            logger.debug(
+                "backend.reuse model=%s source=%s quality=%s provider=%s",
+                cfg.model_variant,
+                cfg.model_source,
+                cfg.model_quality,
+                cfg.provider,
+            )
             self._kokoro._asset_progress = cfg.asset_progress
             return self._kokoro, False
         try:
@@ -811,6 +818,13 @@ class KokoroPipeline:
         assert cfg.model_source is not None
         assert cfg.model_variant is not None
         assert cfg.voice is not None
+        logger.info(
+            "backend.create model=%s source=%s quality=%s provider=%s",
+            cfg.model_variant,
+            cfg.model_source,
+            cfg.model_quality,
+            cfg.provider,
+        )
         new_kokoro = Kokoro(
             model_path=Path(cfg.model_path) if cfg.model_path else None,
             voices_path=Path(cfg.voices_path) if cfg.voices_path else None,
@@ -833,11 +847,20 @@ class KokoroPipeline:
         self._kokoro = new_kokoro
         self._kokoro_config_key = kokoro_key
         self._owns_kokoro = True
+        if previous_kokoro is not None:
+            logger.debug(
+                "backend.replace model=%s source=%s quality=%s provider=%s",
+                cfg.model_variant,
+                cfg.model_source,
+                cfg.model_quality,
+                cfg.provider,
+            )
         if previous_kokoro is not None and previous_owned:
             try:
                 previous_kokoro.close()
             except Exception:
                 logger.warning("Failed to close replaced Kokoro backend", exc_info=True)
+        logger.info("backend.ready model=%s voice=%s", cfg.model_variant, cfg.voice)
         return new_kokoro, True
 
     def _resolve_run_config(self, overrides: dict[str, Any]) -> PipelineConfig:
@@ -1468,6 +1491,15 @@ class KokoroPipeline:
             with trace_timing(prepared.trace, "audio_postprocessing", "postprocess"):
                 audio = prepared.audio_postprocessor.postprocess(
                     generated, prepared.cfg, prepared.trace
+                )
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "unit.finish index=%d unit_kind=%s samples=%d sample_rate=%d segments=%d",
+                    index,
+                    group.descriptor.unit_kind,
+                    int(np.asarray(audio).size),
+                    SAMPLE_RATE,
+                    len(generated),
                 )
             markers = _collect_marker_offsets(
                 list(group.marker_events),

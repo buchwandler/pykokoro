@@ -1,6 +1,7 @@
 """Voice management for PyKokoro."""
 
 import logging
+import time
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -290,6 +291,8 @@ class VoiceManager:
         Args:
             voices_path: Path to the voices file (.npz or .bin)
         """
+        started = time.perf_counter()
+        logger.info("voices.load.start source=%s", self._model_source)
         if voices_path.exists() and voices_path.stat().st_size == 0:
             raise ConfigurationError(
                 f"Voice archive {voices_path} is empty. Re-download voices to fix it."
@@ -315,6 +318,11 @@ class VoiceManager:
             voices_path,
         )
         logger.debug("Available voices: %s", ", ".join(sorted(self._voices_data.keys())))
+        logger.info(
+            "voices.load.finish count=%d elapsed_ms=%.3f",
+            len(self._voices_data),
+            (time.perf_counter() - started) * 1000.0,
+        )
 
     def _load_voices_bin_github(self, voices_path: Path) -> dict[str, np.ndarray]:
         """Load voices from GitHub format .bin file.

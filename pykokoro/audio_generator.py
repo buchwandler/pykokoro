@@ -561,6 +561,16 @@ class AudioGenerator:
             cache_key=cache_key,
             attempt_kind=attempt_kind,
         )
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "inference.finish cache_hit=%s attempt=%s phonemes=%d tokens=%d samples=%d runtime_ms=%.3f",
+                cache_hit,
+                attempt_kind,
+                len(effective_phonemes),
+                len(tokens),
+                int(np.asarray(audio).size),
+                runtime_s * 1000.0,
+            )
         if trace is not None:
             style_values = np.asarray(voice_style_indexed, dtype=np.float32)
             diagnostic = trace.inference[-1]

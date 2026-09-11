@@ -477,12 +477,14 @@ def download_artifact(
     phase_callback: ArtifactPhaseProgress | None = None,
 ) -> Path:
     """Download one artifact and replace the target only after verification."""
+    started = time.perf_counter()
     logger.info(
-        "Downloading runtime artifact %s (%s, %d bytes)",
-        artifact.local_name,
+        "artifact.download.start artifact_id=%s role=%s bytes=%d",
+        artifact.id,
         artifact.role,
         artifact.size,
     )
+    logger.debug("artifact.download.target artifact_id=%s path=%s", artifact.id, target)
     target.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("wb", dir=target.parent, delete=False) as file:
         temporary = Path(file.name)
@@ -503,7 +505,10 @@ def download_artifact(
         verify_artifact(temporary, artifact)
         temporary.replace(target)
         logger.info(
-            "Downloaded and verified runtime artifact %s -> %s", artifact.local_name, target
+            "artifact.download.finish artifact_id=%s bytes=%d elapsed_ms=%.3f",
+            artifact.id,
+            downloaded,
+            (time.perf_counter() - started) * 1000.0,
         )
     except BaseException:
         temporary.unlink(missing_ok=True)
