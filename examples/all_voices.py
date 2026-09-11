@@ -248,6 +248,7 @@ ANNOUNCEMENT_BUILDERS: dict[str, Callable[[int, str, VoiceGender, str], str]] = 
     "ja": _japanese,
     "kk": _kazakh,
     "pt": _portuguese,
+    "pt-PT": _portuguese,
     "ru": _russian,
     "sv": _swedish,
     "th": _thai,
