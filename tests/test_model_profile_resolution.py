@@ -23,47 +23,50 @@ def test_martin_profile_contains_runtime_metadata_only():
     assert not hasattr(profile, "model_sha256")
 
 
-@pytest.mark.parametrize(
-    ("variant", "voice", "language", "frontend"),
-    [
-        ("de-anna", "df_anna", "de", "phonemis-de-v1"),
-        ("pl-mateusz", "pm_mateusz", "pl", "phonemis-pl-v1"),
-    ],
-)
-def test_software_mansion_profiles_are_known_but_staged(variant, voice, language, frontend) -> None:
-    profile = get_model_profile(variant, "github")
+def test_software_mansion_anna_is_ready() -> None:
+    profile = get_model_profile("de-anna", "github")
 
-    assert profile.language_codes == (language,)
-    assert profile.default_voice == voice
-    assert profile.frontend == frontend
-    assert profile.runtime_available is False
-    assert profile.support_status == "registry-unavailable"
+    assert profile.language_codes == ("de",)
+    assert profile.default_voice == "df_anna"
+    assert profile.frontend == "german-ipa-v1"
+    assert profile.frontend_experimental is False
+    assert profile.g2p_backend == "kokorog2p"
+    assert profile.runtime_available is True
+    assert profile.support_status == "ready"
     assert profile.onnx_inputs == {
         "tokens": "int64",
         "style": "float32",
         "speed": "float32",
     }
-    assert frontend not in IMPLEMENTED_FRONTENDS
+    assert profile.frontend in IMPLEMENTED_FRONTENDS
 
 
-def test_staged_profiles_are_excluded_from_automatic_language_selection() -> None:
+
+def test_software_mansion_mateusz_is_known_but_staged() -> None:
+    profile = get_model_profile("pl-mateusz", "github")
+
+    assert profile.language_codes == ("pl",)
+    assert profile.default_voice == "pm_mateusz"
+    assert profile.frontend == "phonemis-pl-v1"
+    assert profile.runtime_available is False
+    assert profile.support_status == "registry-unavailable"
+    assert profile.frontend not in IMPLEMENTED_FRONTENDS
+def test_automatic_language_selection_keeps_martin_and_excludes_mateusz() -> None:
     assert profile_for_language("de").variant == "v1.2-de-martin"
     assert profile_for_language("pl") is None
 
 
-@pytest.mark.parametrize("variant", ["de-anna", "pl-mateusz"])
-def test_staged_profiles_report_missing_runtime_distribution(variant) -> None:
+def test_mateusz_reports_missing_runtime_distribution() -> None:
     with pytest.raises(ValueError, match="present but has no runtime-ready distribution"):
         resolve_model_defaults(
             PipelineConfig(
                 model_source="github",
-                model_variant=variant,
-                generation=GenerationConfig(lang="de" if variant == "de-anna" else "pl"),
+                model_variant="pl-mateusz",
+                generation=GenerationConfig(lang="pl"),
             )
         )
 
-
-def test_staged_profile_resolves_explicit_local_release_assets(tmp_path) -> None:
+def test_anna_resolves_explicit_local_release_assets(tmp_path) -> None:
     manifest = tmp_path / "release-manifest.json"
     manifest.write_text(
         '{"assets": ['
@@ -88,6 +91,22 @@ def test_staged_profile_resolves_explicit_local_release_assets(tmp_path) -> None
     assert resolved.model_path == tmp_path / "model.onnx"
     assert resolved.voices_path == tmp_path / "voices.npz"
     assert resolved.model_config_path == tmp_path / "config.json"
+
+def test_anna_resolves_as_a_normal_github_model() -> None:
+    resolved = resolve_model_defaults(
+        PipelineConfig(
+            model_source="github",
+            model_variant="de-anna",
+            generation=GenerationConfig(lang="de"),
+        )
+    )
+
+    assert resolved.model_source == "github"
+    assert resolved.model_variant == "de-anna"
+    assert resolved.model_quality == "fp32"
+    assert resolved.voice == "df_anna"
+    assert resolved.allow_experimental_frontend is False
+
 
 
 @pytest.mark.parametrize("lang", ["de", "de-DE", "de_at", "de-ch"])

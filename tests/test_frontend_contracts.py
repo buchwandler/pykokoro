@@ -47,6 +47,24 @@ def test_nabra_frontend_is_release_ready():
     assert g2p.phonemize(fixture.text) == fixture.diagnostic_phonemes
 
 
+def test_anna_german_ipa_frontend_is_release_ready() -> None:
+    profile = get_model_profile("de-anna", "github")
+    fixture = FRONTEND_FIXTURES["de-anna"]
+
+    assert profile.frontend == "german-ipa-v1"
+    assert profile.g2p_backend == "kokorog2p"
+    assert profile.frontend_experimental is False
+
+    assert fixture.variant == "de-anna"
+    assert fixture.language == "de"
+    assert fixture.diagnostic_backend == "kokorog2p"
+    assert fixture.diagnostic_phonemes
+    assert fixture.release_ready is True
+
+    assert require_frontend("de-anna", allow_experimental=False) == "german-ipa-v1"
+
+
+
 def test_native_profiles_are_not_marked_experimental():
     assert not get_model_profile("v1.2-de-martin", "github").frontend_experimental
 

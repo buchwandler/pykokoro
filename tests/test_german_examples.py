@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from examples import german, german2, german3
+from examples import german, german2, german3, german4
 
 
 def test_german_model_configurations() -> None:
@@ -35,9 +35,25 @@ def test_german_model_configurations() -> None:
     assert thorsten.generation.speed == 1.0
     assert thorsten.allow_experimental_frontend is False
     assert german3.OUTPUT_FILE == "german_thorsten.wav"
+
+    anna = german4.make_config()
+    assert anna.model_source == "github"
+    assert anna.model_variant == "de-anna"
+    assert anna.model_quality == "fp32"
+    assert anna.voice == "df_anna"
+    assert anna.generation.lang == "de"
+    assert anna.generation.speed == 1.0
+    assert anna.allow_experimental_frontend is False
+    assert german4.OUTPUT_FILE == "german_anna.wav"
+    assert anna.short_sentence_config is not None
+    assert anna.short_sentence_config.enabled is True
+    anna_no_short = german4.make_config(short_sentence=False)
+    assert anna_no_short.short_sentence_config is not None
+    assert anna_no_short.short_sentence_config.enabled is False
     from pykokoro.model_profiles import get_model_profile
 
     assert get_model_profile("de-crane", "github").g2p_backend == "kokorog2p"
+    assert get_model_profile("de-anna", "github").g2p_backend == "kokorog2p"
     assert get_model_profile("de-thorsten", "github").g2p_backend == "kokorog2p"
     assert thorsten.short_sentence_config is not None
     assert thorsten.short_sentence_config.enabled is True
@@ -47,7 +63,7 @@ def test_german_model_configurations() -> None:
 
 
 def test_german_examples_share_normalization_comparison_text() -> None:
-    assert german.TEXT == german2.TEXT == german3.TEXT
+    assert german.TEXT == german2.TEXT == german3.TEXT == german4.TEXT
     for case in ("14.05.2026", "18:20", "1,5 kg", "Prof.", "Min.", "12,80 EUR"):
         assert case in german.TEXT
 
@@ -64,7 +80,7 @@ def test_german_comparison_layout_lists_all_lexicons() -> None:
     )
 
 
-@pytest.mark.parametrize("module", [german, german2, german3])
+@pytest.mark.parametrize("module", [german, german2, german3, german4])
 def test_german_configs_change_only_lexicon(module) -> None:
     gold = module.make_config(lexicons=("gold",))
     crane = module.make_config(lexicons=("crane",))
@@ -103,7 +119,7 @@ def test_german_benchmark_parser_controls() -> None:
     assert args.show_stage_times is False
 
 
-@pytest.mark.parametrize("module", [german, german2, german3])
+@pytest.mark.parametrize("module", [german, german2, german3, german4])
 def test_german_audio_combination(module) -> None:
     gold = SimpleNamespace(audio=np.ones(2, dtype=np.float32), sample_rate=4)
     crane = SimpleNamespace(audio=np.full(3, 2.0, dtype=np.float32), sample_rate=4)

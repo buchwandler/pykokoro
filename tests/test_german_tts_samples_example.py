@@ -50,6 +50,7 @@ def test_model_inventory_includes_current_german_models() -> None:
         "v1.2-de-martin",
         "de-crane",
         "de-thorsten",
+        "de-anna",
     }
     assert example.available_german_models()[0] == example.DEFAULT_MODEL
 
@@ -93,6 +94,7 @@ def test_invalid_choices_fail_in_argparse(arguments: list[str]) -> None:
         ("v1.2-de-martin", "martin", False),
         ("de-crane", "default", True),
         ("de-thorsten", "thorsten", False),
+        ("de-anna", "df_anna", False),
     ],
 )
 def test_model_configuration(model_id: str, voice: str, experimental: bool) -> None:

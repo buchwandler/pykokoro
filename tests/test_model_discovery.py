@@ -97,6 +97,13 @@ def _registry() -> ModelRegistry:
                     voices=["df_kerstin"],
                     default_voice="df_kerstin",
                 ),
+                "de-anna": _model(
+                    "de-anna",
+                    frontend="german-ipa-v1",
+                    languages=["de"],
+                    voices=["df_anna"],
+                    default_voice="df_anna",
+                ),
                 "de-thorsten": _model(
                     "de-thorsten",
                     frontend="kokorog2p-de-thorsten-v1",
@@ -146,6 +153,7 @@ def test_discovery_returns_complete_sorted_contract(monkeypatch: pytest.MonkeyPa
 
     result = discovery.discover_models(offline=True)
     assert [model.model_id for model in result.models] == [
+        "de-anna",
         "de-crane",
         "de-thorsten",
         "restricted",
@@ -155,6 +163,22 @@ def test_discovery_returns_complete_sorted_contract(monkeypatch: pytest.MonkeyPa
     assert result.registry_source == "fixture-cache"
     assert result.cache_fallback is False
     assert result.offline is True
+
+    anna = next(model for model in result.models if model.model_id == "de-anna")
+    assert anna.source == "github"
+    assert anna.languages == ("de",)
+    assert anna.default_voice == "df_anna"
+    assert anna.voices == ("df_anna",)
+    assert anna.qualities == ("fp32",)
+    assert anna.g2p_backend == "kokorog2p"
+    assert anna.frontend == "german-ipa-v1"
+    assert anna.status == "ready"
+    assert anna.experimental is False
+    assert anna.runtime_available is True
+    assert anna.distribution_id == "github"
+    assert anna.provider == "github-release"
+    assert anna.sample_rate == 24000
+    assert anna.max_tokens == 510
 
     thorsten = next(model for model in result.models if model.model_id == "de-thorsten")
     assert thorsten.source == "github"

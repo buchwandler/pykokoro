@@ -39,7 +39,7 @@ def make_config(
     short_sentence: bool = True,
     lexicons: str | tuple[str, ...] | None = None,
 ) -> PipelineConfig:
-    """Return the explicitly selected experimental Anna configuration."""
+    """Return the explicitly selected Anna configuration."""
     from pykokoro.short_sentence_handler import ShortSentenceConfig
 
     return PipelineConfig(
@@ -47,7 +47,6 @@ def make_config(
         model_source="github",
         model_variant="de-anna",
         model_quality="fp32",
-        allow_experimental_frontend=True,
         generation=GenerationConfig(lang="de", speed=1.0),
         tokenizer_config=TokenizerConfig(lexicons=lexicons),
         short_sentence_config=ShortSentenceConfig(enabled=short_sentence),

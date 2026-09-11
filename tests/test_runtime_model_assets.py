@@ -32,6 +32,27 @@ def _artifact(artifact_id: str, url: str, local_name: str) -> dict[str, object]:
         "sha256": hashlib.sha256(payload).hexdigest(),
     }
 
+def _anna_artifact(
+    artifact_id: str,
+    role: str,
+    format: str,
+    local_name: str,
+    quality: str | None = None,
+) -> dict[str, object]:
+    payload = artifact_id.encode()
+    artifact: dict[str, object] = {
+        "id": artifact_id,
+        "role": role,
+        "format": format,
+        "url": f"https://github.test/{local_name}",
+        "local_name": local_name,
+        "size": len(payload),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+    if quality is not None:
+        artifact["quality"] = quality
+    return artifact
+
 
 def _registry() -> ModelRegistry:
     return ModelRegistry(
@@ -85,6 +106,54 @@ def _registry() -> ModelRegistry:
         "test",
     )
 
+def _anna_registry() -> ModelRegistry:
+    return ModelRegistry(
+        {
+            "schema": 1,
+            "runtime_contract": 1,
+            "models": {
+                "de-anna": {
+                    "model_version": "1",
+                    "runtime_available": True,
+                    "language_codes": ["de"],
+                    "frontend": "german-ipa-v1",
+                    "sample_rate": 24000,
+                    "runtime": {
+                        "layout": "single-onnx-v1",
+                        "max_tokens": 510,
+                        "default_voice": "df_anna",
+                        "voices": ["df_anna"],
+                    },
+                    "distributions": [
+                        {
+                            "id": "anna-github",
+                            "provider": "github-release",
+                            "transport": "https",
+                            "runtime_ready": True,
+                            "release_key": "de-anna",
+                            "release_tag": "model-files-german-software-mansion-anna-v1",
+                            "artifacts": [
+                                _anna_artifact(
+                                    "anna-model", "model", "onnx", "model.onnx", "fp32"
+                                ),
+                                _anna_artifact(
+                                    "anna-voices", "voices", "numpy-npz", "voices.npz"
+                                ),
+                                _anna_artifact(
+                                    "anna-config", "config", "json", "config.json"
+                                ),
+                                _anna_artifact(
+                                    "anna-bundle", "bundle", "json", "bundle.json"
+                                ),
+                            ],
+                        }
+                    ],
+                }
+            },
+        },
+        "anna-fixture",
+    )
+
 
 def test_resolver_materializes_one_atomic_distribution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -129,6 +198,41 @@ def test_registry_profile_uses_canonical_runtime_metadata() -> None:
     assert profile.frontend == "test-frontend"
     assert profile.layout == "single-onnx-v1"
     assert profile.support_status == "unsupported-frontend"
+
+def test_anna_registry_profile_and_runtime_assets_are_ready(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def materialize(artifact, target):
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(artifact.id.encode())
+        return target
+
+    monkeypatch.setattr("pykokoro.runtime.model_assets.download_artifact", materialize)
+
+    profile = get_registry_model_profile("de-anna", registry=_anna_registry())
+    assert profile.source == "github"
+    assert profile.variant == "de-anna"
+    assert profile.frontend == "german-ipa-v1"
+    assert profile.frontend_experimental is False
+    assert profile.g2p_backend == "kokorog2p"
+    assert profile.runtime_available is True
+    assert profile.support_status == "ready"
+    assert profile.default_voice == "df_anna"
+    assert profile.available_qualities == ("fp32",)
+
+    assets = resolve_runtime_assets(
+        model_id="de-anna",
+        quality="fp32",
+        registry=_anna_registry(),
+        cache_dir=tmp_path,
+    )
+    assert assets.distribution_id == "anna-github"
+    assert assets.provider == "github-release"
+    assert assets.artifact_for_role("model", quality="fp32").name == "model.onnx"
+    assert assets.artifact_for_role("voices").name == "voices.npz"
+    assert assets.artifact_for_role("config").name == "config.json"
+    assert assets.artifact_for_role("bundle").name == "bundle.json"
+    assert assets.artifact_for_role("voices").suffix == ".npz"
 
 
 def test_raw_voice_materialization_preserves_shape_and_provenance(tmp_path: Path) -> None:

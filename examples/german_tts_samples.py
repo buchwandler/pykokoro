@@ -43,6 +43,7 @@ MODEL_LABELS = {
     "v1.2-de-martin": "Martin v1.2",
     "de-crane": "Kerstin / Crane",
     "de-thorsten": "Thorsten",
+    "de-anna": "Anna",
 }
 
 
