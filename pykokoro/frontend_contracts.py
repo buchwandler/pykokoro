@@ -36,6 +36,14 @@ FRONTEND_FIXTURES: dict[ModelVariant, FrontendFixture] = {
         "fˈyːɾ deːn ˈWflˌWf bɾˈWxən viːɾ kaɾtˈɔfəln .",
         release_ready=True,
     ),
+    "pt-eu-logus2k": FrontendFixture(
+        "pt-eu-logus2k",
+        "pt-pt",
+        "Olá mundo.",
+        "kokorog2p",
+        "ɔˈla mũndo .",
+        release_ready=True,
+    ),
     "sv-joakim": FrontendFixture("sv-joakim", "sv", "Hej", "kokorog2p", "hej"),
     "de-thorsten": FrontendFixture("de-thorsten", "de", "Brücke", "kokorog2p", "bykə"),
     "kk-anuarsv": FrontendFixture("kk-anuarsv", "kk", "Сәлем", "kokorog2p", "sælˈem"),
@@ -46,6 +54,7 @@ FRONTEND_FIXTURES: dict[ModelVariant, FrontendFixture] = {
 
 FRONTEND_NAMED_LEXICONS: dict[str, tuple[str, ...]] = {
     "kokorog2p-de-thorsten-v1": ("gold", "crane"),
+    "tts-eu-pt-v1": ("lexhint",),
     "nabra-arabic-v1": (),
 }
 

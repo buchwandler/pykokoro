@@ -268,6 +268,29 @@ MODEL_PROFILES.update(
             runtime_available=False,
             support_status="registry-unavailable",
         ),
+        ("github", "pt-eu-logus2k"): RuntimeProfile(
+            source="github",
+            variant="pt-eu-logus2k",
+            language_codes=("pt-pt",),
+            default_voice="pt_eu",
+            vocabulary_source="downloaded-config",
+            tokenizer_vocab_version="1.0",
+            frontend="tts-eu-pt-v1",
+            frontend_experimental=False,
+            onnx_inputs={
+                "tokens": "int64",
+                "style": "float32",
+                "speed": "float32",
+            },
+            sample_rate=24_000,
+            quality_files={"fp32": "kokoro-portuguese-eu-pt-v1.0.onnx"},
+            voice_names=("pt_eu",),
+            layout="single-onnx-v1",
+            runtime_available=True,
+            redistribution_allowed=True,
+            support_status="ready",
+            g2p_backend="kokorog2p",
+        ),
     }
 )
 
@@ -389,6 +412,7 @@ IMPLEMENTED_FRONTENDS = {
     "kokorog2p-kk-v1",
     "kokorog2p-ru-v1",
     "kokorog2p-th-wayu-v1",
+    "tts-eu-pt-v1",
 }
 IMPLEMENTED_LAYOUTS = {"single-onnx-v1", "split-onnx-v1"}
 

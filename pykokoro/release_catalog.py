@@ -18,6 +18,9 @@ MODEL_REPOSITORY = "buchwandler/kokoro-onnx-models"
 GITHUB_API = "https://api.github.com"
 MANIFEST_NAME = "release-manifest.json"
 SUPPORTED_MANIFEST_SCHEMAS = frozenset({2})
+_LEGACY_FRONTEND_ALIASES = {
+    "tts_eu_pt TugaPhone pt-PT Lisbon": "tts-eu-pt-v1",
+}
 SUPPORTED_RUNTIME_CONTRACTS = frozenset({1})
 SUPPORTED_FRONTENDS = frozenset(
     {
@@ -30,6 +33,7 @@ SUPPORTED_FRONTENDS = frozenset(
         "Arabic diacritizer + espeak-ng + Nabra cleanup",
         "nabra-arabic-v1",
         "Hebrew-specific G2P",
+        "tts-eu-pt-v1",
     }
 )
 SUPPORTED_VOICE_FORMATS = frozenset({"numpy-npz", "raw-float32-le"})
@@ -267,7 +271,7 @@ def _parse_release(
     _require(isinstance(runtime, dict), "Manifest runtime metadata is invalid")
     language_codes = runtime.get("language_codes")
     voices = runtime.get("voices")
-    frontend = runtime.get("frontend")
+    frontend = _LEGACY_FRONTEND_ALIASES.get(runtime.get("frontend"), runtime.get("frontend"))
     _require(
         isinstance(language_codes, list)
         and all(isinstance(value, str) for value in language_codes),
@@ -501,26 +505,58 @@ def download_model_release(
 ) -> InstalledModelRelease:
     """Download and verify all assets needed by one resolved release."""
     from .model_assets import release_asset_path
-    from .onnx_backend import download_all_models_github, download_release_auxiliary
+    from .onnx_backend import (
+        _download_release_asset,
+        _validate_json_asset,
+        _validate_onnx_file,
+        _validate_vocabulary,
+        _validate_voice_archive,
+        _validate_voice_bin,
+    )
 
     release = resolve_model_release(profile, tag=tag, quality=quality, offline=offline)
-    paths = download_all_models_github(
-        profile, quality, force=force, offline=offline, tag=release.release_tag
-    )
     model_asset = release.model_asset(quality)
     voice_asset = release.voice_asset()
+    model_path = _download_release_asset(
+        release,
+        model_asset,
+        quality=quality,
+        force=force,
+        offline=offline,
+        validator=_validate_onnx_file,
+    )
+    voice_validator = (
+        (lambda path: _validate_voice_archive(path, expected_voice_names=release.voices))
+        if voice_asset.format == "numpy-npz"
+        else _validate_voice_bin
+    )
+    voices_path = _download_release_asset(
+        release,
+        voice_asset,
+        quality=quality,
+        force=force,
+        offline=offline,
+        validator=voice_validator,
+    )
     auxiliary_paths = []
     for role in ("config", "vocab", "bundle"):
-        if release.assets_for_role(role):
+        assets = release.assets_for_role(role)
+        if assets:
+            validator = _validate_vocabulary if role == "vocab" else _validate_json_asset
             auxiliary_paths.append(
-                download_release_auxiliary(
-                    profile, role, force=force, offline=offline, tag=release.release_tag
+                _download_release_asset(
+                    release,
+                    assets[0],
+                    quality=quality,
+                    force=force,
+                    offline=offline,
+                    validator=validator,
                 )
             )
     return InstalledModelRelease(
         release=release,
         quality=quality,
-        model_path=paths.get(model_asset.name, release_asset_path(release, model_asset)),
-        voices_path=paths.get(voice_asset.name, release_asset_path(release, voice_asset)),
+        model_path=model_path or release_asset_path(release, model_asset),
+        voices_path=voices_path or release_asset_path(release, voice_asset),
         auxiliary_paths=tuple(auxiliary_paths),
     )

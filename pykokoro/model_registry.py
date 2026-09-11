@@ -143,7 +143,11 @@ class RuntimeModel:
     @property
     def language_codes(self) -> tuple[str, ...]:
         values = self.data.get("language_codes", self.runtime.get("language_codes", []))
-        return tuple(str(value) for value in values)
+        codes = tuple(str(value) for value in values)
+        if self.model_id == "pt-eu-logus2k" and tuple(code.lower() for code in codes) == ("pt",):
+            # Older catalog revisions used generic pt for this European Portuguese model.
+            return ("pt-pt",)
+        return codes
 
     @property
     def frontend(self) -> str:

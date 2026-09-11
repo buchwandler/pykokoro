@@ -335,3 +335,62 @@ def test_native_provisioning_runs_before_g2p_construction(
 )
 def test_default_lexphon_ids_follow_kokorog2p_registry(language: str, expected: str) -> None:
     assert required_lexphon_ids(language, None) == (expected,)
+
+
+def test_portuguese_lexphon_selection_uses_regional_asset() -> None:
+    assert required_lexphon_ids("pt-pt", ("lexhint",)) == ("pt-pt:lexhint",)
+
+
+def test_portuguese_lexphon_auto_provisioning_installs_regional_asset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from lexphon import LexiconNotInstalledError
+
+    class FakeStore:
+        installed = False
+        identifiers: list[str] = []
+
+        def path(self, identifier: str) -> Path:
+            self.identifiers.append(identifier)
+            if not self.installed:
+                raise LexiconNotInstalledError(identifier)
+            return Path(identifier)
+
+        def install(self, artifact: object) -> None:
+            assert artifact == "pt-pt:lexhint"
+            self.installed = True
+
+    store = FakeStore()
+    catalog_ids: list[str] = []
+    monkeypatch.setattr(lexphon, "DataStore", lambda: store)
+    monkeypatch.setattr(
+        "lexphon.catalog.load_catalog",
+        lambda: SimpleNamespace(
+            artifact=lambda identifier: catalog_ids.append(identifier) or identifier
+        ),
+    )
+
+    assert install_missing_lexphon_data("pt-pt", ("lexhint",)) == ("pt-pt:lexhint",)
+    assert catalog_ids == ["pt-pt:lexhint"]
+    assert store.identifiers == ["pt-pt:lexhint", "pt-pt:lexhint"]
+
+
+def test_portuguese_installed_only_propagates_missing_regional_asset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from lexphon import LexiconNotInstalledError
+
+    error = LexiconNotInstalledError("pt-pt:lexhint")
+    monkeypatch.setattr(
+        "pykokoro.lexicon_data.install_missing_lexphon_data",
+        lambda *args: pytest.fail("installed-only must not install"),
+    )
+
+    with pytest.raises(LexiconNotInstalledError) as caught:
+        create_g2p_with_lexphon_retry(
+            SimpleNamespace(get_g2p=lambda **kwargs: (_ for _ in ()).throw(error)),
+            language="pt-pt",
+            config=TokenizerConfig(lexicons=("lexhint",), lexicon_data_policy="installed-only"),
+            kwargs={"backend": "kokorog2p", "lexicons": ("lexhint",)},
+        )
+    assert caught.value is error

@@ -64,6 +64,25 @@ def test_anna_german_ipa_frontend_is_release_ready() -> None:
     assert require_frontend("de-anna", allow_experimental=False) == "german-ipa-v1"
 
 
+def test_portuguese_frontend_fixture_is_release_ready() -> None:
+    from kokorog2p import get_g2p
+
+    profile = get_model_profile("pt-eu-logus2k", "github")
+    fixture = FRONTEND_FIXTURES["pt-eu-logus2k"]
+    assert profile.frontend == "tts-eu-pt-v1"
+    assert profile.language_codes == ("pt-pt",)
+    assert profile.g2p_backend == fixture.diagnostic_backend
+    assert fixture.release_ready is True
+    assert (
+        get_g2p(
+            language=fixture.language,
+            lexicons=("lexhint",),
+            use_spacy=False,
+        ).phonemize(fixture.text)
+        == fixture.diagnostic_phonemes
+    )
+
+
 def test_native_profiles_are_not_marked_experimental():
     assert not get_model_profile("v1.2-de-martin", "github").frontend_experimental
 

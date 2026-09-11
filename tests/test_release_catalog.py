@@ -145,6 +145,46 @@ def test_unknown_frontend_is_reported_as_incompatible() -> None:
     assert "not implemented" in (releases[0].incompatibility_reason or "")
 
 
+def test_portuguese_release_legacy_frontend_alias_is_supported() -> None:
+    data = _manifest(frontend="tts_eu_pt TugaPhone pt-PT Lisbon")
+    client = FakeClient(
+        [_release("model-files-test", "https://manifest/test")],
+        {"https://manifest/test": data},
+    )
+
+    release = release_catalog.resolve_model_release("test-profile", client=client)
+
+    assert release.compatible is True
+    assert release.frontend == "tts-eu-pt-v1"
+
+
+def test_download_model_release_uses_release_manifest_assets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data = _manifest()
+    client = FakeClient(
+        [_release("model-files-test", "https://manifest/test")],
+        {"https://manifest/test": data},
+    )
+    release = release_catalog._remote_release(client.releases[0], client, allow_prerelease=False)
+    calls: list[str] = []
+
+    def download(release, asset, **kwargs):
+        calls.append(asset.name)
+        path = tmp_path / asset.name
+        path.write_bytes(b"12345")
+        return path
+
+    monkeypatch.setattr(release_catalog, "resolve_model_release", lambda *args, **kwargs: release)
+    monkeypatch.setattr("pykokoro.onnx_backend._download_release_asset", download)
+
+    installed = release_catalog.download_model_release("test-profile")
+
+    assert calls == ["model.onnx", "voices.npz"]
+    assert installed.model_path == tmp_path / "model.onnx"
+    assert installed.voices_path == tmp_path / "voices.npz"
+
+
 def test_offline_release_reads_installed_manifest_without_network(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

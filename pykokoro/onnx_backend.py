@@ -1031,6 +1031,7 @@ def _download_release_asset(
     offline: bool = False,
 ) -> Path:
     path = release_asset_path(release, asset)
+    path.parent.mkdir(parents=True, exist_ok=True)
     result = _download_from_github(
         asset.download_url,
         path,

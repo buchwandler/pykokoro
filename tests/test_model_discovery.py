@@ -111,6 +111,13 @@ def _registry() -> ModelRegistry:
                     voices=["thorsten"],
                     default_voice="thorsten",
                 ),
+                "pt-eu-logus2k": _model(
+                    "pt-eu-logus2k",
+                    frontend="tts-eu-pt-v1",
+                    languages=["pt"],
+                    voices=["pt_eu"],
+                    default_voice="pt_eu",
+                ),
                 "restricted": _model(
                     "restricted",
                     frontend="pykokoro-native-v1",
@@ -156,6 +163,7 @@ def test_discovery_returns_complete_sorted_contract(monkeypatch: pytest.MonkeyPa
         "de-anna",
         "de-crane",
         "de-thorsten",
+        "pt-eu-logus2k",
         "restricted",
         "unavailable",
         "z-unsupported",
@@ -197,6 +205,15 @@ def test_discovery_returns_complete_sorted_contract(monkeypatch: pytest.MonkeyPa
     assert thorsten.provider == "github-release"
     assert thorsten.sample_rate == 24000
     assert thorsten.max_tokens == 510
+    portuguese = next(model for model in result.models if model.model_id == "pt-eu-logus2k")
+    assert portuguese.languages == ("pt-pt",)
+    assert portuguese.default_voice == "pt_eu"
+    assert portuguese.voices == ("pt_eu",)
+    assert portuguese.qualities == ("fp32",)
+    assert portuguese.g2p_backend == "kokorog2p"
+    assert portuguese.lexicons == ("lexhint",)
+    assert portuguese.frontend == "tts-eu-pt-v1"
+    assert portuguese.status == "ready"
 
     crane = next(model for model in result.models if model.model_id == "de-crane")
     assert crane.voices == ("default",)

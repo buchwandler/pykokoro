@@ -32,6 +32,7 @@ SUPPORTED_LANGUAGES = {
     "de": "de",
     "it": "it",
     "pt": "pt",
+    "pt-pt": "pt-pt",
     "ko": "ko",
     "ja": "ja",
     "zh": "zh",  # Mandarin Chinese

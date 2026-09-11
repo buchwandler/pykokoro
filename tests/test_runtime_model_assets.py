@@ -149,6 +149,65 @@ def _anna_registry() -> ModelRegistry:
     )
 
 
+def _portuguese_registry() -> ModelRegistry:
+    return ModelRegistry(
+        {
+            "schema": 1,
+            "runtime_contract": 1,
+            "models": {
+                "pt-eu-logus2k": {
+                    "model_version": "1.0",
+                    "runtime_available": True,
+                    "language_codes": ["pt"],
+                    "frontend": "tts-eu-pt-v1",
+                    "sample_rate": 24000,
+                    "runtime": {
+                        "layout": "single-onnx-v1",
+                        "max_tokens": 510,
+                        "default_voice": "pt_eu",
+                        "voices": ["pt_eu"],
+                    },
+                    "distributions": [
+                        {
+                            "id": "portuguese-github",
+                            "provider": "github-release",
+                            "transport": "https",
+                            "runtime_ready": True,
+                            "release_key": "pt-eu-logus2k",
+                            "release_tag": "model-files-portuguese-eu-pt-v1.0",
+                            "artifacts": [
+                                _anna_artifact(
+                                    "portuguese-model",
+                                    "model",
+                                    "onnx",
+                                    "kokoro-portuguese-eu-pt-v1.0.onnx",
+                                    "fp32",
+                                ),
+                                _anna_artifact(
+                                    "portuguese-voices",
+                                    "voices",
+                                    "numpy-npz",
+                                    "voices-portuguese-eu-pt-v1.0.npz",
+                                ),
+                                _anna_artifact(
+                                    "portuguese-config",
+                                    "config",
+                                    "json",
+                                    "config-portuguese-eu-pt-v1.0.json",
+                                ),
+                                _anna_artifact(
+                                    "portuguese-bundle", "bundle", "json", "bundle.json"
+                                ),
+                            ],
+                        }
+                    ],
+                }
+            },
+        },
+        "portuguese-fixture",
+    )
+
+
 def test_resolver_materializes_one_atomic_distribution(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -228,6 +287,45 @@ def test_anna_registry_profile_and_runtime_assets_are_ready(
     assert assets.artifact_for_role("config").name == "config.json"
     assert assets.artifact_for_role("bundle").name == "bundle.json"
     assert assets.artifact_for_role("voices").suffix == ".npz"
+
+
+def test_portuguese_registry_profile_and_runtime_assets_are_ready(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def materialize(artifact, target):
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(artifact.id.encode())
+        return target
+
+    monkeypatch.setattr("pykokoro.runtime.model_assets.download_artifact", materialize)
+
+    registry = _portuguese_registry()
+    profile = get_registry_model_profile("pt-eu-logus2k", registry=registry)
+    assert profile.source == "github"
+    assert profile.variant == "pt-eu-logus2k"
+    assert profile.frontend == "tts-eu-pt-v1"
+    assert profile.g2p_backend == "kokorog2p"
+    assert profile.language_codes == ("pt-pt",)
+    assert profile.default_voice == "pt_eu"
+    assert profile.available_qualities == ("fp32",)
+    assert profile.runtime_available is True
+    assert profile.redistribution_allowed is True
+    assert profile.support_status == "ready"
+
+    assets = resolve_runtime_assets(
+        model_id="pt-eu-logus2k",
+        quality="fp32",
+        registry=registry,
+        cache_dir=tmp_path,
+    )
+    assert assets.distribution_id == "portuguese-github"
+    assert assets.provider == "github-release"
+    assert assets.artifact_for_role("model", quality="fp32").name == (
+        "kokoro-portuguese-eu-pt-v1.0.onnx"
+    )
+    assert assets.artifact_for_role("voices").name == "voices-portuguese-eu-pt-v1.0.npz"
+    assert assets.artifact_for_role("config").name == "config-portuguese-eu-pt-v1.0.json"
+    assert assets.artifact_for_role("bundle").name == "bundle.json"
 
 
 def test_raw_voice_materialization_preserves_shape_and_provenance(tmp_path: Path) -> None:

@@ -38,4 +38,6 @@ def test_trace_timing_logs_without_trace(caplog) -> None:
     with trace_timing(None, "runtime", "resolve"):
         pass
 
-    assert any("stage.finish stage=runtime name=resolve" in record.message for record in caplog.records)
+    assert any(
+        "stage.finish stage=runtime name=resolve" in record.message for record in caplog.records
+    )

@@ -139,6 +139,8 @@ class TestConstants:
         assert "en-gb" in SUPPORTED_LANGUAGES
         assert "en" in SUPPORTED_LANGUAGES
         assert SUPPORTED_LANGUAGES["en"] == "en-us"
+        assert SUPPORTED_LANGUAGES["pt"] == "pt"
+        assert SUPPORTED_LANGUAGES["pt-pt"] == "pt-pt"
         assert set(ESPEAK_ONLY_LANGUAGES) == {"pl", "tr", "ru", "hi"}
         assert not set(ESPEAK_ONLY_LANGUAGES).intersection(SUPPORTED_LANGUAGES)
 
