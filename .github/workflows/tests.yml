@@ -97,7 +97,7 @@ jobs:
         assert g2p.phonemize("مَرْحَبًا") == "mˈarħabˌan"
         '@ | python -
     - name: Install Lexphon data
-      run: lexphon data install en-us:gold
+      run: lexphon data install en-us:gold pt-pt:lexhint
     - name: Tests
       run: pytest -m "not slow"
 
@@ -126,6 +126,8 @@ jobs:
           "audiosig==0.1.1" \
           platformdirs
         python -m pip install -e .
+    - name: Install Lexphon data
+      run: lexphon data install pt-pt:lexhint
     - name: Lower-bound contract tests
       run: |
         python -m pytest -q \
