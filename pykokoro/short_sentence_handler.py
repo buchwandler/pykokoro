@@ -144,15 +144,18 @@ class ShortSentenceConfig:
     when generated alone in most voices. E.g. "Oh!" or "One step."
     This module improves quality by applying workarounds.
 
-    Mode: phrase and randomized-phrase (default)
+    Mode: phrase and randomized-phrase (default when the model exposes duration timestamps)
     1. Add a full sentence around the phrase. "Phrase" uses a fixed
-       sentence, "Randomized-Phrase" choses from a list for variety.
+       sentence, "Randomized-Phrase" chooses from a list for variety.
     2. Cut out the phrase if confidence level for a clean cut is reached.
-    3. If not, tries another surrounding full sentence.
+    3. If not, try another surrounding full sentence.
     This mode works best, but can increase computation time.
     Accuracy is voice dependent, but a less accurate voice will only
     slow it down, not stop it from working.
-    (Note: requires a timestamped onnx model, which is used by default.)
+    Phrase-based modes require an ONNX duration/timestamp output. When the
+    implicit default is used with a model that lacks timestamps, the runtime
+    selects `wrap`. An explicitly requested phrase mode also falls back to
+    `wrap` and emits a warning.
 
     Mode: Wrap
     1. Add phoneme pretext around the phrase. (e.g. "—" or "…")

@@ -375,9 +375,9 @@ def test_custom_stages_control_backend_creation_and_rebinding(
     )
 
     assert fully_custom._resolve_stages(first_cfg) == custom_stages
-    assert fully_custom._resolve_stages(
-        replace(first_cfg, model_variant="v1.1-zh")
-    ) == custom_stages
+    assert (
+        fully_custom._resolve_stages(replace(first_cfg, model_variant="v1.1-zh")) == custom_stages
+    )
     assert instances == []
 
     custom_audio = object()
@@ -396,7 +396,6 @@ def test_custom_stages_control_backend_creation_and_rebinding(
     assert second[1] is custom_audio
     assert first[0] is not second[0]
     assert first[2] is not second[2]
-
 
 
 def test_failed_backend_replacement_keeps_previous_backend(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -421,9 +420,7 @@ def test_failed_backend_replacement_keeps_previous_backend(monkeypatch: pytest.M
     stages = pipeline._resolve_stages(first_cfg)
 
     with pytest.raises(RuntimeError, match="replacement failed"):
-        pipeline._resolve_stages(
-            replace(first_cfg, model_variant="v1.1-zh", voice="af_maple")
-        )
+        pipeline._resolve_stages(replace(first_cfg, model_variant="v1.1-zh", voice="af_maple"))
 
     assert len(instances) == 1
     assert instances[0].close_calls == 0

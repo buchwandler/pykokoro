@@ -9,6 +9,7 @@ import pytest
 
 import examples.all_voices as all_voices
 from pykokoro.discovery import ModelCapabilities, ModelDiscoveryResult, VoiceCapabilities
+from pykokoro.short_sentence_handler import ShortSentenceConfig
 
 
 def _model(
@@ -164,9 +165,12 @@ def test_synthesize_streams_audio_and_separators(
     catalog = all_voices.ShowcaseCatalog(entries, (), "fixture")
     calls: list[dict[str, object]] = []
 
+    pipeline_configs: list[object] = []
+
     class FakePipeline:
         def __init__(self, config: object) -> None:
             self.config = config
+            pipeline_configs.append(config)
 
         def __enter__(self) -> FakePipeline:
             return self
@@ -211,6 +215,10 @@ def test_synthesize_streams_audio_and_separators(
     assert [call["allow_experimental_frontend"] for call in calls] == [False, True, True]
     assert [write.size for write in writes] == [2, 6000, 2, 6000, 2]
     assert duration == pytest.approx((2 * 3 + 6000 * 2) / 24000)
+    assert len(pipeline_configs) == 1
+    short_sentence_config = pipeline_configs[0].short_sentence_config
+    assert isinstance(short_sentence_config, ShortSentenceConfig)
+    assert short_sentence_config.resolve_mode == "wrap"
 
 
 def test_list_only_does_not_create_pipeline(

@@ -802,6 +802,7 @@ class AudioGenerator:
     ) -> ShortSentenceConfig | None:
         from .short_sentence_handler import ShortSentenceConfig, WrapResolveMode
 
+        explicit_config = self._short_sentence_config is not None
         effective_config = self._short_sentence_config
 
         if enable_short_sentence_override is not None:
@@ -822,14 +823,20 @@ class AudioGenerator:
             and not self._has_timestamp_output
             and self._uses_phrase_short_sentence_mode(effective_config)
         ):
-            if not self._reported_missing_timestamp_output:
-                message = (
-                    "Loaded ONNX model has no timestamp output; phrase-based short "
-                    "sentence modes require timestamps. Falling back to wrap mode "
-                    "for this run."
+            message = (
+                "Loaded ONNX model has no timestamp output; phrase-based short "
+                "sentence modes require timestamps. Falling back to wrap mode "
+                "for this run."
+            )
+            if explicit_config:
+                if not self._reported_missing_timestamp_output:
+                    logger.warning(message)
+                    self._reported_missing_timestamp_output = True
+            else:
+                logger.debug(
+                    "Loaded ONNX model has no timestamp output; "
+                    "using wrap short-sentence mode for the implicit default."
                 )
-                print(message)
-                self._reported_missing_timestamp_output = True
             resolve_modes = dict(effective_config.resolve_modes)
             resolve_modes["wrap"] = resolve_modes.get("wrap", WrapResolveMode())
             effective_config = dataclasses.replace(

@@ -25,6 +25,7 @@ from pykokoro.discovery import (
 )
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline_config import PipelineConfig
+from pykokoro.short_sentence_handler import ShortSentenceConfig
 
 RUNNABLE_STATUSES = {"ready", "experimental"}
 MODEL_PRIORITY = {"v1.0": 0, "v1.1-zh": 1}
@@ -354,6 +355,7 @@ def synthesize_catalog(catalog: ShowcaseCatalog, *, output: Path, pause: float) 
         voice=first.voice,
         allow_experimental_frontend=first.experimental,
         generation=GenerationConfig(lang=first.locale, speed=1.0),
+        short_sentence_config=ShortSentenceConfig(resolve_mode="wrap"),
     )
     frames = 0
     try:

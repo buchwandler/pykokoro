@@ -7,6 +7,7 @@ from typing import Any, cast
 import numpy as np
 
 from pykokoro.audio_generator import AudioGenerator
+from pykokoro.short_sentence_handler import ShortSentenceConfig
 
 
 class _Tokenizer:
@@ -27,6 +28,11 @@ class _Session:
 
     def run(self, _outputs, _inputs) -> list[np.ndarray]:
         return [np.zeros((1, 4), dtype=np.float32)]
+
+
+class _TimestampSession(_Session):
+    def get_outputs(self) -> list[Any]:
+        return [SimpleNamespace(name="audio"), SimpleNamespace(name="pred_dur")]
 
 
 def test_inference_logging_reports_counts_cache_and_runtime_without_payload(caplog) -> None:
@@ -51,3 +57,52 @@ def test_inference_logging_reports_counts_cache_and_runtime_without_payload(capl
         assert "samples=4" in message
         assert "runtime_ms=" in message
         assert source not in message
+
+
+def test_implicit_short_sentence_default_uses_wrap_without_warning(caplog, capsys):
+    generator = AudioGenerator(
+        session=cast(Any, _Session()),
+        tokenizer=cast(Any, _Tokenizer()),
+    )
+    caplog.set_level(logging.WARNING, logger="pykokoro.audio_generator")
+
+    config = generator._resolve_short_sentence_config(None)
+
+    assert config is not None
+    assert config.resolve_mode == "wrap"
+    assert not caplog.records
+    assert capsys.readouterr().out == ""
+
+
+def test_explicit_phrase_mode_without_timestamps_warns_once(caplog):
+    generator = AudioGenerator(
+        session=cast(Any, _Session()),
+        tokenizer=cast(Any, _Tokenizer()),
+        short_sentence_config=ShortSentenceConfig(resolve_mode="phrase"),
+    )
+    caplog.set_level(logging.WARNING, logger="pykokoro.audio_generator")
+
+    first = generator._resolve_short_sentence_config(None)
+    second = generator._resolve_short_sentence_config(None)
+
+    assert first is not None
+    assert second is not None
+    assert first.resolve_mode == "wrap"
+    assert second.resolve_mode == "wrap"
+
+    messages = [
+        record.message for record in caplog.records if "no timestamp output" in record.message
+    ]
+    assert len(messages) == 1
+
+
+def test_timestamp_capable_model_keeps_randomized_phrase_default():
+    generator = AudioGenerator(
+        session=cast(Any, _TimestampSession()),
+        tokenizer=cast(Any, _Tokenizer()),
+    )
+
+    config = generator._resolve_short_sentence_config(None)
+
+    assert config is not None
+    assert config.resolve_mode == "randomized-phrase"

@@ -835,7 +835,7 @@ def test_prosody_boundary_conditioning_respects_explicit_pauses():
     np.testing.assert_array_equal(rendered[-100:], -np.ones(100, dtype=np.float32))
 
 
-def test_phrase_modes_fall_back_to_wrap_once_without_timestamp_output(monkeypatch, capsys):
+def test_phrase_modes_fall_back_to_wrap_once_without_timestamp_output(monkeypatch, caplog):
     tokenizer = DummyTokenizer(factor=1)
     config = ShortSentenceConfig(
         resolve_modes={"phrase": PhraseResolveMode()},
@@ -883,8 +883,13 @@ def test_phrase_modes_fall_back_to_wrap_once_without_timestamp_output(monkeypatc
         for segment in processed
         if segment.ssmd_metadata is not None
     )
-    captured = capsys.readouterr()
-    assert captured.out.count("Falling back to wrap mode for this run.") == 1
+    caplog.set_level(logging.WARNING, logger="pykokoro.audio_generator")
+    messages = [
+        record.message
+        for record in caplog.records
+        if "Falling back to wrap mode for this run." in record.message
+    ]
+    assert len(messages) == 1
 
 
 def test_postprocess_phrase_mode_cuts_with_default_energy_valley():

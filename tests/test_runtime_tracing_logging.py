@@ -77,6 +77,5 @@ def test_trace_timing_logs_finish_for_frozen_exception(caplog) -> None:
         pass
 
     assert any(
-        "stage.finish stage=g2p name=phonemize" in record.message
-        for record in caplog.records
+        "stage.finish stage=g2p name=phonemize" in record.message for record in caplog.records
     )

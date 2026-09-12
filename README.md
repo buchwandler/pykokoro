@@ -973,14 +973,19 @@ context around those short segments before synthesis.
 
 1. Short segments are detected based on phoneme token length.
 2. Depending on the chosen resolve mode, the segment is wrapped with more context.
-   (default resolve mode: `randomized-phrase`)
+   (default resolve mode: `randomized-phrase` when the loaded model exposes duration
+   timestamps)
 3. TTS generates audio from the wrapped phoneme sequence.
 4. Cut away the extra context and put audio together.
 
-This happens automatically during `pipe.run()` - no configuration needed!
+This happens automatically during `pipe.run()` - no configuration needed! Phrase-based
+modes require a model duration/timestamp output. When no explicit short-sentence
+configuration is supplied, PyKokoro automatically uses `wrap` for models without that
+output. If a phrase mode is explicitly requested for such a model, PyKokoro logs a
+warning and falls back to `wrap`. Multilingual showcase code should use `wrap` until
+localized phrase templates exist.
 
-NOTE: Currently, phrase and randomized-phrase mode only support ENGLISH text! (see
-"Advanced customization of short-sentence handling" to add support for other languages)
+NOTE: Phrase and randomized-phrase templates currently support ENGLISH text only.
 
 **Customizing the Behavior:**
 
@@ -1012,10 +1017,11 @@ res = pipe.run("Why?")
 - `enabled=True`: Short-sentence handling is enabled by default
 - `min_phoneme_length=30`: Segments below this token count engage short-sentence
   handling
-- `resolve_mode="randomized-phrase"` Chose between `randomized-phrase`(default),
-  `phrase`, or `wrap`(fallback)
-- `phrase_selection="auto"` Chose which phrase templates to use. `auto`= uses "end", if
-  phrase ends with '.', otherwise uses "neutral"
+- `resolve_mode="randomized-phrase"` Chooses between `randomized-phrase` (default),
+  `phrase`, or `wrap` (fallback). Phrase-based defaults require model timestamps;
+  no-timestamp models automatically use `wrap`.
+- `phrase_selection="auto"` Chooses which phrase templates to use. `auto` uses "end" if
+  the phrase ends with '.', otherwise uses "neutral"
 - `phrase_fallback_tries=5`: Phrase modes try up to X alternate phrase templates before
   falling back to wrap mode when a cut lacks confident boundaries.
 - `phoneme_pretext="—"`: Phoneme context added in wrap mode before and after short

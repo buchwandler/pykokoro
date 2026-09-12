@@ -206,9 +206,7 @@ def test_russian_voice_selection_uses_github_profile(voice, variant) -> None:
 
 
 def test_russian_language_defaults_to_github_base() -> None:
-    resolved = resolve_model_defaults(
-        PipelineConfig(generation=GenerationConfig(lang="ru"))
-    )
+    resolved = resolve_model_defaults(PipelineConfig(generation=GenerationConfig(lang="ru")))
 
     assert resolved.model_source == "github"
     assert resolved.model_variant == "ru-zaakirio-base"
