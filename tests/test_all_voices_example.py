@@ -118,9 +118,20 @@ def test_spoken_voice_name_spells_code_prefix_and_numeric_suffix() -> None:
 def test_synthesize_streams_audio_and_separators(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    entries = tuple(
-        replace_entry(number, voice)
-        for number, voice in enumerate(("voice_a", "voice_b", "voice_c"), 1)
+    entries = (
+        replace_entry(1, "voice_a"),
+        replace(
+            replace_entry(2, "af_maple"),
+            model_id="v1.1-zh",
+            experimental=True,
+        ),
+        replace(
+            replace_entry(3, "zf_001"),
+            model_id="v1.1-zh",
+            language="zh",
+            locale="zh",
+            experimental=True,
+        ),
     )
     catalog = all_voices.ShowcaseCatalog(entries, (), "fixture")
     calls: list[dict[str, object]] = []
@@ -164,7 +175,12 @@ def test_synthesize_streams_audio_and_separators(
 
     assert output.is_file()
     assert len(calls) == 3
-    assert [call["voice"] for call in calls] == ["voice_a", "voice_b", "voice_c"]
+    assert [call["voice"] for call in calls] == ["voice_a", "af_maple", "zf_001"]
+    assert [call["model_source"] for call in calls] == ["github"] * 3
+    assert [call["model_variant"] for call in calls] == ["v1.0", "v1.1-zh", "v1.1-zh"]
+    assert [call["model_quality"] for call in calls] == ["fp32"] * 3
+    assert [call["lang"] for call in calls] == ["en-US", "en-US", "zh"]
+    assert [call["allow_experimental_frontend"] for call in calls] == [False, True, True]
     assert [write.size for write in writes] == [2, 6000, 2, 6000, 2]
     assert duration == pytest.approx((2 * 3 + 6000 * 2) / 24000)
 

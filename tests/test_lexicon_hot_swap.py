@@ -122,3 +122,30 @@ def test_acoustic_generation_receives_each_request_phoneme_output() -> None:
         (id(backend), ["gold-output"]),
         (id(backend), ["crane-output"]),
     ]
+
+
+def test_lexicon_changes_reuse_owned_stages(monkeypatch) -> None:
+    instances: list[Any] = []
+
+    class FakeKokoro:
+        def __init__(self, **kwargs: object) -> None:
+            _ = kwargs
+            instances.append(self)
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("pykokoro.onnx_backend.Kokoro", FakeKokoro)
+    base = PipelineConfig(
+        generation=GenerationConfig(lang="de"),
+        tokenizer_config=TokenizerConfig(lexicons=("gold",)),
+    )
+    pipeline = KokoroPipeline(base)
+
+    first = pipeline._resolve_stages(base)
+    second = pipeline._resolve_stages(
+        replace(base, tokenizer_config=TokenizerConfig(lexicons=("crane",)))
+    )
+
+    assert len(instances) == 1
+    assert second == first

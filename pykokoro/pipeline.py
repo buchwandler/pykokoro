@@ -1338,7 +1338,16 @@ class KokoroPipeline:
         audio_generator = self.audio_generation
         audio_postprocessor = self.audio_postprocessing
 
-        if phoneme_processor is None or audio_generator is None or audio_postprocessor is None:
+        needs_default_backend = (
+            phoneme_processor is None
+            or audio_generator is None
+            or audio_postprocessor is None
+            or self._owns_phoneme_processing
+            or self._owns_audio_generation
+            or self._owns_audio_postprocessing
+        )
+
+        if needs_default_backend:
             kokoro, kokoro_changed = self._ensure_kokoro(cfg)
             (
                 onnx_phoneme_processor,

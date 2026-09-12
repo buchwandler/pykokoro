@@ -1,3 +1,4 @@
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -273,3 +274,160 @@ def test_pipeline_propagates_asset_progress_to_backend(monkeypatch: pytest.Monke
 
     assert callbacks == [first]
     assert instances[0]._asset_progress is second
+
+
+def test_owned_default_stages_rebind_when_model_variant_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    instances: list[Any] = []
+
+    class TrackingKokoro(DummyKokoro):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, **kwargs)
+            self.model_variant = kwargs["model_variant"]
+            instances.append(self)
+
+    monkeypatch.setattr("pykokoro.onnx_backend.Kokoro", TrackingKokoro)
+    first_cfg = PipelineConfig(
+        model_source="github",
+        model_variant="v1.0",
+        model_quality="fp32",
+        voice="af_alloy",
+        generation=GenerationConfig(lang="en-us"),
+    )
+    pipeline = KokoroPipeline(first_cfg, g2p=DummyG2PAdapter())
+
+    first_phoneme, first_audio, first_post = pipeline._resolve_stages(first_cfg)
+    second_cfg = replace(
+        first_cfg,
+        model_variant="v1.1-zh",
+        voice="af_maple",
+    )
+    second_phoneme, second_audio, second_post = pipeline._resolve_stages(second_cfg)
+
+    assert len(instances) == 2
+    assert instances[0].model_variant == "v1.0"
+    assert instances[1].model_variant == "v1.1-zh"
+    assert instances[0].close_calls == 1
+    assert first_phoneme is not second_phoneme
+    assert first_audio is not second_audio
+    assert first_post is not second_post
+    assert second_phoneme._kokoro is instances[1]
+    assert second_audio._kokoro is instances[1]
+    assert second_post._kokoro is instances[1]
+
+
+def test_owned_default_stages_reuse_for_voice_and_language_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    instances: list[Any] = []
+
+    class TrackingKokoro(DummyKokoro):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, **kwargs)
+            instances.append(self)
+
+    monkeypatch.setattr("pykokoro.onnx_backend.Kokoro", TrackingKokoro)
+    first_cfg = PipelineConfig(
+        model_source="github",
+        model_variant="v1.0",
+        model_quality="fp32",
+        voice="af_alloy",
+        generation=GenerationConfig(lang="en-us"),
+    )
+    pipeline = KokoroPipeline(first_cfg, g2p=DummyG2PAdapter())
+
+    first = pipeline._resolve_stages(first_cfg)
+    second = pipeline._resolve_stages(replace(first_cfg, voice="af_sky"))
+    third = pipeline._resolve_stages(
+        replace(first_cfg, generation=replace(first_cfg.generation, lang="zh"))
+    )
+
+    assert len(instances) == 1
+    assert second == first
+    assert third == first
+
+
+def test_custom_stages_control_backend_creation_and_rebinding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    instances: list[Any] = []
+
+    class TrackingKokoro(DummyKokoro):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            super().__init__(*args, **kwargs)
+            instances.append(self)
+
+    monkeypatch.setattr("pykokoro.onnx_backend.Kokoro", TrackingKokoro)
+    first_cfg = PipelineConfig(
+        model_source="github",
+        model_variant="v1.0",
+        model_quality="fp32",
+        voice="af_alloy",
+        generation=GenerationConfig(lang="en-us"),
+    )
+    custom_stages = (object(), object(), object())
+    fully_custom = KokoroPipeline(
+        first_cfg,
+        phoneme_processing=custom_stages[0],
+        audio_generation=custom_stages[1],
+        audio_postprocessing=custom_stages[2],
+    )
+
+    assert fully_custom._resolve_stages(first_cfg) == custom_stages
+    assert fully_custom._resolve_stages(
+        replace(first_cfg, model_variant="v1.1-zh")
+    ) == custom_stages
+    assert instances == []
+
+    custom_audio = object()
+    partially_custom = KokoroPipeline(
+        first_cfg,
+        g2p=DummyG2PAdapter(),
+        audio_generation=custom_audio,
+    )
+    first = partially_custom._resolve_stages(first_cfg)
+    second = partially_custom._resolve_stages(
+        replace(first_cfg, model_variant="v1.1-zh", voice="af_maple")
+    )
+
+    assert len(instances) == 2
+    assert first[1] is custom_audio
+    assert second[1] is custom_audio
+    assert first[0] is not second[0]
+    assert first[2] is not second[2]
+
+
+
+def test_failed_backend_replacement_keeps_previous_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    instances: list[DummyKokoro] = []
+
+    class FailingKokoro(DummyKokoro):
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            if kwargs["model_variant"] == "v1.1-zh":
+                raise RuntimeError("replacement failed")
+            super().__init__(*args, **kwargs)
+            instances.append(self)
+
+    monkeypatch.setattr("pykokoro.onnx_backend.Kokoro", FailingKokoro)
+    first_cfg = PipelineConfig(
+        model_source="github",
+        model_variant="v1.0",
+        model_quality="fp32",
+        voice="af_alloy",
+        generation=GenerationConfig(lang="en-us"),
+    )
+    pipeline = KokoroPipeline(first_cfg, g2p=DummyG2PAdapter())
+    stages = pipeline._resolve_stages(first_cfg)
+
+    with pytest.raises(RuntimeError, match="replacement failed"):
+        pipeline._resolve_stages(
+            replace(first_cfg, model_variant="v1.1-zh", voice="af_maple")
+        )
+
+    assert len(instances) == 1
+    assert instances[0].close_calls == 0
+    assert pipeline._kokoro is instances[0]
+    assert stages[0]._kokoro is instances[0]
+    assert stages[1]._kokoro is instances[0]
+    assert stages[2]._kokoro is instances[0]
