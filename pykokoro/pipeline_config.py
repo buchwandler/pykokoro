@@ -179,6 +179,7 @@ def resolve_model_defaults(cfg: PipelineConfig) -> PipelineConfig:
         get_model_profile,
         model_id_for_voice,
         profile_for_language,
+        profile_for_voice,
     )
 
     lang = require_document_language(cfg)
@@ -188,8 +189,14 @@ def resolve_model_defaults(cfg: PipelineConfig) -> PipelineConfig:
     if variant is None and isinstance(cfg.voice, str):
         voice_model = model_id_for_voice(cfg.voice)
         if voice_model is not None:
+            voice_profile = profile_for_voice(cfg.voice)
+            if voice_profile is None or voice_profile.variant != voice_model:
+                raise ValueError(
+                    f"Voice {cfg.voice!r} maps to {voice_model!r} "
+                    "but has no compatible model profile"
+                )
             variant = voice_model
-            source = "huggingface"
+            source = voice_profile.source
     if variant is None:
         language_profile = profile_for_language(lang)
         if language_profile is not None and source in {None, "github"}:

@@ -69,6 +69,34 @@ def test_catalog_ordering_preserves_model_priority_and_voice_roster_order() -> N
     assert catalog.skipped == (all_voices.SkippedModel("restricted", "restricted", 1),)
 
 
+def test_russian_github_models_are_scheduled_with_all_voices() -> None:
+    catalog = all_voices.build_catalog(
+        _discovery(
+            _model(
+                "ru-zaakirio-base",
+                ("sveta", "masha"),
+                language="ru",
+                locale="ru",
+                label="Russian",
+            ),
+            _model(
+                "ru-zaakirio-dima",
+                ("dima",),
+                language="ru",
+                locale="ru",
+                label="Russian",
+            ),
+        )
+    )
+
+    assert [(entry.model_id, entry.model_source, entry.voice) for entry in catalog.entries] == [
+        ("ru-zaakirio-base", "github", "sveta"),
+        ("ru-zaakirio-base", "github", "masha"),
+        ("ru-zaakirio-dima", "github", "dima"),
+    ]
+    assert {entry.quality for entry in catalog.entries} == {"fp32"}
+
+
 def test_missing_metadata_fails_closed() -> None:
     model = replace(_model("v1.0", ("af_alloy",)), voice_details=())
 

@@ -211,8 +211,8 @@ MODEL_PROFILES.update(
                 "m_elderly_deep",
             ),
         ),
-        ("huggingface", "ru-zaakirio-base"): RuntimeProfile(
-            "huggingface",
+        ("github", "ru-zaakirio-base"): RuntimeProfile(
+            "github",
             "ru-zaakirio-base",
             ("ru",),
             "sveta",
@@ -222,8 +222,8 @@ MODEL_PROFILES.update(
             False,
             voice_names=("sveta", "masha"),
         ),
-        ("huggingface", "ru-zaakirio-dima"): RuntimeProfile(
-            "huggingface",
+        ("github", "ru-zaakirio-dima"): RuntimeProfile(
+            "github",
             "ru-zaakirio-dima",
             ("ru",),
             "dima",

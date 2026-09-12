@@ -7,8 +7,10 @@ from pykokoro.model_profiles import (
     GERMAN_MARTIN_V1_2,
     IMPLEMENTED_FRONTENDS,
     get_model_profile,
+    get_registry_model_profile,
     profile_for_language,
 )
+from pykokoro.model_registry import ModelRegistry
 from pykokoro.pipeline import KokoroPipeline
 from pykokoro.pipeline_config import PipelineConfig, resolve_model_defaults
 
@@ -167,28 +169,135 @@ def test_resolved_profile_is_in_cache_key():
         ("ru-zaakirio-dima", "dima"),
     ],
 )
-def test_registry_huggingface_profiles_defer_quality_validation(variant, voice):
+def test_registry_github_profiles_defer_quality_validation(variant, voice):
     cfg = PipelineConfig(
-        model_source="huggingface",
+        model_source="github",
         model_variant=variant,
         model_quality="fp32",
+        voice=voice,
         generation=GenerationConfig(lang="ru"),
     )
 
     resolved = resolve_model_defaults(cfg)
 
-    assert resolved.model_source == "huggingface"
+    assert resolved.model_source == "github"
     assert resolved.model_variant == variant
     assert resolved.model_quality == "fp32"
     assert resolved.voice == voice
 
 
-def test_dima_voice_requires_explicit_language() -> None:
+@pytest.mark.parametrize(
+    ("voice", "variant"),
+    [
+        ("sveta", "ru-zaakirio-base"),
+        ("masha", "ru-zaakirio-base"),
+        ("dima", "ru-zaakirio-dima"),
+    ],
+)
+def test_russian_voice_selection_uses_github_profile(voice, variant) -> None:
     resolved = resolve_model_defaults(
-        PipelineConfig(voice="dima", generation=GenerationConfig(lang="ru"))
+        PipelineConfig(voice=voice, generation=GenerationConfig(lang="ru"))
     )
 
-    assert resolved.model_source == "huggingface"
-    assert resolved.model_variant == "ru-zaakirio-dima"
+    assert resolved.model_source == "github"
+    assert resolved.model_variant == variant
     assert resolved.generation.lang == "ru"
     assert resolved.model_quality == "fp32"
+
+
+def test_russian_language_defaults_to_github_base() -> None:
+    resolved = resolve_model_defaults(
+        PipelineConfig(generation=GenerationConfig(lang="ru"))
+    )
+
+    assert resolved.model_source == "github"
+    assert resolved.model_variant == "ru-zaakirio-base"
+    assert resolved.voice == "sveta"
+    assert resolved.model_quality == "fp32"
+
+
+@pytest.mark.parametrize("variant", ["ru-zaakirio-base", "ru-zaakirio-dima"])
+def test_russian_github_profiles_are_registered(variant) -> None:
+    profile = get_model_profile(variant, "github")
+
+    assert profile.source == "github"
+    assert profile.variant == variant
+
+
+def _russian_registry(variant: str, voice: str) -> ModelRegistry:
+    return ModelRegistry(
+        {
+            "schema": 1,
+            "runtime_contract": 1,
+            "models": {
+                variant: {
+                    "runtime_available": True,
+                    "language_codes": ["ru"],
+                    "frontend": "kokorog2p-ru-v1",
+                    "runtime": {
+                        "layout": "single-onnx-v1",
+                        "default_voice": voice,
+                        "voices": [voice],
+                    },
+                    "distributions": [
+                        {
+                            "id": f"{variant}-github",
+                            "provider": "github-release",
+                            "transport": "https",
+                            "runtime_ready": True,
+                            "artifacts": [
+                                {
+                                    "id": f"{variant}-model",
+                                    "role": "model",
+                                    "format": "onnx",
+                                    "url": "https://fixture.test/model.onnx",
+                                    "local_name": "model.onnx",
+                                    "size": 1,
+                                    "sha256": "0" * 64,
+                                    "quality": "fp32",
+                                },
+                                {
+                                    "id": f"{variant}-voices",
+                                    "role": "voices",
+                                    "format": "numpy-npz",
+                                    "url": "https://fixture.test/voices.npz",
+                                    "local_name": "voices.npz",
+                                    "size": 1,
+                                    "sha256": "0" * 64,
+                                },
+                            ],
+                        }
+                    ],
+                }
+            },
+        },
+        "russian-profile-fixture",
+    )
+
+
+@pytest.mark.parametrize(
+    ("variant", "voice"),
+    [
+        ("ru-zaakirio-base", "sveta"),
+        ("ru-zaakirio-dima", "dima"),
+    ],
+)
+def test_registry_github_source_resolves_through_local_profile(variant, voice) -> None:
+    registry = _russian_registry(variant, voice)
+    registry_profile = get_registry_model_profile(variant, registry=registry)
+
+    assert registry_profile.source == "github"
+    assert registry_profile.variant == variant
+
+    resolved = resolve_model_defaults(
+        PipelineConfig(
+            model_source=registry_profile.source,
+            model_variant=registry_profile.variant,
+            voice=voice,
+            generation=GenerationConfig(lang="ru"),
+        )
+    )
+
+    assert resolved.model_source == "github"
+    assert resolved.model_variant == variant
+    assert resolved.voice == voice
