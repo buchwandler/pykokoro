@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 from pykokoro.runtime.tracing import trace_timing
 from pykokoro.types import Trace
@@ -40,4 +41,42 @@ def test_trace_timing_logs_without_trace(caplog) -> None:
 
     assert any(
         "stage.finish stage=runtime name=resolve" in record.message for record in caplog.records
+    )
+
+
+@dataclass(frozen=True)
+class _FrozenTracingError(Exception):
+    message: str
+
+
+def test_trace_timing_preserves_frozen_exception_and_records_trace() -> None:
+    trace = Trace()
+    expected = _FrozenTracingError("original failure")
+
+    try:
+        with trace_timing(trace, "g2p", "phonemize"):
+            raise expected
+    except _FrozenTracingError as exc:
+        assert exc is expected
+    else:
+        raise AssertionError("expected frozen exception to propagate")
+
+    assert len(trace.events) == 1
+    assert trace.events[0].stage == "g2p"
+    assert trace.events[0].name == "phonemize"
+
+
+def test_trace_timing_logs_finish_for_frozen_exception(caplog) -> None:
+    trace = Trace()
+    caplog.set_level(logging.DEBUG, logger="pykokoro.runtime.tracing")
+
+    try:
+        with trace_timing(trace, "g2p", "phonemize"):
+            raise _FrozenTracingError("boom")
+    except _FrozenTracingError:
+        pass
+
+    assert any(
+        "stage.finish stage=g2p name=phonemize" in record.message
+        for record in caplog.records
     )
