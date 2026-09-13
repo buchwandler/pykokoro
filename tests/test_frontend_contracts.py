@@ -13,6 +13,7 @@ from pykokoro.model_profiles import get_model_profile
     [
         ("vi-contextbox", "vig2p-v1", "espeak"),
         ("vi-anphunl", "vig2p-v1", "espeak"),
+        ("vi-ngoc-huyen", "vig2p-v1", "espeak"),
         ("de-crane", "german-ipa-v1", "kokorog2p"),
         ("he-hebrew-nc", "hebrew-g2p-v1", "espeak"),
     ],

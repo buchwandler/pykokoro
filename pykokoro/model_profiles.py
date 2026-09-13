@@ -65,6 +65,7 @@ def _github_profile(
         "v1.2-de-martin": "martin",
         "vi-contextbox": "diem_trinh",
         "vi-anphunl": "default",
+        "vi-ngoc-huyen": "ngoc_huyen",
         "ar-nabra": "default",
         "de-crane": "default",
         "he-hebrew-nc": "default",
@@ -101,6 +102,13 @@ MODEL_PROFILES: dict[tuple[ModelSource, ModelVariant], RuntimeProfile] = {
     ),
     ("github", "vi-anphunl"): _github_profile(
         "vi-anphunl",
+        ("vi",),
+        "vig2p-v1",
+        {"tokens": "int64", "style": "float32", "speed": "float32"},
+        g2p_backend="espeak",
+    ),
+    ("github", "vi-ngoc-huyen"): _github_profile(
+        "vi-ngoc-huyen",
         ("vi",),
         "vig2p-v1",
         {"tokens": "int64", "style": "float32", "speed": "float32"},

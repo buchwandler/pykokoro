@@ -12,10 +12,18 @@ def test_runtime_profiles_do_not_duplicate_published_inventory():
         "vi-contextbox": "espeak",
         "vi-anphunl": "espeak",
         "ar-nabra": None,
+        "vi-ngoc-huyen": "espeak",
         "de-crane": "kokorog2p",
         "he-hebrew-nc": "espeak",
     }
-    for variant in ("vi-contextbox", "vi-anphunl", "ar-nabra", "de-crane", "he-hebrew-nc"):
+    for variant in (
+        "vi-contextbox",
+        "vi-anphunl",
+        "vi-ngoc-huyen",
+        "ar-nabra",
+        "de-crane",
+        "he-hebrew-nc",
+    ):
         profile = get_model_profile(variant, "github")
         assert profile.quality_files == {}
         assert profile.voice_names == ()
@@ -37,6 +45,12 @@ def test_vi_contextbox_uses_published_named_default_voice():
     profile = get_model_profile("vi-contextbox", "github")
 
     assert profile.default_voice == "diem_trinh"
+
+
+def test_vi_ngoc_huyen_uses_published_named_default_voice():
+    profile = get_model_profile("vi-ngoc-huyen", "github")
+
+    assert profile.default_voice == "ngoc_huyen"
 
 
 def test_publication_policy_is_remote_manifest_metadata():

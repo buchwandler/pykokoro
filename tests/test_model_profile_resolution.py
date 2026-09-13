@@ -25,6 +25,38 @@ def test_martin_profile_contains_runtime_metadata_only():
     assert not hasattr(profile, "model_sha256")
 
 
+def test_vi_ngoc_huyen_explicit_profile_resolves_for_all_voices() -> None:
+    profile = get_model_profile("vi-ngoc-huyen", "github")
+
+    assert profile.language_codes == ("vi",)
+    assert profile.default_voice == "ngoc_huyen"
+    assert profile.frontend == "vig2p-v1"
+    assert profile.frontend_experimental is True
+    assert profile.g2p_backend == "espeak"
+    assert profile.onnx_inputs == {
+        "tokens": "int64",
+        "style": "float32",
+        "speed": "float32",
+    }
+
+    resolved = resolve_model_defaults(
+        PipelineConfig(
+            model_source="github",
+            model_variant="vi-ngoc-huyen",
+            model_quality="fp32",
+            voice="ngoc_huyen",
+            allow_experimental_frontend=True,
+            generation=GenerationConfig(lang="vi"),
+        )
+    )
+
+    assert resolved.model_source == "github"
+    assert resolved.model_variant == "vi-ngoc-huyen"
+    assert resolved.model_quality == "fp32"
+    assert resolved.voice == "ngoc_huyen"
+    assert resolved.allow_experimental_frontend is True
+
+
 def test_software_mansion_anna_is_ready() -> None:
     profile = get_model_profile("de-anna", "github")
 
