@@ -390,6 +390,14 @@ pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), 
 result = pipe.run(text)
 ```
 
+Automatic clause pauses are limited to Phrasplit's high-confidence clausal-comma signal.
+They require an available dependency-capable linguistic analysis; when automatic
+selection falls back because no compatible local spaCy model is installed, PyKokoro does
+not invent clause boundaries with regular-expression heuristics. Ordinary list commas
+and shared-subject continuations remain part of the same segment. For example,
+`It had picked up the sound of a explosion, direction suggested it was behind.` receives
+one clause pause after the detected comma.
+
 ## Text Normalization (Say-As)
 
 SSMD say-as syntax converts numbers, dates, and other formats:

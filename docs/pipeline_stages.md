@@ -119,7 +119,7 @@ cfg = with_spacy_model(size="lg")(cfg)
 - `is_phonemes`: Treat input text as phoneme strings instead of raw text.
 - `pause_mode`: `"tts"` keeps natural model pauses, `"manual"` trims segment silence and
   preserves explicit pauses, `"auto"` inserts pauses at sentence/paragraph boundaries
-  and trims segment silence.
+  and high-confidence clausal commas, then trims segment silence.
 - `pause_clause`: Default pause for SSMD `...c` breaks (seconds).
 - `pause_sentence`: Default pause for SSMD `...s` breaks (seconds).
 - `pause_paragraph`: Default pause for SSMD `...p` breaks (seconds).
@@ -177,16 +177,23 @@ annotations override individual fields.
 
 ### Plain text sentence splitting
 
-`PlainTextDocumentParser` uses PhraseSplit 0.3.7's offset-preserving detailed split API
-for sentence splitting. The returned diagnostics come from the same operation that
-produced the segments, so sentence-model metadata does not require a separate
-model-resolution pass. When `phrasplit` is unavailable, it falls back to a single
-segment. PhraseSplit may resolve once per hard range; PyKokoro does not claim one
-resolution for the whole document. The language model is derived from `generation.lang`
-using spaCy package naming rules (for example `en_core_web_sm` for English). Split
-boundaries are forced at SSMD pause boundaries and at spans that contain phoneme
-overrides so those overrides are kept intact. Set `PYKOKORO_DEBUG_SEGMENTS=1` to log
-segment offsets.
+`PlainTextDocumentParser` uses Phrasplit 0.3.8's offset-preserving detailed split API
+for sentence splitting. In automatic mode, the prepared linguistic analysis is also
+passed to Phrasplit's high-confidence clausal-comma detector; list commas and
+shared-subject continuations are not treated as deterministic clause pauses. The
+returned diagnostics come from the same operation that produced the segments, so
+sentence-model metadata does not require a separate model-resolution pass. When
+`phrasplit` is unavailable, it falls back to a single segment. PhraseSplit may resolve
+once per hard range; PyKokoro does not claim one resolution for the whole document. The
+language model is derived from `generation.lang` using spaCy package naming rules (for
+example `en_core_web_sm` for English). Split boundaries are forced at SSMD pause
+boundaries and at spans that contain phoneme overrides so those overrides are kept
+intact. Set `PYKOKORO_DEBUG_SEGMENTS=1` to log segment offsets.
+
+The prepared-text flow is: prepared analysis -> sentence segmentation -> Phrasplit
+clausal-comma detection -> structural refinement -> deterministic boundary event -> G2P
+pause propagation. Detection reuses the existing prepared document and does not run
+spaCy again.
 
 ### Kokoro G2P adapter
 

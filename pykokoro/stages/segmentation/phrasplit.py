@@ -9,7 +9,7 @@ from typing import Any
 
 from ...pipeline_config import PipelineConfig
 from ...runtime.language_plan import canonicalize_language
-from ...types import Segment, Trace, TraceEvent
+from ...types import BoundaryEvent, Segment, Trace, TraceEvent
 from ..doc_parsers.plain import PhrasplitSentenceSplitter
 from ..protocols import DocumentResult, SentenceSegmenter
 
@@ -39,6 +39,7 @@ class PhrasplitSentenceSegmenter(PhrasplitSentenceSplitter, SentenceSegmenter):
             segments = super().split(doc, cfg, trace)
         else:
             segments = self._split_prepared_runs(doc, cfg, trace, state.prepared_analysis)
+            self._add_auto_clause_boundaries(doc, cfg, trace, state.prepared_analysis)
         segments = self._repair_closing_quote_boundaries(doc, segments)
         segments = [self._with_semantic_language(doc, segment, cfg) for segment in segments]
         refined: list[Segment] = []
@@ -63,6 +64,136 @@ class PhrasplitSentenceSegmenter(PhrasplitSentenceSplitter, SentenceSegmenter):
                 )
         self._record_diagnostics(doc, trace, refined, cfg)
         return refined
+
+    @staticmethod
+    def _add_auto_clause_boundaries(
+        doc: DocumentResult, cfg: PipelineConfig, trace: Trace, analyses: list[Any]
+    ) -> None:
+        """Add high-confidence Phrasplit comma pauses from prepared analyses."""
+        counters = {
+            "detected": 0,
+            "added": 0,
+            "deduplicated": 0,
+            "runs_with_analysis": 0,
+            "runs_without_analysis": 0,
+        }
+        if cfg.generation.pause_mode != "auto" or cfg.generation.pause_clause <= 0.0:
+            return
+
+        try:
+            phrasplit = importlib.import_module("phrasplit")
+        except ImportError:
+            phrasplit = None
+        detector = (
+            getattr(phrasplit, "detect_clause_boundaries", None) if phrasplit is not None else None
+        )
+        if phrasplit is not None and not callable(detector):
+            trace.warnings.append(
+                "phrasplit.detect_clause_boundaries is unavailable; skipping clausal comma detection."
+            )
+            return
+
+        existing_pause_positions = {
+            event.pos for event in doc.boundary_events if event.kind == "pause"
+        }
+        for analysis in analyses:
+            text = analysis.text
+            if not text:
+                continue
+            if analysis.doc is None:
+                counters["runs_without_analysis"] += 1
+                continue
+            counters["runs_with_analysis"] += 1
+            if not callable(detector):
+                continue
+            try:
+                boundaries = detector(
+                    text,
+                    language=analysis.run.language,
+                    doc=analysis.doc,
+                )
+            except (TypeError, ValueError) as exc:
+                trace.warnings.append(
+                    f"Skipped clausal comma detection for {analysis.run.language!r}: {exc}."
+                )
+                continue
+            try:
+                boundary_iter = iter(boundaries or ())
+            except TypeError:
+                trace.warnings.append(
+                    "Skipped non-iterable Phrasplit clausal comma boundary results."
+                )
+                continue
+            for boundary in boundary_iter:
+                counters["detected"] += 1
+                kind = getattr(boundary, "kind", None)
+                char_start = getattr(boundary, "char_start", None)
+                char_end = getattr(boundary, "char_end", None)
+                boundary_text = getattr(boundary, "text", None)
+                if (
+                    kind != "clausal_comma"
+                    or not isinstance(char_start, int)
+                    or isinstance(char_start, bool)
+                    or not isinstance(char_end, int)
+                    or isinstance(char_end, bool)
+                    or not isinstance(boundary_text, str)
+                ):
+                    trace.warnings.append(
+                        "Skipped malformed Phrasplit clausal comma boundary result."
+                    )
+                    continue
+                if char_start < 0 or char_end <= char_start or char_end > len(text):
+                    trace.warnings.append(
+                        f"Skipped malformed Phrasplit boundary offsets {char_start}:{char_end}."
+                    )
+                    continue
+                absolute_start = analysis.run.char_start + char_start
+                absolute_end = analysis.run.char_start + char_end
+                if (
+                    absolute_start < 0
+                    or absolute_start < analysis.run.char_start
+                    or absolute_end > analysis.run.char_end
+                    or absolute_end > len(doc.clean_text)
+                    or doc.clean_text[absolute_start:absolute_end] != boundary_text
+                ):
+                    trace.warnings.append(
+                        "Skipped Phrasplit boundary with a mismatched clean_text slice "
+                        f"at {absolute_start}:{absolute_end}."
+                    )
+                    continue
+                if absolute_start in existing_pause_positions:
+                    counters["deduplicated"] += 1
+                    continue
+                doc.boundary_events.append(
+                    BoundaryEvent(
+                        pos=absolute_start,
+                        kind="pause",
+                        duration_s=float(cfg.generation.pause_clause),
+                        attrs={
+                            "strength": "c",
+                            "anchor": "after",
+                            "source": "pipeline_default",
+                            "detector": "phrasplit",
+                            "boundary_kind": "clausal_comma",
+                        },
+                    )
+                )
+                existing_pause_positions.add(absolute_start)
+                counters["added"] += 1
+
+        metadata = doc.metadata.setdefault("segmentation", {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+            doc.metadata["segmentation"] = metadata
+        metadata["clausal_comma_boundaries"] = counters["added"]
+        trace.events.append(
+            TraceEvent(
+                stage="segmentation_run",
+                name="clausal_comma_boundaries",
+                ms=0.0,
+                details=counters,
+            )
+        )
 
     @staticmethod
     def _with_semantic_language(
@@ -263,7 +394,7 @@ class PhrasplitSentenceSegmenter(PhrasplitSentenceSplitter, SentenceSegmenter):
                 if (
                     boundary.attrs.get("anchor", "after") == "after"
                     and position < len(doc.clean_text)
-                    and doc.clean_text[position] in ".!?。！？"
+                    and doc.clean_text[position] in ".!?。！？,;:"
                 ):
                     position += 1
                 if segment.char_start < position < segment.char_end:

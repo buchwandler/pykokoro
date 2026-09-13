@@ -120,7 +120,7 @@ jobs:
         python -m pip install \
           "kokorog2p[all]==0.9.9" \
           "lexphon==0.2.3" \
-          "phrasplit==0.3.7" \
+          "phrasplit==0.3.8" \
           "ssmd==0.8.7" \
           "spokenform==0.3.6" \
           "audiosig==0.1.1" \

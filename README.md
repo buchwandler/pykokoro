@@ -613,7 +613,7 @@ networks can learn complex patterns from data, enabling breakthroughs in
 computer vision, natural language processing, and speech recognition.
 """
 
-# Automatic pauses at clause, sentence, and paragraph boundaries
+# Automatic pauses at sentence/paragraph boundaries and high-confidence clausal commas
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 config = PipelineConfig(
@@ -621,7 +621,7 @@ config = PipelineConfig(
     generation=GenerationConfig(
         lang="en-us",
         pause_mode="auto",
-        pause_clause=0.25,  # Pause after clauses (commas)
+        pause_clause=0.25,  # Pause after high-confidence clausal commas
         pause_sentence=0.5,  # Pause after sentences
         pause_paragraph=1.0,  # Pause after paragraphs
         pause_variance=0.05,  # Add natural variance (default)
@@ -635,7 +635,8 @@ audio = res.audio
 
 **Key Features:**
 
-- **Natural boundaries**: Automatically detects clauses, sentences, and paragraphs
+- **Natural boundaries**: Automatically pauses at sentences, paragraphs, and
+  high-confidence clausal commas
 - **Variance**: Gaussian variance prevents robotic timing (±100ms by default)
 - **Reproducible**: Use `random_seed` for consistent output
 - **Composable**: Works with SSMD break markers
@@ -644,6 +645,15 @@ audio = res.audio
 
 - `SsmdDocumentParser` handles paragraph/sentence segmentation using SSMD.
 - `PlainTextDocumentParser` uses optional `phrasplit` sentence splitting.
+
+- In `pause_mode="auto"`, dependency-aware Phrasplit analysis detects only
+  high-confidence clausal commas; list commas and shared-subject continuations remain
+  untouched.
+
+For example,
+`It had picked up the sound of a explosion, direction suggested it was behind.` is
+refined at the detected comma so the preceding segment receives one deterministic
+`pause_clause`.
 
 **Pause Variance Options:**
 
@@ -846,12 +856,13 @@ result = pipeline.run(text)
 ```
 
 The default pipeline owns this order explicitly: SSMD structure is parsed first,
-Spokenform prepares the written text, Phrasplit detects sentences in the prepared text,
-and kokorog2p receives that prepared text through `phonemize_prepared()`. Segment
-offsets therefore refer to the prepared spoken `clean_text`; structural annotations,
-events, and preparation provenance remain available in the document metadata used by
-downstream stages. Use `examples/german3.py` for a German regression containing dates,
-quantities, abbreviations, ordinals, and currency.
+Spokenform prepares the written text, Phrasplit detects sentences and high-confidence
+clausal commas in the prepared text, structural refinement applies the resulting
+boundaries, and kokorog2p receives that prepared text through `phonemize_prepared()`.
+Segment offsets therefore refer to the prepared spoken `clean_text`; structural
+annotations, events, and preparation provenance remain available in the document
+metadata used by downstream stages. Use `examples/german3.py` for a German regression
+containing dates, quantities, abbreviations, ordinals, and currency.
 
 ### Explicit SSMD Say-As Overrides
 

@@ -43,7 +43,7 @@ def test_companion_dependency_floors_match_current_integration_contract() -> Non
 
     assert "kokorog2p[espeak,en]>=0.9.9,<1.0" in dependencies
     assert "lexphon>=0.2.3,<0.3" in dependencies
-    assert "phrasplit>=0.3.7,<0.4" in dependencies
+    assert "phrasplit>=0.3.8,<0.4" in dependencies
 
 
 def test_test_requirements_keep_kokorog2p_in_supported_window() -> None:
