@@ -1,0 +1,81 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: 0.9.7
+git_base_ref: v0.9.6
+git_base_sha: bf9a13c9b28987205f509dda0bede6f9f88a9b75
+git_head_ref: HEAD
+git_head_sha: c0bfda8aeebfd9ab6cf50f99f649a741bcacec45
+git_range: bf9a13c9b28987205f509dda0bede6f9f88a9b75..c0bfda8aeebfd9ab6cf50f99f649a741bcacec45
+commit_count: 2
+rows:
+  - sha: 9d36442a35f40d932f8999be8fe33c5e20ae8a66
+    source_ref: git:9d36442a35f40d932f8999be8fe33c5e20ae8a66
+    short_sha: 9d36442
+    changed_paths:
+      - .github/workflows/tests.yml
+      - README.md
+      - docs/basic_usage.md
+      - docs/installation.md
+      - docs/pipeline_stages.md
+      - pykokoro/stages/segmentation/phrasplit.py
+      - pyproject.toml
+      - requirements-test.txt
+      - tests/test_clausal_comma_pauses.py
+      - tests/test_packaging_metadata.py
+    stats:
+      files_changed: 0
+      insertions: 439
+      deletions: 27
+    inspected: true
+    inspected_paths:
+      - .github/workflows/tests.yml
+      - README.md
+      - docs/basic_usage.md
+      - docs/installation.md
+      - docs/pipeline_stages.md
+      - pykokoro/stages/segmentation/phrasplit.py
+      - pyproject.toml
+      - requirements-test.txt
+      - tests/test_clausal_comma_pauses.py
+      - tests/test_packaging_metadata.py
+    observed_behavior:
+      Automatic pause-mode segmentation now detects dependency-confirmed high-confidence
+      clausal commas, adds a pause boundary owned by the preceding segment, validates
+      offsets, and preserves explicit pauses; Phrasplit support requires version 0.3.8
+      or newer.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: add detection of clausal commas"
+    target_entry_id: entry-0001
+    notes: ""
+  - sha: c0bfda8aeebfd9ab6cf50f99f649a741bcacec45
+    source_ref: git:c0bfda8aeebfd9ab6cf50f99f649a741bcacec45
+    short_sha: c0bfda8
+    changed_paths:
+      - examples/README.md
+      - examples/english_clausal_comma_pause.py
+      - examples/run_all.py
+      - tests/test_example_runner.py
+    stats:
+      files_changed: 0
+      insertions: 168
+      deletions: 4
+    inspected: true
+    inspected_paths:
+      - examples/README.md
+      - examples/english_clausal_comma_pause.py
+      - examples/run_all.py
+      - tests/test_example_runner.py
+    observed_behavior:
+      Added a runnable English clausal-comma pause A/B example, documented its local
+      spaCy prerequisite and behavior, and kept it optional in the example runner.
+    public_impact: docs
+    decision: accepted
+    stale: false
+    evidence_subject: "doc: add example for clausal comma pause"
+    target_entry_id: entry-0002
+    notes: ""
