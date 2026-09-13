@@ -33,6 +33,12 @@ def test_runtime_profiles_do_not_duplicate_published_inventory():
     assert nabra.max_tokens == 510
 
 
+def test_vi_contextbox_uses_published_named_default_voice():
+    profile = get_model_profile("vi-contextbox", "github")
+
+    assert profile.default_voice == "diem_trinh"
+
+
 def test_publication_policy_is_remote_manifest_metadata():
     assert not hasattr(get_model_profile("he-hebrew-nc", "github"), "publication_enabled")
 

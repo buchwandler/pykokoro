@@ -63,7 +63,7 @@ def _github_profile(
 ) -> RuntimeProfile:
     default_voices = {
         "v1.2-de-martin": "martin",
-        "vi-contextbox": "default",
+        "vi-contextbox": "diem_trinh",
         "vi-anphunl": "default",
         "ar-nabra": "default",
         "de-crane": "default",
