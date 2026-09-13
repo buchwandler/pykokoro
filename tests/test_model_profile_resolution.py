@@ -25,6 +25,14 @@ def test_martin_profile_contains_runtime_metadata_only():
     assert not hasattr(profile, "model_sha256")
 
 
+def test_vi_anphunl_explicit_profile_is_runtime_available() -> None:
+    profile = get_model_profile("vi-anphunl", "github")
+
+    assert profile.default_voice == "diem_trinh"
+    assert profile.runtime_available is True
+    assert profile.support_status == "ready"
+
+
 def test_vi_ngoc_huyen_explicit_profile_resolves_for_all_voices() -> None:
     profile = get_model_profile("vi-ngoc-huyen", "github")
 

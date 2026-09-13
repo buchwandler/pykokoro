@@ -6,7 +6,7 @@ Published artifact inventory is intentionally resolved by :mod:`release_catalog`
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from .config_types import ModelSource, ModelVariant
@@ -64,7 +64,7 @@ def _github_profile(
     default_voices = {
         "v1.2-de-martin": "martin",
         "vi-contextbox": "diem_trinh",
-        "vi-anphunl": "default",
+        "vi-anphunl": "diem_trinh",
         "vi-ngoc-huyen": "ngoc_huyen",
         "ar-nabra": "default",
         "de-crane": "default",
@@ -140,11 +140,6 @@ MODEL_PROFILES: dict[tuple[ModelSource, ModelVariant], RuntimeProfile] = {
     ),
 }
 
-MODEL_PROFILES[("github", "vi-anphunl")] = replace(
-    MODEL_PROFILES[("github", "vi-anphunl")],
-    runtime_available=False,
-    support_status="registry-unavailable",
-)
 
 MODEL_PROFILES.update(
     {
