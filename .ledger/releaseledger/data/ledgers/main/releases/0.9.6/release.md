@@ -8,7 +8,7 @@ version: 0.9.6
 status: released
 history_state: curated
 title: Release 0.9.6
-released_at: '2026-09-13'
+released_at: "2026-09-13"
 previous_version: 0.9.5
 cancel_reason: null
 superseded_by: null

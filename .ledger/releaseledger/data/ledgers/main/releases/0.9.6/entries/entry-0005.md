@@ -12,16 +12,16 @@ status: accepted
 audience: null
 scopes: []
 source_refs:
-- git:e0457dbeb070921ec7a9271f740e697f3ac600b3
+  - git:e0457dbeb070921ec7a9271f740e697f3ac600b3
 paths:
-- pyproject.toml
-- .github/workflows/python-publish.yml
-- .github/workflows/tests.yml
-- tests/test_packaging_metadata.py
+  - pyproject.toml
+  - .github/workflows/python-publish.yml
+  - .github/workflows/tests.yml
+  - tests/test_packaging_metadata.py
 issues: []
 prs: []
 sources:
-- git:e0457dbeb070921ec7a9271f740e697f3ac600b3
+  - git:e0457dbeb070921ec7a9271f740e697f3ac600b3
 contributors: []
 breaking: false
 internal: false
