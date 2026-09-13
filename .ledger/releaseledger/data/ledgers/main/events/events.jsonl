@@ -326,3 +326,10 @@
 {"data":{"synced_rows":3},"event":"audit.updated","event_id":"event-0326","record_revisions":{"commit_audit_sheet":3},"release_version":"0.9.5","schema_version":2}
 {"data":{"added_source_refs":[],"fields":["summary"],"removed_source_refs":[],"source_refs_mode":"unchanged"},"entry_id":"entry-0004","event":"entry.updated","event_id":"event-0327","record_revisions":{"entry:0.9.5/entry-0004":2},"release_version":"0.9.5","schema_version":2}
 {"data":{"released_at":"2026-09-11"},"event":"release.finalized","event_id":"event-0328","record_revisions":{"release:0.9.5":7},"release_version":"0.9.5","schema_version":2}
+{"data":{"status":"planned"},"event":"release.created","event_id":"event-0329","record_revisions":{"release:0.9.6":1},"release_version":"0.9.6","schema_version":2}
+{"data":{"fields":["git_base_ref","git_base_sha","git_commit_count","git_head_ref","git_head_sha","git_range"]},"event":"release.updated","event_id":"event-0330","record_revisions":{"release:0.9.6":2},"release_version":"0.9.6","schema_version":2}
+{"data":{"row_count":5},"event":"audit.created","event_id":"event-0331","record_revisions":{"commit_audit_sheet":1},"release_version":"0.9.6","schema_version":2}
+{"data":{"updated_rows":5},"event":"audit.updated","event_id":"event-0332","record_revisions":{"commit_audit_sheet":2},"release_version":"0.9.6","schema_version":2}
+{"data":{"entry_ids":["entry-0001","entry-0002","entry-0003","entry-0004","entry-0005"],"synced_audit_rows":5},"event":"entry.batch_added","event_id":"event-0333","record_revisions":{"commit_audit_sheet":3,"entry:0.9.6/entry-0001":1,"entry:0.9.6/entry-0002":1,"entry:0.9.6/entry-0003":1,"entry:0.9.6/entry-0004":1,"entry:0.9.6/entry-0005":1,"release:0.9.6":3},"release_version":"0.9.6","schema_version":2}
+{"data":{"released_at":"2026-09-13"},"event":"release.finalized","event_id":"event-0334","record_revisions":{"release:0.9.6":4},"release_version":"0.9.6","schema_version":2}
+{"data":{"fields":["git_head_ref"]},"event":"release.updated","event_id":"event-0335","record_revisions":{"release:0.9.6":5},"release_version":"0.9.6","schema_version":2}

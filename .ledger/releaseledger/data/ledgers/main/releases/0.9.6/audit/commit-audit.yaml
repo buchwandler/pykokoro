@@ -1,0 +1,159 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: 0.9.6
+git_base_ref: v0.9.5
+git_base_sha: 3d8cbae2b3014aca67ff18ef42710a0eefa493e0
+git_head_ref: HEAD
+git_head_sha: e0457dbeb070921ec7a9271f740e697f3ac600b3
+git_range: 3d8cbae2b3014aca67ff18ef42710a0eefa493e0..e0457dbeb070921ec7a9271f740e697f3ac600b3
+commit_count: 5
+rows:
+- sha: 21bcf55906ab1ca7b98dddf096d8ff009014cd30
+  source_ref: git:21bcf55906ab1ca7b98dddf096d8ff009014cd30
+  short_sha: 21bcf55
+  changed_paths:
+  - pykokoro/pipeline.py
+  - tests/test_all_voices_example.py
+  - tests/test_lexicon_hot_swap.py
+  - tests/test_pipeline_lifecycle.py
+  stats:
+    files_changed: 0
+    insertions: 215
+    deletions: 5
+  inspected: true
+  inspected_paths:
+  - pykokoro/pipeline.py
+  - tests/test_pipeline_lifecycle.py
+  - tests/test_lexicon_hot_swap.py
+  observed_behavior: Pipeline-owned processing stages are rebuilt when the model variant
+    changes, while custom stages remain authoritative and a failed replacement leaves
+    the existing backend and stages usable.
+  public_impact: public
+  decision: accepted
+  stale: false
+  evidence_subject: 'feat: fix pipeline'
+  target_entry_key: pipeline-stage-rebinding
+  target_entry_id: entry-0001
+  notes: ''
+- sha: 16a00d0904172e769ed0b6de87280d1e261ee9ae
+  source_ref: git:16a00d0904172e769ed0b6de87280d1e261ee9ae
+  short_sha: 16a00d0
+  changed_paths:
+  - pykokoro/model_profiles.py
+  - pykokoro/pipeline_config.py
+  - tests/test_all_voices_example.py
+  - tests/test_model_profile_resolution.py
+  stats:
+    files_changed: 0
+    insertions: 156
+    deletions: 12
+  inspected: true
+  inspected_paths:
+  - pykokoro/model_profiles.py
+  - pykokoro/pipeline_config.py
+  - tests/test_model_profile_resolution.py
+  observed_behavior: Russian voice and language resolution now selects the compatible
+    GitHub model profiles and validates that voice mappings have a matching model
+    profile.
+  public_impact: public
+  decision: accepted
+  stale: false
+  evidence_subject: 'feat: fix voice'
+  target_entry_key: russian-github-model-profiles
+  target_entry_id: entry-0002
+  notes: ''
+- sha: 4f63ae47d37b187145caae63a1ca52dcb64c7ccb
+  source_ref: git:4f63ae47d37b187145caae63a1ca52dcb64c7ccb
+  short_sha: 4f63ae4
+  changed_paths:
+  - pykokoro/runtime/tracing.py
+  - tests/test_runtime_tracing_logging.py
+  stats:
+    files_changed: 0
+    insertions: 86
+    deletions: 14
+  inspected: true
+  inspected_paths:
+  - pykokoro/runtime/tracing.py
+  - tests/test_runtime_tracing_logging.py
+  observed_behavior: Timing instrumentation uses an explicit context object that records
+    completion events and debug logs without replacing exceptions raised by the traced
+    operation.
+  public_impact: public
+  decision: accepted
+  stale: false
+  evidence_subject: 'feat: fix tracing'
+  target_entry_key: tracing-exception-preservation
+  target_entry_id: entry-0003
+  notes: ''
+- sha: 8ec38fbd21a0999509b572a247d104cfc9675991
+  source_ref: git:8ec38fbd21a0999509b572a247d104cfc9675991
+  short_sha: 8ec38fb
+  changed_paths:
+  - .github/workflows/python-publish.yml
+  - .github/workflows/tests.yml
+  - README.md
+  - examples/all_voices.py
+  - pykokoro/audio_generator.py
+  - pykokoro/short_sentence_handler.py
+  - pyproject.toml
+  - requirements-test.txt
+  - tests/test_all_voices_example.py
+  - tests/test_audio_generator_logging.py
+  - tests/test_audio_splitting.py
+  - tests/test_model_profile_resolution.py
+  - tests/test_packaging_metadata.py
+  - tests/test_pipeline_lifecycle.py
+  - tests/test_runtime_tracing_logging.py
+  stats:
+    files_changed: 0
+    insertions: 125
+    deletions: 45
+  inspected: true
+  inspected_paths:
+  - README.md
+  - examples/all_voices.py
+  - pykokoro/audio_generator.py
+  - pykokoro/short_sentence_handler.py
+  - tests/test_audio_generator_logging.py
+  - tests/test_audio_splitting.py
+  observed_behavior: Models without duration timestamps now use wrap mode for the
+    implicit short-sentence default; explicitly requested phrase modes fall back with
+    a warning, and the all-voices example configures the compatible wrap mode.
+  public_impact: public
+  decision: accepted
+  stale: false
+  evidence_subject: 'feat: fix all_voicese example'
+  target_entry_key: timestamp-free-short-sentence-fallback
+  target_entry_id: entry-0004
+  notes: ''
+- sha: e0457dbeb070921ec7a9271f740e697f3ac600b3
+  source_ref: git:e0457dbeb070921ec7a9271f740e697f3ac600b3
+  short_sha: e0457db
+  changed_paths:
+  - .github/workflows/python-publish.yml
+  - .github/workflows/tests.yml
+  - pyproject.toml
+  - tests/test_packaging_metadata.py
+  stats:
+    files_changed: 0
+    insertions: 7
+    deletions: 7
+  inspected: true
+  inspected_paths:
+  - pyproject.toml
+  - .github/workflows/python-publish.yml
+  - .github/workflows/tests.yml
+  - tests/test_packaging_metadata.py
+  observed_behavior: The package and CI compatibility checks raise the kokorog2p minimum
+    used by the standard and test installations to 0.9.9.
+  public_impact: public
+  decision: accepted
+  stale: false
+  evidence_subject: 'chore: increase dep'
+  target_entry_key: kokorog2p-compatibility-floor
+  target_entry_id: entry-0005
+  notes: ''
