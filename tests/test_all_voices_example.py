@@ -116,9 +116,8 @@ def test_missing_metadata_uses_unknown_language_fallback() -> None:
     assert entry.language == "vi"
     assert entry.locale == "vi"
     assert entry.language_label == "vi"
-    assert all_voices.announcement_for(entry) == (
-        "1. This is D I E M trinh. Language: vi."
-    )
+    assert all_voices.announcement_for(entry) == ("1. This is D I E M trinh. Language: vi.")
+
 
 def test_quality_selection_prefers_fp32_and_rejects_empty() -> None:
     assert (

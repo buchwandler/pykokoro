@@ -115,6 +115,7 @@ def _validate_voice_detail(model: ModelCapabilities, voice: str, detail: VoiceCa
             f"{model.model_id}/{voice}: no announcement template for {detail.locale!r}"
         )
 
+
 def build_catalog(
     discovery: ModelDiscoveryResult,
     *,
@@ -272,6 +273,7 @@ def announcement_for(entry: VoiceShowcaseEntry) -> str:
         return f"{entry.number}. This is {voice}. Language: {entry.language_label}."
     builder = ANNOUNCEMENT_BUILDERS[entry.locale]
     return builder(entry.number, voice, entry.gender, entry.language_label)
+
 
 def format_table(entries: Sequence[VoiceShowcaseEntry]) -> str:
     lines = [
