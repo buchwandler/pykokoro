@@ -24,6 +24,33 @@ scripts below use the current pipeline-first API.
 - `termux_android_onnx.py` — Android/Termux provider configuration; requires a
   compatible ONNX Runtime build and model assets.
 
+## High-confidence English clausal-comma pause
+
+Compare ordinary TTS punctuation with PyKokoro's deterministic automatic pause at a
+dependency-confirmed clausal comma:
+
+```bash
+python examples/english_clausal_comma_pause.py
+```
+
+The example uses:
+
+`It had picked up the sound of a explosion, direction suggested it was behind.`
+
+With `pause_mode="auto"`, Phrasplit identifies the comma as a high-confidence clausal
+boundary and PyKokoro assigns one `pause_clause` to the preceding segment. The example
+also renders the same sentence with `pause_mode="tts"` for an audible A/B comparison. It
+intentionally does not claim that every comma receives a deterministic pause.
+
+A compatible local English spaCy model is required, for example:
+
+```bash
+python -m spacy download en_core_web_sm
+```
+
+The demo is optional in `examples/run_all.py` because PyKokoro does not download spaCy
+models automatically.
+
 ## Canonical German TTS samples
 
 ## All-voices showcase
@@ -97,10 +124,10 @@ language demos are also import-safe and indexed here: `abbreviations.py`,
 `automatic_pauses_demo.py`, `backend_comparison.py`, `boundary_detection_analysis.py`,
 `chinese.py`, `compare_prosody_algorithms.py`, `contractions.py`,
 `contractions_advanced.py`, `cpu_benchmark.py`, `dash_variations.py`, `english.py`,
-`french.py`, `headings_demo.py`, `hindi.py`, `homographs.py`, `italian.py`,
-`japanese.py`, `korean.py`, `mixed_language.py`, `optimal_phoneme_length_demo.py`,
-`paragraph_streaming.py`, `pauses_demo.py`, `phoneme_print_demo.py`,
-`pipeline_g2p_onnx_minimal.py`, `podcast.py`, `portuguese.py`,
+`english_clausal_comma_pause.py`, `french.py`, `headings_demo.py`, `hindi.py`,
+`homographs.py`, `italian.py`, `japanese.py`, `korean.py`, `mixed_language.py`,
+`optimal_phoneme_length_demo.py`, `paragraph_streaming.py`, `pauses_demo.py`,
+`phoneme_print_demo.py`, `pipeline_g2p_onnx_minimal.py`, `podcast.py`, `portuguese.py`,
 `prosody_algorithm_selection.py`, `prosody_demo.py`, `provider_info.py`,
 `punctuation.py`, `punctuation_variations.py`, `repro_dup_words.py`, `say_as_demo.py`,
 `short_sentence_demo.py`, `short_sentence_randomized_demo.py`,

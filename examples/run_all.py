@@ -23,6 +23,7 @@ _OPTIONAL_EXAMPLES = {
     "cpu_benchmark.py",
     "provider_info.py",
     "spokenform_phoneme_equivalence.py",
+    "english_clausal_comma_pause.py",
     "termux_android_onnx.py",
 }
 

@@ -12,6 +12,7 @@ def test_default_selection_excludes_opt_in_categories() -> None:
 
     assert "play_audio.py" not in names
     assert "cpu_benchmark.py" not in names
+    assert "english_clausal_comma_pause.py" not in names
     assert not any(path.parent.name == "legacy" for path in paths)
 
 
@@ -23,6 +24,7 @@ def test_selection_flags_add_opt_in_categories() -> None:
 
     assert "play_audio.py" in names
     assert "cpu_benchmark.py" in names
+    assert "english_clausal_comma_pause.py" in names
     assert any(path.parent.name == "legacy" for path in paths)
 
 
