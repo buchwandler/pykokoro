@@ -86,20 +86,34 @@ def model_sort_key(model: ModelCapabilities) -> tuple[int, str, str]:
     return (MODEL_PRIORITY.get(model.model_id, 100), model.model_id, model.source)
 
 
+def _fallback_voice_detail(model: ModelCapabilities, voice: str) -> VoiceCapabilities:
+    if not model.languages:
+        raise ShowcaseError(f"{model.model_id}/{voice}: no model language metadata")
+    language = model.languages[0]
+    return VoiceCapabilities(
+        name=voice,
+        gender="unknown",
+        language=language,
+        locale=language,
+        language_label=language,
+    )
+
+
 def _validate_voice_detail(model: ModelCapabilities, voice: str, detail: VoiceCapabilities) -> None:
     if detail.name != voice:
         raise ShowcaseError(f"{model.model_id}/{voice}: metadata is keyed to {detail.name!r}")
     if not voice or any(character.isspace() for character in voice):
         raise ShowcaseError(f"{model.model_id}/{voice}: invalid registry voice identifier")
+    if not detail.language or not detail.language_label:
+        raise ShowcaseError(f"{model.model_id}/{voice}: incomplete voice metadata")
     if detail.gender == "unknown":
-        raise ShowcaseError(f"{model.model_id}/{voice}: gender metadata is unknown")
-    if not detail.language or not detail.locale or not detail.language_label:
+        return
+    if not detail.locale:
         raise ShowcaseError(f"{model.model_id}/{voice}: incomplete voice metadata")
     if detail.locale not in ANNOUNCEMENT_BUILDERS:
         raise ShowcaseError(
             f"{model.model_id}/{voice}: no announcement template for {detail.locale!r}"
         )
-
 
 def build_catalog(
     discovery: ModelDiscoveryResult,
@@ -123,15 +137,8 @@ def build_catalog(
 
         quality = choose_quality(model)
         details = {detail.name: detail for detail in model.voice_details}
-        if len(details) != len(model.voices):
-            missing = [voice for voice in model.voices if voice not in details]
-            raise ShowcaseError(
-                f"{model.model_id}: missing voice metadata for {', '.join(missing) or 'all voices'}"
-            )
         for voice in model.voices:
-            detail = details.get(voice)
-            if detail is None:
-                raise ShowcaseError(f"{model.model_id}/{voice}: missing voice metadata")
+            detail = details.get(voice) or _fallback_voice_detail(model, voice)
             _validate_voice_detail(model, voice, detail)
             pending.append(
                 VoiceShowcaseEntry(
@@ -260,9 +267,11 @@ ANNOUNCEMENT_BUILDERS: dict[str, Callable[[int, str, VoiceGender, str], str]] = 
 
 
 def announcement_for(entry: VoiceShowcaseEntry) -> str:
+    voice = spoken_voice_name(entry.voice)
+    if entry.gender == "unknown":
+        return f"{entry.number}. This is {voice}. Language: {entry.language_label}."
     builder = ANNOUNCEMENT_BUILDERS[entry.locale]
-    return builder(entry.number, spoken_voice_name(entry.voice), entry.gender, entry.language_label)
-
+    return builder(entry.number, voice, entry.gender, entry.language_label)
 
 def format_table(entries: Sequence[VoiceShowcaseEntry]) -> str:
     lines = [

@@ -98,12 +98,27 @@ def test_russian_github_models_are_scheduled_with_all_voices() -> None:
     assert {entry.quality for entry in catalog.entries} == {"fp32"}
 
 
-def test_missing_metadata_fails_closed() -> None:
-    model = replace(_model("v1.0", ("af_alloy",)), voice_details=())
+def test_missing_metadata_uses_unknown_language_fallback() -> None:
+    model = replace(
+        _model(
+            "vi-contextbox",
+            ("diem_trinh",),
+            language="vi",
+            locale="vi",
+        ),
+        voice_details=(),
+    )
 
-    with pytest.raises(all_voices.ShowcaseError, match="missing voice metadata"):
-        all_voices.build_catalog(_discovery(model))
+    catalog = all_voices.build_catalog(_discovery(model))
+    entry = catalog.entries[0]
 
+    assert entry.gender == "unknown"
+    assert entry.language == "vi"
+    assert entry.locale == "vi"
+    assert entry.language_label == "vi"
+    assert all_voices.announcement_for(entry) == (
+        "1. This is D I E M trinh. Language: vi."
+    )
 
 def test_quality_selection_prefers_fp32_and_rejects_empty() -> None:
     assert (
