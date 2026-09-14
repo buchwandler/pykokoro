@@ -25,6 +25,7 @@ def test_selection_flags_add_opt_in_categories() -> None:
     assert "play_audio.py" in names
     assert "cpu_benchmark.py" in names
     assert "english_clausal_comma_pause.py" in names
+    assert "english_parenthetical_pause.py" in names
     assert any(path.parent.name == "legacy" for path in paths)
 
 

@@ -40,6 +40,7 @@ class PhrasplitSentenceSegmenter(PhrasplitSentenceSplitter, SentenceSegmenter):
         else:
             segments = self._split_prepared_runs(doc, cfg, trace, state.prepared_analysis)
             self._add_auto_clause_boundaries(doc, cfg, trace, state.prepared_analysis)
+            self._add_auto_parenthetical_boundaries(doc, cfg, trace, state.prepared_analysis)
         segments = self._repair_closing_quote_boundaries(doc, segments)
         segments = [self._with_semantic_language(doc, segment, cfg) for segment in segments]
         refined: list[Segment] = []
@@ -190,6 +191,137 @@ class PhrasplitSentenceSegmenter(PhrasplitSentenceSplitter, SentenceSegmenter):
             TraceEvent(
                 stage="segmentation_run",
                 name="clausal_comma_boundaries",
+                ms=0.0,
+                details=counters,
+            )
+        )
+
+    @staticmethod
+    def _add_auto_parenthetical_boundaries(
+        doc: DocumentResult, cfg: PipelineConfig, trace: Trace, analyses: list[Any]
+    ) -> None:
+        """Add Phrasplit parenthetical pauses from prepared text analyses."""
+        counters = {
+            "detected": 0,
+            "open_detected": 0,
+            "close_detected": 0,
+            "added": 0,
+            "deduplicated": 0,
+            "malformed_skipped": 0,
+        }
+        generation = cfg.generation
+        if generation.pause_mode != "auto" or generation.pause_parenthetical <= 0.0:
+            return
+
+        try:
+            phrasplit = importlib.import_module("phrasplit")
+        except ImportError:
+            phrasplit = None
+        detector = (
+            getattr(phrasplit, "detect_parenthetical_boundaries", None)
+            if phrasplit is not None
+            else None
+        )
+        if not callable(detector):
+            trace.warnings.append(
+                "phrasplit.detect_parenthetical_boundaries is unavailable; "
+                "skipping parenthetical detection."
+            )
+            return
+
+        existing_pause_positions = {
+            event.pos for event in doc.boundary_events if event.kind == "pause"
+        }
+        for analysis in analyses:
+            text = analysis.text
+            if not text:
+                continue
+            try:
+                boundaries = detector(text, language=analysis.run.language)
+                boundary_iter = iter(boundaries or ())
+            except (TypeError, ValueError) as exc:
+                trace.warnings.append(
+                    f"Skipped parenthetical detection for {analysis.run.language!r}: {exc}."
+                )
+                continue
+            for boundary in boundary_iter:
+                counters["detected"] += 1
+                kind = getattr(boundary, "kind", None)
+                char_start = getattr(boundary, "char_start", None)
+                char_end = getattr(boundary, "char_end", None)
+                boundary_text = getattr(boundary, "text", None)
+                if kind == "parenthetical_open":
+                    counters["open_detected"] += 1
+                elif kind == "parenthetical_close":
+                    counters["close_detected"] += 1
+                if (
+                    kind not in {"parenthetical_open", "parenthetical_close"}
+                    or not isinstance(char_start, int)
+                    or isinstance(char_start, bool)
+                    or not isinstance(char_end, int)
+                    or isinstance(char_end, bool)
+                    or not isinstance(boundary_text, str)
+                    or char_start < 0
+                    or char_start >= char_end
+                    or char_end > len(text)
+                    or text[char_start:char_end] != boundary_text
+                    or boundary_text != ("(" if kind == "parenthetical_open" else ")")
+                ):
+                    counters["malformed_skipped"] += 1
+                    trace.warnings.append(
+                        "Skipped malformed Phrasplit parenthetical boundary result."
+                    )
+                    continue
+                event_pos = analysis.run.char_start + (
+                    char_start if kind == "parenthetical_open" else char_end
+                )
+                if (
+                    event_pos < analysis.run.char_start
+                    or event_pos > analysis.run.char_end
+                    or event_pos < 0
+                    or event_pos > len(doc.clean_text)
+                ):
+                    counters["malformed_skipped"] += 1
+                    trace.warnings.append(
+                        f"Skipped Phrasplit parenthetical boundary at invalid position {event_pos}."
+                    )
+                    continue
+                if event_pos in existing_pause_positions:
+                    counters["deduplicated"] += 1
+                    continue
+                attrs = {
+                    "strength": "w",
+                    "anchor": "before",
+                    "source": "pipeline_default",
+                    "detector": "phrasplit",
+                    "pause_kind": "parenthetical",
+                    "boundary_kind": kind,
+                }
+                meta = getattr(boundary, "meta", None)
+                if isinstance(meta, dict):
+                    for key in ("confidence", "reason"):
+                        if key in meta:
+                            attrs[key] = str(meta[key])
+                doc.boundary_events.append(
+                    BoundaryEvent(
+                        pos=event_pos,
+                        kind="pause",
+                        duration_s=float(generation.pause_parenthetical),
+                        attrs=attrs,
+                    )
+                )
+                existing_pause_positions.add(event_pos)
+                counters["added"] += 1
+
+        metadata = doc.metadata.setdefault("segmentation", {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+            doc.metadata["segmentation"] = metadata
+        metadata["parenthetical_boundaries"] = counters["added"]
+        trace.events.append(
+            TraceEvent(
+                stage="segmentation_run",
+                name="parenthetical_boundaries",
                 ms=0.0,
                 details=counters,
             )

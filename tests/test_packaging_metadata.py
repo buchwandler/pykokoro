@@ -43,7 +43,7 @@ def test_companion_dependency_floors_match_current_integration_contract() -> Non
 
     assert "kokorog2p[espeak,en]>=0.9.9,<1.0" in dependencies
     assert "lexphon>=0.2.3,<0.3" in dependencies
-    assert "phrasplit>=0.3.8,<0.4" in dependencies
+    assert "phrasplit>=0.3.9,<0.4" in dependencies
 
 
 def test_test_requirements_keep_kokorog2p_in_supported_window() -> None:
@@ -86,7 +86,7 @@ def test_ssmd_dependency_targets_current_contract() -> None:
         "dependencies"
     ]
     assert "ssmd>=0.8.7,<0.9" in dependencies
-    assert "spokenform>=0.3.6,<0.4" in dependencies
+    assert "spokenform>=0.4.2,<0.5" in dependencies
 
 
 def test_audiosig_is_the_only_declared_dsp_backend() -> None:

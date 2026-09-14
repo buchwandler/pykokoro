@@ -66,3 +66,43 @@ def test_pause_propagation_for_single_batch(monkeypatch):
     first_segment = next(seg for seg in phoneme_segments if seg.segment_id == "seg_0")
     assert first_segment.pause_before == pytest.approx(generation.pause_paragraph)
     assert first_segment.pause_after == pytest.approx(generation.pause_paragraph)
+
+
+def test_parenthetical_pause_propagates_to_g2p_segment():
+    fake_g2p = types.SimpleNamespace(__version__="0.0")
+    fake_g2p.phonemes_to_ids = lambda phonemes, model=None: [1, 2]
+    fake_g2p.ids_to_phonemes = lambda ids, model=None: "a"
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setitem(sys.modules, "kokorog2p", fake_g2p)
+    try:
+        generation = GenerationConfig(
+            lang="en-us",
+            is_phonemes=True,
+            pause_mode="auto",
+            pause_parenthetical=0.12,
+        )
+        text = "Host (aside) resumes."
+        aside_start = text.index("(")
+        segment = Segment(
+            id="aside",
+            text=text[aside_start : text.index(")") + 1],
+            char_start=aside_start,
+            char_end=text.index(")") + 1,
+        )
+        doc = DocumentResult(
+            clean_text=text,
+            boundary_events=[
+                BoundaryEvent(
+                    pos=aside_start,
+                    kind="pause",
+                    duration_s=generation.pause_parenthetical,
+                    attrs={"anchor": "before", "pause_kind": "parenthetical"},
+                )
+            ],
+        )
+        phoneme_segments = KokoroG2PAdapter().phonemize(
+            [segment], doc, PipelineConfig(generation=generation), Trace()
+        )
+        assert phoneme_segments[0].pause_before == pytest.approx(0.12)
+    finally:
+        monkeypatch.undo()

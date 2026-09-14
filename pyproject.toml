@@ -24,14 +24,14 @@ keywords = ["tts", "text-to-speech", "kokoro", "phonemizer", "espeak"]
 dependencies = [
     "kokorog2p[espeak,en]>=0.9.9,<1.0",
     "lexphon>=0.2.3,<0.3",
-    "phrasplit>=0.3.8,<0.4",
+    "phrasplit>=0.3.9,<0.4",
     "numpy",
     "audiosig>=0.1.1,<0.2",
     "platformdirs",
     "chardet",
     "charset-normalizer",
     "ssmd>=0.8.7,<0.9",
-    "spokenform>=0.3.6,<0.4",
+    "spokenform>=0.4.2,<0.5",
     "soundfile",
     "typing_extensions>=4.0"
 ]

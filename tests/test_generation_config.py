@@ -16,6 +16,7 @@ class TestGenerationConfigCreation:
         assert config.is_phonemes is False
         assert config.pause_mode == "tts"
         assert config.pause_clause == 0.3
+        assert config.pause_parenthetical == 0.15
         assert config.pause_sentence == 0.6
         assert config.pause_paragraph == 1.0
         assert config.pause_variance == 0.05
@@ -41,11 +42,16 @@ class TestGenerationConfigCreation:
         assert config.is_phonemes is True
         assert config.pause_mode == "manual"
         assert config.pause_clause == 0.25
+        assert config.pause_parenthetical == 0.15
         assert config.pause_sentence == 0.5
         assert config.pause_paragraph == 0.8
         assert config.pause_variance == 0.1
         assert config.random_seed == 42
         assert config.enable_short_sentence is True
+
+    def test_custom_parenthetical_pause(self):
+        config = GenerationConfig(pause_parenthetical=0.12)
+        assert config.pause_parenthetical == pytest.approx(0.12)
 
     def test_partial_config(self):
         """Test creating config with some custom values."""
@@ -58,6 +64,7 @@ class TestGenerationConfigCreation:
         # Defaults for others
         assert config.lang is None
         assert config.pause_clause == 0.3
+        assert config.pause_parenthetical == 0.15
 
 
 class TestGenerationConfigValidation:
@@ -77,6 +84,11 @@ class TestGenerationConfigValidation:
         """Test that negative pause_clause raises ValueError."""
         with pytest.raises(ValueError, match="pause_clause must be >= 0.0"):
             GenerationConfig(pause_clause=-0.1)
+
+    def test_invalid_pause_parenthetical_negative(self):
+        """Test that negative pause_parenthetical raises ValueError."""
+        with pytest.raises(ValueError, match="pause_parenthetical must be >= 0.0"):
+            GenerationConfig(pause_parenthetical=-0.1)
 
     def test_invalid_pause_sentence_negative(self):
         """Test that negative pause_sentence raises ValueError."""
@@ -111,12 +123,14 @@ class TestGenerationConfigValidation:
         config = GenerationConfig(
             pause_clause=0.0,
             pause_sentence=0.0,
+            pause_parenthetical=0.0,
             pause_paragraph=0.0,
             pause_variance=0.0,
         )
         assert config.pause_clause == 0.0
         assert config.pause_sentence == 0.0
         assert config.pause_paragraph == 0.0
+        assert config.pause_parenthetical == 0.0
         assert config.pause_variance == 0.0
 
 
@@ -157,6 +171,11 @@ class TestGenerationConfigMerge:
         config = GenerationConfig(speed=1.5)
         merged = config.merge_with_kwargs(speed=2.0)
         assert merged["speed"] == 2.0
+
+    def test_merge_override_parenthetical_pause(self):
+        config = GenerationConfig(pause_parenthetical=0.15)
+        merged = config.merge_with_kwargs(pause_parenthetical=0.12)
+        assert merged["pause_parenthetical"] == pytest.approx(0.12)
 
     def test_merge_override_multiple(self):
         """Test merging with multiple overrides."""
@@ -201,6 +220,7 @@ class TestGenerationConfigMerge:
             is_phonemes=True,
             pause_mode="manual",
             pause_clause=0.25,
+            pause_parenthetical=0.15,
             pause_sentence=0.5,
             pause_paragraph=0.8,
             pause_variance=0.1,
@@ -213,6 +233,7 @@ class TestGenerationConfigMerge:
         assert merged["pause_mode"] == "manual"
         assert merged["pause_clause"] == 0.25
         assert merged["pause_sentence"] == 0.5
+        assert merged["pause_parenthetical"] == 0.15
         assert merged["pause_paragraph"] == 0.8
         assert merged["pause_variance"] == 0.1
         assert merged["random_seed"] == 42
@@ -260,7 +281,10 @@ class TestGenerationConfigEdgeCases:
         with pytest.raises(ValueError, match="speed"):
             GenerationConfig(speed=value)
 
-    @pytest.mark.parametrize("field_name", ["pause_clause", "pause_sentence", "pause_paragraph"])
+    @pytest.mark.parametrize(
+        "field_name",
+        ["pause_clause", "pause_parenthetical", "pause_sentence", "pause_paragraph"],
+    )
     def test_pause_fields_reject_non_real_values(self, field_name):
         with pytest.raises(ValueError, match=field_name):
             GenerationConfig(**{field_name: "slow"})

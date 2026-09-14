@@ -612,7 +612,7 @@ networks can learn complex patterns from data, enabling breakthroughs in
 computer vision, natural language processing, and speech recognition.
 """
 
-# Automatic pauses at sentence/paragraph boundaries and high-confidence clausal commas
+# Automatic pauses at sentence/paragraph boundaries, parenthetical asides, and high-confidence clausal commas
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 config = PipelineConfig(
@@ -621,6 +621,7 @@ config = PipelineConfig(
         lang="en-us",
         pause_mode="auto",
         pause_clause=0.25,  # Pause after high-confidence clausal commas
+        pause_parenthetical=0.15,  # Short pause around parenthetical asides
         pause_sentence=0.5,  # Pause after sentences
         pause_paragraph=1.0,  # Pause after paragraphs
         pause_variance=0.05,  # Add natural variance (default)
@@ -634,8 +635,8 @@ audio = res.audio
 
 **Key Features:**
 
-- **Natural boundaries**: Automatically pauses at sentences, paragraphs, and
-  high-confidence clausal commas
+- **Natural boundaries**: Automatically pauses at sentences, paragraphs, high-confidence
+  clausal commas, and parenthetical asides
 - **Variance**: Gaussian variance prevents robotic timing (±100ms by default)
 - **Reproducible**: Use `random_seed` for consistent output
 - **Composable**: Works with SSMD break markers
@@ -645,14 +646,20 @@ audio = res.audio
 - `SsmdDocumentParser` handles paragraph/sentence segmentation using SSMD.
 - `PlainTextDocumentParser` uses optional `phrasplit` sentence splitting.
 
-- In `pause_mode="auto"`, dependency-aware Phrasplit analysis detects only
-  high-confidence clausal commas; list commas and shared-subject continuations remain
-  untouched.
+- In `pause_mode="auto"`, dependency-aware Phrasplit analysis detects high-confidence
+  clausal commas and parenthetical asides. List commas and shared-subject continuations
+  remain untouched.
 
 For example,
 `It had picked up the sound of a explosion, direction suggested it was behind.` is
 refined at the detected comma so the preceding segment receives one deterministic
 `pause_clause`.
+For example, `They changed out their clothes (stained with blood).` receives a short
+`pause_parenthetical` before the aside in auto mode. Set `pause_parenthetical=0.0` to
+disable only these inferred parenthetical pauses. The setting is independent from
+`pause_clause`, `pause_sentence`, and `pause_paragraph`.
+
+
 
 **Pause Variance Options:**
 

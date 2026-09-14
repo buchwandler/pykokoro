@@ -381,6 +381,7 @@ Deep learning uses neural networks with many layers.
 generation = GenerationConfig(
     pause_mode="auto",
     pause_clause=0.25,
+    pause_parenthetical=0.15,
     pause_sentence=0.5,
     pause_paragraph=1.0,
     pause_variance=0.05,

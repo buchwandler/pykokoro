@@ -118,9 +118,11 @@ cfg = with_spacy_model(size="lg")(cfg)
 - `lang`: Default language code for phonemization (`"en-us"` etc).
 - `is_phonemes`: Treat input text as phoneme strings instead of raw text.
 - `pause_mode`: `"tts"` keeps natural model pauses, `"manual"` trims segment silence and
-  preserves explicit pauses, `"auto"` inserts pauses at sentence/paragraph boundaries
-  and high-confidence clausal commas, then trims segment silence.
+  preserves explicit pauses, `"auto"` inserts pauses at sentence/paragraph boundaries,
+  high-confidence clausal commas, and parenthetical asides, then trims segment silence.
 - `pause_clause`: Default pause for SSMD `...c` breaks (seconds).
+- `pause_parenthetical`: Short pause for automatically detected parenthetical asides in
+  `pause_mode="auto"` (seconds), independently configurable from clause pauses.
 - `pause_sentence`: Default pause for SSMD `...s` breaks (seconds).
 - `pause_paragraph`: Default pause for SSMD `...p` breaks (seconds).
 - `pause_variance`: Stored for compatibility with the `Kokoro` API. The pipeline stages

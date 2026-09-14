@@ -46,6 +46,8 @@ class GenerationConfig:
         pause_clause: Duration in seconds for SSMD ...c (comma) breaks and
             automatic clause boundary pauses when pause_mode="manual" or "auto".
             Must be >= 0.0. Default: 0.3
+        pause_parenthetical: Duration in seconds for automatically detected parenthetical-aside
+            boundaries when pause_mode="auto". Must be >= 0.0. Default: 0.15
         pause_sentence: Duration in seconds for SSMD ...s (sentence) breaks and
             automatic sentence boundary pauses when pause_mode="manual" or "auto".
             Must be >= 0.0. Default: 0.6
@@ -102,6 +104,7 @@ class GenerationConfig:
     # Pause control
     pause_mode: Literal["tts", "manual", "auto"] = "tts"
     pause_clause: float = 0.3
+    pause_parenthetical: float = 0.15
     pause_sentence: float = 0.6
     pause_paragraph: float = 1.0
     pause_variance: float = 0.05
@@ -115,6 +118,7 @@ class GenerationConfig:
         _validate_real("speed", self.speed, minimum=0.0, exclusive_minimum=True)
         for field_name in (
             "pause_clause",
+            "pause_parenthetical",
             "pause_sentence",
             "pause_paragraph",
             "pause_variance",
@@ -165,6 +169,7 @@ class GenerationConfig:
             "is_phonemes": self.is_phonemes,
             "pause_mode": self.pause_mode,
             "pause_clause": self.pause_clause,
+            "pause_parenthetical": self.pause_parenthetical,
             "pause_sentence": self.pause_sentence,
             "pause_paragraph": self.pause_paragraph,
             "pause_variance": self.pause_variance,

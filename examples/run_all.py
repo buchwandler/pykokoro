@@ -24,6 +24,7 @@ _OPTIONAL_EXAMPLES = {
     "provider_info.py",
     "spokenform_phoneme_equivalence.py",
     "english_clausal_comma_pause.py",
+    "english_parenthetical_pause.py",
     "termux_android_onnx.py",
 }
 
