@@ -520,9 +520,14 @@ class AudioGenerator:
         trace: Trace | None = None,
         *,
         attempt_kind: str = "initial",
+        tokens: list[int] | None = None,
     ) -> tuple[np.ndarray, np.ndarray | None]:
         effective_phonemes = phonemes[:MAX_PHONEME_LENGTH]
-        tokens = self._tokenizer.tokenize(effective_phonemes)
+        effective_tokens = (
+            list(tokens)
+            if tokens is not None and len(phonemes) <= MAX_PHONEME_LENGTH
+            else self._tokenizer.tokenize(effective_phonemes)
+        )
         normalized_voice_style = normalize_voice_style(voice_style, expected_length=None)
         style_idx = self._voice_style_index(
             normalized_voice_style.shape[0], len(effective_phonemes)
@@ -530,7 +535,7 @@ class AudioGenerator:
         voice_style_indexed = normalized_voice_style[style_idx]
         if voice_style_indexed.ndim == 1:
             voice_style_indexed = voice_style_indexed[None, :]
-        tokens_padded = self._pad_tokens(tokens)
+        tokens_padded = self._pad_tokens(effective_tokens)
         inputs = self._build_onnx_inputs(tokens_padded, voice_style_indexed, speed)
         cache_key = self._inference_cache_key(inputs)
         cached = self._get_cached_inference(cache_key)
@@ -554,7 +559,7 @@ class AudioGenerator:
         self._record_inference(
             trace,
             effective_phonemes=effective_phonemes,
-            tokens=tokens,
+            tokens=effective_tokens,
             inputs=inputs,
             audio=audio,
             runtime_s=runtime_s,
@@ -568,7 +573,7 @@ class AudioGenerator:
                 cache_hit,
                 attempt_kind,
                 len(effective_phonemes),
-                len(tokens),
+                len(effective_tokens),
                 int(np.asarray(audio).size),
                 runtime_s * 1000.0,
             )
@@ -870,7 +875,9 @@ class AudioGenerator:
 
         for segment in segments:
             phonemes = segment.phonemes or ""
-            tokens = self._tokenizer.tokenize(phonemes) if phonemes.strip() else []
+            tokens = list(segment.tokens) if segment.tokens else (
+                self._tokenizer.tokenize(phonemes) if phonemes.strip() else []
+            )
             skip_audio = False
 
             if effective_config and is_segment_empty(segment, effective_config):
@@ -989,7 +996,9 @@ class AudioGenerator:
                 )
             segment_voice_style = self._resolve_segment_voice(segment, voice_style, voice_resolver)
             if trace is None:
-                audio, pred_dur = self._run_onnx(segment.phonemes, segment_voice_style, speed)
+                audio, pred_dur = self._run_onnx(
+                    segment.phonemes, segment_voice_style, speed, tokens=segment.tokens or None
+                )
             else:
                 audio, pred_dur = self._run_onnx(
                     segment.phonemes,
@@ -997,6 +1006,7 @@ class AudioGenerator:
                     speed,
                     trace=trace,
                     attempt_kind="initial",
+                    tokens=segment.tokens or None,
                 )
             if trace is not None:
                 trace.inference[-1].update(
@@ -1203,20 +1213,31 @@ class AudioGenerator:
             "falling back to wrap mode.",
             segment.text[:50],
         )
+        fallback_tokens = short_sentence_metadata.get("fallback_tokens")
+        prepared_fallback_tokens = (
+            fallback_tokens
+            if isinstance(fallback_tokens, list)
+            and all(isinstance(token, int) for token in fallback_tokens)
+            else None
+        )
         if trace is None:
-            fallback_audio, _ = self._run_onnx(fallback_phonemes, voice_style, speed)
+            fallback_audio, _ = self._run_onnx(
+                fallback_phonemes, voice_style, speed, tokens=prepared_fallback_tokens
+            )
         else:
             fallback_audio, _ = self._run_onnx(
-                fallback_phonemes, voice_style, speed, trace=trace, attempt_kind="fallback"
+                fallback_phonemes,
+                voice_style,
+                speed,
+                trace=trace,
+                attempt_kind="fallback",
+                tokens=prepared_fallback_tokens,
             )
         short_sentence_metadata["cut_applied"] = True
         short_sentence_metadata["fallback_used"] = "wrap"
         segment.phonemes = fallback_phonemes
-        fallback_tokens = short_sentence_metadata.get("fallback_tokens")
-        if isinstance(fallback_tokens, list) and all(
-            isinstance(token, int) for token in fallback_tokens
-        ):
-            segment.tokens = fallback_tokens
+        if isinstance(prepared_fallback_tokens, list):
+            segment.tokens = prepared_fallback_tokens
         segment.word_timings = []
         return fallback_audio
 
@@ -1281,10 +1302,17 @@ class AudioGenerator:
                 continue
 
             if trace is None:
-                retry_audio, pred_dur = self._run_onnx(retry.phonemes, voice_style, speed)
+                retry_audio, pred_dur = self._run_onnx(
+                    retry.phonemes, voice_style, speed, tokens=retry.tokens
+                )
             else:
                 retry_audio, pred_dur = self._run_onnx(
-                    retry.phonemes, voice_style, speed, trace=trace, attempt_kind="retry"
+                    retry.phonemes,
+                    voice_style,
+                    speed,
+                    trace=trace,
+                    attempt_kind="retry",
+                    tokens=retry.tokens,
                 )
             timing_tokens = retry.metadata.get("timing_tokens")
             retry_timings: list[WordTiming] = []

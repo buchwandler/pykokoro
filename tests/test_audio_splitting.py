@@ -1252,7 +1252,13 @@ def test_prepare_phrase_audio_falls_back_to_wrap_when_cut_is_uncertain(
         lambda audio, metadata: None,
     )
 
-    def fake_run_onnx(phonemes: str, voice_style: np.ndarray, speed: float):
+    def fake_run_onnx(
+        phonemes: str,
+        voice_style: np.ndarray,
+        speed: float,
+        *,
+        tokens=None,
+    ):
         _ = voice_style, speed
         assert phonemes == "—abc—"
         return fallback_audio, None
@@ -1327,7 +1333,13 @@ def test_prepare_phrase_audio_tries_phrase_fallbacks_before_wrap(
             },
         )
 
-    def fake_run_onnx(phonemes: str, voice_style: np.ndarray, speed: float):
+    def fake_run_onnx(
+        phonemes: str,
+        voice_style: np.ndarray,
+        speed: float,
+        *,
+        tokens=None,
+    ):
         _ = phonemes, voice_style, speed
         return retry_audio, np.array([1.0, 1.0, 1.0], dtype=np.float32)
 
@@ -1410,7 +1422,13 @@ def test_prepare_phrase_audio_obeys_phrase_fallback_tries(
             },
         )
 
-    def fake_run_onnx(phonemes: str, voice_style: np.ndarray, speed: float):
+    def fake_run_onnx(
+        phonemes: str,
+        voice_style: np.ndarray,
+        speed: float,
+        *,
+        tokens=None,
+    ):
         _ = phonemes, voice_style, speed
         return np.ones(240, dtype=np.float32), np.array([1.0, 1.0], dtype=np.float32)
 
@@ -1509,7 +1527,7 @@ def test_prepare_phrase_audio_replaces_stale_timings_with_cropped_retry_timings(
     monkeypatch.setattr(
         generator,
         "_run_onnx",
-        lambda phonemes, voice_style, speed: (
+        lambda phonemes, voice_style, speed, tokens=None: (
             retry_audio,
             np.asarray([1.0, 10.0, 1.0], dtype=np.float32),
         ),

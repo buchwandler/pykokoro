@@ -37,6 +37,23 @@ def _legacy_fallback_kwargs(mode: FallbackMode) -> dict[str, bool]:
         return {"use_espeak_fallback": True, "use_goruut_fallback": False}
     return {"use_espeak_fallback": False, "use_goruut_fallback": True}
 
+def _normalize_kokorog2p_version(value: str) -> str:
+    normalized = value.strip().lower()
+    aliases = {
+        "1.0": "1.0",
+        "v1.0": "1.0",
+        "1.1": "1.1",
+        "v1.1": "1.1",
+        "1.1-zh": "1.1",
+        "v1.1-zh": "1.1",
+    }
+    try:
+        return aliases[normalized]
+    except KeyError as exc:
+        raise ValueError(
+            f"Unsupported KokoroG2P vocabulary/version identifier: {value!r}"
+        ) from exc
+
 
 GToken: TypeAlias = Any
 filter_for_kokoro = _kokorog2p.filter_for_kokoro
@@ -208,14 +225,17 @@ class Tokenizer:
             config: Optional TokenizerConfig for phonemization settings
         """
         self.vocab_version = vocab_version
-        # Determine kokorog2p model parameter from vocab_version
-        # Map variant names to kokorog2p model names
-        if vocab_version == "v1.1-zh":
-            self._kokorog2p_model = "1.1"
+        self._kokorog2p_model: str | None
+        if vocab is None:
+            self._kokorog2p_model = _normalize_kokorog2p_version(vocab_version)
+            self.vocab = get_kokoro_vocab(model=self._kokorog2p_model)
         else:
-            self._kokorog2p_model = "1.0"
-
-        self.vocab = vocab if vocab is not None else get_kokoro_vocab(model=self._kokorog2p_model)
+            self.vocab = vocab
+            try:
+                self._kokorog2p_model = _normalize_kokorog2p_version(vocab_version)
+            except ValueError:
+                # Custom frontends may use identifiers outside KokoroG2P's versions.
+                self._kokorog2p_model = None
         self._reverse_vocab: dict[int, str] | None = None
         self.config = config or TokenizerConfig()
 
@@ -263,6 +283,13 @@ class Tokenizer:
         Returns:
             G2P instance for the language
         """
+
+        if self._kokorog2p_model is None:
+            raise ValueError(
+                f"Tokenizer version {self.vocab_version!r} does not identify a supported "
+                "KokoroG2P model"
+            )
+
 
         if lang not in self._g2p_cache:
             # Map language to kokorog2p format
@@ -313,6 +340,28 @@ class Tokenizer:
             self._reverse_vocab = {v: k for k, v in self.vocab.items()}
         return self._reverse_vocab
 
+    def _filter_for_vocab(self, phonemes: str) -> str:
+        return "".join(char for char in phonemes if char in self.vocab)
+
+    def _encode_with_vocab(self, phonemes: str) -> list[int]:
+        tokens: list[int] = []
+        for char in phonemes:
+            token_id = self.vocab.get(char)
+            if token_id is not None and token_id != 0:
+                tokens.append(token_id)
+        return tokens
+
+    def _decode_with_vocab(self, tokens: list[int]) -> str:
+        return "".join(
+            self.reverse_vocab[token_id]
+            for token_id in tokens
+            if token_id != 0 and token_id in self.reverse_vocab
+        )
+
+    def _validate_with_vocab(self, phonemes: str) -> tuple[bool, list[str]]:
+        invalid = [char for char in phonemes if char not in self.vocab]
+        return not invalid, invalid
+
     @staticmethod
     def normalize_text(text: str) -> str:
         """Normalize text before phonemization.
@@ -357,7 +406,7 @@ class Tokenizer:
         processed_text = self._apply_phoneme_dictionary(text)
         g2p = self._get_g2p(lang)
         result = phonemize(processed_text, language=lang, g2p=g2p)
-        return filter_for_kokoro(result.phonemes, model=self._kokorog2p_model)
+        return self._filter_for_vocab(result.phonemes)
 
     def phonemize_detailed(
         self,
@@ -402,7 +451,7 @@ class Tokenizer:
                 phoneme_parts.append(" ")
 
         phonemes = "".join(phoneme_parts)
-        phonemes = filter_for_kokoro(phonemes, model=self._kokorog2p_model)
+        phonemes = self._filter_for_vocab(phonemes)
 
         return PhonemeResult(
             phonemes=phonemes.strip(),
@@ -428,7 +477,7 @@ class Tokenizer:
                 f"Maximum is {MAX_PHONEME_LENGTH} phonemes."
             )
 
-        return phonemes_to_ids(phonemes, model=self._kokorog2p_model)
+        return self._encode_with_vocab(phonemes)
 
     def detokenize(self, tokens: list[int]) -> str:
         """Convert token IDs back to phonemes.
@@ -439,7 +488,7 @@ class Tokenizer:
         Returns:
             Phoneme string
         """
-        return ids_to_phonemes(tokens, model=self._kokorog2p_model)
+        return self._decode_with_vocab(tokens)
 
     def text_to_tokens(
         self,
@@ -485,7 +534,7 @@ class Tokenizer:
         for token in tokens:
             if token.phonemes and token.text.strip():
                 # Filter phonemes for Kokoro vocabulary
-                filtered_phonemes = filter_for_kokoro(token.phonemes, model=self._kokorog2p_model)
+                filtered_phonemes = self._filter_for_vocab(token.phonemes)
                 result.append((token.text, filtered_phonemes))
 
         return result
@@ -531,7 +580,7 @@ class Tokenizer:
         Returns:
             Tuple of (is_valid, list_of_invalid_chars)
         """
-        return validate_for_kokoro(phonemes)
+        return self._validate_with_vocab(phonemes)
 
 
 # Convenience function for simple usage

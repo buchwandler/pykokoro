@@ -6,10 +6,27 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from kokorog2p import get_kokoro_vocab
 
 import examples.all_voices as all_voices
 from pykokoro.discovery import ModelCapabilities, ModelDiscoveryResult, VoiceCapabilities
+from pykokoro.model_profiles import get_model_profile
 from pykokoro.short_sentence_handler import ShortSentenceConfig
+from pykokoro.tokenizer import Tokenizer
+
+
+def test_chinese_profile_tokenizer_contract_uses_v11_vocabulary():
+
+    profile = get_model_profile("v1.1-zh", "github")
+    tokenizer = Tokenizer(
+        vocab_version=profile.tokenizer_vocab_version,
+        vocab=get_kokoro_vocab(model="1.1"),
+    )
+
+    assert profile.tokenizer_vocab_version == "1.1"
+    assert tokenizer._kokorog2p_model == "1.1"
+    assert tokenizer.detokenize(tokenizer.tokenize("ㄋㄧ2ㄏㄠ3")) == "ㄋㄧ2ㄏㄠ3"
+
 
 
 def _model(

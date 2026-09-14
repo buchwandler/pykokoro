@@ -46,6 +46,20 @@ def _normalize_phonemes(segments) -> str:
     return " ".join(phonemes.split())
 
 
+def test_chinese_pipeline_preserves_v11_phonemes_and_tokens():
+    cfg = PipelineConfig(
+        model_source="github",
+        model_variant="v1.1-zh",
+        generation=GenerationConfig(lang="zh"),
+    )
+    pipeline = _build_pipeline(PlainTextDocumentParser(), cfg)
+
+    result = pipeline.run("你好世界。")
+
+    assert result.phoneme_segments
+    assert any(char in "ㄋㄧㄏㄠ" for char in result.phoneme_segments[0].phonemes)
+    assert result.phoneme_segments[0].tokens
+
 @pytest.mark.parametrize("ssmd_text, plain_text", CASES)
 def test_ssmd_and_plain_phonemes_match(ssmd_text, plain_text):
     cfg = PipelineConfig(generation=GenerationConfig(lang="en-us"))

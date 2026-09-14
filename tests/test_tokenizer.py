@@ -1,6 +1,7 @@
 """Tests for pykokoro.tokenizer module."""
 
 import pytest
+from kokorog2p import get_kokoro_vocab
 from spokenform import prepare_for_kokorog2p
 
 from pykokoro.constants import (
@@ -180,6 +181,42 @@ class TestTokenizer:
         tokenizer = Tokenizer(config=config)
         assert tokenizer.config.use_spacy is False
         assert tokenizer.config.fallback == "espeak"
+
+    @pytest.mark.parametrize("version", ["1.1", "v1.1", "1.1-zh", "v1.1-zh"])
+    def test_chinese_version_aliases_select_v11(self, version):
+        tokenizer = Tokenizer(vocab_version=version)
+        assert tokenizer._kokorog2p_model == "1.1"
+
+    def test_unsupported_version_is_rejected(self):
+        with pytest.raises(ValueError, match="Unsupported KokoroG2P"):
+            Tokenizer(vocab_version="unknown")
+
+    def test_tokenize_uses_explicit_vocabulary(self):
+        tokenizer = Tokenizer(
+            vocab_version="1.0",
+            vocab={"ㄋ": 73, "ㄧ": 127, "2": 172},
+        )
+
+        assert tokenizer.tokenize("ㄋㄧ2") == [73, 127, 172]
+        assert tokenizer.detokenize([73, 127, 172]) == "ㄋㄧ2"
+
+    def test_chinese_vocab_preserves_zhuyin_round_trip(self):
+        tokenizer = Tokenizer(
+            vocab_version="1.1",
+            vocab=get_kokoro_vocab(model="1.1"),
+        )
+        phonemes = "ㄋㄧ2ㄏㄠ3"
+
+        tokens = tokenizer.tokenize(phonemes)
+        valid, invalid = tokenizer.validate_phonemes(phonemes)
+
+        assert tokens
+        assert len(tokens) == len(phonemes)
+        assert tokenizer.detokenize(tokens) == phonemes
+        assert valid
+        assert invalid == []
+
+
 
     def test_get_g2p_forwards_spacy_model(self, monkeypatch):
         """Test configured spaCy model is forwarded to get_g2p."""
