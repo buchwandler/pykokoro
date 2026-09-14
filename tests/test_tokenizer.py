@@ -216,8 +216,6 @@ class TestTokenizer:
         assert valid
         assert invalid == []
 
-
-
     def test_get_g2p_forwards_spacy_model(self, monkeypatch):
         """Test configured spaCy model is forwarded to get_g2p."""
         import pykokoro.tokenizer as tokenizer_module

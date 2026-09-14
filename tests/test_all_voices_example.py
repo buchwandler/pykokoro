@@ -28,7 +28,6 @@ def test_chinese_profile_tokenizer_contract_uses_v11_vocabulary():
     assert tokenizer.detokenize(tokenizer.tokenize("ㄋㄧ2ㄏㄠ3")) == "ㄋㄧ2ㄏㄠ3"
 
 
-
 def _model(
     model_id: str,
     voices: tuple[str, ...],

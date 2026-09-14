@@ -875,8 +875,10 @@ class AudioGenerator:
 
         for segment in segments:
             phonemes = segment.phonemes or ""
-            tokens = list(segment.tokens) if segment.tokens else (
-                self._tokenizer.tokenize(phonemes) if phonemes.strip() else []
+            tokens = (
+                list(segment.tokens)
+                if segment.tokens
+                else (self._tokenizer.tokenize(phonemes) if phonemes.strip() else [])
             )
             skip_audio = False
 

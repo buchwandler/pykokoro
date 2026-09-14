@@ -37,6 +37,7 @@ def _legacy_fallback_kwargs(mode: FallbackMode) -> dict[str, bool]:
         return {"use_espeak_fallback": True, "use_goruut_fallback": False}
     return {"use_espeak_fallback": False, "use_goruut_fallback": True}
 
+
 def _normalize_kokorog2p_version(value: str) -> str:
     normalized = value.strip().lower()
     aliases = {
@@ -50,9 +51,7 @@ def _normalize_kokorog2p_version(value: str) -> str:
     try:
         return aliases[normalized]
     except KeyError as exc:
-        raise ValueError(
-            f"Unsupported KokoroG2P vocabulary/version identifier: {value!r}"
-        ) from exc
+        raise ValueError(f"Unsupported KokoroG2P vocabulary/version identifier: {value!r}") from exc
 
 
 GToken: TypeAlias = Any
@@ -289,7 +288,6 @@ class Tokenizer:
                 f"Tokenizer version {self.vocab_version!r} does not identify a supported "
                 "KokoroG2P model"
             )
-
 
         if lang not in self._g2p_cache:
             # Map language to kokorog2p format

@@ -31,7 +31,7 @@ dependencies = [
     "chardet",
     "charset-normalizer",
     "ssmd>=0.8.7,<0.9",
-    "spokenform>=0.4.2,<0.5",
+    "spokenform>=0.4.3,<0.5",
     "soundfile",
     "typing_extensions>=4.0"
 ]

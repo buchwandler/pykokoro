@@ -160,7 +160,9 @@ def test_parenthetical_pause_is_owned_by_aside_and_resumed_host(monkeypatch):
     )
 
     sliced = [
-        slice_boundaries(doc.boundary_events, segment.char_start, segment.char_end, doc_end=len(MEDIAL_TEXT))
+        slice_boundaries(
+            doc.boundary_events, segment.char_start, segment.char_end, doc_end=len(MEDIAL_TEXT)
+        )
         for segment in segments
     ]
     adapter = KokoroG2PAdapter()
@@ -174,21 +176,23 @@ def test_non_auto_modes_do_not_add_parenthetical_pause(monkeypatch, pause_mode):
     fake_module = types.SimpleNamespace(
         split_with_offsets=lambda value, *args, **kwargs: [(value, 0, len(value), 0, 0, 0)],
         detect_clause_boundaries=lambda *args, **kwargs: [],
-        detect_parenthetical_boundaries=lambda *args, **kwargs: pytest.fail("detector must not run"),
+        detect_parenthetical_boundaries=lambda *args, **kwargs: pytest.fail(
+            "detector must not run"
+        ),
     )
     monkeypatch.setitem(sys.modules, "phrasplit", fake_module)
     run = LanguageRun(0, len(MEDIAL_TEXT), "en-us")
     analysis = PreparedRunAnalysis(run=run, text=MEDIAL_TEXT, doc=None, annotations=())
     doc = DocumentResult(
         clean_text=MEDIAL_TEXT,
-        linguistic_state=LinguisticRequestState(
-            prepared_plan=(run,), prepared_analysis=[analysis]
-        ),
+        linguistic_state=LinguisticRequestState(prepared_plan=(run,), prepared_analysis=[analysis]),
     )
     segments = PhrasplitSentenceSegmenter().split(
         doc,
         PipelineConfig(
-            generation=GenerationConfig(lang="en-us", pause_mode=pause_mode, pause_parenthetical=0.15)
+            generation=GenerationConfig(
+                lang="en-us", pause_mode=pause_mode, pause_parenthetical=0.15
+            )
         ),
         Trace(),
     )
@@ -216,14 +220,14 @@ def test_zero_parenthetical_pause_preserves_other_auto_detection(monkeypatch):
     analysis = PreparedRunAnalysis(run=run, text=MEDIAL_TEXT, doc=object(), annotations=())
     doc = DocumentResult(
         clean_text=MEDIAL_TEXT,
-        linguistic_state=LinguisticRequestState(
-            prepared_plan=(run,), prepared_analysis=[analysis]
-        ),
+        linguistic_state=LinguisticRequestState(prepared_plan=(run,), prepared_analysis=[analysis]),
     )
 
     segments = PhrasplitSentenceSegmenter().split(
         doc,
-        PipelineConfig(generation=GenerationConfig(lang="en-us", pause_mode="auto", pause_parenthetical=0.0)),
+        PipelineConfig(
+            generation=GenerationConfig(lang="en-us", pause_mode="auto", pause_parenthetical=0.0)
+        ),
         Trace(),
     )
 
@@ -348,7 +352,9 @@ def test_parenthetical_pause_propagates_through_g2p_boundaries():
     ]
     sliced = [
         slice_boundaries(boundaries, segment.char_start, segment.char_end, doc_end=len(text))
-        for segment, boundaries in zip(segments, [doc.boundary_events] * len(segments), strict=False)
+        for segment, boundaries in zip(
+            segments, [doc.boundary_events] * len(segments), strict=False
+        )
     ]
     adapter = KokoroG2PAdapter()
     assert adapter._resolve_pauses(sliced[1], generation) == (pytest.approx(0.12), 0.0)

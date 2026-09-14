@@ -100,7 +100,6 @@ def test_automatic_language_selection_keeps_martin_and_excludes_mateusz() -> Non
     assert profile_for_language("pl") is None
 
 
-
 def test_oddadmix_profile_is_explicitly_selectable() -> None:
     profile = get_model_profile("en-oddadmix-7m-distill", "github")
 
@@ -122,10 +121,10 @@ def test_oddadmix_profile_is_explicitly_selectable() -> None:
     assert resolved.voice == "af_msa"
 
 
-
 def test_oddadmix_does_not_change_automatic_english_or_voice_selection() -> None:
     assert profile_for_language("en") is None
     assert profile_for_voice("af_msa") is None
+
 
 def test_mateusz_reports_missing_runtime_distribution() -> None:
     with pytest.raises(ValueError, match="present but has no runtime-ready distribution"):

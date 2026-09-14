@@ -7,17 +7,18 @@ versioning:
 entry_id: entry-0003
 release_version: 0.9.7
 kind: added
-summary: Added configurable short automatic pauses around Phrasplit-detected parenthetical
+summary:
+  Added configurable short automatic pauses around Phrasplit-detected parenthetical
   asides
 status: accepted
 audience: null
 scopes: []
 source_refs:
-- tl:task-0082
+  - tl:task-0082
 paths:
-- pykokoro/generation_config.py
-- pykokoro/stages/segmentation/phrasplit.py
-- examples/english_parenthetical_pause.py
+  - pykokoro/generation_config.py
+  - pykokoro/stages/segmentation/phrasplit.py
+  - examples/english_parenthetical_pause.py
 issues: []
 prs: []
 sources: []

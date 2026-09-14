@@ -86,7 +86,7 @@ def test_ssmd_dependency_targets_current_contract() -> None:
         "dependencies"
     ]
     assert "ssmd>=0.8.7,<0.9" in dependencies
-    assert "spokenform>=0.4.2,<0.5" in dependencies
+    assert "spokenform>=0.4.3,<0.5" in dependencies
 
 
 def test_audiosig_is_the_only_declared_dsp_backend() -> None:

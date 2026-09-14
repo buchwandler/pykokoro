@@ -60,6 +60,7 @@ def test_chinese_pipeline_preserves_v11_phonemes_and_tokens():
     assert any(char in "ㄋㄧㄏㄠ" for char in result.phoneme_segments[0].phonemes)
     assert result.phoneme_segments[0].tokens
 
+
 @pytest.mark.parametrize("ssmd_text, plain_text", CASES)
 def test_ssmd_and_plain_phonemes_match(ssmd_text, plain_text):
     cfg = PipelineConfig(generation=GenerationConfig(lang="en-us"))

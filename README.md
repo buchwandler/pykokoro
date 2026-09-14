@@ -653,13 +653,10 @@ audio = res.audio
 For example,
 `It had picked up the sound of a explosion, direction suggested it was behind.` is
 refined at the detected comma so the preceding segment receives one deterministic
-`pause_clause`.
-For example, `They changed out their clothes (stained with blood).` receives a short
-`pause_parenthetical` before the aside in auto mode. Set `pause_parenthetical=0.0` to
-disable only these inferred parenthetical pauses. The setting is independent from
-`pause_clause`, `pause_sentence`, and `pause_paragraph`.
-
-
+`pause_clause`. For example, `They changed out their clothes (stained with blood).`
+receives a short `pause_parenthetical` before the aside in auto mode. Set
+`pause_parenthetical=0.0` to disable only these inferred parenthetical pauses. The
+setting is independent from `pause_clause`, `pause_sentence`, and `pause_paragraph`.
 
 **Pause Variance Options:**
 

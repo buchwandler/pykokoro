@@ -1,0 +1,271 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: v0.9.8
+git_base_ref: v0.9.7
+git_base_sha: c4c7fd4da5a1adaa2374de63c5c09a905622329b
+git_head_ref: HEAD
+git_head_sha: 2306bd1c165214d70ef4a73aa9a88a846bb1c5c8
+git_range: c4c7fd4da5a1adaa2374de63c5c09a905622329b..2306bd1c165214d70ef4a73aa9a88a846bb1c5c8
+commit_count: 8
+rows:
+  - sha: 64689780b2c6a2f3d8794b150fb5d694d876bfb0
+    source_ref: git:64689780b2c6a2f3d8794b150fb5d694d876bfb0
+    short_sha: "6468978"
+    changed_paths:
+      - pykokoro/model_profiles.py
+      - tests/test_release_profiles.py
+    stats:
+      files_changed: 0
+      insertions: 7
+      deletions: 1
+    inspected: true
+    inspected_paths:
+      - pykokoro/model_profiles.py
+      - tests/test_release_profiles.py
+    observed_behavior:
+      The Vietnamese ContextBox runtime profile now selects the published diem_trinh
+      voice by default, with a regression test covering the profile metadata.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "fix: vi-contextbox voice"
+    target_entry_id: entry-0001
+    notes:
+      Reviewed source and regression test; user-facing profile selection correction.
+  - sha: ff47c9fd86ae20c380a6fd58c07e9f4346256c8e
+    source_ref: git:ff47c9fd86ae20c380a6fd58c07e9f4346256c8e
+    short_sha: ff47c9f
+    changed_paths:
+      - examples/all_voices.py
+      - tests/test_all_voices_example.py
+    stats:
+      files_changed: 0
+      insertions: 41
+      deletions: 17
+    inspected: true
+    inspected_paths:
+      - examples/all_voices.py
+      - tests/test_all_voices_example.py
+    observed_behavior:
+      The all-voices showcase now supplies language-based fallback metadata when a voice
+      lacks detailed registry metadata and generates a generic language announcement for
+      unknown gender.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "fix: all_voices"
+    target_entry_id: entry-0002
+    notes: Reviewed showcase implementation and regression coverage.
+  - sha: 9bd6f0ebff7f8835435d68c200f4ff448219c94e
+    source_ref: git:9bd6f0ebff7f8835435d68c200f4ff448219c94e
+    short_sha: 9bd6f0e
+    changed_paths:
+      - examples/all_voices.py
+      - tests/test_all_voices_example.py
+    stats:
+      files_changed: 0
+      insertions: 4
+      deletions: 3
+    inspected: true
+    inspected_paths:
+      - examples/all_voices.py
+      - tests/test_all_voices_example.py
+    observed_behavior:
+      The follow-up only normalizes blank-line formatting in the all-voices example and
+      its tests; no runtime behavior changes.
+    public_impact: internal
+    decision: internal
+    stale: false
+    evidence_subject: "chore: pre-commit"
+    target_entry_id: entry-0003
+    notes:
+      Formatting-only maintenance; retained for complete commit coverage and excluded
+      from public notes.
+  - sha: 8e2eac0bd43cf5c3a5678fbf2084ec537e7f750f
+    source_ref: git:8e2eac0bd43cf5c3a5678fbf2084ec537e7f750f
+    short_sha: 8e2eac0
+    changed_paths:
+      - pykokoro/frontend_contracts.py
+      - pykokoro/model_profiles.py
+      - tests/test_frontend_contracts.py
+      - tests/test_model_profile_resolution.py
+      - tests/test_release_profiles.py
+    stats:
+      files_changed: 0
+      insertions: 63
+      deletions: 1
+    inspected: true
+    inspected_paths:
+      - pykokoro/frontend_contracts.py
+      - pykokoro/model_profiles.py
+      - tests/test_frontend_contracts.py
+      - tests/test_model_profile_resolution.py
+      - tests/test_release_profiles.py
+    observed_behavior:
+      The Vietnamese Ngoc Huyen model variant is now represented by an explicit
+      experimental frontend contract and runtime profile with its default voice and
+      resolution behavior covered by tests.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "fix: vi-ngoc-huyen"
+    target_entry_id: entry-0004
+    notes: Reviewed profile, frontend contract, resolver, and regression tests.
+  - sha: 9b6237dd036768fb7df4e2128113739edd91499a
+    source_ref: git:9b6237dd036768fb7df4e2128113739edd91499a
+    short_sha: 9b6237d
+    changed_paths:
+      - README.md
+      - pykokoro/model_profiles.py
+      - tests/test_model_profile_resolution.py
+    stats:
+      files_changed: 0
+      insertions: 16
+      deletions: 14
+    inspected: true
+    inspected_paths:
+      - README.md
+      - pykokoro/model_profiles.py
+      - tests/test_model_profile_resolution.py
+    observed_behavior:
+      The Vietnamese An Phunl profile is restored to runtime-ready status with the
+      published diem_trinh default voice, and the README model-status table reflects
+      that availability.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "chore: fix models"
+    target_entry_id: entry-0005
+    notes:
+      Reviewed runtime profile change, documentation update, and resolver regression
+      test.
+  - sha: 4df2043695e889d56fd4b0ddeb21f15f7c9f65f8
+    source_ref: git:4df2043695e889d56fd4b0ddeb21f15f7c9f65f8
+    short_sha: 4df2043
+    changed_paths:
+      - .github/workflows/tests.yml
+      - .ledger/releaseledger/data/ledgers/main/events/events.jsonl
+      - .ledger/releaseledger/data/ledgers/main/releases/0.9.7/entries/entry-0003.md
+      - .ledger/releaseledger/data/ledgers/main/releases/0.9.7/release.md
+      - README.md
+      - docs/basic_usage.md
+      - docs/changelog.md
+      - docs/installation.md
+      - docs/pipeline_stages.md
+      - examples/english_parenthetical_pause.py
+      - examples/run_all.py
+      - pykokoro/generation_config.py
+      - pykokoro/stages/segmentation/phrasplit.py
+      - pyproject.toml
+      - requirements-test.txt
+      - tests/test_example_runner.py
+      - tests/test_g2p_pause_propagation.py
+      - tests/test_generation_config.py
+      - tests/test_packaging_metadata.py
+      - tests/test_parenthetical_pauses.py
+    stats:
+      files_changed: 0
+      insertions: 704
+      deletions: 29
+    inspected: true
+    inspected_paths:
+      - .github/workflows/tests.yml
+      - .ledger/releaseledger/data/ledgers/main/events/events.jsonl
+      - .ledger/releaseledger/data/ledgers/main/releases/0.9.7/entries/entry-0003.md
+      - .ledger/releaseledger/data/ledgers/main/releases/0.9.7/release.md
+      - README.md
+      - docs/basic_usage.md
+      - docs/changelog.md
+      - docs/installation.md
+      - docs/pipeline_stages.md
+      - examples/english_parenthetical_pause.py
+      - examples/run_all.py
+      - pykokoro/generation_config.py
+      - pykokoro/stages/segmentation/phrasplit.py
+      - pyproject.toml
+      - requirements-test.txt
+      - tests/test_example_runner.py
+      - tests/test_g2p_pause_propagation.py
+      - tests/test_generation_config.py
+      - tests/test_packaging_metadata.py
+      - tests/test_parenthetical_pauses.py
+    observed_behavior:
+      Automatic segmentation can add configurable pauses at Phrasplit-detected opening
+      and closing parenthetical boundaries, propagates those pauses through G2P, and
+      documents the behavior with an example and regression tests. The commit also
+      updates the companion dependency floors and release records.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: pause on parenthetical boundaries"
+    target_entry_id: entry-0006
+    notes:
+      Reviewed the segmentation implementation, pause configuration, propagation tests,
+      documentation/example, dependency metadata, and release-record maintenance. The
+      release-record and prior changelog edits are not treated as separate public
+      behavior.
+  - sha: 50802ee9a70cd3eea7f2609858255dd39d3adf92
+    source_ref: git:50802ee9a70cd3eea7f2609858255dd39d3adf92
+    short_sha: 50802ee
+    changed_paths:
+      - pykokoro/audio_generator.py
+      - pykokoro/tokenizer.py
+      - tests/test_all_voices_example.py
+      - tests/test_audio_input_contract.py
+      - tests/test_audio_splitting.py
+      - tests/test_pipeline_phoneme_consistency.py
+      - tests/test_tokenizer.py
+    stats:
+      files_changed: 0
+      insertions: 241
+      deletions: 32
+    inspected: true
+    inspected_paths:
+      - pykokoro/audio_generator.py
+      - pykokoro/tokenizer.py
+      - tests/test_all_voices_example.py
+      - tests/test_audio_input_contract.py
+      - tests/test_audio_splitting.py
+      - tests/test_pipeline_phoneme_consistency.py
+      - tests/test_tokenizer.py
+    observed_behavior:
+      Chinese synthesis now preserves the explicit v1.1 vocabulary through phoneme
+      filtering, tokenization, detokenization, and ONNX input construction, including
+      prepared segment tokens and fallback paths.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "fix: chinese voices"
+    target_entry_id: entry-0007
+    notes:
+      Reviewed tokenizer and audio-generator changes with Chinese pipeline and
+      input-contract regression tests.
+  - sha: 2306bd1c165214d70ef4a73aa9a88a846bb1c5c8
+    source_ref: git:2306bd1c165214d70ef4a73aa9a88a846bb1c5c8
+    short_sha: 2306bd1
+    changed_paths:
+      - pykokoro/model_profiles.py
+      - tests/test_model_profile_resolution.py
+    stats:
+      files_changed: 0
+      insertions: 61
+      deletions: 1
+    inspected: true
+    inspected_paths:
+      - pykokoro/model_profiles.py
+      - tests/test_model_profile_resolution.py
+    observed_behavior:
+      An explicit runtime profile for the English 7M distill model is available with its
+      model artifact, voice, and tokenizer metadata, while automatic English language
+      and voice selection remain unchanged.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: add 7M english model"
+    target_entry_id: entry-0008
+    notes:
+      Reviewed profile metadata, explicit resolver behavior, and non-selection
+      regression coverage.

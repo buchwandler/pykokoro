@@ -78,7 +78,7 @@ pip install onnxruntime-gpu==1.19.2
 ## Dependencies and optional spaCy
 
 PyKokoro v0.9 requires `kokorog2p[espeak,en]>=0.9.4,<1.0`, `lexphon>=0.2.3,<0.3`,
-`phrasplit>=0.3.9,<0.4`, `ssmd>=0.8.7,<0.9`, and `spokenform>=0.4.2,<0.5`. The native
+`phrasplit>=0.3.9,<0.4`, `ssmd>=0.8.7,<0.9`, and `spokenform>=0.4.3,<0.5`. The native
 KokoroG2P frontend uses named lexicons: `lexicons=None` selects KokoroG2P language
 defaults, while `lexicons=()` disables static Lexphon layers. New code should use named
 lexicons rather than the legacy `use_dictionary`, `load_gold`, and `load_silver`

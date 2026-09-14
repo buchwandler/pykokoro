@@ -399,8 +399,8 @@ def profile_for_language(lang: str) -> RuntimeProfile | None:
     normalized = normalize_language_code(lang)
     for profile in MODEL_PROFILES.values():
         if (
-            profile.auto_select_for_language and
-            normalized in profile.language_codes
+            profile.auto_select_for_language
+            and normalized in profile.language_codes
             and profile.runtime_available
             and profile.support_status == "ready"
         ):
