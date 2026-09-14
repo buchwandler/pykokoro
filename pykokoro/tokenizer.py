@@ -66,6 +66,16 @@ validate_for_kokoro = _kokorog2p.validate_for_kokoro
 logger = logging.getLogger(__name__)
 
 
+GERMAN_DEFAULT_LEXICONS = ("espeak",)
+
+
+def _default_lexicons_for_language(language: str) -> tuple[str, ...] | None:
+    """Return PyKokoro's implicit static lexicon selection for a language."""
+    normalized = language.lower().replace("_", "-")
+    if normalized in {"de", "de-de", "de-at", "de-ch", "deu", "german"}:
+        return GERMAN_DEFAULT_LEXICONS
+    return None
+
 def _normalize_lexicons(
     value: str | Sequence[str] | None,
 ) -> tuple[str, ...] | None:
@@ -297,6 +307,9 @@ class Tokenizer:
 
             # All languages are now fully supported by kokorog2p
             # kokorog2p uses dictionary + espeak fallback for all languages
+            selected_lexicons = _effective_lexicons(self.config)
+            if selected_lexicons is None and self.config.backend == "kokorog2p":
+                selected_lexicons = _default_lexicons_for_language(kokorog2p_lang)
             kwargs = {
                 "language": kokorog2p_lang,
                 **_legacy_fallback_kwargs(self.config.fallback),
@@ -304,7 +317,7 @@ class Tokenizer:
                 "spacy_model": self.config.spacy_model,
                 "spacy_model_size": self.config.spacy_model_size,
                 "backend": self.config.backend,
-                "lexicons": _effective_lexicons(self.config),
+                "lexicons": selected_lexicons,
                 "version": self._kokorog2p_model,
                 "phoneme_quotes": "curly",
             }

@@ -87,6 +87,9 @@ python examples/german_tts_samples.py --model de-crane --lexicon olaph
 python examples/german_tts_samples.py --model de-thorsten --lexicon crane
 ```
 
+Omitting `--lexicon` selects the static `de-de:espeak` lexicon. Pass `--lexicon` explicitly to compare
+`gold`, `crane`, `espeak`, or `olaph` across the German models.
+
 Outputs are written below `example-artifacts/german_tts_samples/<model>/<lexicon>/`,
 with one file for each sentence. The four named lexicons may require Lexphon data
 provisioning on first use; see [German lexicon data](#german-lexicon-data) below for
@@ -94,10 +97,10 @@ offline provisioning guidance.
 
 ## German lexicon data
 
-The German examples use named KokoroG2P lexicons. PyKokoro defaults to automatic Lexphon
-provisioning: on a missing selected asset, it installs the asset and retries G2P
-construction once. This first-use step may access the catalog and network. Later runs
-use the local store.
+The German examples use named KokoroG2P lexicons. PyKokoro defaults to the static `de-de:espeak`
+lexicon for implicit German selections and provides automatic Lexphon provisioning: on a missing
+selected asset, it installs the asset and retries G2P construction once. This first-use step may
+access the catalog and network. Later runs use the local store.
 
 For offline deployments, pre-provision the required assets and select strict
 installed-only behavior in `TokenizerConfig`:

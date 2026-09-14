@@ -43,7 +43,7 @@ SAMPLES = (
 )
 
 DEFAULT_MODEL = "v1.2-de-martin"
-DEFAULT_LEXICON = "gold"
+DEFAULT_LEXICON = "espeak"
 LEXICON_CHOICES = ("gold", "crane", "espeak", "olaph")
 MODEL_LABELS = {
     "v1.2-de-martin": "Martin v1.2",

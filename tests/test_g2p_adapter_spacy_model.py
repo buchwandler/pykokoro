@@ -202,6 +202,26 @@ def test_kokorog2p_adapter_forwards_named_lexicons(monkeypatch):
     assert captured["use_goruut_fallback"] is True
 
 
+def test_kokorog2p_adapter_uses_german_implicit_espeak_lexicon(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeG2PModule:
+        @staticmethod
+        def get_g2p(**kwargs):
+            captured.update(kwargs)
+            return object()
+
+    adapter = KokoroG2PAdapter()
+    monkeypatch.setattr(adapter, "_load", lambda: FakeG2PModule())
+    cfg = PipelineConfig(
+        generation=GenerationConfig(lang="de"),
+        tokenizer_config=TokenizerConfig(),
+    )
+
+    adapter._get_g2p_instance("de", cfg)
+
+    assert captured["lexicons"] == ("espeak",)
+
 def test_g2p_instance_cache_distinguishes_named_lexicons(monkeypatch):
     created: list[dict[str, object]] = []
 

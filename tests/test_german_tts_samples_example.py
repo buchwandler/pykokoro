@@ -71,7 +71,7 @@ def test_default_cli_selection() -> None:
     args = example.build_parser().parse_args([])
 
     assert args.model == "v1.2-de-martin"
-    assert args.lexicon == "gold"
+    assert args.lexicon == "espeak"
 
 
 @pytest.mark.parametrize(

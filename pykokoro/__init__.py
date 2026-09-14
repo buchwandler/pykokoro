@@ -48,6 +48,14 @@ def __getattr__(name: str) -> Any:
             "ModelDiscoveryResult": ModelDiscoveryResult,
             "VoiceCapabilities": VoiceCapabilities,
         }[name]
+    if name in {"LexiconCapabilities", "LexiconDiscoveryResult", "discover_lexicons"}:
+        from .lexicon_discovery import LexiconCapabilities, LexiconDiscoveryResult, discover_lexicons
+
+        return {
+            "LexiconCapabilities": LexiconCapabilities,
+            "LexiconDiscoveryResult": LexiconDiscoveryResult,
+            "discover_lexicons": discover_lexicons,
+        }[name]
     if name in {"PipelineConfig", "resolve_pipeline_config"}:
         from .pipeline_config import PipelineConfig, resolve_pipeline_config
 
@@ -118,6 +126,9 @@ __all__ = [
     "ModelCapabilities",
     "ModelDiscoveryResult",
     "VoiceCapabilities",
+    "LexiconCapabilities",
+    "LexiconDiscoveryResult",
+    "discover_lexicons",
     "GenerationConfig",
     "LanguageDetectionConfig",
     "ProsodyConfig",

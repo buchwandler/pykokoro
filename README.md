@@ -1537,7 +1537,7 @@ The native KokoroG2P backend also supports explicit named lexicon selection thro
 ```python
 from pykokoro.tokenizer import TokenizerConfig
 
-# Compatibility behavior, with language defaults selected by KokoroG2P.
+# Compatibility behavior. PyKokoro selects de-de:espeak implicitly for German; other languages use their KokoroG2P defaults.
 default_config = TokenizerConfig()
 # German Gold lexicon only.
 gold_config = TokenizerConfig(lexicons="gold")
@@ -1546,8 +1546,8 @@ gold_config = TokenizerConfig(lexicons="gold")
 crane_config = TokenizerConfig(lexicons="crane")
 ```
 
-`lexicons=None` delegates to KokoroG2P's language defaults. An explicit selection takes
-precedence over legacy dictionary flags. Ordered selections such as
+`lexicons=None` uses PyKokoro's language defaults. For German, the implicit selection is the static
+de-de:espeak lexicon. An explicit selection takes precedence over legacy dictionary flags.
 `lexicons=("gold", "crane")` are supported for layered lookup, where the first matching
 layer wins. That layered lookup is not a Gold-versus-Crane A/B comparison. For an A/B
 comparison, render separately with `("gold",)` and `("crane",)` and combine the results

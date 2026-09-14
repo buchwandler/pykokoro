@@ -60,7 +60,6 @@ FRONTEND_FIXTURES: dict[ModelVariant, FrontendFixture] = {
 }
 
 FRONTEND_NAMED_LEXICONS: dict[str, tuple[str, ...]] = {
-    "kokorog2p-de-thorsten-v1": ("gold", "crane"),
     "tts-eu-pt-v1": ("lexhint",),
     "nabra-arabic-v1": (),
 }
