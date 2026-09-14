@@ -39,6 +39,8 @@ class RuntimeProfile:
     redistribution_allowed: bool = True
     support_status: str = "ready"
     g2p_backend: G2PBackend | None = None
+    auto_select_for_language: bool = True
+    auto_select_for_voice: bool = True
     named_lexicons: tuple[str, ...] | None = None
 
     @property
@@ -294,6 +296,31 @@ MODEL_PROFILES.update(
             support_status="ready",
             g2p_backend="kokorog2p",
         ),
+        ("github", "en-oddadmix-7m-distill"): RuntimeProfile(
+            source="github",
+            variant="en-oddadmix-7m-distill",
+            language_codes=("en", "en-us"),
+            default_voice="af_msa",
+            vocabulary_source="downloaded-config",
+            tokenizer_vocab_version="1.0",
+            frontend="pykokoro-native-v1",
+            frontend_experimental=False,
+            onnx_inputs={
+                "tokens": "int64",
+                "style": "float32",
+                "speed": "float32",
+            },
+            sample_rate=24_000,
+            max_tokens=510,
+            quality_files={"fp32": "kokoro-english-oddadmix-7m-distill-v1.onnx"},
+            voice_names=("af_msa",),
+            layout="single-onnx-v1",
+            runtime_available=True,
+            redistribution_allowed=True,
+            support_status="ready",
+            auto_select_for_language=False,
+            auto_select_for_voice=False,
+        ),
     }
 )
 
@@ -372,6 +399,7 @@ def profile_for_language(lang: str) -> RuntimeProfile | None:
     normalized = normalize_language_code(lang)
     for profile in MODEL_PROFILES.values():
         if (
+            profile.auto_select_for_language and
             normalized in profile.language_codes
             and profile.runtime_available
             and profile.support_status == "ready"
@@ -387,7 +415,11 @@ def profile_for_voice(voice: str) -> RuntimeProfile | None:
     variant = DEFAULT_PROFILE_BY_VOICE.get(voice)
     if variant is not None:
         return get_model_profile(variant, "github")
-    matches = [profile for profile in MODEL_PROFILES.values() if voice in profile.voice_names]
+    matches = [
+        profile
+        for profile in MODEL_PROFILES.values()
+        if profile.auto_select_for_voice and voice in profile.voice_names
+    ]
     return matches[0] if len(matches) == 1 else None
 
 

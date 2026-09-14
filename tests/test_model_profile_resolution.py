@@ -9,6 +9,7 @@ from pykokoro.model_profiles import (
     get_model_profile,
     get_registry_model_profile,
     profile_for_language,
+    profile_for_voice,
 )
 from pykokoro.model_registry import ModelRegistry
 from pykokoro.pipeline import KokoroPipeline
@@ -98,6 +99,33 @@ def test_automatic_language_selection_keeps_martin_and_excludes_mateusz() -> Non
     assert profile_for_language("de").variant == "v1.2-de-martin"
     assert profile_for_language("pl") is None
 
+
+
+def test_oddadmix_profile_is_explicitly_selectable() -> None:
+    profile = get_model_profile("en-oddadmix-7m-distill", "github")
+
+    assert profile.default_voice == "af_msa"
+    assert profile.frontend == "pykokoro-native-v1"
+    assert profile.vocabulary_source == "downloaded-config"
+    assert profile.sample_rate == 24_000
+    assert profile.runtime_available is True
+    assert profile.voice_names == ("af_msa",)
+
+    resolved = resolve_model_defaults(
+        PipelineConfig(
+            model_source="github",
+            model_variant="en-oddadmix-7m-distill",
+            generation=GenerationConfig(lang="en-us"),
+        )
+    )
+    assert resolved.model_variant == "en-oddadmix-7m-distill"
+    assert resolved.voice == "af_msa"
+
+
+
+def test_oddadmix_does_not_change_automatic_english_or_voice_selection() -> None:
+    assert profile_for_language("en") is None
+    assert profile_for_voice("af_msa") is None
 
 def test_mateusz_reports_missing_runtime_distribution() -> None:
     with pytest.raises(ValueError, match="present but has no runtime-ready distribution"):
