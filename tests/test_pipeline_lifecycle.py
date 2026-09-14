@@ -4,6 +4,7 @@ from typing import Any
 import numpy as np
 import pytest
 
+from pykokoro.asset_progress import ConsoleAssetProgress
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.onnx_backend import Kokoro
 from pykokoro.pipeline import KokoroPipeline
@@ -234,6 +235,21 @@ def test_kokoro_close_is_safe_after_partial_initialization():
     assert kokoro._tokenizer is None
     assert kokoro._voice_manager is None
     assert kokoro._session is None
+
+
+def test_pipeline_config_copy_preserves_stateful_asset_progress_callback() -> None:
+    from pykokoro.pipeline import _copy_config_for_preparation
+
+    progress = ConsoleAssetProgress()
+    config = PipelineConfig(
+        voice="af",
+        generation=GenerationConfig(lang="en-us"),
+        asset_progress=progress,
+    )
+
+    copied = _copy_config_for_preparation(config)
+
+    assert copied.asset_progress is progress
 
 
 def test_pipeline_propagates_asset_progress_to_backend(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -450,6 +450,13 @@ def _merge_config(
     return cfg
 
 
+def _copy_config_for_preparation(cfg: PipelineConfig) -> PipelineConfig:
+    """Copy preparation settings without copying runtime progress callbacks."""
+    progress = cfg.asset_progress
+    copied = deepcopy(replace(cfg, asset_progress=None))
+    return replace(copied, asset_progress=progress)
+
+
 PipelineConfigTransform = Callable[[PipelineConfig], PipelineConfig]
 
 
@@ -911,7 +918,7 @@ class KokoroPipeline:
         """Prepare a document globally for sequential unit rendering."""
         if unit not in ("paragraph", "sentence"):
             raise ValueError(f"Unsupported audio unit kind: {unit!r}")
-        cfg = deepcopy(self._resolve_run_config(overrides))
+        cfg = _copy_config_for_preparation(self._resolve_run_config(overrides))
         prepared = self._prepare_document(text, cfg, unit)
         result = PreparedAudioUnits(self, prepared)
         self._prepared_objects.append(result)
@@ -927,7 +934,7 @@ class KokoroPipeline:
         """Prepare lexicon-independent frontend state for repeated rendering."""
         if unit not in ("paragraph", "sentence"):
             raise ValueError(f"Unsupported audio unit kind: {unit!r}")
-        cfg = deepcopy(self._resolve_run_config(overrides))
+        cfg = _copy_config_for_preparation(self._resolve_run_config(overrides))
         if cfg.tokenizer_config is not None:
             cfg = replace(
                 cfg,

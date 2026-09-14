@@ -7,6 +7,8 @@ scripts below use the current pipeline-first API.
 
 - `german.py` — German Martin v1.2; demonstrates automatic German model selection and
   requires ONNX Runtime/model assets.
+- `english_7m.py` — English TTS with the explicitly selected `en-oddadmix-7m-distill` 7M
+  model and `af_msa` voice.
 - `german2.py` — German Kerstin/Crane; explicitly selects `de-crane`, opts into its
   experimental readiness status, and uses the shared native German G2P path.
 - `german3.py` — German Thorsten; explicitly selects the ready `de-thorsten` model.
@@ -173,12 +175,11 @@ python examples/run_all.py --include-optional
 
 Generated WAV files and diagnostic artifacts are written below `example-artifacts/`.
 When using the runner, each example gets its own subdirectory, making it easy to inspect
-or compare its files without overwriting another example's output. The directory is
-intentionally ignored by Git and contains only a tracked `.gitkeep` marker.
+or compare its files. The directory is intentionally ignored by Git and contains only a
+tracked `.gitkeep` marker.
 
 ## Archived examples
 
 The `legacy/` directory contains historical scripts that targeted the removed `Kokoro()`
-/ `.create()` API. They are retained for migration reference only and are not part of
-the maintained example surface. New examples must use `KokoroPipeline`,
-`PipelineConfig`, and `GenerationConfig`.
+/ `.create()` API. They are retained for migration reference only. New examples must use
+`KokoroPipeline`, `PipelineConfig`, and `GenerationConfig`.
