@@ -7,7 +7,7 @@ import pytest
 from pykokoro.asset_progress import ConsoleAssetProgress
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.onnx_backend import Kokoro
-from pykokoro.pipeline import KokoroPipeline
+from pykokoro.pipeline import KokoroPipeline, _copy_config_for_preparation
 from pykokoro.pipeline_config import PipelineConfig
 from pykokoro.stages.audio_generation.onnx import OnnxAudioGenerationAdapter
 from pykokoro.stages.audio_postprocessing.onnx import OnnxAudioPostprocessingAdapter
@@ -238,7 +238,6 @@ def test_kokoro_close_is_safe_after_partial_initialization():
 
 
 def test_pipeline_config_copy_preserves_stateful_asset_progress_callback() -> None:
-    from pykokoro.pipeline import _copy_config_for_preparation
 
     progress = ConsoleAssetProgress()
     config = PipelineConfig(
