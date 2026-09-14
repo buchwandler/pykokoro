@@ -49,6 +49,7 @@ class _CachedContextToken:
     char_start: int | None
     char_end: int | None
     model_token_count: int | None
+    model_span_token_count: int | None
 
 
 @dataclass(frozen=True)
@@ -59,7 +60,7 @@ class _CachedContextResult:
 
 
 class KokoroG2PAdapter(G2PAdapter):
-    _cache_schema = 10
+    _cache_schema = 11
 
     def __init__(self) -> None:
         self._g2p: ModuleType | None = None
@@ -490,6 +491,7 @@ class KokoroG2PAdapter(G2PAdapter):
                     char_start=item.get("char_start"),
                     char_end=item.get("char_end"),
                     model_token_count=item.get("model_token_count"),
+                    model_span_token_count=item.get("model_span_token_count"),
                     pronunciation_source=item.get("pronunciation_source"),
                     pronunciation_provider=item.get("pronunciation_provider"),
                     pronunciation_lexicon_id=item.get("pronunciation_lexicon_id"),
@@ -620,6 +622,7 @@ class KokoroG2PAdapter(G2PAdapter):
                 char_start = segment.char_start + local_start
                 char_end = char_start + len(text)
                 cursor = max(cursor, local_start + len(text))
+            raw_model_span_count = _context_token_int(raw_token, "model_span_token_count")
             try:
                 model_token_count = len(g2p.phonemes_to_ids(phonemes, model=model_version))
             except (AttributeError, TypeError, ValueError, RuntimeError):
@@ -632,6 +635,7 @@ class KokoroG2PAdapter(G2PAdapter):
                     char_start=char_start,
                     char_end=char_end,
                     model_token_count=model_token_count,
+                    model_span_token_count=raw_model_span_count,
                     pronunciation_source=pronunciation_source,
                     pronunciation_provider=pronunciation_provider,
                     pronunciation_lexicon_id=pronunciation_lexicon_id,
@@ -815,6 +819,37 @@ class KokoroG2PAdapter(G2PAdapter):
         )
 
     @staticmethod
+    def _derive_context_model_spans(
+        tokens: list[_CachedContextToken],
+        ids: tuple[int, ...],
+        g2p_module: Any | None,
+        model_version: str | None,
+    ) -> list[int | None]:
+        """Reconcile alignment items against the exact phrase tokenizer output."""
+        explicit = [token.model_span_token_count for token in tokens]
+        if all(isinstance(span, int) and not isinstance(span, bool) and span > 0 for span in explicit) and sum(cast(list[int], explicit)) == len(ids):
+            return cast(list[int | None], explicit)
+        tokenizer = getattr(g2p_module, "phonemes_to_ids", None)
+        if not callable(tokenizer) or not tokens:
+            return [None for _ in tokens]
+        prefix = ""
+        previous_count = 0
+        spans: list[int | None] = []
+        try:
+            for token in tokens:
+                prefix += token.phonemes + token.whitespace
+                current_count = len(tokenizer(prefix, model=model_version))
+                span = current_count - previous_count
+                if span <= 0:
+                    return [None for _ in tokens]
+                spans.append(span)
+                previous_count = current_count
+        except (AttributeError, TypeError, ValueError, RuntimeError):
+            return [None for _ in tokens]
+        if previous_count != len(ids):
+            return [None for _ in tokens]
+        return spans
+    @staticmethod
     def _normalize_context_result(
         result: Any,
         *,
@@ -834,6 +869,9 @@ class KokoroG2PAdapter(G2PAdapter):
             model_token_count = _context_token_int(token, "model_token_count")
             if model_token_count is not None and model_token_count <= 0:
                 model_token_count = None
+            explicit_span = _context_token_int(token, "model_span_token_count")
+            if explicit_span is not None and explicit_span <= 0:
+                explicit_span = None
             if model_token_count is None and token_phonemes and g2p_module is not None:
                 try:
                     model_token_count = len(
@@ -849,14 +887,22 @@ class KokoroG2PAdapter(G2PAdapter):
                     char_start=_context_token_int(token, "char_start"),
                     char_end=_context_token_int(token, "char_end"),
                     model_token_count=model_token_count,
+                    model_span_token_count=explicit_span,
                 )
             )
+        ids_tuple = tuple(int(token_id) for token_id in (ids or ()))
+        spans = KokoroG2PAdapter._derive_context_model_spans(
+            normalized_tokens, ids_tuple, g2p_module, model_version
+        )
+        normalized_tokens = [
+            replace(token, model_span_token_count=span)
+            for token, span in zip(normalized_tokens, spans, strict=True)
+        ]
         return _CachedContextResult(
             phonemes=str(phonemes),
-            ids=tuple(int(token_id) for token_id in (ids or ())),
+            ids=ids_tuple,
             tokens=tuple(normalized_tokens),
         )
-
     def _record_selection(
         self, doc: DocumentResult, lang: str, cfg: PipelineConfig, g2p_instance: G2PBase
     ) -> None:

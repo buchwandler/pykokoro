@@ -1151,7 +1151,9 @@ class AudioGenerator:
         short_sentence_metadata["pred_duration_count"] = (
             0 if pred_dur is None else int(np.asarray(pred_dur).reshape(-1).size)
         )
-        _record_short_sentence_timing_alignment(short_sentence_metadata, timing_tokens)
+        _record_short_sentence_timing_alignment(
+            short_sentence_metadata, timing_tokens, pred_duration_count=short_sentence_metadata["pred_duration_count"]
+        )
         if pred_dur is None:
             short_sentence_metadata.setdefault("timing_failure_reason", "missing-duration-output")
             short_sentence_metadata.setdefault("failure_stage", "timing-token-build")
@@ -1213,8 +1215,13 @@ class AudioGenerator:
 
         cut_audio = cut_short_sentence_phrase_audio(audio, short_sentence_metadata)
         if cut_audio is not None:
+            _clear_short_sentence_failure(short_sentence_metadata)
             _record_short_sentence_attempt(
-                short_sentence_metadata, attempt=0, kind="initial", succeeded=True
+                short_sentence_metadata,
+                attempt=0,
+                kind="initial",
+                succeeded=True,
+                audio_samples=len(audio),
             )
             _record_short_sentence_cut(short_sentence_metadata, len(audio), trace)
             _log_short_sentence_cut_success(segment, short_sentence_metadata)
@@ -1226,7 +1233,11 @@ class AudioGenerator:
             return cut_audio
         _log_short_sentence_cut_failure(segment, short_sentence_metadata, len(audio))
         _record_short_sentence_attempt(
-            short_sentence_metadata, attempt=0, kind="initial", succeeded=False
+            short_sentence_metadata,
+            attempt=0,
+            kind="initial",
+            succeeded=False,
+            audio_samples=len(audio),
         )
         _record_short_sentence_cut_failure(short_sentence_metadata, trace)
 
@@ -1253,10 +1264,24 @@ class AudioGenerator:
         short_sentence_metadata["cut_strategy"] = "wrap"
         if trace is not None:
             trace.increment_counter("short_sentence_wrap_fallback")
+        history = short_sentence_metadata.get("short_sentence_attempts")
+        failures = [
+            item for item in history if isinstance(item, dict) and item.get("succeeded") is False
+        ] if isinstance(history, list) else []
+        reasons: dict[str, int] = {}
+        for item in failures:
+            reason = item.get("failure_reason")
+            if isinstance(reason, str) and reason:
+                reasons[reason] = reasons.get(reason, 0) + 1
+        dominant_reason = max(reasons, key=reasons.get) if reasons else "unknown"
+        dominant_count = reasons.get(dominant_reason, 0)
         logger.warning(
-            "Short sentence phrase cut for '%s' lacked confident boundaries; "
-            "falling back to wrap mode.",
-            segment.text[:50],
+            "Short sentence phrase extraction failed after %d phrase attempts; "
+            "falling back to wrap mode. Dominant failure: %s (%d/%d).",
+            len(history) if isinstance(history, list) else 1,
+            dominant_reason,
+            dominant_count,
+            len(failures) or 1,
         )
         fallback_tokens = short_sentence_metadata.get("fallback_tokens")
         prepared_fallback_tokens = (
@@ -1352,7 +1377,24 @@ class AudioGenerator:
                 )
             )
             if retry is None or retry.metadata is None:
-                continue
+                failed_retry_metadata = dict(short_sentence_metadata)
+                failed_retry_metadata.update(
+                    {
+                        "phrase_template": template,
+                        "failure_stage": "context-g2p",
+                        "cut_failure_reason": "context-g2p-failed",
+                    }
+                )
+                _record_short_sentence_attempt(
+                    failed_retry_metadata,
+                    attempt=retry_attempts,
+                    kind="retry",
+                    succeeded=False,
+                )
+                history = failed_retry_metadata.get("short_sentence_attempts")
+                if isinstance(history, list):
+                    short_sentence_metadata["short_sentence_attempts"] = history
+                failed_template = template
 
             if trace is None:
                 retry_audio, pred_dur = self._run_onnx(
@@ -1381,7 +1423,11 @@ class AudioGenerator:
                     len(retry_audio),
                     local_target_offsets=True,
                 )
-                _record_short_sentence_timing_alignment(retry.metadata, timing_tokens)
+                _record_short_sentence_timing_alignment(
+                    retry.metadata,
+                    timing_tokens,
+                    pred_duration_count=int(np.asarray(pred_dur).reshape(-1).size),
+                )
                 timestamped = _join_timestamps(timing_tokens, pred_dur, strict=True)
                 populate_short_sentence_boundary_metadata(retry.metadata, timestamped)
             cut_audio = cut_short_sentence_phrase_audio(retry_audio, retry.metadata)
@@ -1392,15 +1438,18 @@ class AudioGenerator:
                     attempt=retry_attempts,
                     kind="retry",
                     succeeded=False,
+                    audio_samples=len(retry_audio),
                 )
                 _record_short_sentence_cut_failure(retry.metadata, trace)
                 failed_template = template
                 continue
+            _clear_short_sentence_failure(retry.metadata)
             _record_short_sentence_attempt(
                 retry.metadata,
                 attempt=retry_attempts,
                 kind="retry",
                 succeeded=True,
+                audio_samples=len(retry_audio),
             )
             _record_short_sentence_cut(retry.metadata, len(retry_audio), trace)
 
@@ -1804,6 +1853,9 @@ def _join_timestamps(
                 complete = False
                 break
             token_count = len(phonemes)
+        if strict and "model_span_token_count" in token and token.get("model_span_token_count") is None:
+            complete = False
+            break
         model_span_count = _model_span_token_count(token)
         if model_span_count is None:
             if strict:
@@ -1843,10 +1895,12 @@ def _record_short_sentence_timing_alignment(
     timestamp_join_complete: bool | None = None,
     target_timestamp_count: int | None = None,
 ) -> None:
+    """Record exact model-position accounting for a phrase timing payload."""
     model_position_count = 0
     complete = True
     target_token_count = 0
-    for raw_token in timing_tokens:
+    first_unresolved: tuple[int, dict[str, object]] | None = None
+    for index, raw_token in enumerate(timing_tokens):
         token = dict(raw_token) if isinstance(raw_token, dict) else {}
         if token.get("is_target"):
             target_token_count += 1
@@ -1855,20 +1909,46 @@ def _record_short_sentence_timing_alignment(
             if token.get("whitespace"):
                 model_position_count += 1
             continue
+        requires_exact_span = isinstance(metadata.get("generated_token_count"), int)
+        if (
+            requires_exact_span
+            and "model_span_token_count" in token
+            and token.get("model_span_token_count") is None
+        ):
+            complete = False
+            if first_unresolved is None:
+                first_unresolved = (index, token)
+            continue
         model_span_count = _model_span_token_count(token)
+        if model_span_count is None and not requires_exact_span:
+            model_span_count = len(phonemes) + (1 if token.get("whitespace") else 0)
         if model_span_count is None:
             complete = False
+            if first_unresolved is None:
+                first_unresolved = (index, token)
             continue
         model_position_count += model_span_count
     generated_token_count = metadata.get("generated_token_count")
     metadata["timing_token_count"] = len(timing_tokens)
     metadata["timing_target_token_count"] = target_token_count
     metadata["timing_model_position_count"] = model_position_count
+    metadata["timing_model_position_delta"] = (
+        model_position_count - generated_token_count
+        if isinstance(generated_token_count, int) and not isinstance(generated_token_count, bool)
+        else None
+    )
     if pred_duration_count is not None:
         metadata["pred_duration_count"] = pred_duration_count
+    if first_unresolved is not None:
+        index, token = first_unresolved
+        metadata["timing_first_unresolved_token_index"] = index
+        metadata["timing_first_unresolved_token_text"] = token.get("text")
+        metadata["timing_first_unresolved_token_phonemes"] = token.get("phonemes")
+        metadata["timing_first_unresolved_token_whitespace"] = token.get("whitespace")
     metadata["timing_alignment_complete"] = (
         complete
         and isinstance(generated_token_count, int)
+        and not isinstance(generated_token_count, bool)
         and model_position_count == generated_token_count
     )
     if timestamp_join_complete is not None:
@@ -1876,10 +1956,10 @@ def _record_short_sentence_timing_alignment(
     if target_timestamp_count is not None:
         metadata["target_timestamp_count"] = target_timestamp_count
     if not metadata["timing_alignment_complete"]:
+        metadata["cutter_reached"] = False
         metadata.setdefault("timing_failure_reason", "timing-model-position-mismatch")
         metadata.setdefault("failure_stage", "timing-alignment")
         metadata.setdefault("cut_failure_reason", "timing-model-position-mismatch")
-
 
 def populate_short_sentence_boundary_metadata(
     metadata: dict[str, object],
@@ -1989,34 +2069,28 @@ def _log_short_sentence_cut_failure(
     metadata: dict[str, object],
     audio_length: int,
 ) -> None:
+    """Log an attempt failure without implying that the cutter was reached."""
     reason = str(metadata.setdefault("cut_failure_reason", "unknown-cutter"))
-    target_start = _timestamp_to_sample(metadata.get("target_start_ts"))
-    target_end = _timestamp_to_sample(metadata.get("target_end_ts"))
-    previous_end = _timestamp_to_sample(metadata.get("previous_token_end_ts"))
-    next_start = _timestamp_to_sample(metadata.get("next_token_start_ts"))
-    logger.warning(
-        "short_sentence.cut.failure segment=%r segment_language=%s phrase_language=%s "
-        "terminal_form=%s template=%r reason=%s audio_samples=%d target_start=%s "
-        "target_end=%s previous_end=%s next_start=%s left_gap_samples=%s "
-        "right_gap_samples=%s has_left_context=%s has_right_context=%s cutter=%s",
+    stage = str(metadata.setdefault("failure_stage", "cut-search"))
+    attempt_history = metadata.get("short_sentence_attempts")
+    attempt_number = len(attempt_history) + 1 if isinstance(attempt_history, list) else 1
+    max_attempts = int(metadata.get("phrase_fallback_tries", 0)) + 1
+    logger.info(
+        "short_sentence.phrase_attempt.failure segment=%r attempt=%d/%d stage=%s "
+        "reason=%s configured_cutter=%s cutter_reached=%s generated_positions=%s "
+        "timing_positions=%s delta=%s template=%r audio_samples=%d",
         segment.text,
-        getattr(segment, "lang", None),
-        metadata.get("phrase_language"),
-        metadata.get("phrase_terminal_form"),
-        metadata.get("phrase_template"),
+        attempt_number,
+        max_attempts,
+        stage,
         reason,
-        audio_length,
-        target_start,
-        target_end,
-        previous_end,
-        next_start,
-        target_start - previous_end
-        if target_start is not None and previous_end is not None
-        else None,
-        next_start - target_end if next_start is not None and target_end is not None else None,
-        metadata.get("has_left_context"),
-        metadata.get("has_right_context"),
         metadata.get("cutter"),
+        metadata.get("cutter_reached", stage not in {"timing-alignment", "timestamp-join"}),
+        metadata.get("generated_token_count"),
+        metadata.get("timing_model_position_count"),
+        metadata.get("timing_model_position_delta"),
+        metadata.get("phrase_template"),
+        audio_length,
     )
 
 
@@ -2025,8 +2099,8 @@ def _log_short_sentence_cut_success(
     metadata: dict[str, object],
 ) -> None:
     logger.debug(
-        "short_sentence.cut.success segment=%r strategy=%s left_cut=%s right_cut=%s "
-        "left_distance_ms=%s right_distance_ms=%s phrase_language=%s",
+        "short_sentence.phrase_attempt.success segment=%r strategy=%s left_cut=%s "
+        "right_cut=%s left_distance_ms=%s right_distance_ms=%s phrase_language=%s",
         segment.text,
         metadata.get("cut_strategy"),
         metadata.get("cut_left"),
@@ -2036,15 +2110,33 @@ def _log_short_sentence_cut_success(
         metadata.get("phrase_language"),
     )
 
-
 def _record_short_sentence_cut_failure(
     metadata: dict[str, object],
     trace: Trace | None,
 ) -> None:
-    """Record an unsuccessful legal phrase cut."""
+    """Record an unsuccessful phrase attempt with a stage-specific counter."""
+    reason = metadata.setdefault("cut_failure_reason", "unknown-cutter")
+    stage = metadata.setdefault("failure_stage", "cut-search")
     if trace is not None:
         trace.increment_counter("short_sentence_cut_failure")
+        trace.increment_counter("short_sentence_phrase_attempt_failure")
+        counter_by_stage = {
+            "timing-alignment": "short_sentence_timing_alignment_failure",
+            "timestamp-join": "short_sentence_timestamp_join_failure",
+            "target-boundary": "short_sentence_target_boundary_failure",
+            "cut-search": "short_sentence_cutter_failure",
+            "cut-window": "short_sentence_cutter_failure",
+            "cut-validation": "short_sentence_cutter_failure",
+        }
+        counter = counter_by_stage.get(str(stage))
+        if counter is not None:
+            trace.increment_counter(counter)
+    _ = reason
 
+def _clear_short_sentence_failure(metadata: dict[str, object]) -> None:
+    """Remove outcome fields from an attempt that ultimately succeeded."""
+    for key in ("cut_failure_reason", "timing_failure_reason", "failure_stage"):
+        metadata.pop(key, None)
 
 def _record_short_sentence_attempt(
     metadata: dict[str, object],
@@ -2052,23 +2144,42 @@ def _record_short_sentence_attempt(
     attempt: int,
     kind: str,
     succeeded: bool,
+    audio_samples: int | None = None,
 ) -> None:
+    """Append a self-contained attempt snapshot for benchmark consumers."""
     history = metadata.setdefault("short_sentence_attempts", [])
     if not isinstance(history, list):
         return
     entry: dict[str, object] = {
         "attempt": attempt,
+        "ordinal": attempt + 1,
         "kind": kind,
         "phrase_template": metadata.get("phrase_template"),
+        "phrase_language": metadata.get("phrase_language"),
+        "terminal_form": metadata.get("phrase_terminal_form"),
+        "configured_cutter": metadata.get("cutter"),
         "cutter": metadata.get("cutter"),
-        "cut_strategy": metadata.get("cut_strategy"),
+        "actual_cut_strategy": metadata.get("cut_strategy") if succeeded else None,
+        "cut_strategy": metadata.get("cut_strategy") if succeeded else None,
         "succeeded": succeeded,
+        "failure_stage": None if succeeded else metadata.get("failure_stage"),
+        "failure_reason": (
+            None
+            if succeeded
+            else metadata.get("timing_failure_reason", metadata.get("cut_failure_reason"))
+        ),
+        "audio_samples": audio_samples,
+        "generated_token_count": metadata.get("generated_token_count"),
+        "timing_model_position_count": metadata.get("timing_model_position_count"),
+        "timing_model_position_delta": metadata.get("timing_model_position_delta"),
+        "pred_duration_count": metadata.get("pred_duration_count"),
+        "target_timestamp_count": metadata.get("target_timestamp_count", 0),
+        "target_start_sample": _timestamp_to_sample(metadata.get("target_start_ts")),
+        "target_end_sample": _timestamp_to_sample(metadata.get("target_end_ts")),
     }
-    if not succeeded:
-        entry["failure_stage"] = metadata.get("failure_stage")
-        entry["failure_reason"] = metadata.get(
-            "timing_failure_reason", metadata.get("cut_failure_reason")
-        )
+    if succeeded:
+        entry["cut_left"] = metadata.get("cut_left")
+        entry["cut_right"] = metadata.get("cut_right")
     history.append(entry)
 
 

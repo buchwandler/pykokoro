@@ -60,10 +60,14 @@ def _installed_state(asset_id: str | None) -> bool | None:
     if asset_id is None:
         return None
     try:
-        from lexphon import DataStore
-
+        from lexphon import DataStore, LexiconNotInstalledError
+    except ImportError:
+        return None
+    try:
         return DataStore().verify(asset_id)
-    except (ImportError, OSError, RuntimeError, ValueError):
+    except LexiconNotInstalledError:
+        return False
+    except (OSError, RuntimeError, ValueError):
         return None
 
 

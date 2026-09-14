@@ -14,7 +14,13 @@ from pykokoro.audio_generator import (
 )
 from pykokoro.constants import MAX_PHONEME_LENGTH
 from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
-from pykokoro.types import G2PAlignmentToken, PhonemeSegment, Segment, WordTiming
+from pykokoro.types import (
+    G2PAlignmentToken,
+    PhonemeSegment,
+    Segment,
+    WordTiming,
+    _model_span_token_count,
+)
 
 
 class _Tokenizer:
@@ -250,3 +256,33 @@ def test_strict_timestamp_join_rejects_incomplete_duration_mapping() -> None:
     durations = np.asarray([1.0, 1.0, 1.0, 0.0], dtype=np.float32)
 
     assert _join_timestamps(tokens, durations, strict=True) == []
+
+def test_explicit_model_span_overrides_compatibility_whitespace_rule() -> None:
+    token = G2PAlignmentToken(
+        "word", "phonemes", " ", model_token_count=2, model_span_token_count=7
+    )
+    assert _model_span_token_count(token) == 7
+    assert token.to_dict()["model_span_token_count"] == 7
+
+
+def test_context_normalization_reconciles_prefix_spans_with_whole_phrase_ids() -> None:
+    class FakeG2P:
+        @staticmethod
+        def phonemes_to_ids(phonemes: str, *, model: str) -> list[int]:
+            _ = model
+            # The separator is one model position and punctuation is merged.
+            return list(range(len(phonemes) - phonemes.count(".")))
+
+    result = SimpleNamespace(
+        phonemes="a b.",
+        ids=[1, 2, 3],
+        tokens=[
+            {"text": "a", "phonemes": "a", "whitespace": " "},
+            {"text": "b", "phonemes": "b", "whitespace": "."},
+        ],
+    )
+    normalized = KokoroG2PAdapter._normalize_context_result(
+        result, g2p_module=FakeG2P(), model_version="1.0"
+    )
+    assert [token.model_span_token_count for token in normalized.tokens] == [2, 1]
+    assert sum(token.model_span_token_count or 0 for token in normalized.tokens) == len(normalized.ids)

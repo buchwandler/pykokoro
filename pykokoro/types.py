@@ -84,6 +84,7 @@ class G2PAlignmentToken:
     char_start: int | None = None
     char_end: int | None = None
     model_token_count: int | None = None
+    model_span_token_count: int | None = None
     pronunciation_source: str | None = None
     pronunciation_provider: str | None = None
     pronunciation_lexicon_id: str | None = None
@@ -92,7 +93,7 @@ class G2PAlignmentToken:
     pronunciation_language_markers: list[dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "text": self.text,
             "phonemes": self.phonemes,
             "whitespace": self.whitespace,
@@ -106,16 +107,23 @@ class G2PAlignmentToken:
             "pronunciation_source_ipa": self.pronunciation_source_ipa,
             "pronunciation_language_markers": self.pronunciation_language_markers,
         }
+        if self.model_span_token_count is not None:
+            result["model_span_token_count"] = self.model_span_token_count
+        return result
 
 
 def _model_span_token_count(token: G2PAlignmentToken | dict[str, Any]) -> int | None:
     """Return model input positions consumed by an alignment item, including whitespace."""
     if isinstance(token, G2PAlignmentToken):
         model_token_count = token.model_token_count
+        explicit_span = token.model_span_token_count
         whitespace = token.whitespace
     else:
         model_token_count = token.get("model_token_count")
+        explicit_span = token.get("model_span_token_count")
         whitespace = token.get("whitespace") or ""
+    if isinstance(explicit_span, int) and not isinstance(explicit_span, bool) and explicit_span > 0:
+        return explicit_span
     if not isinstance(model_token_count, int) or isinstance(model_token_count, bool):
         return None
     if model_token_count <= 0:

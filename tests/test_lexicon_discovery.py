@@ -94,3 +94,15 @@ def test_discovery_never_installs_assets(monkeypatch: pytest.MonkeyPatch) -> Non
     result = lexicon_discovery.discover_lexicons(language="de", offline=True)
     assert result.offline is True
     assert calls
+
+
+def test_missing_asset_is_reported_as_uninstalled(monkeypatch: pytest.MonkeyPatch) -> None:
+    import lexphon
+
+    class Store:
+        def verify(self, _asset_id: str) -> bool:
+            raise lexphon.LexiconNotInstalledError("missing")
+
+    monkeypatch.setattr(lexphon, "DataStore", Store)
+
+    assert lexicon_discovery._installed_state("sv-se:nst") is False

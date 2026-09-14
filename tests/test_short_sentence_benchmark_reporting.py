@@ -101,10 +101,35 @@ def test_summary_and_table_include_run_metadata_and_sections() -> None:
     summary = build_short_sentence_summary(
         [{"policy": "disabled"}], metadata={"voice": "af_sarah", "model": "v1.0"}
     )
-
     table = format_short_sentence_table(summary)
-    assert summary["schema"] == "pykokoro.short-sentence-benchmark.v1"
+    assert summary["schema"] == "pykokoro.short-sentence-benchmark.v2"
     assert "Voice: af_sarah" in table
     assert "Configured policy" in table
     assert "Phrase attempt accounting" in table
     assert "Failure reasons" in table
+
+def test_attempt_history_reports_success_ordinal_strategy_template_and_stages() -> None:
+    rows = [
+        {
+            "policy": "energy-valley",
+            "fallback_retries": 5,
+            "short_sentence_metadata": {
+                "kind": "phrase",
+                "cut_strategy": "timestamp-smooth",
+                "fallback_used": "phrase",
+                "short_sentence_attempts": [
+                    {"attempt": 0, "ordinal": 1, "succeeded": False, "failure_stage": "timing-alignment", "failure_reason": "timing-model-position-mismatch", "phrase_template": "A {segment}"},
+                    {"attempt": 1, "ordinal": 2, "succeeded": True, "actual_cut_strategy": "timestamp-smooth", "phrase_template": "B {segment}"},
+                ],
+            },
+        }
+    ]
+    summary = aggregate_short_sentence_rows(rows)
+    normalized = summary["rows"][0]
+    assert normalized["phrase_attempt_count"] == 2
+    assert normalized["success_attempt_ordinal"] == 2
+    assert summary["success_by_attempt_ordinal"]["energy-valley"] == {"2": 1}
+    assert summary["success_by_strategy"] == {"timestamp-smooth": 1}
+    assert summary["success_by_template"] == {"B {segment}": 1}
+    assert summary["failure_by_stage"] == {"timing-alignment": 1}
+    assert summary["retry_budget_comparison"]["5"]["max_phrase_attempts"] == 6

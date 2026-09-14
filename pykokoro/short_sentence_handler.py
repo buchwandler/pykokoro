@@ -221,6 +221,7 @@ class ShortSentenceTimingToken:
     char_start: int | None = None
     char_end: int | None = None
     model_token_count: int | None = None
+    model_span_token_count: int | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -231,6 +232,7 @@ class ShortSentenceTimingToken:
             "char_start": self.char_start,
             "char_end": self.char_end,
             "model_token_count": self.model_token_count,
+            "model_span_token_count": self.model_span_token_count,
         }
 
 
@@ -639,6 +641,7 @@ def cut_short_sentence_phrase_audio(
         return audio
     if audio.size == 0:
         return audio
+    metadata["cutter_reached"] = True
     return cut_phrase_audio(audio, metadata)
 
 
@@ -698,7 +701,12 @@ def _select_phrase_template(
         chooser = rng if rng is not None else random
         return chooser.choice(choices)
     if isinstance(mode, PhraseResolveMode):
-        effective_phrase_set = phrase_set if mode == PhraseResolveMode() else None
+        default_mode = PhraseResolveMode()
+        uses_builtin_templates = (
+            mode.neutral_phrase == default_mode.neutral_phrase
+            and mode.end_phrase == default_mode.end_phrase
+        )
+        effective_phrase_set = phrase_set if uses_builtin_templates else None
         if effective_phrase_set is not None and use_end_phrase:
             choices = effective_phrase_set.declarative or effective_phrase_set.neutral
             return choices[0]
@@ -1028,6 +1036,14 @@ def _build_timing_tokens(
             and raw_model_token_count > 0
             else None
         )
+        raw_model_span_count = _token_attr(token, "model_span_token_count")
+        model_span_token_count = (
+            raw_model_span_count
+            if isinstance(raw_model_span_count, int)
+            and not isinstance(raw_model_span_count, bool)
+            and raw_model_span_count > 0
+            else None
+        )
         timing_tokens.append(
             ShortSentenceTimingToken(
                 text=text,
@@ -1037,6 +1053,7 @@ def _build_timing_tokens(
                 char_start=source_start,
                 char_end=source_end,
                 model_token_count=model_token_count,
+                model_span_token_count=model_span_token_count,
             ).to_dict()
         )
     return timing_tokens
