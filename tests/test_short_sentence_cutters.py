@@ -120,3 +120,76 @@ def test_timestamp_adaptive_rejects_invalid_timestamp_geometry() -> None:
     metadata["target_end_ts"] = metadata["target_start_ts"]
 
     assert find_timestamp_adaptive_cut_bounds(audio, metadata) is None
+
+
+def test_timestamp_adaptive_accepts_zero_width_context_gaps(monkeypatch) -> None:
+    audio = np.ones(3000, dtype=np.float32)
+    metadata = _metadata()
+    metadata.update(
+        {
+            "previous_token_end_ts": 1000 / 24000,
+            "target_start_ts": 1000 / 24000,
+            "target_end_ts": 2000 / 24000,
+            "next_token_start_ts": 2000 / 24000,
+        }
+    )
+    intervals: list[tuple[int, int]] = []
+    monkeypatch.setattr(
+        "pykokoro.short_sentence_cutters.timestamp_adaptive.find_energy_valley_cut_bounds",
+        lambda _audio, _metadata: None,
+    )
+    def smooth_point(_audio, *, start, end, anchor, window_length):
+        intervals.append((start, end))
+        return anchor
+    monkeypatch.setattr(
+        "pykokoro.short_sentence_cutters.timestamp_adaptive.find_smooth_cut_point",
+        smooth_point,
+    )
+    assert find_timestamp_adaptive_cut_bounds(audio, metadata) == (1000, 2000)
+    assert intervals == [(1000, 1001), (2000, 2001)]
+    assert metadata["cut_strategy"] == "timestamp-anchor"
+
+
+def test_timestamp_adaptive_accepts_terminal_target_at_audio_end(monkeypatch) -> None:
+    audio = np.ones(3000, dtype=np.float32)
+    metadata = _metadata(left=True, right=False)
+    metadata["target_end_ts"] = 3000 / 24000
+    monkeypatch.setattr(
+        "pykokoro.short_sentence_cutters.timestamp_adaptive.find_energy_valley_cut_bounds",
+        lambda _audio, _metadata: None,
+    )
+    monkeypatch.setattr(
+        "pykokoro.short_sentence_cutters.timestamp_adaptive.find_smooth_cut_point",
+        lambda _audio, *, anchor, **kwargs: anchor,
+    )
+    assert find_timestamp_adaptive_cut_bounds(audio, metadata) == (1600, 3000)
+
+
+def test_timestamp_adaptive_accepts_target_at_audio_start(monkeypatch) -> None:
+    audio = np.ones(3000, dtype=np.float32)
+    metadata = _metadata(left=False, right=True)
+    metadata["target_start_ts"] = 0.0
+    metadata["target_end_ts"] = 800 / 24000
+    monkeypatch.setattr(
+        "pykokoro.short_sentence_cutters.timestamp_adaptive.find_smooth_cut_point",
+        lambda _audio, *, anchor, **kwargs: anchor,
+    )
+    assert find_timestamp_adaptive_cut_bounds(audio, metadata) == (0, 800)
+
+
+def test_timestamp_adaptive_accepts_one_sample_context_gaps(monkeypatch) -> None:
+    audio = np.ones(3000, dtype=np.float32)
+    metadata = _metadata()
+    metadata.update(
+        {
+            "previous_token_end_ts": 999 / 24000,
+            "target_start_ts": 1000 / 24000,
+            "target_end_ts": 2000 / 24000,
+            "next_token_start_ts": 2001 / 24000,
+        }
+    )
+    monkeypatch.setattr(
+        "pykokoro.short_sentence_cutters.timestamp_adaptive.find_smooth_cut_point",
+        lambda _audio, *, anchor, **kwargs: anchor,
+    )
+    assert find_timestamp_adaptive_cut_bounds(audio, metadata) == (1000, 2000)

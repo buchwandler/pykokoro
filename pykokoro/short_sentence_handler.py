@@ -26,6 +26,11 @@ import numpy as np
 
 from .constants import MAX_PHONEME_LENGTH, SUPPORTED_LANGUAGES
 from .short_sentence_cutters import cut_phrase_audio
+from .short_sentence_phrases import (
+    ShortSentencePhraseSet,
+    resolve_short_sentence_phrase_language,
+    resolve_short_sentence_phrase_set,
+)
 
 if TYPE_CHECKING:
     from .types import PhonemeSegment
@@ -148,6 +153,7 @@ class ShortSentenceTimingToken:
     is_target: bool = False
     char_start: int | None = None
     char_end: int | None = None
+    model_token_count: int | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -157,6 +163,7 @@ class ShortSentenceTimingToken:
             "is_target": self.is_target,
             "char_start": self.char_start,
             "char_end": self.char_end,
+            "model_token_count": self.model_token_count,
         }
 
 
@@ -217,6 +224,7 @@ class ShortSentenceConfig:
     )
     phrase_fallback_tries: int = 1
 
+    phrase_catalog: dict[str, ShortSentencePhraseSet] | None = None
     def __post_init__(self) -> None:
         if (
             isinstance(self.min_phoneme_length, bool)
@@ -252,10 +260,24 @@ class ShortSentenceConfig:
             if isinstance(mode, PhraseResolveMode):
                 templates = [mode.neutral_phrase, mode.end_phrase]
             elif isinstance(mode, RandomizedPhraseResolveMode):
-                templates = [*mode.neutral_phrases, *mode.end_phrases]
-            if any("{segment}" not in template for template in templates):
-                raise ValueError("phrase templates must contain the '{segment}' placeholder")
-
+                templates = [
+                    *mode.neutral_phrases,
+                    *mode.end_phrases,
+                    *mode.question_phrases,
+                    *mode.exclamation_phrases,
+                    *mode.ellipsis_phrases,
+                    *mode.fragment_phrases,
+                ]
+            if any(template.count("{segment}") != 1 for template in templates):
+                raise ValueError(
+                    "phrase templates must contain exactly one '{segment}' placeholder"
+                )
+        if self.phrase_catalog is not None:
+            for key, phrase_set in self.phrase_catalog.items():
+                if not isinstance(phrase_set, ShortSentencePhraseSet):
+                    raise ValueError("phrase_catalog values must be ShortSentencePhraseSet")
+                if key.strip().lower().replace("_", "-") != phrase_set.language.lower():
+                    raise ValueError("phrase catalog key must match its declared language")
     def should_use_pause_surrounding(self, phoneme_length: int, text: str) -> bool:
         """Check if segment should use pause surrounding.
 
@@ -359,16 +381,32 @@ def phonemize_short_sentence_phrase(
     segment: PhonemeSegment,
     phrase_template: str,
     context_phonemizer: Callable[[str, str], Any] | None = None,
+    *,
+    phrase_language: str | None = None,
 ) -> tuple[str, list[int], list[dict[str, object]]]:
     """Phonemize a phrase containing the short segment text."""
     phrase_text = phrase_template.replace("{segment}", segment.text)
     segment_start = phrase_template.find("{segment}")
     segment_end = segment_start + len(segment.text) if segment_start >= 0 else -1
+    segment_language = resolve_short_sentence_phrase_language(segment.lang) or segment.lang
+    resolved_phrase_language = (
+        resolve_short_sentence_phrase_language(phrase_language)
+        if phrase_language is not None
+        else segment_language
+    )
+    if resolved_phrase_language != segment_language:
+        raise ValueError(
+            f"short sentence phrase language {phrase_language!r} does not match "
+            f"segment language {segment.lang!r}"
+        )
     lang = SUPPORTED_LANGUAGES.get(segment.lang, segment.lang)
     started = time.perf_counter()
     logger.debug(
-        "short_sentence.context_g2p.start mode=phrase language=%s reuse=%s",
-        lang,
+        "short_sentence.context_g2p.start mode=phrase segment_language=%s phrase_language=%s "
+        "terminal_form=%s reuse=%s",
+        segment_language,
+        resolved_phrase_language,
+        _terminal_form(segment.text),
         context_phonemizer is not None,
     )
     if context_phonemizer is None:
@@ -396,6 +434,32 @@ def phonemize_short_sentence_phrase(
     return str(phonemes), list(tokens), timing_tokens
 
 
+def _build_wrap_application(
+    segment: PhonemeSegment,
+    phonemes: str,
+    tokens: list[int],
+    config: ShortSentenceConfig,
+    mode_name: str,
+    tokenize: Callable[[str], list[int]],
+    cut_failure_reason: str | None = None,
+) -> ShortSentenceApplication:
+    wrap_mode = config.resolve_modes.get("wrap")
+    pretext = wrap_mode.phoneme_pretext if isinstance(wrap_mode, WrapResolveMode) else config.phoneme_pretext
+    if pretext == "—":
+        pretext = config.phoneme_pretext
+    wrapped = f"{pretext}{phonemes}{pretext}"
+    wrapped_tokens = tokenize(wrapped)
+    metadata: dict[str, object] = {
+        "mode": mode_name,
+        "kind": "wrap",
+        "original_token_count": len(tokens),
+        "generated_token_count": len(wrapped_tokens),
+    }
+    if cut_failure_reason is not None:
+        metadata["cut_failure_reason"] = cut_failure_reason
+    return ShortSentenceApplication(wrapped, wrapped_tokens, metadata)
+
+
 def apply_short_sentence_mode(
     segment: PhonemeSegment,
     phonemes: str,
@@ -416,33 +480,37 @@ def apply_short_sentence_mode(
         return ShortSentenceApplication(phonemes, tokens)
 
     if mode.kind == "wrap":
-        pretext = mode.phoneme_pretext
-        if pretext == "—":
-            pretext = config.phoneme_pretext
-        wrapped = f"{pretext}{phonemes}{pretext}"
-        wrapped_tokens = tokenize(wrapped)
-        return ShortSentenceApplication(
-            wrapped,
-            wrapped_tokens,
-            {
-                "mode": mode_name,
-                "kind": mode.kind,
-                "original_token_count": len(tokens),
-                "generated_token_count": len(wrapped_tokens),
-            },
+        return _build_wrap_application(segment, phonemes, tokens, config, mode_name, tokenize)
+    phrase_set, phrase_language, catalog_source = resolve_short_sentence_phrase_set(
+        segment.lang, config.phrase_catalog
+    )
+    if phrase_set is None or phrase_language is None:
+        logger.info(
+            "short_sentence.phrase.unavailable language=%s action=wrap reason=no-localized-phrase-catalog",
+            segment.lang,
         )
-
+        return _build_wrap_application(
+            segment,
+            phonemes,
+            tokens,
+            config,
+            mode_name,
+            tokenize,
+            cut_failure_reason="no-localized-phrase-catalog",
+        )
     phrase_mode = _configured_phrase_mode(config)
     phrase_template = _select_phrase_template(
         segment.text,
         mode,
         phrase_mode=phrase_mode,
+        phrase_set=phrase_set,
         rng=rng,
     )
     phrase_fallback_templates = _select_phrase_fallback_templates(
         segment.text,
         mode,
         phrase_mode=phrase_mode,
+        phrase_set=phrase_set,
         used_templates=[phrase_template],
         limit=config.phrase_fallback_tries,
     )
@@ -477,6 +545,9 @@ def apply_short_sentence_mode(
         original_token_count=len(tokens),
         generated_token_count=len(phrase_tokens),
         phrase_template=phrase_template,
+        phrase_language=phrase_language,
+        phrase_terminal_form=_terminal_form(segment.text),
+        phrase_catalog_source=catalog_source,
         phrase_fallback_templates=phrase_fallback_templates,
         phrase_fallback_tries=config.phrase_fallback_tries,
         timing_tokens=timing_tokens,
@@ -544,14 +615,23 @@ def _select_phrase_template(
     mode: ShortSentenceResolveMode,
     *,
     phrase_mode: PhraseResolveMode | None = None,
+    phrase_set: ShortSentencePhraseSet | None = None,
     rng: random.Random | None = None,
 ) -> str:
     use_end_phrase = _uses_end_phrase(segment_text, mode)
     if isinstance(mode, RandomizedPhraseResolveMode):
-        choices = _phrase_choices(segment_text, mode, phrase_mode)
+        effective_phrase_set = phrase_set if mode == RandomizedPhraseResolveMode() else None
+        choices = _phrase_choices(segment_text, mode, phrase_mode, effective_phrase_set)
         chooser = rng if rng is not None else random
         return chooser.choice(choices)
     if isinstance(mode, PhraseResolveMode):
+        effective_phrase_set = phrase_set if mode == PhraseResolveMode() else None
+        if effective_phrase_set is not None and use_end_phrase:
+            choices = effective_phrase_set.declarative or effective_phrase_set.neutral
+            return choices[0]
+        if effective_phrase_set is not None:
+            choices = effective_phrase_set.neutral or effective_phrase_set.fragment
+            return choices[0]
         return mode.end_phrase if use_end_phrase else mode.neutral_phrase
     return ""
 
@@ -561,6 +641,7 @@ def _select_phrase_fallback_templates(
     mode: ShortSentenceResolveMode,
     *,
     phrase_mode: PhraseResolveMode | None = None,
+    phrase_set: ShortSentencePhraseSet | None = None,
     used_templates: list[str],
     limit: int,
 ) -> list[str]:
@@ -570,11 +651,21 @@ def _select_phrase_fallback_templates(
 
     used = set(used_templates)
     if isinstance(mode, PhraseResolveMode):
-        choices = _default_ranked_phrase_choices(segment_text)
+        effective_phrase_set = (
+            phrase_set
+            if phrase_set is not None and phrase_set.language != "en"
+            else None
+        )
+        choices = _default_ranked_phrase_choices(segment_text, effective_phrase_set)
         return _unique_phrase_templates(choices, used, limit)
 
     if isinstance(mode, RandomizedPhraseResolveMode):
-        choices = _phrase_choices(segment_text, mode, phrase_mode)
+        choices = _phrase_choices(
+            segment_text,
+            mode,
+            phrase_mode,
+            phrase_set if mode == RandomizedPhraseResolveMode() else None,
+        )
         selected = used_templates[-1] if used_templates else ""
         try:
             selected_index = choices.index(selected)
@@ -593,19 +684,41 @@ def _phrase_choices(
     segment_text: str,
     mode: RandomizedPhraseResolveMode,
     phrase_defaults: PhraseResolveMode | None = None,
+    phrase_set: ShortSentencePhraseSet | None = None,
 ) -> list[str]:
     if phrase_defaults is None:
         phrase_defaults = PhraseResolveMode()
     if mode.phrase_selection == "neutral":
+        if phrase_set is not None:
+            return list(phrase_set.neutral or phrase_set.fragment)
         return mode.neutral_phrases or [phrase_defaults.neutral_phrase]
     if mode.phrase_selection == "end":
+        if phrase_set is not None:
+            return list(phrase_set.declarative or phrase_set.neutral)
         return mode.end_phrases or [phrase_defaults.end_phrase]
     terminal_form = _terminal_form(segment_text)
+    if phrase_set is not None:
+        choices = {
+            "question": phrase_set.question,
+            "exclamation": phrase_set.exclamation,
+            "ellipsis": phrase_set.ellipsis,
+            "fragment": phrase_set.fragment,
+            "declarative": phrase_set.declarative,
+        }[terminal_form]
+        fallback = phrase_set.declarative if terminal_form == "declarative" else phrase_set.neutral
+        return list(choices or fallback)
+    fragment_choices = mode.fragment_phrases
+    defaults = RandomizedPhraseResolveMode()
+    if (
+        mode.neutral_phrases != defaults.neutral_phrases
+        and mode.fragment_phrases == defaults.fragment_phrases
+    ):
+        fragment_choices = mode.neutral_phrases
     choices = {
         "question": mode.question_phrases,
         "exclamation": mode.exclamation_phrases,
         "ellipsis": mode.ellipsis_phrases,
-        "fragment": mode.neutral_phrases or mode.fragment_phrases,
+        "fragment": fragment_choices,
         "declarative": mode.end_phrases,
     }[terminal_form]
     fallback = (
@@ -622,9 +735,18 @@ def _configured_phrase_mode(config: ShortSentenceConfig) -> PhraseResolveMode | 
     return None
 
 
-def _default_ranked_phrase_choices(segment_text: str) -> list[str]:
-    defaults = RandomizedPhraseResolveMode()
-    return _phrase_choices(segment_text, defaults)
+def _default_ranked_phrase_choices(
+    segment_text: str,
+    phrase_set: ShortSentencePhraseSet | None = None,
+) -> list[str]:
+    if phrase_set is None and _terminal_form(segment_text) == "fragment":
+        return list(RandomizedPhraseResolveMode().neutral_phrases)
+    defaults = (
+        RandomizedPhraseResolveMode(fragment_phrases=())
+        if phrase_set is None
+        else RandomizedPhraseResolveMode()
+    )
+    return _phrase_choices(segment_text, defaults, phrase_set=phrase_set)
 
 def _unique_phrase_templates(
     choices: list[str],
@@ -670,6 +792,9 @@ def _build_short_sentence_metadata(
     original_token_count: int,
     generated_token_count: int,
     phrase_template: str | None = None,
+    phrase_language: str | None = None,
+    phrase_terminal_form: str | None = None,
+    phrase_catalog_source: str | None = None,
     phrase_fallback_templates: list[str] | None = None,
     phrase_fallback_tries: int | None = None,
     timing_tokens: list[dict[str, object]] | None = None,
@@ -695,6 +820,9 @@ def _build_short_sentence_metadata(
         "mode": mode_name,
         "kind": mode.kind,
         "phrase_template": phrase_template,
+        "phrase_language": phrase_language,
+        "phrase_terminal_form": phrase_terminal_form,
+        "phrase_catalog_source": phrase_catalog_source,
         "original_token_count": original_token_count,
         "generated_token_count": generated_token_count,
         "expected_cut_ratio": max(0.01, min(0.99, expected_cut_ratio)),
@@ -733,6 +861,9 @@ def _build_short_sentence_retry_metadata(
         "mode": base_metadata.get("mode"),
         "kind": base_metadata.get("kind"),
         "phrase_template": phrase_template,
+        "phrase_language": base_metadata.get("phrase_language"),
+        "phrase_terminal_form": base_metadata.get("phrase_terminal_form"),
+        "phrase_catalog_source": base_metadata.get("phrase_catalog_source"),
         "original_token_count": original_token_count,
         "generated_token_count": generated_token_count,
         "expected_cut_ratio": max(0.01, min(0.99, expected_cut_ratio)),
@@ -796,6 +927,14 @@ def _build_timing_tokens(
         source_end = (
             max(0, char_end - segment_start) if isinstance(char_end, int) and is_target else None
         )
+        raw_model_token_count = _token_attr(token, "model_token_count")
+        model_token_count = (
+            raw_model_token_count
+            if isinstance(raw_model_token_count, int)
+            and not isinstance(raw_model_token_count, bool)
+            and raw_model_token_count > 0
+            else None
+        )
         timing_tokens.append(
             ShortSentenceTimingToken(
                 text=text,
@@ -804,6 +943,7 @@ def _build_timing_tokens(
                 is_target=is_target,
                 char_start=source_start,
                 char_end=source_end,
+                model_token_count=model_token_count,
             ).to_dict()
         )
     return timing_tokens

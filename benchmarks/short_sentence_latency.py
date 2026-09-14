@@ -39,14 +39,19 @@ DEMO_TEXTS = (
 )
 
 SCENARIOS = (
-    ("short-declarative", "Oh No."),
-    ("short-question", "Why?"),
-    ("short-exclamation", "Help!"),
-    ("one-word-interjection", "Oh!"),
-    ("two-word-phrase", "No thanks."),
-    ("fragment", "thing on her chest."),
-    ("ellipsis", "Wait …"),
-    ("near-min-phoneme-length", "One small step."),
+    ("short-declarative", "Oh No.", "en-us"),
+    ("short-question", "Why?", "en-us"),
+    ("short-exclamation", "Help!", "en-us"),
+    ("one-word-interjection", "Oh!", "en-us"),
+    ("two-word-phrase", "No thanks.", "en-us"),
+    ("fragment", "thing on her chest.", "en-us"),
+    ("ellipsis", "Wait …", "en-us"),
+    ("near-min-phoneme-length", "One small step.", "en-us"),
+    ("zero-gap-fragment", "three", "en-us"),
+    ("terminal-fragment", "tomato and dictionary.", "en-us"),
+    ("german-declarative", "zwölf.", "de"),
+    ("german-question", "wirklich?", "de"),
+    ("german-exclamation", "Hilfe!", "de"),
 )
 POLICIES = ("disabled", "energy-valley", "timestamp-adaptive", "wrap")
 
@@ -70,10 +75,12 @@ def _summary(result: Any, *, policy: str, scenario: str, text: str, wall_ms: flo
     counters = trace.counters if trace is not None else {}
     audio_seconds = result.audio.size / result.sample_rate if result.sample_rate else 0.0
     boundary_metrics = _waveform_boundary_metrics(result.audio)
+    short_metadata: dict[str, object] = {}
     if trace is not None:
         for event in trace.prosody:
             metadata = event.get("short_sentence") if isinstance(event, dict) else None
             if isinstance(metadata, dict):
+                short_metadata = metadata
                 boundary_metrics.update(
                     {
                         key: value
@@ -100,7 +107,26 @@ def _summary(result: Any, *, policy: str, scenario: str, text: str, wall_ms: flo
         "adaptive_cut_successes": counters.get("short_sentence_cut_adaptive_success", 0),
         "cut_failures": counters.get("short_sentence_cut_failure", 0),
         "boundary_metrics": boundary_metrics,
+        "cut_strategy": short_metadata.get("cut_strategy"),
+        "cut_failure_reason": short_metadata.get("cut_failure_reason"),
+        "left_gap_samples": _metadata_gap(short_metadata, "previous_token_end_ts", "target_start_ts"),
+        "right_gap_samples": _metadata_gap(short_metadata, "target_end_ts", "next_token_start_ts"),
+        "timing_model_position_count": short_metadata.get("timing_model_position_count"),
+        "generated_token_count": short_metadata.get("generated_token_count"),
+        "timing_alignment_complete": short_metadata.get("timing_alignment_complete"),
     }
+
+def _metadata_gap(
+    metadata: dict[str, object],
+    start_key: str,
+    end_key: str,
+) -> int | None:
+    start = metadata.get(start_key)
+    end = metadata.get(end_key)
+    if not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
+        return None
+    return round((float(end) - float(start)) * 24000)
+
 
 def _waveform_boundary_metrics(audio: Any) -> dict[str, object]:
     values = np.asarray(audio, dtype=np.float32).reshape(-1)
@@ -129,49 +155,76 @@ def _add_arguments(parser: argparse.ArgumentParser) -> None:
 def run_benchmark(args: argparse.Namespace) -> list[dict[str, Any]]:
     voices = tuple(voice.strip() for voice in args.voices.split(",") if voice.strip())
     policies = POLICIES
+    languages = tuple(sorted({language for _, _, language in SCENARIOS}))
     if args.dry_run:
         return [
-            {"policy": policy, "scenario": scenario, "text": text, "voice": voice}
+            {
+                "policy": policy,
+                "scenario": scenario,
+                "text": text,
+                "language": language,
+                "voice": voice,
+            }
             for voice in voices
             for policy in policies
-            for scenario, text in (*SCENARIOS, ("demo-corpus", "|".join(DEMO_TEXTS)))
+            for scenario, text, language in SCENARIOS
         ]
 
-    pipelines: dict[str, KokoroPipeline] = {}
+    pipelines: dict[tuple[str, str], KokoroPipeline] = {}
     try:
         for policy in policies:
-            pipelines[policy] = KokoroPipeline(
-                PipelineConfig(
-                    voice=voices[0],
-                    model_source=args.model_source,
-                    model_variant=args.model_variant,
-                    model_path=args.model_path,
-                    voices_path=args.voices_path,
-                    generation=GenerationConfig(lang="en-us", speed=1.0),
-                    short_sentence_config=_short_sentence_config(policy),
-                    return_trace=True,
+            for language in languages:
+                pipelines[(policy, language)] = KokoroPipeline(
+                    PipelineConfig(
+                        voice=voices[0],
+                        model_source=args.model_source,
+                        model_variant=args.model_variant,
+                        model_path=args.model_path,
+                        voices_path=args.voices_path,
+                        generation=GenerationConfig(lang=language, speed=1.0),
+                        short_sentence_config=_short_sentence_config(policy),
+                        return_trace=True,
+                    )
                 )
-            )
         for pipeline in pipelines.values():
             pipeline.warmup()
 
         rows: list[dict[str, Any]] = []
         for voice in voices:
-            for policy, pipeline in pipelines.items():
-                for scenario, text in SCENARIOS:
-                    started = time.perf_counter()
-                    result = pipeline.run(text, voice=voice)
-                    wall_ms = (time.perf_counter() - started) * 1000.0
-                    row = _summary(result, policy=policy, scenario=scenario, text=text, wall_ms=wall_ms)
-                    row["voice"] = voice
-                    rows.append(row)
-                for text in DEMO_TEXTS:
-                    started = time.perf_counter()
-                    result = pipeline.run(text, voice=voice)
-                    wall_ms = (time.perf_counter() - started) * 1000.0
-                    row = _summary(result, policy=policy, scenario="demo-corpus", text=text, wall_ms=wall_ms)
-                    row["voice"] = voice
-                    rows.append(row)
+            for policy in policies:
+                for language in languages:
+                    pipeline = pipelines[(policy, language)]
+                    for scenario, text, scenario_language in SCENARIOS:
+                        if scenario_language != language:
+                            continue
+                        started = time.perf_counter()
+                        result = pipeline.run(text, voice=voice)
+                        wall_ms = (time.perf_counter() - started) * 1000.0
+                        row = _summary(
+                            result,
+                            policy=policy,
+                            scenario=scenario,
+                            text=text,
+                            wall_ms=wall_ms,
+                        )
+                        row["voice"] = voice
+                        row["language"] = language
+                        rows.append(row)
+                    if language == "en-us":
+                        for text in DEMO_TEXTS:
+                            started = time.perf_counter()
+                            result = pipeline.run(text, voice=voice)
+                            wall_ms = (time.perf_counter() - started) * 1000.0
+                            row = _summary(
+                                result,
+                                policy=policy,
+                                scenario="demo-corpus",
+                                text=text,
+                                wall_ms=wall_ms,
+                            )
+                            row["voice"] = voice
+                            row["language"] = language
+                            rows.append(row)
         return rows
     finally:
         for pipeline in pipelines.values():

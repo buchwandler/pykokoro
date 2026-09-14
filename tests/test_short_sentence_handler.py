@@ -6,8 +6,13 @@ from pykokoro.short_sentence_handler import (
     ShortSentenceConfig,
     _phrase_choices,
     _terminal_form,
+    apply_short_sentence_mode,
     is_segment_empty,
     is_segment_short,
+)
+from pykokoro.short_sentence_phrases import (
+    ShortSentencePhraseSet,
+    resolve_short_sentence_phrase_language,
 )
 from pykokoro.types import PhonemeSegment
 
@@ -25,7 +30,7 @@ def test_randomized_templates_match_terminal_punctuation() -> None:
         "Why?": mode.question_phrases,
         "Stop!": mode.exclamation_phrases,
         "Wait…": mode.ellipsis_phrases,
-        "Go": mode.neutral_phrases,
+        "Go": mode.fragment_phrases,
     }
     for text, templates in expected.items():
         assert _terminal_form(text) in {
@@ -139,3 +144,61 @@ class TestIsSegmentShort:
         segment = make_segment(text="Go", phonemes="abc")
         config = ShortSentenceConfig(enabled=False)
         assert is_segment_short(segment, config=config) is False
+
+
+def test_phrase_language_aliases_are_explicit() -> None:
+    assert resolve_short_sentence_phrase_language("en-US") == "en"
+    assert resolve_short_sentence_phrase_language("de_DE") == "de"
+    assert resolve_short_sentence_phrase_language("xx-YY") is None
+
+
+def test_custom_phrase_catalog_is_selected_for_segment_language() -> None:
+    custom = ShortSentencePhraseSet(
+        language="xx",
+        declarative=("LOCAL {segment}",),
+        question=("LOCAL? {segment}",),
+        exclamation=("LOCAL! {segment}",),
+        ellipsis=("LOCAL… {segment}",),
+        fragment=("LOCAL {segment}",),
+    )
+    config = ShortSentenceConfig(
+        phrase_catalog={"xx": custom},
+        resolve_mode="phrase",
+    )
+    segment = make_segment("word", "abc")
+    segment.lang = "xx"
+    calls: list[tuple[str, str]] = []
+    def context_phonemizer(text: str, language: str):
+        calls.append((text, language))
+        return type("Result", (), {"phonemes": "context", "ids": [1], "tokens": []})()
+    result = apply_short_sentence_mode(
+        segment,
+        segment.phonemes,
+        [1],
+        config,
+        lambda text: [1 for _ in text],
+        context_phonemizer=context_phonemizer,
+    )
+    assert result.metadata is not None
+    assert result.metadata["phrase_language"] == "xx"
+    assert result.metadata["phrase_template"] == "LOCAL {segment}"
+    assert calls == [("LOCAL word", "xx")]
+
+
+def test_unsupported_phrase_language_uses_wrap_without_english_context() -> None:
+    config = ShortSentenceConfig(resolve_mode="phrase")
+    segment = make_segment("word", "abc")
+    segment.lang = "sv"
+    calls: list[tuple[str, str]] = []
+    result = apply_short_sentence_mode(
+        segment,
+        segment.phonemes,
+        [1],
+        config,
+        lambda text: [1 for _ in text],
+        context_phonemizer=lambda text, language: calls.append((text, language)),
+    )
+    assert result.metadata is not None
+    assert result.metadata["kind"] == "wrap"
+    assert result.metadata["cut_failure_reason"] == "no-localized-phrase-catalog"
+    assert calls == []

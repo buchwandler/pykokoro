@@ -1150,7 +1150,9 @@ class AudioGenerator:
         timing_tokens = short_sentence_metadata.get("timing_tokens")
         if not isinstance(timing_tokens, list):
             return
-        timestamped = _join_timestamps(timing_tokens, pred_dur)
+        _record_short_sentence_timing_alignment(short_sentence_metadata, timing_tokens)
+        strict_join = "generated_token_count" in short_sentence_metadata
+        timestamped = _join_timestamps(timing_tokens, pred_dur, strict=strict_join)
         populate_short_sentence_boundary_metadata(
             short_sentence_metadata,
             timestamped,
@@ -1189,12 +1191,14 @@ class AudioGenerator:
         cut_audio = cut_short_sentence_phrase_audio(audio, short_sentence_metadata)
         if cut_audio is not None:
             _record_short_sentence_cut(short_sentence_metadata, len(audio), trace)
+            _log_short_sentence_cut_success(segment, short_sentence_metadata)
             left_cut = short_sentence_metadata.get("cut_left")
             right_cut = short_sentence_metadata.get("cut_right")
             if isinstance(left_cut, int) and isinstance(right_cut, int):
                 segment.word_timings = _crop_word_timings(segment.word_timings, left_cut, right_cut)
             short_sentence_metadata["cut_applied"] = True
             return cut_audio
+        _log_short_sentence_cut_failure(segment, short_sentence_metadata, len(audio))
         _record_short_sentence_cut_failure(short_sentence_metadata, trace)
 
         retry_audio = self._try_short_sentence_phrase_fallbacks(
@@ -1234,7 +1238,11 @@ class AudioGenerator:
         )
         if trace is None:
             fallback_audio, _ = self._run_onnx(
-                fallback_phonemes, voice_style, speed, tokens=prepared_fallback_tokens
+                fallback_phonemes,
+                voice_style,
+                speed,
+                attempt_kind="fallback",
+                tokens=prepared_fallback_tokens,
             )
         else:
             fallback_audio, _ = self._run_onnx(
@@ -1319,7 +1327,11 @@ class AudioGenerator:
 
             if trace is None:
                 retry_audio, pred_dur = self._run_onnx(
-                    retry.phonemes, voice_style, speed, tokens=retry.tokens
+                    retry.phonemes,
+                    voice_style,
+                    speed,
+                    attempt_kind="retry",
+                    tokens=retry.tokens,
                 )
             else:
                 retry_audio, pred_dur = self._run_onnx(
@@ -1340,15 +1352,18 @@ class AudioGenerator:
                     len(retry_audio),
                     local_target_offsets=True,
                 )
-                timestamped = _join_timestamps(timing_tokens, pred_dur)
+                _record_short_sentence_timing_alignment(retry.metadata, timing_tokens)
+                timestamped = _join_timestamps(timing_tokens, pred_dur, strict=True)
                 populate_short_sentence_boundary_metadata(retry.metadata, timestamped)
             cut_audio = cut_short_sentence_phrase_audio(retry_audio, retry.metadata)
             if cut_audio is None:
+                _log_short_sentence_cut_failure(segment, retry.metadata, len(retry_audio))
                 _record_short_sentence_cut_failure(retry.metadata, trace)
                 failed_template = template
                 continue
             _record_short_sentence_cut(retry.metadata, len(retry_audio), trace)
 
+            _log_short_sentence_cut_success(segment, retry.metadata)
             logger.info(
                 "Short sentence phrase cut for '%s' succeeded using fallback phrase '%s' (%d/%d).",
                 segment.text[:50],
@@ -1744,9 +1759,15 @@ def _join_timestamps(
 
         token_count = token.get("model_token_count")
         if not isinstance(token_count, int) or isinstance(token_count, bool) or token_count <= 0:
+            if strict:
+                complete = False
+                break
             token_count = len(phonemes)
         model_span_count = _model_span_token_count(token)
         if model_span_count is None:
+            if strict:
+                complete = False
+                break
             model_span_count = token_count + (1 if whitespace else 0)
         speech_end_index = i + token_count
         if speech_end_index >= len(durations):
@@ -1771,6 +1792,37 @@ def _join_timestamps(
     if strict and not complete:
         return []
     return timestamped
+
+
+def _record_short_sentence_timing_alignment(
+    metadata: dict[str, object],
+    timing_tokens: list[object],
+) -> None:
+    model_position_count = 0
+    complete = True
+    for raw_token in timing_tokens:
+        token = dict(raw_token) if isinstance(raw_token, dict) else {}
+        phonemes = str(token.get("phonemes") or "")
+        if not phonemes:
+            if token.get("whitespace"):
+                model_position_count += 1
+            continue
+        model_span_count = _model_span_token_count(token)
+        if model_span_count is None:
+            complete = False
+            continue
+        model_position_count += model_span_count
+    generated_token_count = metadata.get("generated_token_count")
+    metadata["timing_model_position_count"] = model_position_count
+    metadata["timing_alignment_complete"] = (
+        complete
+        and isinstance(generated_token_count, int)
+        and model_position_count == generated_token_count
+    )
+    if not metadata["timing_alignment_complete"]:
+        metadata["cut_failure_reason"] = "timing-model-position-mismatch"
+
+
 
 
 def populate_short_sentence_boundary_metadata(
@@ -1845,7 +1897,7 @@ def _record_short_sentence_cut(
     strategy = str(metadata.get("cut_strategy", "energy-valley"))
     if strategy == "energy-valley":
         counter = "short_sentence_cut_strict_success"
-    elif strategy == "timestamp-smooth":
+    elif strategy.startswith("timestamp-"):
         counter = "short_sentence_cut_adaptive_success"
     else:
         counter = "short_sentence_cut_failure"
@@ -1873,6 +1925,58 @@ def _record_short_sentence_cut(
         guard_durations["right"] = abs(right_cut - target_end) * 1000.0 / SAMPLE_RATE
     if guard_durations:
         metadata["retained_guard_duration_ms"] = guard_durations
+
+
+def _log_short_sentence_cut_failure(
+    segment: PhonemeSegment,
+    metadata: dict[str, object],
+    audio_length: int,
+) -> None:
+    reason = str(metadata.setdefault("cut_failure_reason", "unknown-cutter"))
+    target_start = _timestamp_to_sample(metadata.get("target_start_ts"))
+    target_end = _timestamp_to_sample(metadata.get("target_end_ts"))
+    previous_end = _timestamp_to_sample(metadata.get("previous_token_end_ts"))
+    next_start = _timestamp_to_sample(metadata.get("next_token_start_ts"))
+    logger.warning(
+        "short_sentence.cut.failure segment=%r segment_language=%s phrase_language=%s "
+        "terminal_form=%s template=%r reason=%s audio_samples=%d target_start=%s "
+        "target_end=%s previous_end=%s next_start=%s left_gap_samples=%s "
+        "right_gap_samples=%s has_left_context=%s has_right_context=%s cutter=%s",
+        segment.text,
+        getattr(segment, "lang", None),
+        metadata.get("phrase_language"),
+        metadata.get("phrase_terminal_form"),
+        metadata.get("phrase_template"),
+        reason,
+        audio_length,
+        target_start,
+        target_end,
+        previous_end,
+        next_start,
+        target_start - previous_end if target_start is not None and previous_end is not None else None,
+        next_start - target_end if next_start is not None and target_end is not None else None,
+        metadata.get("has_left_context"),
+        metadata.get("has_right_context"),
+        metadata.get("cutter"),
+    )
+
+
+
+def _log_short_sentence_cut_success(
+    segment: PhonemeSegment,
+    metadata: dict[str, object],
+) -> None:
+    logger.debug(
+        "short_sentence.cut.success segment=%r strategy=%s left_cut=%s right_cut=%s "
+        "left_distance_ms=%s right_distance_ms=%s phrase_language=%s",
+        segment.text,
+        metadata.get("cut_strategy"),
+        metadata.get("cut_left"),
+        metadata.get("cut_right"),
+        metadata.get("left_anchor_distance_ms"),
+        metadata.get("right_anchor_distance_ms"),
+        metadata.get("phrase_language"),
+    )
 
 
 def _record_short_sentence_cut_failure(

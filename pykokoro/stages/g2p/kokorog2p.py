@@ -48,7 +48,7 @@ class _CachedContextToken:
     whitespace: str
     char_start: int | None
     char_end: int | None
-
+    model_token_count: int | None
 
 @dataclass(frozen=True)
 class _CachedContextResult:
@@ -776,7 +776,9 @@ class KokoroG2PAdapter(G2PAdapter):
             g2p_instance,
             target_model=model_version,
         )
-        normalized = self._normalize_context_result(result)
+        normalized = self._normalize_context_result(
+            result, g2p_module=g2p_module, model_version=model_version
+        )
         self._context_cache[cache_key] = normalized
         self._context_cache.move_to_end(cache_key)
         while len(self._context_cache) > self._context_cache_max_entries:
@@ -806,30 +808,47 @@ class KokoroG2PAdapter(G2PAdapter):
         )
 
     @staticmethod
-    def _normalize_context_result(result: Any) -> _CachedContextResult:
+    def _normalize_context_result(
+        result: Any,
+        *,
+        g2p_module: Any | None = None,
+        model_version: str | None = None,
+    ) -> _CachedContextResult:
         phonemes = getattr(result, "phonemes", None) or getattr(result, "phoneme", "")
         ids = getattr(result, "ids", None)
         if ids is None:
             ids = getattr(result, "token_ids", ())
-        tokens = tuple(
-            _CachedContextToken(
-                text=str(_context_token_value(token, "text", "")),
-                phonemes=str(
-                    _context_token_value(token, "phonemes", None)
-                    or _context_token_value(token, "phoneme", "")
-                ),
-                whitespace=str(_context_token_value(token, "whitespace", "") or ""),
-                char_start=_context_token_int(token, "char_start"),
-                char_end=_context_token_int(token, "char_end"),
+        normalized_tokens: list[_CachedContextToken] = []
+        for token in getattr(result, "tokens", ()) or ():
+            token_phonemes = str(
+                _context_token_value(token, "phonemes", None)
+                or _context_token_value(token, "phoneme", "")
             )
-            for token in (getattr(result, "tokens", ()) or ())
-        )
+            model_token_count = _context_token_int(token, "model_token_count")
+            if model_token_count is not None and model_token_count <= 0:
+                model_token_count = None
+            if model_token_count is None and token_phonemes and g2p_module is not None:
+                try:
+                    model_token_count = len(
+                        g2p_module.phonemes_to_ids(token_phonemes, model=model_version)
+                    )
+                except (AttributeError, TypeError, ValueError, RuntimeError):
+                    model_token_count = None
+            normalized_tokens.append(
+                _CachedContextToken(
+                    text=str(_context_token_value(token, "text", "")),
+                    phonemes=token_phonemes,
+                    whitespace=str(_context_token_value(token, "whitespace", "") or ""),
+                    char_start=_context_token_int(token, "char_start"),
+                    char_end=_context_token_int(token, "char_end"),
+                    model_token_count=model_token_count,
+                )
+            )
         return _CachedContextResult(
             phonemes=str(phonemes),
             ids=tuple(int(token_id) for token_id in (ids or ())),
-            tokens=tokens,
+            tokens=tuple(normalized_tokens),
         )
-
 
 
     def _record_selection(
