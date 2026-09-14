@@ -443,6 +443,24 @@ print(resolve_execution_provider("auto"))
 Maintainer benchmark documentation for the PolyNorm phoneme gate lives in
 `docs/polynorm_benchmark.md`.
 
+### Short-sentence benchmark tools
+
+PyKokoro has separate tools for structural diagnosis and listening-based parameter
+comparison:
+
+- `benchmarks/short_sentence_latency.py` runs the warm policy/scenario benchmark and
+  reports final cases, actual cut strategies, failures, retries, and inference costs. It
+  defaults to a human-readable table, supports `--output-format table|jsonl|both`, JSONL
+  and summary JSON export, and `--dry-run`. It does not write WAV artifacts.
+- `benchmarks/short_sentence_parameter_sweep.py` renders one fixed short segment for an
+  ordered parameter sweep. It writes one combined labeled WAV and a JSON manifest.
+  Labels use short-sentence handling disabled, phrase retries default to zero, and the
+  manifest records reproducibility metadata and audio offsets.
+
+Use the parameter sweep for human listening, not automatic optimization. See
+[`docs/short_sentence_quality.md`](docs/short_sentence_quality.md) for CLI examples,
+supported parameters, starting ranges, and artifact details.
+
 ### Basic Text-to-Speech
 
 ```python
@@ -1546,12 +1564,12 @@ gold_config = TokenizerConfig(lexicons="gold")
 crane_config = TokenizerConfig(lexicons="crane")
 ```
 
-`lexicons=None` uses PyKokoro's language defaults. For German, the implicit selection is the static
-de-de:espeak lexicon. An explicit selection takes precedence over legacy dictionary flags.
-`lexicons=("gold", "crane")` are supported for layered lookup, where the first matching
-layer wins. That layered lookup is not a Gold-versus-Crane A/B comparison. For an A/B
-comparison, render separately with `("gold",)` and `("crane",)` and combine the results
-yourself.
+`lexicons=None` uses PyKokoro's language defaults. For German, the implicit selection is
+the static de-de:espeak lexicon. An explicit selection takes precedence over legacy
+dictionary flags. `lexicons=("gold", "crane")` are supported for layered lookup, where
+the first matching layer wins. That layered lookup is not a Gold-versus-Crane A/B
+comparison. For an A/B comparison, render separately with `("gold",)` and `("crane",)`
+and combine the results yourself.
 
 Provider-only operation is explicit with `lexicons=()`; it selects no static Lexphon
 layers and can use `fallback="espeak"` or `fallback="goruut"`. A static lexicon named

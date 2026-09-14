@@ -168,6 +168,7 @@ def test_previous_g2p_cache_schema_is_recomputed_with_cleaned_payload(
     assert payload["phonemes"] == "bykə"
     assert payload["tokens"] == [ord(char) for char in "bykə"]
 
+
 def test_context_g2p_cache_normalizes_results_and_covers_frontend_key(monkeypatch) -> None:
     adapter = KokoroG2PAdapter()
     config = PipelineConfig(generation=GenerationConfig(lang="en-us"))

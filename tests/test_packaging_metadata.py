@@ -119,6 +119,7 @@ def test_audiosig_smooth_cut_api_contract() -> None:
 
     assert callable(find_smooth_cut_point)
 
+
 def test_production_source_has_no_forbidden_dsp_imports() -> None:
     forbidden = (
         "import librosa",

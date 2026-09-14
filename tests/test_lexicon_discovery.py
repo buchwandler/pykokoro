@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import pykokoro
 import pytest
 
+import pykokoro
 from pykokoro import lexicon_discovery
 
 
@@ -59,9 +59,7 @@ def test_known_model_filter_and_unknown_capability(monkeypatch: pytest.MonkeyPat
         lexicon_discovery,
         "discover_models",
         lambda **_kwargs: SimpleNamespace(
-            models=(
-                SimpleNamespace(model_id="de-thorsten", lexicons=("gold", "crane")),
-            )
+            models=(SimpleNamespace(model_id="de-thorsten", lexicons=("gold", "crane")),)
         ),
     )
 

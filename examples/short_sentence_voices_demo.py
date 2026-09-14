@@ -107,11 +107,9 @@ def test_sentence_with_config(
     """Generate audio with a persistent pipeline and per-run voice override."""
     result = pipeline.run(text, voice=voice)
     samples, sample_rate = result.audio, result.sample_rate
-    print(
-        f"  {config_name:25} -> {len(samples):6} samples "
-        f"({len(samples) / sample_rate:.3f}s)"
-    )
+    print(f"  {config_name:25} -> {len(samples):6} samples ({len(samples) / sample_rate:.3f}s)")
     return samples, sample_rate
+
 
 def main() -> None:
     """Generate audio demonstrating short sentence handling."""
@@ -153,7 +151,9 @@ def main() -> None:
         sample_rate = 24000
         pause = np.zeros(int(sample_rate * 0.5), dtype=np.float32)
 
-        all_samples.extend([phrase_pipeline.run("With context extraction", voice=VOICE).audio, pause])
+        all_samples.extend(
+            [phrase_pipeline.run("With context extraction", voice=VOICE).audio, pause]
+        )
         baseline_samples.extend(
             [baseline_pipeline.run("Without context extraction", voice=VOICE).audio, pause]
         )

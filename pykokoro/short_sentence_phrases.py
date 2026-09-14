@@ -67,7 +67,10 @@ ENGLISH_SHORT_SENTENCE_PHRASES = ShortSentencePhraseSet(
     question=("The question was asked plainly: {segment}", "A quiet voice asked: {segment}"),
     exclamation=("The speaker called out: {segment}", "The announcement ended with: {segment}"),
     ellipsis=("The thought trailed off with: {segment}", "The unfinished sentence was: {segment}"),
-    fragment=("The note contained only these words: {segment}", "The short message read: {segment}"),
+    fragment=(
+        "The note contained only these words: {segment}",
+        "The short message read: {segment}",
+    ),
 )
 
 GERMAN_SHORT_SENTENCE_PHRASES = ShortSentencePhraseSet(

@@ -173,6 +173,7 @@ def test_inference_cache_evicts_by_bytes_and_close_clears_entries() -> None:
     generator._run_onnx("abc", style, 1.0)
     assert session.calls == 4
 
+
 def test_trace_summary_exposes_short_sentence_counters() -> None:
     trace = Trace()
     for name in (
@@ -188,6 +189,7 @@ def test_trace_summary_exposes_short_sentence_counters() -> None:
 
     summary = trace.inference_summary()
     assert all(summary[name] == 1 for name in trace.counters)
+
 
 class _PhraseSession(_Session):
     def __init__(self, audio: np.ndarray) -> None:
@@ -222,8 +224,11 @@ def _phrase_metadata(*, cutter: str = "energy-valley", valid: bool = True) -> di
 
 @pytest.mark.parametrize(
     ("waveform", "cutter"),
-    [(np.zeros(4000, dtype=np.float32), "energy-valley"), (np.ones(4000, dtype=np.float32), "timestamp-adaptive")],
- )
+    [
+        (np.zeros(4000, dtype=np.float32), "energy-valley"),
+        (np.ones(4000, dtype=np.float32), "timestamp-adaptive"),
+    ],
+)
 def test_phrase_cut_success_uses_one_model_call(waveform, cutter) -> None:
     session = _PhraseSession(waveform)
     generator = AudioGenerator(session, _Tokenizer(), inference_cache_enabled=False)

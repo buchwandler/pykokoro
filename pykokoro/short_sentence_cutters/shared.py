@@ -29,10 +29,10 @@ def boundary_windows_from_metadata(
     target_start = _sample_index(metadata.get("target_start_ts"), audio_length)
     target_end = _sample_index(metadata.get("target_end_ts"), audio_length)
     if target_start is None or target_end is None:
-        metadata["cut_failure_reason"] = "missing-target-timestamps"
+        record_cut_failure(metadata, "missing-target-timestamps", "target-boundary")
         return None
     if target_end <= target_start:
-        metadata["cut_failure_reason"] = "invalid-target-range"
+        record_cut_failure(metadata, "invalid-target-range", "target-boundary")
         return None
 
     has_left_context = bool(metadata.get("has_left_context", True))
@@ -43,20 +43,20 @@ def boundary_windows_from_metadata(
     if has_left_context:
         previous_end = _sample_index(metadata.get("previous_token_end_ts"), audio_length)
         if previous_end is None:
-            metadata["cut_failure_reason"] = "left-context-timestamp-missing"
+            record_cut_failure(metadata, "left-context-timestamp-missing", "cut-window")
             return None
         if previous_end > target_start:
-            metadata["cut_failure_reason"] = "left-search-invalid"
+            record_cut_failure(metadata, "left-search-invalid", "cut-window")
             return None
         left_window = (previous_end, target_start)
 
     if has_right_context:
         next_start = _sample_index(metadata.get("next_token_start_ts"), audio_length)
         if next_start is None:
-            metadata["cut_failure_reason"] = "right-context-timestamp-missing"
+            record_cut_failure(metadata, "right-context-timestamp-missing", "cut-window")
             return None
         if next_start < target_end:
-            metadata["cut_failure_reason"] = "right-search-invalid"
+            record_cut_failure(metadata, "right-search-invalid", "cut-window")
             return None
         right_window = (target_end, next_start)
 
@@ -70,6 +70,11 @@ def boundary_windows_from_metadata(
     )
 
 
+def record_cut_failure(metadata: dict[str, object], reason: str, stage: str = "cut-window") -> None:
+    """Record the first cut failure and its pipeline stage."""
+    metadata.setdefault("cut_failure_reason", reason)
+    metadata.setdefault("failure_stage", stage)
+
 
 def _sample_index(value: object, audio_length: int) -> int | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -82,9 +87,3 @@ def _sample_index(value: object, audio_length: int) -> int | None:
     if sample < -tolerance or sample > audio_length + tolerance:
         return None
     return min(audio_length, max(0, sample))
-
-
-def _sample_index(value: object, audio_length: int) -> int | None:
-    if not isinstance(value, (int, float)):
-        return None
-    return min(audio_length, max(0, int(float(value) * SAMPLE_RATE)))

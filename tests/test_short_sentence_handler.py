@@ -23,6 +23,7 @@ def test_phrase_cutters_default_to_timestamp_adaptive_with_compatibility_option(
     assert PhraseResolveMode(cutter="energy-valley").cutter == "energy-valley"
     assert RandomizedPhraseResolveMode(cutter="energy-valley").cutter == "energy-valley"
 
+
 def test_randomized_templates_match_terminal_punctuation() -> None:
     mode = RandomizedPhraseResolveMode()
     expected = {
@@ -44,6 +45,7 @@ def test_randomized_templates_match_terminal_punctuation() -> None:
         if text != "Go":
             assert all(template.endswith("{segment}") for template in templates)
 
+
 def test_short_sentence_config_rejects_negative_thresholds_and_retries():
     import pytest
 
@@ -51,6 +53,30 @@ def test_short_sentence_config_rejects_negative_thresholds_and_retries():
         ShortSentenceConfig(min_phoneme_length=-1)
     with pytest.raises(ValueError, match="phrase_fallback_tries"):
         ShortSentenceConfig(phrase_fallback_tries=-1)
+
+
+def test_phrase_modes_validate_cutter_settings() -> None:
+    import pytest
+
+    mode_types = (PhraseResolveMode, RandomizedPhraseResolveMode)
+    invalid_values = {
+        "frame_duration_ms": 0,
+        "energy_threshold": float("nan"),
+        "min_silence_seconds": -0.1,
+        "search_radius_ms": 0.0,
+        "context_guard_ms": -1.0,
+        "analysis_window_ms": float("inf"),
+    }
+    for mode_type in mode_types:
+        for field_name, value in invalid_values.items():
+            with pytest.raises(ValueError, match=field_name):
+                mode_type(**{field_name: value})
+
+    for mode_type in mode_types:
+        mode = mode_type()
+        assert mode.search_radius_ms == 35.0
+        assert mode.context_guard_ms == 8.0
+        assert mode.analysis_window_ms == 5.0
 
 
 def test_short_sentence_config_rejects_unknown_mode_and_malformed_template():
@@ -168,9 +194,11 @@ def test_custom_phrase_catalog_is_selected_for_segment_language() -> None:
     segment = make_segment("word", "abc")
     segment.lang = "xx"
     calls: list[tuple[str, str]] = []
+
     def context_phonemizer(text: str, language: str):
         calls.append((text, language))
         return type("Result", (), {"phonemes": "context", "ids": [1], "tokens": []})()
+
     result = apply_short_sentence_mode(
         segment,
         segment.phonemes,

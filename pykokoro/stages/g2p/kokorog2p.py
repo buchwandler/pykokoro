@@ -50,6 +50,7 @@ class _CachedContextToken:
     char_end: int | None
     model_token_count: int | None
 
+
 @dataclass(frozen=True)
 class _CachedContextResult:
     phonemes: str
@@ -66,6 +67,7 @@ class KokoroG2PAdapter(G2PAdapter):
 
         self._context_cache: OrderedDict[tuple[object, ...], _CachedContextResult] = OrderedDict()
         self._context_cache_max_entries = 256
+
     def _load(self) -> ModuleType:
         if self._g2p is not None:
             return self._g2p
@@ -703,6 +705,7 @@ class KokoroG2PAdapter(G2PAdapter):
             _effective_lexicons,
             _legacy_fallback_kwargs,
         )
+
         tokenizer_config = cfg.tokenizer_config or TokenizerConfig()
         kokorog2p_lang = SUPPORTED_LANGUAGES.get(lang, lang)
         default_language = normalize_language_code(cfg.generation.lang or lang)
@@ -796,9 +799,7 @@ class KokoroG2PAdapter(G2PAdapter):
     ) -> tuple[object, ...]:
         profile, backend, _ = self._resolve_frontend_contract(cfg)
         model_version = self._get_model_version(cfg, language)
-        kwargs = self._g2p_kwargs_for_language(
-            language, cfg, backend, profile, model_version
-        )
+        kwargs = self._g2p_kwargs_for_language(language, cfg, backend, profile, model_version)
         tokenizer_config = cfg.tokenizer_config
         lexicon_data_policy = (
             tokenizer_config.lexicon_data_policy if tokenizer_config is not None else None
@@ -855,7 +856,6 @@ class KokoroG2PAdapter(G2PAdapter):
             ids=tuple(int(token_id) for token_id in (ids or ())),
             tokens=tuple(normalized_tokens),
         )
-
 
     def _record_selection(
         self, doc: DocumentResult, lang: str, cfg: PipelineConfig, g2p_instance: G2PBase

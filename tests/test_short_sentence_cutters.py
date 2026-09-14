@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from pykokoro.short_sentence_cutters.energy_valley import find_energy_valley_cut_bounds
+from pykokoro.short_sentence_cutters.shared import _sample_index, boundary_windows_from_metadata
 from pykokoro.short_sentence_cutters.timestamp_adaptive import (
     cut_with_timestamp_adaptive,
     find_timestamp_adaptive_cut_bounds,
@@ -96,7 +97,7 @@ def test_timestamp_adaptive_shrinks_guard_for_narrow_context(monkeypatch) -> Non
 
 
 def test_timestamp_adaptive_preserves_one_sided_context(monkeypatch) -> None:
-    audio = np.ones(3000, dtype=np.float32)
+    audio = np.ones(4000, dtype=np.float32)
     metadata = _metadata(left=False, right=True)
     monkeypatch.setattr(
         "pykokoro.short_sentence_cutters.timestamp_adaptive.find_energy_valley_cut_bounds",
@@ -138,9 +139,11 @@ def test_timestamp_adaptive_accepts_zero_width_context_gaps(monkeypatch) -> None
         "pykokoro.short_sentence_cutters.timestamp_adaptive.find_energy_valley_cut_bounds",
         lambda _audio, _metadata: None,
     )
+
     def smooth_point(_audio, *, start, end, anchor, window_length):
         intervals.append((start, end))
         return anchor
+
     monkeypatch.setattr(
         "pykokoro.short_sentence_cutters.timestamp_adaptive.find_smooth_cut_point",
         smooth_point,
@@ -166,7 +169,7 @@ def test_timestamp_adaptive_accepts_terminal_target_at_audio_end(monkeypatch) ->
 
 
 def test_timestamp_adaptive_accepts_target_at_audio_start(monkeypatch) -> None:
-    audio = np.ones(3000, dtype=np.float32)
+    audio = np.ones(4000, dtype=np.float32)
     metadata = _metadata(left=False, right=True)
     metadata["target_start_ts"] = 0.0
     metadata["target_end_ts"] = 800 / 24000
@@ -193,3 +196,61 @@ def test_timestamp_adaptive_accepts_one_sample_context_gaps(monkeypatch) -> None
         lambda _audio, *, anchor, **kwargs: anchor,
     )
     assert find_timestamp_adaptive_cut_bounds(audio, metadata) == (1000, 2000)
+
+
+def test_sample_index_rejects_invalid_and_out_of_tolerance_values() -> None:
+    for value in (True, float("nan"), float("inf"), -3 / 24000, (4000 + 3) / 24000):
+        assert _sample_index(value, 4000) is None
+
+    assert _sample_index(-2 / 24000, 4000) == 0
+    assert _sample_index((4000 + 2) / 24000, 4000) == 4000
+
+
+def test_sample_index_accepts_exact_audio_boundaries() -> None:
+    assert _sample_index(0.0, 4000) == 0
+    assert _sample_index(4000 / 24000, 4000) == 4000
+
+
+def test_boundary_failure_does_not_overwrite_timing_failure() -> None:
+    metadata: dict[str, object] = {
+        "target_start_ts": 100 / 24000,
+        "target_end_ts": 200 / 24000,
+        "timing_failure_reason": "timing-model-position-mismatch",
+        "cut_failure_reason": "timing-model-position-mismatch",
+        "failure_stage": "timing-alignment",
+    }
+
+    assert boundary_windows_from_metadata(4000, metadata) is None
+    assert metadata["timing_failure_reason"] == "timing-model-position-mismatch"
+    assert metadata["cut_failure_reason"] == "timing-model-position-mismatch"
+    assert metadata["failure_stage"] == "timing-alignment"
+
+
+def test_timestamp_adaptive_uses_configured_sample_windows(monkeypatch) -> None:
+    audio = np.ones(4000, dtype=np.float32)
+    metadata = _metadata()
+    metadata.update(
+        {
+            "search_radius_ms": 10.0,
+            "context_guard_ms": 0.0,
+            "analysis_window_ms": 2.0,
+        }
+    )
+    intervals: list[tuple[int, int, int]] = []
+
+    monkeypatch.setattr(
+        "pykokoro.short_sentence_cutters.timestamp_adaptive.find_energy_valley_cut_bounds",
+        lambda _audio, _metadata: None,
+    )
+
+    def smooth_point(_audio, *, start, end, anchor, window_length):
+        intervals.append((start, end, window_length))
+        return start if anchor == 1600 else end - 1
+
+    monkeypatch.setattr(
+        "pykokoro.short_sentence_cutters.timestamp_adaptive.find_smooth_cut_point",
+        smooth_point,
+    )
+
+    assert find_timestamp_adaptive_cut_bounds(audio, metadata) == (1360, 2639)
+    assert intervals == [(1360, 1600, 48), (2400, 2640, 48)]

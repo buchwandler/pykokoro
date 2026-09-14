@@ -87,8 +87,8 @@ python examples/german_tts_samples.py --model de-crane --lexicon olaph
 python examples/german_tts_samples.py --model de-thorsten --lexicon crane
 ```
 
-Omitting `--lexicon` selects the static `de-de:espeak` lexicon. Pass `--lexicon` explicitly to compare
-`gold`, `crane`, `espeak`, or `olaph` across the German models.
+Omitting `--lexicon` selects the static `de-de:espeak` lexicon. Pass `--lexicon`
+explicitly to compare `gold`, `crane`, `espeak`, or `olaph` across the German models.
 
 Outputs are written below `example-artifacts/german_tts_samples/<model>/<lexicon>/`,
 with one file for each sentence. The four named lexicons may require Lexphon data
@@ -97,10 +97,11 @@ offline provisioning guidance.
 
 ## German lexicon data
 
-The German examples use named KokoroG2P lexicons. PyKokoro defaults to the static `de-de:espeak`
-lexicon for implicit German selections and provides automatic Lexphon provisioning: on a missing
-selected asset, it installs the asset and retries G2P construction once. This first-use step may
-access the catalog and network. Later runs use the local store.
+The German examples use named KokoroG2P lexicons. PyKokoro defaults to the static
+`de-de:espeak` lexicon for implicit German selections and provides automatic Lexphon
+provisioning: on a missing selected asset, it installs the asset and retries G2P
+construction once. This first-use step may access the catalog and network. Later runs
+use the local store.
 
 For offline deployments, pre-provision the required assets and select strict
 installed-only behavior in `TokenizerConfig`:
@@ -129,14 +130,13 @@ language demos are also import-safe and indexed here: `abbreviations.py`,
 `automatic_pauses_demo.py`, `backend_comparison.py`, `boundary_detection_analysis.py`,
 `chinese.py`, `compare_prosody_algorithms.py`, `contractions.py`,
 `contractions_advanced.py`, `cpu_benchmark.py`, `dash_variations.py`, `english.py`,
-`english_7m.py`,
-`english_clausal_comma_pause.py`, `french.py`, `headings_demo.py`, `hindi.py`,
-`homographs.py`, `italian.py`, `japanese.py`, `korean.py`, `mixed_language.py`,
-`optimal_phoneme_length_demo.py`, `paragraph_streaming.py`, `pauses_demo.py`,
-`phoneme_print_demo.py`, `pipeline_g2p_onnx_minimal.py`, `podcast.py`, `portuguese.py`,
-`prosody_algorithm_selection.py`, `prosody_demo.py`, `provider_info.py`,
-`punctuation.py`, `punctuation_variations.py`, `repro_dup_words.py`, `say_as_demo.py`,
-`short_sentence_demo.py`, `short_sentence_randomized_demo.py`,
+`english_7m.py`, `english_clausal_comma_pause.py`, `french.py`, `headings_demo.py`,
+`hindi.py`, `homographs.py`, `italian.py`, `japanese.py`, `korean.py`,
+`mixed_language.py`, `optimal_phoneme_length_demo.py`, `paragraph_streaming.py`,
+`pauses_demo.py`, `phoneme_print_demo.py`, `pipeline_g2p_onnx_minimal.py`, `podcast.py`,
+`portuguese.py`, `prosody_algorithm_selection.py`, `prosody_demo.py`,
+`provider_info.py`, `punctuation.py`, `punctuation_variations.py`, `repro_dup_words.py`,
+`say_as_demo.py`, `short_sentence_demo.py`, `short_sentence_randomized_demo.py`,
 `short_sentence_voices_demo.py`, `spanish.py`, `split_and_phonemize_demo.py`,
 `ssmd_080_portable_podcast.py`, `ssmd_demo.py`, and `termux_android_onnx.py`.
 

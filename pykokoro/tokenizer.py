@@ -76,6 +76,7 @@ def _default_lexicons_for_language(language: str) -> tuple[str, ...] | None:
         return GERMAN_DEFAULT_LEXICONS
     return None
 
+
 def _normalize_lexicons(
     value: str | Sequence[str] | None,
 ) -> tuple[str, ...] | None:

@@ -49,7 +49,11 @@ def __getattr__(name: str) -> Any:
             "VoiceCapabilities": VoiceCapabilities,
         }[name]
     if name in {"LexiconCapabilities", "LexiconDiscoveryResult", "discover_lexicons"}:
-        from .lexicon_discovery import LexiconCapabilities, LexiconDiscoveryResult, discover_lexicons
+        from .lexicon_discovery import (
+            LexiconCapabilities,
+            LexiconDiscoveryResult,
+            discover_lexicons,
+        )
 
         return {
             "LexiconCapabilities": LexiconCapabilities,

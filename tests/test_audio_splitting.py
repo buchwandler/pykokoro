@@ -261,6 +261,9 @@ def test_preprocess_phrase_mode_uses_phrase_phonemes_and_metadata(monkeypatch):
     assert metadata["phrase_template"] == "The word, {segment}, appears here."
     assert metadata["original_token_count"] == 3
     assert metadata["generated_token_count"] == 8
+    assert metadata["search_radius_ms"] == 35.0
+    assert metadata["context_guard_ms"] == 8.0
+    assert metadata["analysis_window_ms"] == 5.0
 
 
 def test_preprocess_phrase_mode_uses_pipeline_context_phonemizer() -> None:

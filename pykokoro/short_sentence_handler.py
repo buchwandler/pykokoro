@@ -16,6 +16,7 @@ sufficient context for natural prosody.
 from __future__ import annotations
 
 import logging
+import math
 import random
 import time
 from collections.abc import Callable
@@ -42,6 +43,46 @@ ResolveModeName = str | Literal[False]
 PhraseSelection = Literal["auto", "neutral", "end"]
 
 
+def _validate_phrase_cutter_settings(
+    frame_duration_ms: int,
+    energy_threshold: float,
+    min_silence_seconds: float,
+    search_radius_ms: float,
+    context_guard_ms: float,
+    analysis_window_ms: float,
+) -> None:
+    if (
+        isinstance(frame_duration_ms, bool)
+        or not isinstance(frame_duration_ms, int)
+        or frame_duration_ms <= 0
+    ):
+        raise ValueError("frame_duration_ms must be a positive integer")
+    numeric_values = {
+        "energy_threshold": energy_threshold,
+        "min_silence_seconds": min_silence_seconds,
+        "search_radius_ms": search_radius_ms,
+        "context_guard_ms": context_guard_ms,
+        "analysis_window_ms": analysis_window_ms,
+    }
+    for name, value in numeric_values.items():
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+        ):
+            raise ValueError(f"{name} must be a finite number")
+    if not 0 <= energy_threshold <= 1:
+        raise ValueError("energy_threshold must be between 0 and 1")
+    if min_silence_seconds < 0:
+        raise ValueError("min_silence_seconds must be non-negative")
+    if search_radius_ms <= 0:
+        raise ValueError("search_radius_ms must be positive")
+    if context_guard_ms < 0:
+        raise ValueError("context_guard_ms must be non-negative")
+    if analysis_window_ms <= 0:
+        raise ValueError("analysis_window_ms must be positive")
+
+
 @dataclass
 class WrapResolveMode:
     """Configuration for phoneme pretext wrapping."""
@@ -63,6 +104,19 @@ class PhraseResolveMode:
     silence_threshold: float = 1e-4
     min_silence_seconds: float = 0.02
     cutter: Literal["energy-valley", "timestamp-adaptive"] = "timestamp-adaptive"
+    search_radius_ms: float = 35.0
+    context_guard_ms: float = 8.0
+    analysis_window_ms: float = 5.0
+
+    def __post_init__(self) -> None:
+        _validate_phrase_cutter_settings(
+            self.frame_duration_ms,
+            self.energy_threshold,
+            self.min_silence_seconds,
+            self.search_radius_ms,
+            self.context_guard_ms,
+            self.analysis_window_ms,
+        )
 
 
 @dataclass
@@ -129,6 +183,19 @@ class RandomizedPhraseResolveMode:
     silence_threshold: float = 1e-4
     min_silence_seconds: float = 0.02
     cutter: Literal["energy-valley", "timestamp-adaptive"] = "timestamp-adaptive"
+    search_radius_ms: float = 35.0
+    context_guard_ms: float = 8.0
+    analysis_window_ms: float = 5.0
+
+    def __post_init__(self) -> None:
+        _validate_phrase_cutter_settings(
+            self.frame_duration_ms,
+            self.energy_threshold,
+            self.min_silence_seconds,
+            self.search_radius_ms,
+            self.context_guard_ms,
+            self.analysis_window_ms,
+        )
 
 
 ShortSentenceResolveMode = WrapResolveMode | PhraseResolveMode | RandomizedPhraseResolveMode
@@ -225,6 +292,7 @@ class ShortSentenceConfig:
     phrase_fallback_tries: int = 1
 
     phrase_catalog: dict[str, ShortSentencePhraseSet] | None = None
+
     def __post_init__(self) -> None:
         if (
             isinstance(self.min_phoneme_length, bool)
@@ -278,6 +346,7 @@ class ShortSentenceConfig:
                     raise ValueError("phrase_catalog values must be ShortSentencePhraseSet")
                 if key.strip().lower().replace("_", "-") != phrase_set.language.lower():
                     raise ValueError("phrase catalog key must match its declared language")
+
     def should_use_pause_surrounding(self, phoneme_length: int, text: str) -> bool:
         """Check if segment should use pause surrounding.
 
@@ -444,7 +513,11 @@ def _build_wrap_application(
     cut_failure_reason: str | None = None,
 ) -> ShortSentenceApplication:
     wrap_mode = config.resolve_modes.get("wrap")
-    pretext = wrap_mode.phoneme_pretext if isinstance(wrap_mode, WrapResolveMode) else config.phoneme_pretext
+    pretext = (
+        wrap_mode.phoneme_pretext
+        if isinstance(wrap_mode, WrapResolveMode)
+        else config.phoneme_pretext
+    )
     if pretext == "—":
         pretext = config.phoneme_pretext
     wrapped = f"{pretext}{phonemes}{pretext}"
@@ -652,9 +725,7 @@ def _select_phrase_fallback_templates(
     used = set(used_templates)
     if isinstance(mode, PhraseResolveMode):
         effective_phrase_set = (
-            phrase_set
-            if phrase_set is not None and phrase_set.language != "en"
-            else None
+            phrase_set if phrase_set is not None and phrase_set.language != "en" else None
         )
         choices = _default_ranked_phrase_choices(segment_text, effective_phrase_set)
         return _unique_phrase_templates(choices, used, limit)
@@ -728,6 +799,7 @@ def _phrase_choices(
     )
     return choices or [fallback]
 
+
 def _configured_phrase_mode(config: ShortSentenceConfig) -> PhraseResolveMode | None:
     mode = config.resolve_modes.get("phrase")
     if isinstance(mode, PhraseResolveMode):
@@ -748,6 +820,7 @@ def _default_ranked_phrase_choices(
     )
     return _phrase_choices(segment_text, defaults, phrase_set=phrase_set)
 
+
 def _unique_phrase_templates(
     choices: list[str],
     used: set[str],
@@ -764,7 +837,9 @@ def _unique_phrase_templates(
     return selected
 
 
-def _terminal_form(segment_text: str) -> Literal["declarative", "question", "exclamation", "ellipsis", "fragment"]:
+def _terminal_form(
+    segment_text: str,
+) -> Literal["declarative", "question", "exclamation", "ellipsis", "fragment"]:
     text = segment_text.rstrip()
     if text.endswith(("…", "...")):
         return "ellipsis"
@@ -784,6 +859,7 @@ def _uses_end_phrase(segment_text: str, mode: ShortSentenceResolveMode) -> bool:
         if mode.phrase_selection == "neutral":
             return False
     return _terminal_form(segment_text) != "fragment"
+
 
 def _build_short_sentence_metadata(
     *,
@@ -807,12 +883,18 @@ def _build_short_sentence_metadata(
         silence_threshold = 1e-4
         min_silence_seconds = 0.02
         cutter = "energy-valley"
+        search_radius_ms = 35.0
+        context_guard_ms = 8.0
+        analysis_window_ms = 5.0
     else:
         frame_duration_ms = mode.frame_duration_ms
         energy_threshold = mode.energy_threshold
         silence_threshold = mode.silence_threshold
         min_silence_seconds = mode.min_silence_seconds
         cutter = mode.cutter
+        search_radius_ms = mode.search_radius_ms
+        context_guard_ms = mode.context_guard_ms
+        analysis_window_ms = mode.analysis_window_ms
     expected_cut_ratio = 1.0
     if generated_token_count > 0:
         expected_cut_ratio = original_token_count / generated_token_count
@@ -831,6 +913,9 @@ def _build_short_sentence_metadata(
         "silence_threshold": silence_threshold,
         "min_silence_seconds": min_silence_seconds,
         "cutter": cutter,
+        "search_radius_ms": search_radius_ms,
+        "context_guard_ms": context_guard_ms,
+        "analysis_window_ms": analysis_window_ms,
     }
     if timing_tokens:
         metadata["timing_tokens"] = timing_tokens
@@ -872,10 +957,18 @@ def _build_short_sentence_retry_metadata(
         "silence_threshold": base_metadata.get("silence_threshold", 1e-4),
         "min_silence_seconds": base_metadata.get("min_silence_seconds", 0.02),
         "cutter": base_metadata.get("cutter", "energy-valley"),
+        "search_radius_ms": base_metadata.get("search_radius_ms", 35.0),
+        "context_guard_ms": base_metadata.get("context_guard_ms", 8.0),
+        "analysis_window_ms": base_metadata.get("analysis_window_ms", 5.0),
     }
     if timing_tokens:
         metadata["timing_tokens"] = timing_tokens
-    for key in ("fallback_phonemes", "fallback_tokens", "phrase_fallback_tries"):
+    for key in (
+        "fallback_phonemes",
+        "fallback_tokens",
+        "phrase_fallback_tries",
+        "short_sentence_attempts",
+    ):
         if key in base_metadata:
             metadata[key] = base_metadata[key]
     return metadata

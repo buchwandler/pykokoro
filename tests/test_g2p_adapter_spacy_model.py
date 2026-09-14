@@ -222,6 +222,7 @@ def test_kokorog2p_adapter_uses_german_implicit_espeak_lexicon(monkeypatch):
 
     assert captured["lexicons"] == ("espeak",)
 
+
 def test_g2p_instance_cache_distinguishes_named_lexicons(monkeypatch):
     created: list[dict[str, object]] = []
 

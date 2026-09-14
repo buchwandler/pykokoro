@@ -254,7 +254,6 @@ class TestTokenizer:
         assert captured["spacy_model"] is None
         assert captured["spacy_model_size"] == "lg"
 
-
     def test_get_g2p_uses_german_implicit_espeak_lexicon(self, monkeypatch):
         """Test German defaults to the static de-de:espeak lexicon."""
         import pykokoro.tokenizer as tokenizer_module
@@ -288,6 +287,7 @@ class TestTokenizer:
         tokenizer._get_g2p("en-us")
 
         assert captured["lexicons"] is None
+
     def test_normalize_text(self, tokenizer):
         """Test text normalization."""
         assert tokenizer.normalize_text("  hello  ") == "hello"

@@ -53,9 +53,7 @@ def _language_matches(requested: str | None, locale: str) -> bool:
         return True
     requested = _normalize_language(requested)
     locale = _normalize_language(locale)
-    return locale == requested or (
-        "-" not in requested and locale.partition("-")[0] == requested
-    )
+    return locale == requested or ("-" not in requested and locale.partition("-")[0] == requested)
 
 
 def _installed_state(asset_id: str | None) -> bool | None:
