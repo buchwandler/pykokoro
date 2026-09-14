@@ -232,10 +232,10 @@ def test_unsupported_phrase_language_uses_wrap_without_english_context() -> None
     assert result.metadata["cut_failure_reason"] == "no-localized-phrase-catalog"
     assert calls == []
 
+
 def test_cutter_override_keeps_german_builtin_carrier_localized() -> None:
     from pykokoro.short_sentence_phrases import GERMAN_SHORT_SENTENCE_PHRASES
+
     mode = PhraseResolveMode(cutter="energy-valley")
-    template = _select_phrase_template(
-        "zwölf.", mode, phrase_set=GERMAN_SHORT_SENTENCE_PHRASES
-    )
+    template = _select_phrase_template("zwölf.", mode, phrase_set=GERMAN_SHORT_SENTENCE_PHRASES)
     assert template == GERMAN_SHORT_SENTENCE_PHRASES.declarative[0]

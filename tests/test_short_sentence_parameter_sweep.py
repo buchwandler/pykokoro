@@ -130,22 +130,36 @@ def test_parameter_sweep_dry_run_does_not_load_models() -> None:
     assert "Retries: 0" in result.stdout
     assert "3  energy-threshold=0.08" in result.stdout
 
+
 def test_parameter_sweep_rejects_pre_cutter_timing_failure_by_default() -> None:
     calls: list[str] = []
+
     def render_text(text: str, config) -> RenderedAudio:
         _ = config
         calls.append(text)
         if text == "Why?":
             return RenderedAudio(
-                np.ones(2, dtype=np.float32), 10,
-                {"failure_stage": "timing-alignment", "timing_failure_reason": "timing-model-position-mismatch", "cutter_reached": False},
+                np.ones(2, dtype=np.float32),
+                10,
+                {
+                    "failure_stage": "timing-alignment",
+                    "timing_failure_reason": "timing-model-position-mismatch",
+                    "cutter_reached": False,
+                },
             )
         return RenderedAudio(np.ones(2, dtype=np.float32), 10, {})
+
     with pytest.raises(ValueError, match="not affect the observed failure"):
         run_parameter_sweep(
-            text="Why?", cutter="timestamp-adaptive", parameter="search-radius-ms",
-            values=[15.0, 25.0], phrase_template="Fixed {segment}", voice="af_sarah",
-            language="en-us", model_source="github", model_variant="v1.0",
+            text="Why?",
+            cutter="timestamp-adaptive",
+            parameter="search-radius-ms",
+            values=[15.0, 25.0],
+            phrase_template="Fixed {segment}",
+            voice="af_sarah",
+            language="en-us",
+            model_source="github",
+            model_variant="v1.0",
             render_text=render_text,
         )
     assert calls == ["Short sentence parameter sweep.", "Search radius ms is 15.", "Why?"]

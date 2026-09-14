@@ -257,6 +257,7 @@ def test_strict_timestamp_join_rejects_incomplete_duration_mapping() -> None:
 
     assert _join_timestamps(tokens, durations, strict=True) == []
 
+
 def test_explicit_model_span_overrides_compatibility_whitespace_rule() -> None:
     token = G2PAlignmentToken(
         "word", "phonemes", " ", model_token_count=2, model_span_token_count=7
@@ -285,4 +286,6 @@ def test_context_normalization_reconciles_prefix_spans_with_whole_phrase_ids() -
         result, g2p_module=FakeG2P(), model_version="1.0"
     )
     assert [token.model_span_token_count for token in normalized.tokens] == [2, 1]
-    assert sum(token.model_span_token_count or 0 for token in normalized.tokens) == len(normalized.ids)
+    assert sum(token.model_span_token_count or 0 for token in normalized.tokens) == len(
+        normalized.ids
+    )

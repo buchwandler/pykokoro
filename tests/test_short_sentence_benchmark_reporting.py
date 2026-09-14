@@ -108,6 +108,7 @@ def test_summary_and_table_include_run_metadata_and_sections() -> None:
     assert "Phrase attempt accounting" in table
     assert "Failure reasons" in table
 
+
 def test_attempt_history_reports_success_ordinal_strategy_template_and_stages() -> None:
     rows = [
         {
@@ -118,8 +119,21 @@ def test_attempt_history_reports_success_ordinal_strategy_template_and_stages() 
                 "cut_strategy": "timestamp-smooth",
                 "fallback_used": "phrase",
                 "short_sentence_attempts": [
-                    {"attempt": 0, "ordinal": 1, "succeeded": False, "failure_stage": "timing-alignment", "failure_reason": "timing-model-position-mismatch", "phrase_template": "A {segment}"},
-                    {"attempt": 1, "ordinal": 2, "succeeded": True, "actual_cut_strategy": "timestamp-smooth", "phrase_template": "B {segment}"},
+                    {
+                        "attempt": 0,
+                        "ordinal": 1,
+                        "succeeded": False,
+                        "failure_stage": "timing-alignment",
+                        "failure_reason": "timing-model-position-mismatch",
+                        "phrase_template": "A {segment}",
+                    },
+                    {
+                        "attempt": 1,
+                        "ordinal": 2,
+                        "succeeded": True,
+                        "actual_cut_strategy": "timestamp-smooth",
+                        "phrase_template": "B {segment}",
+                    },
                 ],
             },
         }

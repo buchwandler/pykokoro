@@ -1152,7 +1152,9 @@ class AudioGenerator:
             0 if pred_dur is None else int(np.asarray(pred_dur).reshape(-1).size)
         )
         _record_short_sentence_timing_alignment(
-            short_sentence_metadata, timing_tokens, pred_duration_count=short_sentence_metadata["pred_duration_count"]
+            short_sentence_metadata,
+            timing_tokens,
+            pred_duration_count=short_sentence_metadata["pred_duration_count"],
         )
         if pred_dur is None:
             short_sentence_metadata.setdefault("timing_failure_reason", "missing-duration-output")
@@ -1265,9 +1267,11 @@ class AudioGenerator:
         if trace is not None:
             trace.increment_counter("short_sentence_wrap_fallback")
         history = short_sentence_metadata.get("short_sentence_attempts")
-        failures = [
-            item for item in history if isinstance(item, dict) and item.get("succeeded") is False
-        ] if isinstance(history, list) else []
+        failures = (
+            [item for item in history if isinstance(item, dict) and item.get("succeeded") is False]
+            if isinstance(history, list)
+            else []
+        )
         reasons: dict[str, int] = {}
         for item in failures:
             reason = item.get("failure_reason")
@@ -1853,7 +1857,11 @@ def _join_timestamps(
                 complete = False
                 break
             token_count = len(phonemes)
-        if strict and "model_span_token_count" in token and token.get("model_span_token_count") is None:
+        if (
+            strict
+            and "model_span_token_count" in token
+            and token.get("model_span_token_count") is None
+        ):
             complete = False
             break
         model_span_count = _model_span_token_count(token)
@@ -1960,6 +1968,7 @@ def _record_short_sentence_timing_alignment(
         metadata.setdefault("timing_failure_reason", "timing-model-position-mismatch")
         metadata.setdefault("failure_stage", "timing-alignment")
         metadata.setdefault("cut_failure_reason", "timing-model-position-mismatch")
+
 
 def populate_short_sentence_boundary_metadata(
     metadata: dict[str, object],
@@ -2110,6 +2119,7 @@ def _log_short_sentence_cut_success(
         metadata.get("phrase_language"),
     )
 
+
 def _record_short_sentence_cut_failure(
     metadata: dict[str, object],
     trace: Trace | None,
@@ -2133,10 +2143,12 @@ def _record_short_sentence_cut_failure(
             trace.increment_counter(counter)
     _ = reason
 
+
 def _clear_short_sentence_failure(metadata: dict[str, object]) -> None:
     """Remove outcome fields from an attempt that ultimately succeeded."""
     for key in ("cut_failure_reason", "timing_failure_reason", "failure_stage"):
         metadata.pop(key, None)
+
 
 def _record_short_sentence_attempt(
     metadata: dict[str, object],

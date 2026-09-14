@@ -82,6 +82,7 @@ def _short_sentence_config(policy: str, phrase_fallback_tries: int = 1) -> Short
         phrase_fallback_tries=phrase_fallback_tries,
     )
 
+
 def _short_sentence_metadata(trace: Any) -> dict[str, object]:
     if trace is None:
         return {}
@@ -145,18 +146,36 @@ def _summary(
         "cut_failure_reason": short_metadata.get("cut_failure_reason"),
         "fallback_retries": short_metadata.get("phrase_fallback_tries", 1),
         "max_phrase_attempts": int(short_metadata.get("phrase_fallback_tries", 1)) + 1,
-        "phrase_attempt_count": len(short_metadata.get("short_sentence_attempts", [])) if isinstance(short_metadata.get("short_sentence_attempts"), list) else 0,
+        "phrase_attempt_count": len(short_metadata.get("short_sentence_attempts", []))
+        if isinstance(short_metadata.get("short_sentence_attempts"), list)
+        else 0,
         "attempt_history": short_metadata.get("short_sentence_attempts", []),
-        "success_attempt_ordinal": next((attempt.get("ordinal") for attempt in short_metadata.get("short_sentence_attempts", []) if isinstance(attempt, dict) and attempt.get("succeeded") is True), None) if isinstance(short_metadata.get("short_sentence_attempts"), list) else None,
-        "success_template": short_metadata.get("phrase_template") if short_metadata.get("cut_strategy") in {"energy-valley", "timestamp-smooth", "timestamp-smooth-relaxed", "timestamp-anchor"} else None,
+        "success_attempt_ordinal": next(
+            (
+                attempt.get("ordinal")
+                for attempt in short_metadata.get("short_sentence_attempts", [])
+                if isinstance(attempt, dict) and attempt.get("succeeded") is True
+            ),
+            None,
+        )
+        if isinstance(short_metadata.get("short_sentence_attempts"), list)
+        else None,
+        "success_template": short_metadata.get("phrase_template")
+        if short_metadata.get("cut_strategy")
+        in {"energy-valley", "timestamp-smooth", "timestamp-smooth-relaxed", "timestamp-anchor"}
+        else None,
         "timing_failure_reason": short_metadata.get("timing_failure_reason"),
         "failure_stage": short_metadata.get("failure_stage"),
         "timing_token_count": short_metadata.get("timing_token_count"),
         "timing_target_token_count": short_metadata.get("timing_target_token_count"),
         "timing_model_position_count": short_metadata.get("timing_model_position_count"),
         "timing_model_position_delta": short_metadata.get("timing_model_position_delta"),
-        "timing_first_unresolved_token_index": short_metadata.get("timing_first_unresolved_token_index"),
-        "timing_first_unresolved_token_text": short_metadata.get("timing_first_unresolved_token_text"),
+        "timing_first_unresolved_token_index": short_metadata.get(
+            "timing_first_unresolved_token_index"
+        ),
+        "timing_first_unresolved_token_text": short_metadata.get(
+            "timing_first_unresolved_token_text"
+        ),
         "generated_token_count": short_metadata.get("generated_token_count"),
         "pred_duration_count": short_metadata.get("pred_duration_count"),
         "timing_alignment_complete": short_metadata.get("timing_alignment_complete"),
@@ -215,6 +234,7 @@ def _add_arguments(parser: argparse.ArgumentParser) -> None:
         help="Comma-separated fallback retry budgets; overrides --phrase-fallback-tries.",
     )
 
+
 def _retry_budgets(args: argparse.Namespace) -> tuple[int, ...]:
     if args.retry_budgets:
         raw_values = args.retry_budgets.split(",")
@@ -235,17 +255,31 @@ def _dry_run_rows(voices: tuple[str, ...], budgets: tuple[int, ...]) -> list[dic
         for voice in voices:
             for policy in POLICIES:
                 for scenario, text, language in SCENARIOS:
-                    rows.append({
-                        "policy": policy, "configured_policy": policy, "scenario": scenario,
-                        "text": text, "language": language, "voice": voice,
-                        "fallback_retries": budget, "max_phrase_attempts": budget + 1,
-                    })
+                    rows.append(
+                        {
+                            "policy": policy,
+                            "configured_policy": policy,
+                            "scenario": scenario,
+                            "text": text,
+                            "language": language,
+                            "voice": voice,
+                            "fallback_retries": budget,
+                            "max_phrase_attempts": budget + 1,
+                        }
+                    )
                 for text in DEMO_TEXTS:
-                    rows.append({
-                        "policy": policy, "configured_policy": policy, "scenario": "demo-corpus",
-                        "text": text, "language": "en-us", "voice": voice,
-                        "fallback_retries": budget, "max_phrase_attempts": budget + 1,
-                    })
+                    rows.append(
+                        {
+                            "policy": policy,
+                            "configured_policy": policy,
+                            "scenario": "demo-corpus",
+                            "text": text,
+                            "language": "en-us",
+                            "voice": voice,
+                            "fallback_retries": budget,
+                            "max_phrase_attempts": budget + 1,
+                        }
+                    )
     return rows
 
 
@@ -262,10 +296,14 @@ def run_benchmark(args: argparse.Namespace) -> list[dict[str, Any]]:
                 for language in languages:
                     pipelines[(policy, language, budget)] = KokoroPipeline(
                         PipelineConfig(
-                            voice=voices[0], model_source=args.model_source,
-                            model_variant=args.model_variant, model_path=args.model_path,
-                            voices_path=args.voices_path, generation=GenerationConfig(lang=language, speed=1.0),
-                            short_sentence_config=_short_sentence_config(policy, budget), return_trace=True,
+                            voice=voices[0],
+                            model_source=args.model_source,
+                            model_variant=args.model_variant,
+                            model_path=args.model_path,
+                            voices_path=args.voices_path,
+                            generation=GenerationConfig(lang=language, speed=1.0),
+                            short_sentence_config=_short_sentence_config(policy, budget),
+                            return_trace=True,
                         )
                     )
         for pipeline in pipelines.values():
@@ -282,16 +320,42 @@ def run_benchmark(args: argparse.Namespace) -> list[dict[str, Any]]:
                             started = time.perf_counter()
                             result = pipeline.run(text, voice=voice)
                             wall_ms = (time.perf_counter() - started) * 1000.0
-                            row = _summary(result, policy=policy, scenario=scenario, text=text, wall_ms=wall_ms)
-                            row.update({"voice": voice, "language": language, "model_source": args.model_source, "model_variant": args.model_variant, "fallback_retries": budget, "max_phrase_attempts": budget + 1})
+                            row = _summary(
+                                result, policy=policy, scenario=scenario, text=text, wall_ms=wall_ms
+                            )
+                            row.update(
+                                {
+                                    "voice": voice,
+                                    "language": language,
+                                    "model_source": args.model_source,
+                                    "model_variant": args.model_variant,
+                                    "fallback_retries": budget,
+                                    "max_phrase_attempts": budget + 1,
+                                }
+                            )
                             rows.append(row)
                         if language == "en-us":
                             for text in DEMO_TEXTS:
                                 started = time.perf_counter()
                                 result = pipeline.run(text, voice=voice)
                                 wall_ms = (time.perf_counter() - started) * 1000.0
-                                row = _summary(result, policy=policy, scenario="demo-corpus", text=text, wall_ms=wall_ms)
-                                row.update({"voice": voice, "language": language, "model_source": args.model_source, "model_variant": args.model_variant, "fallback_retries": budget, "max_phrase_attempts": budget + 1})
+                                row = _summary(
+                                    result,
+                                    policy=policy,
+                                    scenario="demo-corpus",
+                                    text=text,
+                                    wall_ms=wall_ms,
+                                )
+                                row.update(
+                                    {
+                                        "voice": voice,
+                                        "language": language,
+                                        "model_source": args.model_source,
+                                        "model_variant": args.model_variant,
+                                        "fallback_retries": budget,
+                                        "max_phrase_attempts": budget + 1,
+                                    }
+                                )
                                 rows.append(row)
         return rows
     finally:

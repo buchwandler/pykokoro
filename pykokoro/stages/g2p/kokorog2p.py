@@ -827,7 +827,9 @@ class KokoroG2PAdapter(G2PAdapter):
     ) -> list[int | None]:
         """Reconcile alignment items against the exact phrase tokenizer output."""
         explicit = [token.model_span_token_count for token in tokens]
-        if all(isinstance(span, int) and not isinstance(span, bool) and span > 0 for span in explicit) and sum(cast(list[int], explicit)) == len(ids):
+        if all(
+            isinstance(span, int) and not isinstance(span, bool) and span > 0 for span in explicit
+        ) and sum(cast(list[int], explicit)) == len(ids):
             return cast(list[int | None], explicit)
         tokenizer = getattr(g2p_module, "phonemes_to_ids", None)
         if not callable(tokenizer) or not tokens:
@@ -849,6 +851,7 @@ class KokoroG2PAdapter(G2PAdapter):
         if previous_count != len(ids):
             return [None for _ in tokens]
         return spans
+
     @staticmethod
     def _normalize_context_result(
         result: Any,
@@ -903,6 +906,7 @@ class KokoroG2PAdapter(G2PAdapter):
             ids=ids_tuple,
             tokens=tuple(normalized_tokens),
         )
+
     def _record_selection(
         self, doc: DocumentResult, lang: str, cfg: PipelineConfig, g2p_instance: G2PBase
     ) -> None:

@@ -27,7 +27,11 @@ def classify_short_sentence_outcome(
     if configured_policy == "wrap" and kind == "wrap":
         return "wrap-configured"
     if kind == "wrap":
-        return "wrap-no-localized-catalog" if failure_reason == "no-localized-phrase-catalog" else "wrap-runtime-resolution"
+        return (
+            "wrap-no-localized-catalog"
+            if failure_reason == "no-localized-phrase-catalog"
+            else "wrap-runtime-resolution"
+        )
     if fallback_used == "wrap" or cut_strategy == "wrap":
         return "wrap-fallback"
     if cut_strategy in SUCCESSFUL_CUT_STRATEGIES:
@@ -51,9 +55,16 @@ def normalize_short_sentence_row(row: dict[str, Any]) -> dict[str, Any]:
         metadata = {
             key: row[key]
             for key in (
-                "kind", "fallback_used", "cut_strategy", "timing_failure_reason",
-                "cut_failure_reason", "failure_stage", "phrase_template", "phrase_language",
-                "cutter", "configured_cutter",
+                "kind",
+                "fallback_used",
+                "cut_strategy",
+                "timing_failure_reason",
+                "cut_failure_reason",
+                "failure_stage",
+                "phrase_template",
+                "phrase_language",
+                "cutter",
+                "configured_cutter",
             )
             if key in row
         }
@@ -77,15 +88,21 @@ def normalize_short_sentence_row(row: dict[str, Any]) -> dict[str, Any]:
             "phrase_attempt_count": attempt_count,
             "failed_phrase_attempt_count": len(failed_attempts),
             "success_attempt_ordinal": success_ordinal,
-            "success_template": (success or {}).get("phrase_template", metadata.get("phrase_template"))
+            "success_template": (success or {}).get(
+                "phrase_template", metadata.get("phrase_template")
+            )
             if success is not None or outcome.startswith("phrase-cut")
             else None,
             "configured_cutter": metadata.get("configured_cutter", metadata.get("cutter")),
-            "actual_cut_strategy": metadata.get("actual_cut_strategy", metadata.get("cut_strategy")),
+            "actual_cut_strategy": metadata.get(
+                "actual_cut_strategy", metadata.get("cut_strategy")
+            ),
             "fallback_used": metadata.get("fallback_used", row.get("fallback_used")),
             "retry_attempts": metadata.get("retry_attempts", row.get("retry_attempts", 0)),
             "cut_failure_reason": metadata.get("cut_failure_reason", row.get("cut_failure_reason")),
-            "timing_failure_reason": metadata.get("timing_failure_reason", row.get("timing_failure_reason")),
+            "timing_failure_reason": metadata.get(
+                "timing_failure_reason", row.get("timing_failure_reason")
+            ),
             "failure_stage": metadata.get("failure_stage", row.get("failure_stage")),
             "attempt_history": history,
         }
@@ -103,8 +120,12 @@ def aggregate_short_sentence_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     normalized_rows = [normalize_short_sentence_row(row) for row in rows]
     policies: dict[str, dict[str, Any]] = defaultdict(
         lambda: {
-            "cases": 0, "phrase_cut_successes": 0, "initial_successes": 0,
-            "retry_successes": 0, "wrap_fallbacks": 0, "unresolved": 0,
+            "cases": 0,
+            "phrase_cut_successes": 0,
+            "initial_successes": 0,
+            "retry_successes": 0,
+            "wrap_fallbacks": 0,
+            "unresolved": 0,
         }
     )
     actual_strategies: Counter[str] = Counter()
@@ -113,11 +134,20 @@ def aggregate_short_sentence_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
     failure_by_stage: Counter[str] = Counter()
     failure_reasons: Counter[str] = Counter()
     attempts = {
-        "initial_phrase_attempts": 0, "phrase_retries": 0, "cut_failures": 0,
-        "wrap_fallback_renders": 0, "onnx_calls": 0,
+        "initial_phrase_attempts": 0,
+        "phrase_retries": 0,
+        "cut_failures": 0,
+        "wrap_fallback_renders": 0,
+        "onnx_calls": 0,
     }
     budgets: dict[str, dict[str, Any]] = defaultdict(
-        lambda: {"cases": 0, "phrase_cut_successes": 0, "wrap_fallbacks": 0, "onnx_calls": [], "wall_ms": []}
+        lambda: {
+            "cases": 0,
+            "phrase_cut_successes": 0,
+            "wrap_fallbacks": 0,
+            "onnx_calls": [],
+            "wall_ms": [],
+        }
     )
     for row in normalized_rows:
         policy = str(row["configured_policy"])
@@ -141,7 +171,9 @@ def aggregate_short_sentence_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 strategy = attempt.get("actual_cut_strategy", attempt.get("cut_strategy"))
                 if isinstance(strategy, str) and strategy:
                     actual_strategies[strategy] += 1
-                    success_by_ordinal[policy][str(attempt.get("ordinal", _integer(attempt, "attempt") + 1))] += 1
+                    success_by_ordinal[policy][
+                        str(attempt.get("ordinal", _integer(attempt, "attempt") + 1))
+                    ] += 1
                 template = attempt.get("phrase_template")
                 if isinstance(template, str) and template:
                     success_by_template[template] += 1
@@ -178,7 +210,9 @@ def aggregate_short_sentence_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     for summary in policies.values():
         cases = summary["cases"]
-        summary["phrase_cut_success_rate"] = summary["phrase_cut_successes"] / cases if cases else 0.0
+        summary["phrase_cut_success_rate"] = (
+            summary["phrase_cut_successes"] / cases if cases else 0.0
+        )
     retry_comparison: dict[str, dict[str, Any]] = {}
     for budget, value in budgets.items():
         cases = value["cases"]
@@ -189,13 +223,17 @@ def aggregate_short_sentence_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "phrase_cut_successes": value["phrase_cut_successes"],
             "phrase_cut_success_rate": value["phrase_cut_successes"] / cases if cases else 0.0,
             "wrap_fallbacks": value["wrap_fallbacks"],
-            "mean_onnx_calls": sum(value["onnx_calls"]) / len(value["onnx_calls"]) if value["onnx_calls"] else None,
+            "mean_onnx_calls": sum(value["onnx_calls"]) / len(value["onnx_calls"])
+            if value["onnx_calls"]
+            else None,
             "p50_wall_ms": median(value["wall_ms"]) if value["wall_ms"] else None,
         }
     return {
         "cases": dict(policies),
         "actual_cut_strategies": dict(actual_strategies),
-        "success_by_attempt_ordinal": {policy: dict(counts) for policy, counts in success_by_ordinal.items()},
+        "success_by_attempt_ordinal": {
+            policy: dict(counts) for policy, counts in success_by_ordinal.items()
+        },
         "success_by_strategy": dict(actual_strategies),
         "success_by_template": dict(success_by_template),
         "failure_by_stage": dict(failure_by_stage),
@@ -236,7 +274,9 @@ def format_short_sentence_table(summary: dict[str, Any]) -> str:
             retries = int(run["fallback_retries"])
             lines.append(f"Fallback retries: {retries}")
             lines.append(f"Maximum phrase attempts per short segment: {retries + 1}")
-    lines.extend(["", "Configured policy      Cases  Phrase cut  Initial  Retry  Wrap fallback  Unresolved"])
+    lines.extend(
+        ["", "Configured policy      Cases  Phrase cut  Initial  Retry  Wrap fallback  Unresolved"]
+    )
     for policy, values in summary.get("cases", {}).items():
         lines.append(
             f"{policy:<22}{values['cases']:>5}  {values['phrase_cut_successes']:>11}  "
@@ -245,15 +285,28 @@ def format_short_sentence_table(summary: dict[str, Any]) -> str:
         )
     lines.extend(["", "Phrase-cut success rate"])
     for policy, values in summary.get("cases", {}).items():
-        lines.append(f"{policy:<22}{values['phrase_cut_successes']}/{values['cases']}  {_percentage(values['phrase_cut_successes'], values['cases'])}")
+        lines.append(
+            f"{policy:<22}{values['phrase_cut_successes']}/{values['cases']}  {_percentage(values['phrase_cut_successes'], values['cases'])}"
+        )
     lines.extend(["", "Success by attempt ordinal"])
     for policy, values in summary.get("success_by_attempt_ordinal", {}).items():
-        lines.append(f"{policy:<22}" + "  ".join(f"#{ordinal}: {count}" for ordinal, count in sorted(values.items(), key=lambda item: int(item[0]))))
+        lines.append(
+            f"{policy:<22}"
+            + "  ".join(
+                f"#{ordinal}: {count}"
+                for ordinal, count in sorted(values.items(), key=lambda item: int(item[0]))
+            )
+        )
     lines.extend(["", "Actual successful cut strategies"])
     for strategy, count in summary.get("actual_cut_strategies", {}).items():
         lines.append(f"{strategy:<30}{count}")
     lines.extend(["", "Phrase attempt accounting"])
-    labels = {"initial_phrase_attempts": "Initial phrase attempts", "phrase_retries": "Phrase retries", "cut_failures": "Cut failures", "wrap_fallback_renders": "Wrap fallback renders"}
+    labels = {
+        "initial_phrase_attempts": "Initial phrase attempts",
+        "phrase_retries": "Phrase retries",
+        "cut_failures": "Cut failures",
+        "wrap_fallback_renders": "Wrap fallback renders",
+    }
     for key, label in labels.items():
         lines.append(f"{label:<30}{summary.get('attempts', {}).get(key, 0)}")
     lines.extend(["", "Failure stage"])
@@ -264,13 +317,21 @@ def format_short_sentence_table(summary: dict[str, Any]) -> str:
         lines.append(f"{reason:<30}{count}")
     if summary.get("retry_budget_comparison"):
         lines.extend(["", "Retry-budget comparison"])
-        lines.append("Retries  Max attempts  Cases  Phrase success  Wrap fallback  Mean ONNX calls  p50 ms")
+        lines.append(
+            "Retries  Max attempts  Cases  Phrase success  Wrap fallback  Mean ONNX calls  p50 ms"
+        )
         for value in summary["retry_budget_comparison"].values():
-            lines.append(f"{value['fallback_retries']:>7}  {value['max_phrase_attempts']:>12}  {value['cases']:>5}  {value['phrase_cut_successes']:>14}  {value['wrap_fallbacks']:>13}  {value['mean_onnx_calls']!s:>16}  {value['p50_wall_ms']!s:>6}")
+            lines.append(
+                f"{value['fallback_retries']:>7}  {value['max_phrase_attempts']:>12}  {value['cases']:>5}  {value['phrase_cut_successes']:>14}  {value['wrap_fallbacks']:>13}  {value['mean_onnx_calls']!s:>16}  {value['p50_wall_ms']!s:>6}"
+            )
     return "\n".join(lines)
 
 
 __all__ = [
-    "SUCCESSFUL_CUT_STRATEGIES", "aggregate_short_sentence_rows", "build_short_sentence_summary",
-    "classify_short_sentence_outcome", "format_short_sentence_table", "normalize_short_sentence_row",
+    "SUCCESSFUL_CUT_STRATEGIES",
+    "aggregate_short_sentence_rows",
+    "build_short_sentence_summary",
+    "classify_short_sentence_outcome",
+    "format_short_sentence_table",
+    "normalize_short_sentence_row",
 ]

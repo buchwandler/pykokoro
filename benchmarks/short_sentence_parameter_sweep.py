@@ -232,13 +232,29 @@ def _candidate_manifest_entry(
         "retry_attempts": metadata.get("retry_attempts", 0),
         "cut_failure_reason": metadata.get("cut_failure_reason"),
         "attempt_history": metadata.get("short_sentence_attempts", []),
-        "success_attempt_ordinal": next((attempt.get("ordinal") for attempt in metadata.get("short_sentence_attempts", []) if isinstance(attempt, dict) and attempt.get("succeeded") is True), None) if isinstance(metadata.get("short_sentence_attempts"), list) else None,
+        "success_attempt_ordinal": next(
+            (
+                attempt.get("ordinal")
+                for attempt in metadata.get("short_sentence_attempts", [])
+                if isinstance(attempt, dict) and attempt.get("succeeded") is True
+            ),
+            None,
+        )
+        if isinstance(metadata.get("short_sentence_attempts"), list)
+        else None,
         "configured_cutter": metadata.get("cutter", cutter),
         "timing_model_position_count": metadata.get("timing_model_position_count"),
         "generated_token_count": metadata.get("generated_token_count"),
         "timing_model_position_delta": metadata.get("timing_model_position_delta"),
-        "cutter_reached": metadata.get("cutter_reached", metadata.get("failure_stage") not in {"timing-alignment", "timestamp-join", "target-boundary"}),
-        "parameter_evaluation": "valid" if metadata.get("failure_stage") not in {"timing-alignment", "timestamp-join", "target-boundary"} else "not-a-cutter-evaluation",
+        "cutter_reached": metadata.get(
+            "cutter_reached",
+            metadata.get("failure_stage")
+            not in {"timing-alignment", "timestamp-join", "target-boundary"},
+        ),
+        "parameter_evaluation": "valid"
+        if metadata.get("failure_stage")
+        not in {"timing-alignment", "timestamp-join", "target-boundary"}
+        else "not-a-cutter-evaluation",
         "timing_failure_reason": metadata.get("timing_failure_reason"),
         "failure_stage": metadata.get("failure_stage"),
     }
@@ -260,7 +276,11 @@ def _candidate_manifest_entry(
 
 def _is_pre_cutter_failure(metadata: dict[str, object]) -> bool:
     """Return whether timing failed before any cutter parameter could matter."""
-    return metadata.get("failure_stage") in {"timing-alignment", "timestamp-join", "target-boundary"} or metadata.get("cutter_reached") is False
+    return (
+        metadata.get("failure_stage") in {"timing-alignment", "timestamp-join", "target-boundary"}
+        or metadata.get("cutter_reached") is False
+    )
+
 
 def run_parameter_sweep(
     *,
@@ -332,7 +352,9 @@ def run_parameter_sweep(
             )
             rendered = render_text(text, config)
             if _index == 1 and _is_pre_cutter_failure(rendered.metadata) and not keep_invalid:
-                reason = rendered.metadata.get("timing_failure_reason", rendered.metadata.get("failure_stage"))
+                reason = rendered.metadata.get(
+                    "timing_failure_reason", rendered.metadata.get("failure_stage")
+                )
                 raise ValueError(
                     "The carrier phrase did not produce valid target timing geometry. "
                     "Parameter sweep aborted because this parameter cannot affect the observed failure. "
@@ -427,7 +449,11 @@ def _add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--label-template", default="{parameter} is {value}.")
     parser.add_argument("--allow-retries", type=int, default=0)
     parser.add_argument("--random-seed", type=int, default=0)
-    parser.add_argument("--keep-invalid", action="store_true", help="Retain candidates after pre-cutter timing failures.")
+    parser.add_argument(
+        "--keep-invalid",
+        action="store_true",
+        help="Retain candidates after pre-cutter timing failures.",
+    )
     parser.add_argument(
         "--output-wav", type=Path, default=Path("artifacts/short_sentence_parameter_sweep.wav")
     )
