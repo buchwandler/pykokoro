@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
+import pytest
 
 from pykokoro.audio_generator import AudioGenerator
 from pykokoro.types import Trace
@@ -170,3 +172,134 @@ def test_inference_cache_evicts_by_bytes_and_close_clears_entries() -> None:
     assert not generator._inference_cache
     generator._run_onnx("abc", style, 1.0)
     assert session.calls == 4
+
+def test_trace_summary_exposes_short_sentence_counters() -> None:
+    trace = Trace()
+    for name in (
+        "short_sentence_detected",
+        "short_sentence_phrase_initial",
+        "short_sentence_phrase_retry",
+        "short_sentence_cut_strict_success",
+        "short_sentence_cut_adaptive_success",
+        "short_sentence_cut_failure",
+        "short_sentence_wrap_fallback",
+    ):
+        trace.increment_counter(name)
+
+    summary = trace.inference_summary()
+    assert all(summary[name] == 1 for name in trace.counters)
+
+class _PhraseSession(_Session):
+    def __init__(self, audio: np.ndarray) -> None:
+        super().__init__()
+        self.audio = audio.astype(np.float32, copy=False)
+
+    def run(self, _outputs: Any, _inputs: dict[str, np.ndarray]) -> list[np.ndarray]:
+        self.calls += 1
+        return [self.audio[None, :], np.array([1.0, 2.0, 3.0], dtype=np.float32)]
+
+
+def _phrase_metadata(*, cutter: str = "energy-valley", valid: bool = True) -> dict[str, object]:
+    target_end = 2400 / 24000 if valid else 1600 / 24000
+    return {
+        "kind": "phrase",
+        "cutter": cutter,
+        "target_start_ts": 1600 / 24000,
+        "target_end_ts": target_end,
+        "previous_token_end_ts": 600 / 24000,
+        "next_token_start_ts": 3400 / 24000,
+        "has_left_context": True,
+        "has_right_context": True,
+        "frame_duration_ms": 5,
+        "energy_threshold": 0.05,
+        "min_silence_seconds": 0.02,
+        "phrase_fallback_templates": ["retry {segment}"],
+        "phrase_fallback_tries": 1,
+        "fallback_phonemes": "—abc—",
+        "fallback_tokens": [1, 2, 3],
+    }
+
+
+@pytest.mark.parametrize(
+    ("waveform", "cutter"),
+    [(np.zeros(4000, dtype=np.float32), "energy-valley"), (np.ones(4000, dtype=np.float32), "timestamp-adaptive")],
+ )
+def test_phrase_cut_success_uses_one_model_call(waveform, cutter) -> None:
+    session = _PhraseSession(waveform)
+    generator = AudioGenerator(session, _Tokenizer(), inference_cache_enabled=False)
+    trace = Trace()
+    audio, _ = generator._run_onnx("abc", np.zeros((2, 256), dtype=np.float32), 1.0, trace)
+    segment = SimpleNamespace(
+        text="Hi!",
+        phonemes="abc",
+        tokens=[1, 2, 3],
+        word_timings=[],
+        ssmd_metadata={"__short_sentence": _phrase_metadata(cutter=cutter)},
+    )
+
+    result = generator._prepare_short_sentence_phrase_audio(
+        segment, audio, np.zeros((2, 256), dtype=np.float32), 1.0, trace=trace
+    )
+
+    assert result.size > 0
+    assert session.calls == 1
+    assert trace.inference_summary()["short_sentence_cut_failure"] == 0
+
+
+def test_invalid_timestamps_use_one_retry(monkeypatch) -> None:
+    from pykokoro.short_sentence_handler import ShortSentenceApplication
+
+    session = _PhraseSession(np.zeros(4000, dtype=np.float32))
+    generator = AudioGenerator(session, _Tokenizer(), inference_cache_enabled=False)
+    trace = Trace()
+    audio, _ = generator._run_onnx("abc", np.zeros((2, 256), dtype=np.float32), 1.0, trace)
+    retry_metadata = _phrase_metadata(valid=True)
+    monkeypatch.setattr(
+        "pykokoro.audio_generator.build_short_sentence_phrase_retry",
+        lambda *args, **kwargs: ShortSentenceApplication("abc", [1, 2, 3], retry_metadata),
+    )
+    segment = SimpleNamespace(
+        text="Hi!",
+        phonemes="abc",
+        tokens=[1, 2, 3],
+        word_timings=[],
+        ssmd_metadata={"__short_sentence": _phrase_metadata(valid=False)},
+    )
+
+    result = generator._prepare_short_sentence_phrase_audio(
+        segment, audio, np.zeros((2, 256), dtype=np.float32), 1.0, trace=trace
+    )
+
+    assert result.size > 0
+    assert session.calls == 2
+    assert trace.inference_summary()["short_sentence_phrase_retry"] == 1
+
+
+def test_retry_failure_uses_one_retry_and_wrap_fallback(monkeypatch) -> None:
+    from pykokoro.short_sentence_handler import ShortSentenceApplication
+
+    session = _PhraseSession(np.zeros(4000, dtype=np.float32))
+    generator = AudioGenerator(session, _Tokenizer(), inference_cache_enabled=False)
+    trace = Trace()
+    audio, _ = generator._run_onnx("abc", np.zeros((2, 256), dtype=np.float32), 1.0, trace)
+    retry_metadata = _phrase_metadata(valid=False)
+    monkeypatch.setattr(
+        "pykokoro.audio_generator.build_short_sentence_phrase_retry",
+        lambda *args, **kwargs: ShortSentenceApplication("abc", [1, 2, 3], retry_metadata),
+    )
+    segment = SimpleNamespace(
+        text="Hi!",
+        phonemes="abc",
+        tokens=[1, 2, 3],
+        word_timings=[],
+        ssmd_metadata={"__short_sentence": _phrase_metadata(valid=False)},
+    )
+
+    result = generator._prepare_short_sentence_phrase_audio(
+        segment, audio, np.zeros((2, 256), dtype=np.float32), 1.0, trace=trace
+    )
+
+    assert result.size > 0
+    assert session.calls == 3
+    assert trace.inference_summary()["short_sentence_phrase_retry"] == 1
+    assert trace.inference_summary()["short_sentence_wrap_fallback"] == 1

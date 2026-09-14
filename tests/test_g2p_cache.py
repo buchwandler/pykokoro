@@ -167,3 +167,81 @@ def test_previous_g2p_cache_schema_is_recomputed_with_cleaned_payload(
     assert payload["schema"] == 10
     assert payload["phonemes"] == "bykə"
     assert payload["tokens"] == [ord(char) for char in "bykə"]
+
+def test_context_g2p_cache_normalizes_results_and_covers_frontend_key(monkeypatch) -> None:
+    adapter = KokoroG2PAdapter()
+    config = PipelineConfig(generation=GenerationConfig(lang="en-us"))
+    calls = {"count": 0}
+    raw_ids = [1, 2]
+    raw_tokens = [{"text": "Hi", "phonemes": "h", "whitespace": ""}]
+    raw = SimpleNamespace(phonemes="h", ids=raw_ids, tokens=raw_tokens)
+
+    monkeypatch.setattr(adapter, "_load", lambda: object())
+    monkeypatch.setattr(adapter, "_get_g2p_instance", lambda lang, cfg: object())
+    monkeypatch.setattr(
+        adapter,
+        "_resolve_frontend_contract",
+        lambda cfg: (None, "kokorog2p", None),
+    )
+    monkeypatch.setattr(adapter, "_get_model_version", lambda cfg, lang=None: "model")
+    monkeypatch.setattr(
+        adapter,
+        "_g2p_kwargs_for_language",
+        lambda *args: {"language": str(args[0]), "contract": "same"},
+    )
+
+    def phonemize_prepared(*args, **kwargs):
+        calls["count"] += 1
+        return raw
+
+    monkeypatch.setattr(adapter, "_phonemize_prepared", phonemize_prepared)
+
+    first = adapter.phonemize_context("Hi", "en-us", config)
+    raw_ids.append(3)
+    raw_tokens[0]["text"] = "mutated"
+    second = adapter.phonemize_context("Hi", "en-us", config)
+
+    assert calls["count"] == 1
+    assert first is second
+    assert first.ids == (1, 2)
+    assert first.tokens[0].text == "Hi"
+    assert first.tokens[0].char_start is None
+
+    changed_config = PipelineConfig(generation=GenerationConfig(lang="de"))
+    adapter.phonemize_context("Hi", "en-us", changed_config)
+    assert calls["count"] == 2
+
+
+def test_context_g2p_cache_is_bounded_lru(monkeypatch) -> None:
+    adapter = KokoroG2PAdapter()
+    adapter._context_cache_max_entries = 2
+    config = PipelineConfig(generation=GenerationConfig(lang="en-us"))
+    calls = {"count": 0}
+
+    monkeypatch.setattr(adapter, "_load", lambda: object())
+    monkeypatch.setattr(adapter, "_get_g2p_instance", lambda lang, cfg: object())
+    monkeypatch.setattr(
+        adapter,
+        "_resolve_frontend_contract",
+        lambda cfg: (None, "kokorog2p", None),
+    )
+    monkeypatch.setattr(adapter, "_get_model_version", lambda cfg, lang=None: "model")
+    monkeypatch.setattr(
+        adapter,
+        "_g2p_kwargs_for_language",
+        lambda *args: {"language": str(args[0]), "contract": "same"},
+    )
+    monkeypatch.setattr(
+        adapter,
+        "_phonemize_prepared",
+        lambda *args, **kwargs: (
+            calls.__setitem__("count", calls["count"] + 1)
+            or SimpleNamespace(phonemes="h", ids=[1], tokens=[])
+        ),
+    )
+
+    for text in ("one", "two", "three"):
+        adapter.phonemize_context(text, "en-us", config)
+    assert len(adapter._context_cache) == 2
+    adapter.phonemize_context("one", "en-us", config)
+    assert calls["count"] == 4

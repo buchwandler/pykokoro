@@ -2,25 +2,25 @@
 """
 Short Sentence Handler Demonstration.
 
-This example demonstrates the cross-correlation extraction technique used by PyKokoro
+This example demonstrates the short-sentence extraction flow used by PyKokoro
 to improve audio quality for very short sentences.
 
 The short sentence handler:
 1. Detects sentences with fewer phonemes than a threshold (default: 30)
-2. Generates the short sentence alone (poor quality, but needed for pattern)
-3. Generates context + short sentence together (good quality with natural prosody)
-4. Uses cross-correlation to find where the short sentence appears in combined audio
-5. Extracts that portion from the combined audio (maintains high quality)
+2. Generates a context phrase and records model duration/timestamp metadata
+3. Builds legal boundary windows from neighboring token timestamps
+4. Uses strict energy-valley or adaptive smooth waveform boundaries
+5. Retries only when timestamped extraction is not possible
+6. Extracts the target portion from the context audio
 
 This produces higher-quality audio because neural TTS models typically need
 more context to produce natural-sounding speech with proper prosody and intonation.
-The cross-correlation approach is robust and doesn't depend on silence gap detection.
 
 Usage:
-    python examples/short_sentence_demo.py
+    python examples/short_sentence_voices_demo.py
 
 Output:
-    short_sentence_demo.wav - Audio demonstrating short sentence handling
+    short_sentence_voices_demo.wav - Audio comparing context extraction and baseline audio
     Detailed console output showing processing steps
 """
 
@@ -99,112 +99,98 @@ def print_separator(title: str) -> None:
 
 
 def test_sentence_with_config(
+    pipeline: KokoroPipeline,
     voice: str,
     text: str,
-    config: ShortSentenceConfig | None,
     config_name: str,
 ) -> tuple[np.ndarray, int]:
-    """Generate audio for a sentence with a specific config.
-
-    Args:
-        kokoro: Kokoro instance
-        text: Text to generate
-        config: Short sentence configuration (or None to disable)
-        config_name: Name for logging
-
-    Returns:
-        Tuple of (audio samples, sample rate)
-    """
-    # Create a new Kokoro instance with the config
-    kokoro_test = KokoroPipeline(
-        PipelineConfig(
-            voice=voice,
-            generation=GenerationConfig(lang=LANG, speed=1.0),
-            short_sentence_config=config,
-        )
+    """Generate audio with a persistent pipeline and per-run voice override."""
+    result = pipeline.run(text, voice=voice)
+    samples, sample_rate = result.audio, result.sample_rate
+    print(
+        f"  {config_name:25} -> {len(samples):6} samples "
+        f"({len(samples) / sample_rate:.3f}s)"
     )
+    return samples, sample_rate
 
-    res = kokoro_test.run(text)
-    samples, sr = res.audio, res.sample_rate
-
-    print(f"  {config_name:25} -> {len(samples):6} samples ({len(samples) / sr:.3f}s)")
-
-    return samples, sr
-
-
-def main():
+def main() -> None:
     """Generate audio demonstrating short sentence handling."""
     print_separator("SHORT SENTENCE HANDLER DEMONSTRATION")
 
-    print("\nThis demo shows how PyKokoro improves audio quality for short sentences")
-    print("using cross-correlation extraction with context.")
+    print("\nThis demo compares context extraction with short-sentence handling disabled")
+    print("using model timestamps, legal boundary windows, and waveform cuts.")
     print(f"\nTexts: {len(TEST_SENTENCES)} short-sentence samples")
     print(f"Language: {LANG}")
     print("\nNOTE: Audio duration will be similar, but QUALITY will be better")
     print("      with context-prepending. Listen to the generated files to compare!")
 
-    # Initialize with default config
     print_separator("Testing Individual Sentences")
-
-    kokoro = KokoroPipeline(
-        PipelineConfig(voice=VOICE, generation=GenerationConfig(lang=LANG, speed=1.0))
-    )
+    phrase_config = neutral_phrase_short_sentence_config()
+    disabled_config = ShortSentenceConfig(enabled=False)
     tokenizer = Tokenizer()
 
-    all_samples = []
-    all_samples2 = []
-    sample_rate = 24000
-
-    pause = np.zeros(int(sample_rate * 0.5), dtype=np.float32)
-    # Add announcement and samples to output
-    announcement = "With pretexting"
-    intro = kokoro.run(announcement).audio
-    all_samples.extend([intro, pause])
-    # Add announcement and samples to output
-    announcement = "Without pretexting"
-    intro2 = kokoro.run(announcement).audio
-    all_samples2.extend([pause, intro2, pause])
-
-    # Test each voice and sentence with different configurations
-    for voice in VOICES:
-        print(f"\nVoice: '{voice}'")
-        for text in TEST_SENTENCES:
-            phoneme_count = len(tokenizer.phonemize(text, lang=LANG))
-            print(f"\nText: '{text}' ({phoneme_count} phonemes)")
-
-            config_enabled = neutral_phrase_short_sentence_config()
-            config_disabled = ShortSentenceConfig(enabled=False)
-
-            samples_enabled, sr = test_sentence_with_config(
-                voice, text, config_enabled, "With phrase cutting"
+    with (
+        KokoroPipeline(
+            PipelineConfig(
+                voice=VOICE,
+                generation=GenerationConfig(lang=LANG, speed=1.0),
+                short_sentence_config=phrase_config,
             )
-
-            samples_disabled, sr = test_sentence_with_config(
-                voice, text, config_disabled, "Without phrase cutting"
+        ) as phrase_pipeline,
+        KokoroPipeline(
+            PipelineConfig(
+                voice=VOICE,
+                generation=GenerationConfig(lang=LANG, speed=1.0),
+                short_sentence_config=disabled_config,
             )
-            pause = np.zeros(int(sr * 0.1), dtype=np.float32)
-            all_samples.extend([samples_enabled, pause])
-            all_samples2.extend([samples_disabled, pause])
+        ) as baseline_pipeline,
+    ):
+        phrase_pipeline.warmup()
+        baseline_pipeline.warmup()
 
-    # Save combined audio
-    print_separator("Saving Combined Audio")
+        all_samples: list[np.ndarray] = []
+        baseline_samples: list[np.ndarray] = []
+        sample_rate = 24000
+        pause = np.zeros(int(sample_rate * 0.5), dtype=np.float32)
 
-    combined_samples = np.concatenate(all_samples + all_samples2)
-    output_file = artifact_path("short_sentence_voices_demo.wav")
-    sf.write(output_file, combined_samples, sample_rate)
+        all_samples.extend([phrase_pipeline.run("With context extraction", voice=VOICE).audio, pause])
+        baseline_samples.extend(
+            [baseline_pipeline.run("Without context extraction", voice=VOICE).audio, pause]
+        )
 
-    total_duration = len(combined_samples) / sample_rate
-    print(f"\nCreated {output_file}")
-    print(f"Total duration: {total_duration:.2f}s ({total_duration / 60:.2f} minutes)")
+        for voice in VOICES:
+            print(f"\nVoice: '{voice}'")
+            for text in TEST_SENTENCES:
+                phoneme_count = len(tokenizer.phonemize(text, lang=LANG))
+                print(f"\nText: '{text}' ({phoneme_count} phonemes)")
 
-    # Summary
+                samples_enabled, sample_rate = test_sentence_with_config(
+                    phrase_pipeline, voice, text, "With phrase cutting"
+                )
+                samples_disabled, sample_rate = test_sentence_with_config(
+                    baseline_pipeline, voice, text, "Without phrase cutting"
+                )
+                pause = np.zeros(int(sample_rate * 0.1), dtype=np.float32)
+                all_samples.extend([samples_enabled, pause])
+                baseline_samples.extend([samples_disabled, pause])
+
+        print_separator("Saving Combined Audio")
+        combined_samples = np.concatenate(all_samples + baseline_samples)
+        output_file = artifact_path("short_sentence_voices_demo.wav")
+        sf.write(output_file, combined_samples, sample_rate)
+
+        total_duration = len(combined_samples) / sample_rate
+        print(f"\nCreated {output_file}")
+        print(f"Total duration: {total_duration:.2f}s ({total_duration / 60:.2f} minutes)")
+
     print_separator("SUMMARY")
 
     print("\nHow the Short Sentence Handler Works:")
     print("  1. Detects sentences with < min_phoneme_length phonemes")
-    print("  2. Applies the configured resolve mode to the short segment")
-    print("  3. Phrase modes synthesize a context phrase")
-    print("  4. Cuts away the extra phrase context when boundaries are confident")
+    print("  2. Generates a context phrase and reads duration/timestamp metadata")
+    print("  3. Builds legal boundary windows around the target timestamps")
+    print("  4. Cuts at an energy valley or an adaptive smooth waveform boundary")
+    print("  5. Retries only when timestamped extraction is not possible")
 
     print("\nBenefits:")
     print("  • Improved prosody and intonation for short sentences")

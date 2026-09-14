@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import re
-from dataclasses import asdict, replace
+from collections import OrderedDict
+from dataclasses import asdict, dataclass, replace
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, cast
 
@@ -29,6 +30,33 @@ if TYPE_CHECKING:
     from ...types import Segment, Trace
 
 
+def _context_token_value(token: Any, name: str, default: object) -> object:
+    if isinstance(token, dict):
+        return token.get(name, default)
+    return getattr(token, name, default)
+
+
+def _context_token_int(token: Any, name: str) -> int | None:
+    value = _context_token_value(token, name, None)
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+@dataclass(frozen=True)
+class _CachedContextToken:
+    text: str
+    phonemes: str
+    whitespace: str
+    char_start: int | None
+    char_end: int | None
+
+
+@dataclass(frozen=True)
+class _CachedContextResult:
+    phonemes: str
+    ids: tuple[int, ...]
+    tokens: tuple[_CachedContextToken, ...]
+
+
 class KokoroG2PAdapter(G2PAdapter):
     _cache_schema = 10
 
@@ -36,6 +64,8 @@ class KokoroG2PAdapter(G2PAdapter):
         self._g2p: ModuleType | None = None
         self._g2p_instances: dict[tuple[tuple[str, object], ...], G2PBase] = {}
 
+        self._context_cache: OrderedDict[tuple[object, ...], _CachedContextResult] = OrderedDict()
+        self._context_cache_max_entries = 256
     def _load(self) -> ModuleType:
         if self._g2p is not None:
             return self._g2p
@@ -727,11 +757,17 @@ class KokoroG2PAdapter(G2PAdapter):
         return g2p_instance
 
     def phonemize_context(self, text: str, language: str, cfg: PipelineConfig) -> Any:
-        """Phonemize synthetic short-sentence context with the configured G2P instance."""
+        """Phonemize synthetic short-sentence context with a bounded LRU cache."""
+        cache_key = self._context_cache_key(text, language, cfg)
+        cached = self._context_cache.get(cache_key)
+        if cached is not None:
+            self._context_cache.move_to_end(cache_key)
+            return cached
+
         g2p_module = self._load()
         g2p_instance = self._get_g2p_instance(language, cfg)
         model_version = self._get_model_version(cfg, language)
-        return self._phonemize_prepared(
+        result = self._phonemize_prepared(
             g2p_module,
             text,
             language,
@@ -740,6 +776,61 @@ class KokoroG2PAdapter(G2PAdapter):
             g2p_instance,
             target_model=model_version,
         )
+        normalized = self._normalize_context_result(result)
+        self._context_cache[cache_key] = normalized
+        self._context_cache.move_to_end(cache_key)
+        while len(self._context_cache) > self._context_cache_max_entries:
+            self._context_cache.popitem(last=False)
+        return normalized
+
+    def _context_cache_key(
+        self, text: str, language: str, cfg: PipelineConfig
+    ) -> tuple[object, ...]:
+        profile, backend, _ = self._resolve_frontend_contract(cfg)
+        model_version = self._get_model_version(cfg, language)
+        kwargs = self._g2p_kwargs_for_language(
+            language, cfg, backend, profile, model_version
+        )
+        tokenizer_config = cfg.tokenizer_config
+        lexicon_data_policy = (
+            tokenizer_config.lexicon_data_policy if tokenizer_config is not None else None
+        )
+        return (
+            text,
+            language,
+            tuple(sorted(kwargs.items())),
+            ("lexicon_data_policy", lexicon_data_policy),
+            ("generation_lang", cfg.generation.lang),
+            ("target_model", model_version),
+            ("allow_experimental_frontend", cfg.allow_experimental_frontend),
+        )
+
+    @staticmethod
+    def _normalize_context_result(result: Any) -> _CachedContextResult:
+        phonemes = getattr(result, "phonemes", None) or getattr(result, "phoneme", "")
+        ids = getattr(result, "ids", None)
+        if ids is None:
+            ids = getattr(result, "token_ids", ())
+        tokens = tuple(
+            _CachedContextToken(
+                text=str(_context_token_value(token, "text", "")),
+                phonemes=str(
+                    _context_token_value(token, "phonemes", None)
+                    or _context_token_value(token, "phoneme", "")
+                ),
+                whitespace=str(_context_token_value(token, "whitespace", "") or ""),
+                char_start=_context_token_int(token, "char_start"),
+                char_end=_context_token_int(token, "char_end"),
+            )
+            for token in (getattr(result, "tokens", ()) or ())
+        )
+        return _CachedContextResult(
+            phonemes=str(phonemes),
+            ids=tuple(int(token_id) for token_id in (ids or ())),
+            tokens=tokens,
+        )
+
+
 
     def _record_selection(
         self, doc: DocumentResult, lang: str, cfg: PipelineConfig, g2p_instance: G2PBase

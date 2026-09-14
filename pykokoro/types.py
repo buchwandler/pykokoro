@@ -226,6 +226,10 @@ class Trace:
     model: dict[str, Any] = field(default_factory=dict)
     counters: dict[str, int] = field(default_factory=dict)
 
+
+    def increment_counter(self, name: str, amount: int = 1) -> None:
+        """Increment a named trace counter."""
+        self.counters[name] = self.counters.get(name, 0) + amount
     def inference_summary(self) -> dict[str, float | int | None]:
         """Return aggregate acoustic inference metrics without retaining extra arrays."""
         calls = len(self.inference)
@@ -244,6 +248,21 @@ class Trace:
             "initial_onnx_calls": self.counters.get("initial_onnx_calls", 0),
             "short_sentence_retry_calls": self.counters.get("short_sentence_retry_calls", 0),
             "fallback_onnx_calls": self.counters.get("fallback_onnx_calls", 0),
+            "short_sentence_detected": self.counters.get("short_sentence_detected", 0),
+            "short_sentence_phrase_initial": self.counters.get(
+                "short_sentence_phrase_initial", 0
+            ),
+            "short_sentence_phrase_retry": self.counters.get("short_sentence_phrase_retry", 0),
+            "short_sentence_cut_strict_success": self.counters.get(
+                "short_sentence_cut_strict_success", 0
+            ),
+            "short_sentence_cut_adaptive_success": self.counters.get(
+                "short_sentence_cut_adaptive_success", 0
+            ),
+            "short_sentence_cut_failure": self.counters.get("short_sentence_cut_failure", 0),
+            "short_sentence_wrap_fallback": self.counters.get(
+                "short_sentence_wrap_fallback", 0
+            ),
         }
 
     def event_summary(self) -> dict[tuple[str, str], float]:

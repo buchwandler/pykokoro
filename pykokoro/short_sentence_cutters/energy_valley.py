@@ -18,6 +18,7 @@ def cut_with_energy_valley(
 ) -> np.ndarray | None:
     """Cut phrase audio at stable low-energy valleys inside legal timestamp windows."""
     cut_bounds = find_energy_valley_cut_bounds(audio, metadata)
+    metadata["cut_strategy"] = "energy-valley"
     if cut_bounds is None:
         return None
     left_cut, right_cut = cut_bounds

@@ -142,7 +142,7 @@ def main():
     print("Pipeline created with default ShortSentenceConfig:")
     print("  min_phoneme_length: 30 (segments below this use short-sentence handling)")
     print("  resolve_mode: randomized-phrase")
-    print("  phrase_fallback_tries: 5")
+    print("  phrase_fallback_tries: 1")
 
     # Analyze the text to show which segments are short
     print_separator("Analyzing Text Segments")

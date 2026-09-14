@@ -57,7 +57,7 @@ class PhraseResolveMode:
     energy_threshold: float = 0.05
     silence_threshold: float = 1e-4
     min_silence_seconds: float = 0.02
-    cutter: Literal["energy-valley"] = "energy-valley"
+    cutter: Literal["energy-valley", "timestamp-adaptive"] = "timestamp-adaptive"
 
 
 @dataclass
@@ -95,11 +95,35 @@ class RandomizedPhraseResolveMode:
             "At last, the guide called out, {segment}",
         ]
     )
+    question_phrases: list[str] = field(
+        default_factory=lambda: [
+            "The question was asked plainly: {segment}",
+            "A quiet voice asked: {segment}",
+        ]
+    )
+    exclamation_phrases: list[str] = field(
+        default_factory=lambda: [
+            "The speaker called out: {segment}",
+            "The announcement ended with: {segment}",
+        ]
+    )
+    ellipsis_phrases: list[str] = field(
+        default_factory=lambda: [
+            "The thought trailed off with: {segment}",
+            "The unfinished sentence was: {segment}",
+        ]
+    )
+    fragment_phrases: list[str] = field(
+        default_factory=lambda: [
+            "The note contained only these words: {segment}",
+            "The short message read: {segment}",
+        ]
+    )
     frame_duration_ms: int = 5
     energy_threshold: float = 0.05
     silence_threshold: float = 1e-4
     min_silence_seconds: float = 0.02
-    cutter: Literal["energy-valley"] = "energy-valley"
+    cutter: Literal["energy-valley", "timestamp-adaptive"] = "timestamp-adaptive"
 
 
 ShortSentenceResolveMode = WrapResolveMode | PhraseResolveMode | RandomizedPhraseResolveMode
@@ -147,8 +171,8 @@ class ShortSentenceConfig:
     Mode: phrase and randomized-phrase (default when the model exposes duration timestamps)
     1. Add a full sentence around the phrase. "Phrase" uses a fixed
        sentence, "Randomized-Phrase" chooses from a list for variety.
-    2. Cut out the phrase if confidence level for a clean cut is reached.
-    3. If not, try another surrounding full sentence.
+    2. Cut out the phrase when timestamp geometry and a legal waveform boundary are available.
+    3. Retry with another surrounding phrase only when alignment or timestamps are unusable.
     This mode works best, but can increase computation time.
     Accuracy is voice dependent, but a less accurate voice will only
     slow it down, not stop it from working.
@@ -173,8 +197,8 @@ class ShortSentenceConfig:
         resolve_mode: Resolve mode to apply to all short sentences. Default:
             "randomized-phrase".
         phrase_fallback_tries: Number of alternate phrase templates to
-            try, if confidence level for cutting is too low for a phrase,
-            before falling back to wrap mode. Default: 5
+            try when alignment or timestamp geometry is unusable,
+            before falling back to wrap mode. Default: 1
             Higher=more robust and possibly slower for less-accurate
             voices, Lower=falls back to wrap mode quicker.
 
@@ -191,7 +215,7 @@ class ShortSentenceConfig:
             "randomized-phrase": RandomizedPhraseResolveMode(),
         }
     )
-    phrase_fallback_tries: int = 5
+    phrase_fallback_tries: int = 1
 
     def __post_init__(self) -> None:
         if (
@@ -545,9 +569,8 @@ def _select_phrase_fallback_templates(
         return []
 
     used = set(used_templates)
-    use_end_phrase = _uses_end_phrase(segment_text, mode)
     if isinstance(mode, PhraseResolveMode):
-        choices = _default_ranked_phrase_choices(use_end_phrase)
+        choices = _default_ranked_phrase_choices(segment_text)
         return _unique_phrase_templates(choices, used, limit)
 
     if isinstance(mode, RandomizedPhraseResolveMode):
@@ -573,11 +596,24 @@ def _phrase_choices(
 ) -> list[str]:
     if phrase_defaults is None:
         phrase_defaults = PhraseResolveMode()
-    use_end_phrase = _uses_end_phrase(segment_text, mode)
-    if use_end_phrase:
+    if mode.phrase_selection == "neutral":
+        return mode.neutral_phrases or [phrase_defaults.neutral_phrase]
+    if mode.phrase_selection == "end":
         return mode.end_phrases or [phrase_defaults.end_phrase]
-    return mode.neutral_phrases or [phrase_defaults.neutral_phrase]
-
+    terminal_form = _terminal_form(segment_text)
+    choices = {
+        "question": mode.question_phrases,
+        "exclamation": mode.exclamation_phrases,
+        "ellipsis": mode.ellipsis_phrases,
+        "fragment": mode.neutral_phrases or mode.fragment_phrases,
+        "declarative": mode.end_phrases,
+    }[terminal_form]
+    fallback = (
+        phrase_defaults.end_phrase
+        if terminal_form == "declarative"
+        else phrase_defaults.neutral_phrase
+    )
+    return choices or [fallback]
 
 def _configured_phrase_mode(config: ShortSentenceConfig) -> PhraseResolveMode | None:
     mode = config.resolve_modes.get("phrase")
@@ -586,10 +622,9 @@ def _configured_phrase_mode(config: ShortSentenceConfig) -> PhraseResolveMode | 
     return None
 
 
-def _default_ranked_phrase_choices(use_end_phrase: bool) -> list[str]:
+def _default_ranked_phrase_choices(segment_text: str) -> list[str]:
     defaults = RandomizedPhraseResolveMode()
-    return defaults.end_phrases if use_end_phrase else defaults.neutral_phrases
-
+    return _phrase_choices(segment_text, defaults)
 
 def _unique_phrase_templates(
     choices: list[str],
@@ -607,14 +642,26 @@ def _unique_phrase_templates(
     return selected
 
 
+def _terminal_form(segment_text: str) -> Literal["declarative", "question", "exclamation", "ellipsis", "fragment"]:
+    text = segment_text.rstrip()
+    if text.endswith(("…", "...")):
+        return "ellipsis"
+    if text.endswith("?"):
+        return "question"
+    if text.endswith("!"):
+        return "exclamation"
+    if text.endswith("."):
+        return "declarative"
+    return "fragment"
+
+
 def _uses_end_phrase(segment_text: str, mode: ShortSentenceResolveMode) -> bool:
     if isinstance(mode, (PhraseResolveMode, RandomizedPhraseResolveMode)):
         if mode.phrase_selection == "end":
             return True
         if mode.phrase_selection == "neutral":
             return False
-    return segment_text.rstrip().endswith(".")
-
+    return _terminal_form(segment_text) != "fragment"
 
 def _build_short_sentence_metadata(
     *,

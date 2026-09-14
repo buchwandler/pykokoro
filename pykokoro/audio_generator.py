@@ -988,6 +988,11 @@ class AudioGenerator:
     ) -> list[PhonemeSegment]:
         noise_flags: list[bool] = []
         for segment in segments:
+            short_sentence_metadata = (segment.ssmd_metadata or {}).get(SHORT_SENTENCE_META_KEY)
+            if trace is not None and isinstance(short_sentence_metadata, dict):
+                trace.increment_counter("short_sentence_detected")
+                if short_sentence_metadata.get("kind") in {"phrase", "randomized-phrase"}:
+                    trace.increment_counter("short_sentence_phrase_initial")
             if not segment.phonemes.strip():
                 segment.raw_audio = None
                 continue
@@ -1183,12 +1188,14 @@ class AudioGenerator:
 
         cut_audio = cut_short_sentence_phrase_audio(audio, short_sentence_metadata)
         if cut_audio is not None:
+            _record_short_sentence_cut(short_sentence_metadata, len(audio), trace)
             left_cut = short_sentence_metadata.get("cut_left")
             right_cut = short_sentence_metadata.get("cut_right")
             if isinstance(left_cut, int) and isinstance(right_cut, int):
                 segment.word_timings = _crop_word_timings(segment.word_timings, left_cut, right_cut)
             short_sentence_metadata["cut_applied"] = True
             return cut_audio
+        _record_short_sentence_cut_failure(short_sentence_metadata, trace)
 
         retry_audio = self._try_short_sentence_phrase_fallbacks(
             segment,
@@ -1210,6 +1217,9 @@ class AudioGenerator:
             )
             return audio
 
+        short_sentence_metadata["cut_strategy"] = "wrap"
+        if trace is not None:
+            trace.increment_counter("short_sentence_wrap_fallback")
         logger.warning(
             "Short sentence phrase cut for '%s' lacked confident boundaries; "
             "falling back to wrap mode.",
@@ -1237,6 +1247,8 @@ class AudioGenerator:
             )
         short_sentence_metadata["cut_applied"] = True
         short_sentence_metadata["fallback_used"] = "wrap"
+        short_sentence_metadata["cut_left"] = 0
+        short_sentence_metadata["cut_right"] = len(fallback_audio)
         segment.phonemes = fallback_phonemes
         if isinstance(prepared_fallback_tokens, list):
             segment.tokens = prepared_fallback_tokens
@@ -1281,6 +1293,8 @@ class AudioGenerator:
             if retry_attempts >= max_attempts:
                 break
             retry_attempts += 1
+            if trace is not None:
+                trace.increment_counter("short_sentence_phrase_retry")
             logger.info(
                 "Short sentence phrase cut for '%s' lacked confident boundaries; "
                 "trying another phrase %d/%d. Failed with: '%s'",
@@ -1330,8 +1344,10 @@ class AudioGenerator:
                 populate_short_sentence_boundary_metadata(retry.metadata, timestamped)
             cut_audio = cut_short_sentence_phrase_audio(retry_audio, retry.metadata)
             if cut_audio is None:
+                _record_short_sentence_cut_failure(retry.metadata, trace)
                 failed_template = template
                 continue
+            _record_short_sentence_cut(retry.metadata, len(retry_audio), trace)
 
             logger.info(
                 "Short sentence phrase cut for '%s' succeeded using fallback phrase '%s' (%d/%d).",
@@ -1819,6 +1835,59 @@ def _short_sentence_phrase_fallback_limit(
         return max(0, int(cast(Any, value)))
     except (TypeError, ValueError):
         return max(0, int(default))
+
+def _record_short_sentence_cut(
+    metadata: dict[str, object],
+    audio_length: int,
+    trace: Trace | None,
+) -> None:
+    """Record cut strategy, geometry, and aggregate success counters."""
+    strategy = str(metadata.get("cut_strategy", "energy-valley"))
+    if strategy == "energy-valley":
+        counter = "short_sentence_cut_strict_success"
+    elif strategy == "timestamp-smooth":
+        counter = "short_sentence_cut_adaptive_success"
+    else:
+        counter = "short_sentence_cut_failure"
+    if trace is not None:
+        trace.increment_counter(counter)
+
+    left_cut = metadata.get("cut_left")
+    right_cut = metadata.get("cut_right")
+    if not isinstance(left_cut, int) or not isinstance(right_cut, int):
+        return
+    metadata["cut_left"] = max(0, min(audio_length, left_cut))
+    metadata["cut_right"] = max(0, min(audio_length, right_cut))
+    target_start = _timestamp_to_sample(metadata.get("target_start_ts"))
+    target_end = _timestamp_to_sample(metadata.get("target_end_ts"))
+    if target_start is not None:
+        metadata["left_anchor_distance_samples"] = abs(left_cut - target_start)
+        metadata["left_anchor_distance_ms"] = abs(left_cut - target_start) * 1000.0 / SAMPLE_RATE
+    if target_end is not None:
+        metadata["right_anchor_distance_samples"] = abs(right_cut - target_end)
+        metadata["right_anchor_distance_ms"] = abs(right_cut - target_end) * 1000.0 / SAMPLE_RATE
+    guard_durations: dict[str, float] = {}
+    if target_start is not None:
+        guard_durations["left"] = abs(left_cut - target_start) * 1000.0 / SAMPLE_RATE
+    if target_end is not None:
+        guard_durations["right"] = abs(right_cut - target_end) * 1000.0 / SAMPLE_RATE
+    if guard_durations:
+        metadata["retained_guard_duration_ms"] = guard_durations
+
+
+def _record_short_sentence_cut_failure(
+    metadata: dict[str, object],
+    trace: Trace | None,
+) -> None:
+    """Record an unsuccessful legal phrase cut."""
+    if trace is not None:
+        trace.increment_counter("short_sentence_cut_failure")
+
+
+def _timestamp_to_sample(value: object) -> int | None:
+    if not isinstance(value, (int, float)):
+        return None
+    return round(float(value) * SAMPLE_RATE)
 
 
 def _is_spoken_token(token: dict[str, object]) -> bool:

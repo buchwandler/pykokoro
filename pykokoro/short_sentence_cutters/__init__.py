@@ -7,11 +7,13 @@ from collections.abc import Callable
 import numpy as np
 
 from .energy_valley import cut_with_energy_valley
+from .timestamp_adaptive import cut_with_timestamp_adaptive
 
 PhraseCutter = Callable[[np.ndarray, dict[str, object]], np.ndarray | None]
 
 _CUTTERS: dict[str, PhraseCutter] = {
     "energy-valley": cut_with_energy_valley,
+    "timestamp-adaptive": cut_with_timestamp_adaptive,
 }
 
 

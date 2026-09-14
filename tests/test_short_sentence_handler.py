@@ -2,12 +2,42 @@
 
 from pykokoro.short_sentence_handler import (
     PhraseResolveMode,
+    RandomizedPhraseResolveMode,
     ShortSentenceConfig,
+    _phrase_choices,
+    _terminal_form,
     is_segment_empty,
     is_segment_short,
 )
 from pykokoro.types import PhonemeSegment
 
+
+def test_phrase_cutters_default_to_timestamp_adaptive_with_compatibility_option() -> None:
+    assert PhraseResolveMode().cutter == "timestamp-adaptive"
+    assert RandomizedPhraseResolveMode().cutter == "timestamp-adaptive"
+    assert PhraseResolveMode(cutter="energy-valley").cutter == "energy-valley"
+    assert RandomizedPhraseResolveMode(cutter="energy-valley").cutter == "energy-valley"
+
+def test_randomized_templates_match_terminal_punctuation() -> None:
+    mode = RandomizedPhraseResolveMode()
+    expected = {
+        "Hello.": mode.end_phrases,
+        "Why?": mode.question_phrases,
+        "Stop!": mode.exclamation_phrases,
+        "Wait…": mode.ellipsis_phrases,
+        "Go": mode.neutral_phrases,
+    }
+    for text, templates in expected.items():
+        assert _terminal_form(text) in {
+            "declarative",
+            "question",
+            "exclamation",
+            "ellipsis",
+            "fragment",
+        }
+        assert _phrase_choices(text, mode) == templates
+        if text != "Go":
+            assert all(template.endswith("{segment}") for template in templates)
 
 def test_short_sentence_config_rejects_negative_thresholds_and_retries():
     import pytest

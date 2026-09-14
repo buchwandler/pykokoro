@@ -94,7 +94,7 @@ def test_audiosig_is_the_only_declared_dsp_backend() -> None:
     dependencies = pyproject["project"]["dependencies"]
     optional = pyproject["project"]["optional-dependencies"]
 
-    assert "audiosig>=0.1.1,<0.2" in dependencies
+    assert "audiosig>=0.1.3,<0.2" in dependencies
     assert "prosody" not in optional
 
     requirements = [requirement.lower() for requirement in dependencies]
@@ -113,6 +113,11 @@ def test_audiosig_is_the_only_declared_dsp_backend() -> None:
     )
     assert not any(name in requirement for requirement in requirements for name in forbidden)
 
+
+def test_audiosig_smooth_cut_api_contract() -> None:
+    from audiosig import find_smooth_cut_point
+
+    assert callable(find_smooth_cut_point)
 
 def test_production_source_has_no_forbidden_dsp_imports() -> None:
     forbidden = (
