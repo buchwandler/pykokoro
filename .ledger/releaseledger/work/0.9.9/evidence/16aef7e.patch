@@ -1,0 +1,549 @@
+ README.md                                |   6 +-
+ examples/README.md                       |  11 ++-
+ examples/german_tts_samples.py           |   2 +-
+ pykokoro/__init__.py                     |  11 +++
+ pykokoro/frontend_contracts.py           |   1 -
+ pykokoro/lexicon_discovery.py            | 163 +++++++++++++++++++++++++++++++
+ pykokoro/stages/g2p/kokorog2p.py         |  10 +-
+ pykokoro/tokenizer.py                    |  15 ++-
+ tests/test_g2p_adapter_spacy_model.py    |  20 ++++
+ tests/test_german_tts_samples_example.py |   2 +-
+ tests/test_lexicon_discovery.py          |  98 +++++++++++++++++++
+ tests/test_tokenizer.py                  |  34 +++++++
+ 12 files changed, 360 insertions(+), 13 deletions(-)
+
+diff --git a/README.md b/README.md
+index d384594..d383b02 100644
+--- a/README.md
++++ b/README.md
+@@ -1537,7 +1537,7 @@ The native KokoroG2P backend also supports explicit named lexicon selection thro
+ ```python
+ from pykokoro.tokenizer import TokenizerConfig
+
+-# Compatibility behavior, with language defaults selected by KokoroG2P.
++# Compatibility behavior. PyKokoro selects de-de:espeak implicitly for German; other languages use their KokoroG2P defaults.
+ default_config = TokenizerConfig()
+ # German Gold lexicon only.
+ gold_config = TokenizerConfig(lexicons="gold")
+@@ -1546,8 +1546,8 @@ gold_config = TokenizerConfig(lexicons="gold")
+ crane_config = TokenizerConfig(lexicons="crane")
+ ```
+
+-`lexicons=None` delegates to KokoroG2P's language defaults. An explicit selection takes
+-precedence over legacy dictionary flags. Ordered selections such as
++`lexicons=None` uses PyKokoro's language defaults. For German, the implicit selection is the static
++de-de:espeak lexicon. An explicit selection takes precedence over legacy dictionary flags.
+ `lexicons=("gold", "crane")` are supported for layered lookup, where the first matching
+ layer wins. That layered lookup is not a Gold-versus-Crane A/B comparison. For an A/B
+ comparison, render separately with `("gold",)` and `("crane",)` and combine the results
+diff --git a/examples/README.md b/examples/README.md
+index 02a80ff..075ad3b 100644
+--- a/examples/README.md
++++ b/examples/README.md
+@@ -87,6 +87,9 @@ python examples/german_tts_samples.py --model de-crane --lexicon olaph
+ python examples/german_tts_samples.py --model de-thorsten --lexicon crane
+ ```
+
++Omitting `--lexicon` selects the static `de-de:espeak` lexicon. Pass `--lexicon` explicitly to compare
++`gold`, `crane`, `espeak`, or `olaph` across the German models.
++
+ Outputs are written below `example-artifacts/german_tts_samples/<model>/<lexicon>/`,
+ with one file for each sentence. The four named lexicons may require Lexphon data
+ provisioning on first use; see [German lexicon data](#german-lexicon-data) below for
+@@ -94,10 +97,10 @@ offline provisioning guidance.
+
+ ## German lexicon data
+
+-The German examples use named KokoroG2P lexicons. PyKokoro defaults to automatic Lexphon
+-provisioning: on a missing selected asset, it installs the asset and retries G2P
+-construction once. This first-use step may access the catalog and network. Later runs
+-use the local store.
++The German examples use named KokoroG2P lexicons. PyKokoro defaults to the static `de-de:espeak`
++lexicon for implicit German selections and provides automatic Lexphon provisioning: on a missing
++selected asset, it installs the asset and retries G2P construction once. This first-use step may
++access the catalog and network. Later runs use the local store.
+
+ For offline deployments, pre-provision the required assets and select strict
+ installed-only behavior in `TokenizerConfig`:
+diff --git a/examples/german_tts_samples.py b/examples/german_tts_samples.py
+index 3080915..91cc528 100644
+--- a/examples/german_tts_samples.py
++++ b/examples/german_tts_samples.py
+@@ -43,7 +43,7 @@ SAMPLES = (
+ )
+
+ DEFAULT_MODEL = "v1.2-de-martin"
+-DEFAULT_LEXICON = "gold"
++DEFAULT_LEXICON = "espeak"
+ LEXICON_CHOICES = ("gold", "crane", "espeak", "olaph")
+ MODEL_LABELS = {
+     "v1.2-de-martin": "Martin v1.2",
+diff --git a/pykokoro/__init__.py b/pykokoro/__init__.py
+index c02289f..c552962 100644
+--- a/pykokoro/__init__.py
++++ b/pykokoro/__init__.py
+@@ -48,6 +48,14 @@ def __getattr__(name: str) -> Any:
+             "ModelDiscoveryResult": ModelDiscoveryResult,
+             "VoiceCapabilities": VoiceCapabilities,
+         }[name]
++    if name in {"LexiconCapabilities", "LexiconDiscoveryResult", "discover_lexicons"}:
++        from .lexicon_discovery import LexiconCapabilities, LexiconDiscoveryResult, discover_lexicons
++
++        return {
++            "LexiconCapabilities": LexiconCapabilities,
++            "LexiconDiscoveryResult": LexiconDiscoveryResult,
++            "discover_lexicons": discover_lexicons,
++        }[name]
+     if name in {"PipelineConfig", "resolve_pipeline_config"}:
+         from .pipeline_config import PipelineConfig, resolve_pipeline_config
+
+@@ -118,6 +126,9 @@ __all__ = [
+     "ModelCapabilities",
+     "ModelDiscoveryResult",
+     "VoiceCapabilities",
++    "LexiconCapabilities",
++    "LexiconDiscoveryResult",
++    "discover_lexicons",
+     "GenerationConfig",
+     "LanguageDetectionConfig",
+     "ProsodyConfig",
+diff --git a/pykokoro/frontend_contracts.py b/pykokoro/frontend_contracts.py
+index d5b4475..785711b 100644
+--- a/pykokoro/frontend_contracts.py
++++ b/pykokoro/frontend_contracts.py
+@@ -60,7 +60,6 @@ FRONTEND_FIXTURES: dict[ModelVariant, FrontendFixture] = {
+ }
+
+ FRONTEND_NAMED_LEXICONS: dict[str, tuple[str, ...]] = {
+-    "kokorog2p-de-thorsten-v1": ("gold", "crane"),
+     "tts-eu-pt-v1": ("lexhint",),
+     "nabra-arabic-v1": (),
+ }
+diff --git a/pykokoro/lexicon_discovery.py b/pykokoro/lexicon_discovery.py
+new file mode 100644
+index 0000000..cccfb17
+--- /dev/null
++++ b/pykokoro/lexicon_discovery.py
+@@ -0,0 +1,163 @@
++"""Metadata-only discovery of named pronunciation lexicons."""
++
++from __future__ import annotations
++
++from dataclasses import dataclass
++from typing import Any
++
++from .discovery import discover_models
++
++
++@dataclass(frozen=True, slots=True)
++class LexiconCapabilities:
++    """Public metadata for a named lexicon accepted by the runtime."""
++
++    selector: str
++    language: str
++    locale: str
++    asset_id: str | None
++    data_backend: str | None
++    default: bool
++    installed: bool | None
++    display_name: str | None = None
++    phoneme_encoding: str | None = None
++    data_version: str | None = None
++    models: tuple[str, ...] = ()
++    model_support: str = "unknown"
++
++
++@dataclass(frozen=True, slots=True)
++class LexiconDiscoveryResult:
++    """Lexicon inventory and discovery provenance."""
++
++    lexicons: tuple[LexiconCapabilities, ...]
++    offline: bool = False
++    refreshed: bool = False
++    registry_source: str | None = None
++    cache_fallback: bool = False
++
++
++def _normalize_language(language: str) -> str:
++    return language.strip().casefold().replace("_", "-")
++
++
++def _locale_label(language: str) -> str:
++    parts = language.split("-")
++    if len(parts) == 1:
++        return parts[0]
++    return "-".join([parts[0].lower(), *[part.upper() for part in parts[1:]]])
++
++
++def _language_matches(requested: str | None, locale: str) -> bool:
++    if requested is None:
++        return True
++    requested = _normalize_language(requested)
++    locale = _normalize_language(locale)
++    return locale == requested or (
++        "-" not in requested and locale.partition("-")[0] == requested
++    )
++
++
++def _installed_state(asset_id: str | None) -> bool | None:
++    if asset_id is None:
++        return None
++    try:
++        from lexphon import DataStore
++
++        return DataStore().verify(asset_id)
++    except (ImportError, OSError, RuntimeError, ValueError):
++        return None
++
++
++def _model_capability(
++    model_variant: str,
++    *,
++    offline: bool,
++    refresh: bool,
++    preference: str,
++) -> Any:
++    models = discover_models(offline=offline, refresh=refresh, preference=preference).models
++    for model in models:
++        if model.model_id == model_variant:
++            return model
++    raise ValueError(f"Unknown model variant: {model_variant}")
++
++
++def _registry_metadata() -> tuple[tuple[Any, ...], str | None]:
++    from kokorog2p.lexicons.registry import iter_lexicon_specs
++
++    return iter_lexicon_specs(), "kokorog2p.lexicons.registry"
++
++
++def discover_lexicons(
++    *,
++    language: str | None = None,
++    model_variant: str | None = None,
++    offline: bool = False,
++    refresh: bool = False,
++    preference: str = "auto",
++) -> LexiconDiscoveryResult:
++    """Discover named selectors without installing lexicon or model assets.
++
++    The KokoroG2P pronunciation registry is the selector source of truth. Model
++    capability metadata narrows the result only when that capability is known.
++    """
++
++    if offline and refresh:
++        raise ValueError("offline and refresh cannot be combined")
++    if preference not in {"auto", "github", "huggingface", "upstream"}:
++        raise ValueError(f"Unknown download preference: {preference}")
++
++    model = None
++    if model_variant is not None:
++        model = _model_capability(
++            model_variant,
++            offline=offline,
++            refresh=refresh,
++            preference=preference,
++        )
++
++    specs, registry_source = _registry_metadata()
++    entries: list[LexiconCapabilities] = []
++    for spec in specs:
++        if not _language_matches(language, spec.language):
++            continue
++
++        model_support = "unknown"
++        models: tuple[str, ...] = ()
++        if model is not None:
++            named_lexicons = model.lexicons
++            if named_lexicons is not None:
++                model_support = "known"
++                if spec.name not in named_lexicons:
++                    continue
++                models = (model.model_id,)
++
++        metadata = dict(spec.metadata)
++        entries.append(
++            LexiconCapabilities(
++                selector=spec.name,
++                language=spec.language.partition("-")[0],
++                locale=_locale_label(spec.language),
++                asset_id=spec.id,
++                data_backend=spec.backend,
++                default=spec.default_priority is not None,
++                installed=_installed_state(spec.id),
++                display_name=metadata.get("display_name"),
++                phoneme_encoding=spec.phoneme_encoding,
++                data_version=metadata.get("data_version"),
++                models=models,
++                model_support=model_support,
++            )
++        )
++
++    entries.sort(key=lambda item: (item.locale.casefold(), item.selector, item.asset_id or ""))
++    return LexiconDiscoveryResult(
++        lexicons=tuple(entries),
++        offline=offline,
++        refreshed=refresh,
++        registry_source=registry_source,
++    )
++
++
++__all__ = ["LexiconCapabilities", "LexiconDiscoveryResult", "discover_lexicons"]
+diff --git a/pykokoro/stages/g2p/kokorog2p.py b/pykokoro/stages/g2p/kokorog2p.py
+index b8e7178..b2c7430 100644
+--- a/pykokoro/stages/g2p/kokorog2p.py
++++ b/pykokoro/stages/g2p/kokorog2p.py
+@@ -697,13 +697,19 @@ class KokoroG2PAdapter(G2PAdapter):
+         from kokorog2p.language_codes import normalize_language_code
+         from kokorog2p.lexicons import normalize_lexicon_selection
+
+-        from ...tokenizer import TokenizerConfig, _effective_lexicons, _legacy_fallback_kwargs
+-
++        from ...tokenizer import (
++            TokenizerConfig,
++            _default_lexicons_for_language,
++            _effective_lexicons,
++            _legacy_fallback_kwargs,
++        )
+         tokenizer_config = cfg.tokenizer_config or TokenizerConfig()
+         kokorog2p_lang = SUPPORTED_LANGUAGES.get(lang, lang)
+         default_language = normalize_language_code(cfg.generation.lang or lang)
+         candidate_language = normalize_language_code(kokorog2p_lang)
+         lexicons = _effective_lexicons(tokenizer_config)
++        if lexicons is None and backend == "kokorog2p":
++            lexicons = _default_lexicons_for_language(candidate_language)
+         if candidate_language != default_language and lexicons is not None:
+             try:
+                 lexicons = normalize_lexicon_selection(candidate_language, lexicons)
+diff --git a/pykokoro/tokenizer.py b/pykokoro/tokenizer.py
+index 11b7497..bbfe204 100644
+--- a/pykokoro/tokenizer.py
++++ b/pykokoro/tokenizer.py
+@@ -66,6 +66,16 @@ validate_for_kokoro = _kokorog2p.validate_for_kokoro
+ logger = logging.getLogger(__name__)
+
+
++GERMAN_DEFAULT_LEXICONS = ("espeak",)
++
++
++def _default_lexicons_for_language(language: str) -> tuple[str, ...] | None:
++    """Return PyKokoro's implicit static lexicon selection for a language."""
++    normalized = language.lower().replace("_", "-")
++    if normalized in {"de", "de-de", "de-at", "de-ch", "deu", "german"}:
++        return GERMAN_DEFAULT_LEXICONS
++    return None
++
+ def _normalize_lexicons(
+     value: str | Sequence[str] | None,
+ ) -> tuple[str, ...] | None:
+@@ -297,6 +307,9 @@ class Tokenizer:
+
+             # All languages are now fully supported by kokorog2p
+             # kokorog2p uses dictionary + espeak fallback for all languages
++            selected_lexicons = _effective_lexicons(self.config)
++            if selected_lexicons is None and self.config.backend == "kokorog2p":
++                selected_lexicons = _default_lexicons_for_language(kokorog2p_lang)
+             kwargs = {
+                 "language": kokorog2p_lang,
+                 **_legacy_fallback_kwargs(self.config.fallback),
+@@ -304,7 +317,7 @@ class Tokenizer:
+                 "spacy_model": self.config.spacy_model,
+                 "spacy_model_size": self.config.spacy_model_size,
+                 "backend": self.config.backend,
+-                "lexicons": _effective_lexicons(self.config),
++                "lexicons": selected_lexicons,
+                 "version": self._kokorog2p_model,
+                 "phoneme_quotes": "curly",
+             }
+diff --git a/tests/test_g2p_adapter_spacy_model.py b/tests/test_g2p_adapter_spacy_model.py
+index b99943e..e288534 100644
+--- a/tests/test_g2p_adapter_spacy_model.py
++++ b/tests/test_g2p_adapter_spacy_model.py
+@@ -202,6 +202,26 @@ def test_kokorog2p_adapter_forwards_named_lexicons(monkeypatch):
+     assert captured["use_goruut_fallback"] is True
+
+
++def test_kokorog2p_adapter_uses_german_implicit_espeak_lexicon(monkeypatch):
++    captured: dict[str, object] = {}
++
++    class FakeG2PModule:
++        @staticmethod
++        def get_g2p(**kwargs):
++            captured.update(kwargs)
++            return object()
++
++    adapter = KokoroG2PAdapter()
++    monkeypatch.setattr(adapter, "_load", lambda: FakeG2PModule())
++    cfg = PipelineConfig(
++        generation=GenerationConfig(lang="de"),
++        tokenizer_config=TokenizerConfig(),
++    )
++
++    adapter._get_g2p_instance("de", cfg)
++
++    assert captured["lexicons"] == ("espeak",)
++
+ def test_g2p_instance_cache_distinguishes_named_lexicons(monkeypatch):
+     created: list[dict[str, object]] = []
+
+diff --git a/tests/test_german_tts_samples_example.py b/tests/test_german_tts_samples_example.py
+index dc8e52c..4f330c6 100644
+--- a/tests/test_german_tts_samples_example.py
++++ b/tests/test_german_tts_samples_example.py
+@@ -71,7 +71,7 @@ def test_default_cli_selection() -> None:
+     args = example.build_parser().parse_args([])
+
+     assert args.model == "v1.2-de-martin"
+-    assert args.lexicon == "gold"
++    assert args.lexicon == "espeak"
+
+
+ @pytest.mark.parametrize(
+diff --git a/tests/test_lexicon_discovery.py b/tests/test_lexicon_discovery.py
+new file mode 100644
+index 0000000..1c53f82
+--- /dev/null
++++ b/tests/test_lexicon_discovery.py
+@@ -0,0 +1,98 @@
++from __future__ import annotations
++
++from types import SimpleNamespace
++
++import pykokoro
++import pytest
++
++from pykokoro import lexicon_discovery
++
++
++def test_root_package_exports_lexicon_discovery() -> None:
++    assert pykokoro.discover_lexicons is lexicon_discovery.discover_lexicons
++    assert pykokoro.LexiconCapabilities is lexicon_discovery.LexiconCapabilities
++
++
++@pytest.mark.parametrize(
++    ("language", "selector", "asset_id"),
++    (
++        ("de", "gold", "de-de:gold"),
++        ("de", "crane", "de-de:crane"),
++        ("en-us", "gold", "en-us:gold"),
++        ("en-gb", "gold", "en-gb:gold"),
++        ("fr-fr", "gold", "fr-fr:gold"),
++        ("pt-pt", "lexhint", "pt-pt:lexhint"),
++    ),
++)
++def test_named_selectors_map_to_language_qualified_assets(
++    monkeypatch: pytest.MonkeyPatch,
++    language: str,
++    selector: str,
++    asset_id: str,
++) -> None:
++    monkeypatch.setattr(lexicon_discovery, "_installed_state", lambda _asset: False)
++
++    result = lexicon_discovery.discover_lexicons(language=language)
++    matching = [item for item in result.lexicons if item.selector == selector]
++
++    assert matching
++    assert matching[0].asset_id == asset_id
++    assert matching[0].selector == selector
++
++
++def test_base_language_keeps_regional_entries(monkeypatch: pytest.MonkeyPatch) -> None:
++    monkeypatch.setattr(lexicon_discovery, "_installed_state", lambda _asset: False)
++
++    result = lexicon_discovery.discover_lexicons(language="EN_us")
++    assert [(item.locale, item.selector) for item in result.lexicons] == [("en-US", "gold")]
++
++    result = lexicon_discovery.discover_lexicons(language="en")
++    assert [(item.locale, item.selector) for item in result.lexicons] == [
++        ("en-GB", "gold"),
++        ("en-US", "gold"),
++    ]
++
++
++def test_known_model_filter_and_unknown_capability(monkeypatch: pytest.MonkeyPatch) -> None:
++    monkeypatch.setattr(lexicon_discovery, "_installed_state", lambda _asset: False)
++    monkeypatch.setattr(
++        lexicon_discovery,
++        "discover_models",
++        lambda **_kwargs: SimpleNamespace(
++            models=(
++                SimpleNamespace(model_id="de-thorsten", lexicons=("gold", "crane")),
++            )
++        ),
++    )
++
++    known = lexicon_discovery.discover_lexicons(language="de", model_variant="de-thorsten")
++    assert [item.selector for item in known.lexicons] == ["crane", "gold"]
++    assert all(item.model_support == "known" for item in known.lexicons)
++    assert all(item.models == ("de-thorsten",) for item in known.lexicons)
++
++    monkeypatch.setattr(
++        lexicon_discovery,
++        "discover_models",
++        lambda **_kwargs: SimpleNamespace(
++            models=(SimpleNamespace(model_id="de-thorsten", lexicons=None),)
++        ),
++    )
++    unknown = lexicon_discovery.discover_lexicons(language="de", model_variant="de-thorsten")
++    assert {item.selector for item in unknown.lexicons} >= {"gold", "crane"}
++    assert all(item.model_support == "unknown" for item in unknown.lexicons)
++
++
++def test_discovery_never_installs_assets(monkeypatch: pytest.MonkeyPatch) -> None:
++    calls: list[str] = []
++
++    class Store:
++        def verify(self, asset_id: str) -> bool:
++            calls.append(asset_id)
++            return False
++
++    monkeypatch.setattr(lexicon_discovery, "DataStore", Store, raising=False)
++    monkeypatch.setattr(lexicon_discovery, "_installed_state", lambda asset: Store().verify(asset))
++
++    result = lexicon_discovery.discover_lexicons(language="de", offline=True)
++    assert result.offline is True
++    assert calls
+diff --git a/tests/test_tokenizer.py b/tests/test_tokenizer.py
+index dbac91a..970bbae 100644
+--- a/tests/test_tokenizer.py
++++ b/tests/test_tokenizer.py
+@@ -254,6 +254,40 @@ class TestTokenizer:
+         assert captured["spacy_model"] is None
+         assert captured["spacy_model_size"] == "lg"
+
++
++    def test_get_g2p_uses_german_implicit_espeak_lexicon(self, monkeypatch):
++        """Test German defaults to the static de-de:espeak lexicon."""
++        import pykokoro.tokenizer as tokenizer_module
++
++        captured: dict[str, object] = {}
++
++        def fake_get_g2p(**kwargs):
++            captured.update(kwargs)
++            return object()
++
++        monkeypatch.setattr(tokenizer_module, "get_g2p", fake_get_g2p)
++
++        tokenizer = Tokenizer(config=TokenizerConfig(use_spacy=False))
++        tokenizer._get_g2p("de")
++
++        assert captured["lexicons"] == ("espeak",)
++
++    def test_get_g2p_preserves_non_german_implicit_lexicon_default(self, monkeypatch):
++        """Test non-German defaults remain delegated to KokoroG2P."""
++        import pykokoro.tokenizer as tokenizer_module
++
++        captured: dict[str, object] = {}
++
++        def fake_get_g2p(**kwargs):
++            captured.update(kwargs)
++            return object()
++
++        monkeypatch.setattr(tokenizer_module, "get_g2p", fake_get_g2p)
++
++        tokenizer = Tokenizer(config=TokenizerConfig(use_spacy=False))
++        tokenizer._get_g2p("en-us")
++
++        assert captured["lexicons"] is None
+     def test_normalize_text(self, tokenizer):
+         """Test text normalization."""
+         assert tokenizer.normalize_text("  hello  ") == "hello"

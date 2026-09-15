@@ -1,0 +1,1601 @@
+ .github/workflows/tests.yml                        |   2 +-
+ benchmarks/short_sentence_latency.py               | 191 +++++++++++++++++++++
+ docs/short_sentence_quality.md                     |  39 +++++
+ examples/optimal_phoneme_length_demo.py            |   2 +-
+ examples/short_sentence_voices_demo.py             | 164 ++++++++----------
+ pykokoro/audio_generator.py                        |  69 ++++++++
+ pykokoro/short_sentence_cutters/__init__.py        |   2 +
+ pykokoro/short_sentence_cutters/energy_valley.py   |   1 +
+ .../short_sentence_cutters/timestamp_adaptive.py   | 140 +++++++++++++++
+ pykokoro/short_sentence_handler.py                 |  83 +++++++--
+ pykokoro/stages/g2p/kokorog2p.py                   |  97 ++++++++++-
+ pykokoro/types.py                                  |  19 ++
+ pyproject.toml                                     |   2 +-
+ tests/test_audio_generator_performance.py          | 133 ++++++++++++++
+ tests/test_g2p_cache.py                            |  78 +++++++++
+ tests/test_packaging_metadata.py                   |   7 +-
+ tests/test_short_sentence_cutters.py               | 122 +++++++++++++
+ tests/test_short_sentence_handler.py               |  30 ++++
+ 18 files changed, 1067 insertions(+), 114 deletions(-)
+
+diff --git a/.github/workflows/tests.yml b/.github/workflows/tests.yml
+index 9f94b57..2d7bf6f 100644
+--- a/.github/workflows/tests.yml
++++ b/.github/workflows/tests.yml
+@@ -123,7 +123,7 @@ jobs:
+           "phrasplit==0.3.9" \
+           "ssmd==0.8.7" \
+           "spokenform==0.4.3" \
+-          "audiosig==0.1.1" \
++          "audiosig==0.1.3" \
+           platformdirs
+         python -m pip install -e .
+     - name: Install Lexphon data
+diff --git a/benchmarks/short_sentence_latency.py b/benchmarks/short_sentence_latency.py
+new file mode 100644
+index 0000000..01a2058
+--- /dev/null
++++ b/benchmarks/short_sentence_latency.py
+@@ -0,0 +1,191 @@
++"""Benchmark warm short-sentence rendering and structural inference counters.
++
++This benchmark intentionally reports wall time without using it as a CI threshold.
++Use ``--dry-run`` to inspect the complete scenario and policy matrix without loading
++model assets.
++"""
++
++from __future__ import annotations
++
++import argparse
++import json
++import time
++from pathlib import Path
++from typing import Any
++
++import numpy as np
++
++from pykokoro import GenerationConfig, PipelineConfig
++from pykokoro.pipeline import KokoroPipeline
++from pykokoro.short_sentence_handler import (
++    PhraseResolveMode,
++    ShortSentenceConfig,
++)
++
++DEMO_TEXTS = (
++    "Hi!",
++    "Why?",
++    "Oh No.",
++    "No!",
++    "Yes!",
++    "Help!",
++    "Oh!",
++    "Stop!",
++    "What?",
++    "Don't!",
++    "One … step. In front.",
++    "thing on her chest.",
++    "Of.",
++)
++
++SCENARIOS = (
++    ("short-declarative", "Oh No."),
++    ("short-question", "Why?"),
++    ("short-exclamation", "Help!"),
++    ("one-word-interjection", "Oh!"),
++    ("two-word-phrase", "No thanks."),
++    ("fragment", "thing on her chest."),
++    ("ellipsis", "Wait …"),
++    ("near-min-phoneme-length", "One small step."),
++)
++POLICIES = ("disabled", "energy-valley", "timestamp-adaptive", "wrap")
++
++
++def _short_sentence_config(policy: str) -> ShortSentenceConfig:
++    if policy == "disabled":
++        return ShortSentenceConfig(enabled=False)
++    if policy == "wrap":
++        return ShortSentenceConfig(resolve_mode="wrap")
++    return ShortSentenceConfig(
++        resolve_mode="phrase",
++        resolve_modes={
++            "phrase": PhraseResolveMode(cutter=policy),
++        },
++    )
++
++
++def _summary(result: Any, *, policy: str, scenario: str, text: str, wall_ms: float) -> dict[str, Any]:
++    trace = result.trace
++    inference_summary = trace.inference_summary() if trace is not None else {}
++    counters = trace.counters if trace is not None else {}
++    audio_seconds = result.audio.size / result.sample_rate if result.sample_rate else 0.0
++    boundary_metrics = _waveform_boundary_metrics(result.audio)
++    if trace is not None:
++        for event in trace.prosody:
++            metadata = event.get("short_sentence") if isinstance(event, dict) else None
++            if isinstance(metadata, dict):
++                boundary_metrics.update(
++                    {
++                        key: value
++                        for key, value in metadata.items()
++                        if key.endswith("_distance_samples")
++                        or key.endswith("_distance_ms")
++                        or key == "retained_guard_duration_ms"
++                    }
++                )
++    return {
++        "policy": policy,
++        "scenario": scenario,
++        "text": text,
++        "wall_ms": wall_ms,
++        "audio_seconds": audio_seconds,
++        "rtf": wall_ms / 1000.0 / audio_seconds if audio_seconds else None,
++        "short_segments": counters.get("short_sentence_detected", 0),
++        "onnx_calls": inference_summary.get("onnx_calls", 0),
++        "onnx_runtime_ms": inference_summary.get("onnx_runtime_ms", 0.0),
++        "initial_phrase_attempts": counters.get("short_sentence_phrase_initial", 0),
++        "phrase_retries": counters.get("short_sentence_phrase_retry", 0),
++        "wrap_fallbacks": counters.get("short_sentence_wrap_fallback", 0),
++        "strict_cut_successes": counters.get("short_sentence_cut_strict_success", 0),
++        "adaptive_cut_successes": counters.get("short_sentence_cut_adaptive_success", 0),
++        "cut_failures": counters.get("short_sentence_cut_failure", 0),
++        "boundary_metrics": boundary_metrics,
++    }
++
++def _waveform_boundary_metrics(audio: Any) -> dict[str, object]:
++    values = np.asarray(audio, dtype=np.float32).reshape(-1)
++    if values.size < 2:
++        return {}
++    window = min(120, values.size)
++    return {
++        "left_endpoint_abs_amplitude": float(abs(values[0])),
++        "right_endpoint_abs_amplitude": float(abs(values[-1])),
++        "left_cross_boundary_slope": float(abs(values[1] - values[0])),
++        "right_cross_boundary_slope": float(abs(values[-1] - values[-2])),
++        "left_local_rms": float(np.sqrt(np.mean(np.square(values[:window])))),
++        "right_local_rms": float(np.sqrt(np.mean(np.square(values[-window:])))),
++    }
++
++
++def _add_arguments(parser: argparse.ArgumentParser) -> None:
++    parser.add_argument("--model-source", choices=("github", "huggingface"), default="huggingface")
++    parser.add_argument("--model-variant", default="v1.0")
++    parser.add_argument("--model-path", type=Path)
++    parser.add_argument("--voices-path", type=Path)
++    parser.add_argument("--voices", default="af_sarah")
++    parser.add_argument("--dry-run", action="store_true")
++
++
++def run_benchmark(args: argparse.Namespace) -> list[dict[str, Any]]:
++    voices = tuple(voice.strip() for voice in args.voices.split(",") if voice.strip())
++    policies = POLICIES
++    if args.dry_run:
++        return [
++            {"policy": policy, "scenario": scenario, "text": text, "voice": voice}
++            for voice in voices
++            for policy in policies
++            for scenario, text in (*SCENARIOS, ("demo-corpus", "|".join(DEMO_TEXTS)))
++        ]
++
++    pipelines: dict[str, KokoroPipeline] = {}
++    try:
++        for policy in policies:
++            pipelines[policy] = KokoroPipeline(
++                PipelineConfig(
++                    voice=voices[0],
++                    model_source=args.model_source,
++                    model_variant=args.model_variant,
++                    model_path=args.model_path,
++                    voices_path=args.voices_path,
++                    generation=GenerationConfig(lang="en-us", speed=1.0),
++                    short_sentence_config=_short_sentence_config(policy),
++                    return_trace=True,
++                )
++            )
++        for pipeline in pipelines.values():
++            pipeline.warmup()
++
++        rows: list[dict[str, Any]] = []
++        for voice in voices:
++            for policy, pipeline in pipelines.items():
++                for scenario, text in SCENARIOS:
++                    started = time.perf_counter()
++                    result = pipeline.run(text, voice=voice)
++                    wall_ms = (time.perf_counter() - started) * 1000.0
++                    row = _summary(result, policy=policy, scenario=scenario, text=text, wall_ms=wall_ms)
++                    row["voice"] = voice
++                    rows.append(row)
++                for text in DEMO_TEXTS:
++                    started = time.perf_counter()
++                    result = pipeline.run(text, voice=voice)
++                    wall_ms = (time.perf_counter() - started) * 1000.0
++                    row = _summary(result, policy=policy, scenario="demo-corpus", text=text, wall_ms=wall_ms)
++                    row["voice"] = voice
++                    rows.append(row)
++        return rows
++    finally:
++        for pipeline in pipelines.values():
++            pipeline.close()
++
++
++def main() -> int:
++    parser = argparse.ArgumentParser(description=__doc__)
++    _add_arguments(parser)
++    args = parser.parse_args()
++    for row in run_benchmark(args):
++        print(json.dumps(row, sort_keys=True))
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/docs/short_sentence_quality.md b/docs/short_sentence_quality.md
+new file mode 100644
+index 0000000..b44bcab
+--- /dev/null
++++ b/docs/short_sentence_quality.md
+@@ -0,0 +1,39 @@
++# Short-sentence quality validation
++
++The warm benchmark compares the four supported policies using the same persistent
++pipelines:
++
++```text
++disabled
++energy-valley
++timestamp-adaptive
++wrap
++```
++
++Run it with model assets available:
++
++```bash
++python benchmarks/short_sentence_latency.py --voices af_sarah
++```
++
++Use `--dry-run` to inspect the scenario matrix without loading model assets. The
++benchmark includes the existing 13 demo texts and the required declarative,
++question, exclamation, interjection, two-word, fragment, ellipsis, and near-minimum
++scenarios. It reports structural counters for ONNX calls, phrase attempts, retries,
++wrap fallbacks, strict cuts, adaptive cuts, and failures. Wall-clock values are
++informational and are not CI pass/fail gates.
++
++Each rendered row also reports objective boundary measurements:
++
++- absolute amplitude at the returned left and right endpoints;
++- adjacent sample slope at each endpoint;
++- local RMS near each endpoint;
++- distance from each timestamp anchor in samples and milliseconds;
++- retained guard duration in milliseconds when timestamp metadata is available.
++
++Review the generated outputs in an A/B listening pass. Check for missing initial
++consonants, clipped final consonants, leaked neighboring context, clicks, abrupt
++gating, and incorrect question or exclamation prosody. Compare old energy-valley,
++new timestamp-adaptive, disabled, and wrap outputs. No human reference recording is
++required, and no wall-clock improvement should be claimed without a real warm
++benchmark run on the target hardware.
+diff --git a/examples/optimal_phoneme_length_demo.py b/examples/optimal_phoneme_length_demo.py
+index 7cd47b6..a8a169a 100644
+--- a/examples/optimal_phoneme_length_demo.py
++++ b/examples/optimal_phoneme_length_demo.py
+@@ -142,7 +142,7 @@ def main():
+     print("Pipeline created with default ShortSentenceConfig:")
+     print("  min_phoneme_length: 30 (segments below this use short-sentence handling)")
+     print("  resolve_mode: randomized-phrase")
+-    print("  phrase_fallback_tries: 5")
++    print("  phrase_fallback_tries: 1")
+
+     # Analyze the text to show which segments are short
+     print_separator("Analyzing Text Segments")
+diff --git a/examples/short_sentence_voices_demo.py b/examples/short_sentence_voices_demo.py
+index b746982..bfb9255 100644
+--- a/examples/short_sentence_voices_demo.py
++++ b/examples/short_sentence_voices_demo.py
+@@ -2,25 +2,25 @@
+ """
+ Short Sentence Handler Demonstration.
+
+-This example demonstrates the cross-correlation extraction technique used by PyKokoro
++This example demonstrates the short-sentence extraction flow used by PyKokoro
+ to improve audio quality for very short sentences.
+
+ The short sentence handler:
+ 1. Detects sentences with fewer phonemes than a threshold (default: 30)
+-2. Generates the short sentence alone (poor quality, but needed for pattern)
+-3. Generates context + short sentence together (good quality with natural prosody)
+-4. Uses cross-correlation to find where the short sentence appears in combined audio
+-5. Extracts that portion from the combined audio (maintains high quality)
++2. Generates a context phrase and records model duration/timestamp metadata
++3. Builds legal boundary windows from neighboring token timestamps
++4. Uses strict energy-valley or adaptive smooth waveform boundaries
++5. Retries only when timestamped extraction is not possible
++6. Extracts the target portion from the context audio
+
+ This produces higher-quality audio because neural TTS models typically need
+ more context to produce natural-sounding speech with proper prosody and intonation.
+-The cross-correlation approach is robust and doesn't depend on silence gap detection.
+
+ Usage:
+-    python examples/short_sentence_demo.py
++    python examples/short_sentence_voices_demo.py
+
+ Output:
+-    short_sentence_demo.wav - Audio demonstrating short sentence handling
++    short_sentence_voices_demo.wav - Audio comparing context extraction and baseline audio
+     Detailed console output showing processing steps
+ """
+
+@@ -99,112 +99,98 @@ def print_separator(title: str) -> None:
+
+
+ def test_sentence_with_config(
++    pipeline: KokoroPipeline,
+     voice: str,
+     text: str,
+-    config: ShortSentenceConfig | None,
+     config_name: str,
+ ) -> tuple[np.ndarray, int]:
+-    """Generate audio for a sentence with a specific config.
+-
+-    Args:
+-        kokoro: Kokoro instance
+-        text: Text to generate
+-        config: Short sentence configuration (or None to disable)
+-        config_name: Name for logging
+-
+-    Returns:
+-        Tuple of (audio samples, sample rate)
+-    """
+-    # Create a new Kokoro instance with the config
+-    kokoro_test = KokoroPipeline(
+-        PipelineConfig(
+-            voice=voice,
+-            generation=GenerationConfig(lang=LANG, speed=1.0),
+-            short_sentence_config=config,
+-        )
++    """Generate audio with a persistent pipeline and per-run voice override."""
++    result = pipeline.run(text, voice=voice)
++    samples, sample_rate = result.audio, result.sample_rate
++    print(
++        f"  {config_name:25} -> {len(samples):6} samples "
++        f"({len(samples) / sample_rate:.3f}s)"
+     )
++    return samples, sample_rate
+
+-    res = kokoro_test.run(text)
+-    samples, sr = res.audio, res.sample_rate
+-
+-    print(f"  {config_name:25} -> {len(samples):6} samples ({len(samples) / sr:.3f}s)")
+-
+-    return samples, sr
+-
+-
+-def main():
++def main() -> None:
+     """Generate audio demonstrating short sentence handling."""
+     print_separator("SHORT SENTENCE HANDLER DEMONSTRATION")
+
+-    print("\nThis demo shows how PyKokoro improves audio quality for short sentences")
+-    print("using cross-correlation extraction with context.")
++    print("\nThis demo compares context extraction with short-sentence handling disabled")
++    print("using model timestamps, legal boundary windows, and waveform cuts.")
+     print(f"\nTexts: {len(TEST_SENTENCES)} short-sentence samples")
+     print(f"Language: {LANG}")
+     print("\nNOTE: Audio duration will be similar, but QUALITY will be better")
+     print("      with context-prepending. Listen to the generated files to compare!")
+
+-    # Initialize with default config
+     print_separator("Testing Individual Sentences")
+-
+-    kokoro = KokoroPipeline(
+-        PipelineConfig(voice=VOICE, generation=GenerationConfig(lang=LANG, speed=1.0))
+-    )
++    phrase_config = neutral_phrase_short_sentence_config()
++    disabled_config = ShortSentenceConfig(enabled=False)
+     tokenizer = Tokenizer()
+
+-    all_samples = []
+-    all_samples2 = []
+-    sample_rate = 24000
+-
+-    pause = np.zeros(int(sample_rate * 0.5), dtype=np.float32)
+-    # Add announcement and samples to output
+-    announcement = "With pretexting"
+-    intro = kokoro.run(announcement).audio
+-    all_samples.extend([intro, pause])
+-    # Add announcement and samples to output
+-    announcement = "Without pretexting"
+-    intro2 = kokoro.run(announcement).audio
+-    all_samples2.extend([pause, intro2, pause])
+-
+-    # Test each voice and sentence with different configurations
+-    for voice in VOICES:
+-        print(f"\nVoice: '{voice}'")
+-        for text in TEST_SENTENCES:
+-            phoneme_count = len(tokenizer.phonemize(text, lang=LANG))
+-            print(f"\nText: '{text}' ({phoneme_count} phonemes)")
+-
+-            config_enabled = neutral_phrase_short_sentence_config()
+-            config_disabled = ShortSentenceConfig(enabled=False)
+-
+-            samples_enabled, sr = test_sentence_with_config(
+-                voice, text, config_enabled, "With phrase cutting"
++    with (
++        KokoroPipeline(
++            PipelineConfig(
++                voice=VOICE,
++                generation=GenerationConfig(lang=LANG, speed=1.0),
++                short_sentence_config=phrase_config,
+             )
+-
+-            samples_disabled, sr = test_sentence_with_config(
+-                voice, text, config_disabled, "Without phrase cutting"
++        ) as phrase_pipeline,
++        KokoroPipeline(
++            PipelineConfig(
++                voice=VOICE,
++                generation=GenerationConfig(lang=LANG, speed=1.0),
++                short_sentence_config=disabled_config,
+             )
+-            pause = np.zeros(int(sr * 0.1), dtype=np.float32)
+-            all_samples.extend([samples_enabled, pause])
+-            all_samples2.extend([samples_disabled, pause])
+-
+-    # Save combined audio
+-    print_separator("Saving Combined Audio")
+-
+-    combined_samples = np.concatenate(all_samples + all_samples2)
+-    output_file = artifact_path("short_sentence_voices_demo.wav")
+-    sf.write(output_file, combined_samples, sample_rate)
++        ) as baseline_pipeline,
++    ):
++        phrase_pipeline.warmup()
++        baseline_pipeline.warmup()
++
++        all_samples: list[np.ndarray] = []
++        baseline_samples: list[np.ndarray] = []
++        sample_rate = 24000
++        pause = np.zeros(int(sample_rate * 0.5), dtype=np.float32)
++
++        all_samples.extend([phrase_pipeline.run("With context extraction", voice=VOICE).audio, pause])
++        baseline_samples.extend(
++            [baseline_pipeline.run("Without context extraction", voice=VOICE).audio, pause]
++        )
+
+-    total_duration = len(combined_samples) / sample_rate
+-    print(f"\nCreated {output_file}")
+-    print(f"Total duration: {total_duration:.2f}s ({total_duration / 60:.2f} minutes)")
++        for voice in VOICES:
++            print(f"\nVoice: '{voice}'")
++            for text in TEST_SENTENCES:
++                phoneme_count = len(tokenizer.phonemize(text, lang=LANG))
++                print(f"\nText: '{text}' ({phoneme_count} phonemes)")
++
++                samples_enabled, sample_rate = test_sentence_with_config(
++                    phrase_pipeline, voice, text, "With phrase cutting"
++                )
++                samples_disabled, sample_rate = test_sentence_with_config(
++                    baseline_pipeline, voice, text, "Without phrase cutting"
++                )
++                pause = np.zeros(int(sample_rate * 0.1), dtype=np.float32)
++                all_samples.extend([samples_enabled, pause])
++                baseline_samples.extend([samples_disabled, pause])
++
++        print_separator("Saving Combined Audio")
++        combined_samples = np.concatenate(all_samples + baseline_samples)
++        output_file = artifact_path("short_sentence_voices_demo.wav")
++        sf.write(output_file, combined_samples, sample_rate)
++
++        total_duration = len(combined_samples) / sample_rate
++        print(f"\nCreated {output_file}")
++        print(f"Total duration: {total_duration:.2f}s ({total_duration / 60:.2f} minutes)")
+
+-    # Summary
+     print_separator("SUMMARY")
+
+     print("\nHow the Short Sentence Handler Works:")
+     print("  1. Detects sentences with < min_phoneme_length phonemes")
+-    print("  2. Applies the configured resolve mode to the short segment")
+-    print("  3. Phrase modes synthesize a context phrase")
+-    print("  4. Cuts away the extra phrase context when boundaries are confident")
++    print("  2. Generates a context phrase and reads duration/timestamp metadata")
++    print("  3. Builds legal boundary windows around the target timestamps")
++    print("  4. Cuts at an energy valley or an adaptive smooth waveform boundary")
++    print("  5. Retries only when timestamped extraction is not possible")
+
+     print("\nBenefits:")
+     print("  • Improved prosody and intonation for short sentences")
+diff --git a/pykokoro/audio_generator.py b/pykokoro/audio_generator.py
+index b36d3d9..a65aaa0 100644
+--- a/pykokoro/audio_generator.py
++++ b/pykokoro/audio_generator.py
+@@ -988,6 +988,11 @@ class AudioGenerator:
+     ) -> list[PhonemeSegment]:
+         noise_flags: list[bool] = []
+         for segment in segments:
++            short_sentence_metadata = (segment.ssmd_metadata or {}).get(SHORT_SENTENCE_META_KEY)
++            if trace is not None and isinstance(short_sentence_metadata, dict):
++                trace.increment_counter("short_sentence_detected")
++                if short_sentence_metadata.get("kind") in {"phrase", "randomized-phrase"}:
++                    trace.increment_counter("short_sentence_phrase_initial")
+             if not segment.phonemes.strip():
+                 segment.raw_audio = None
+                 continue
+@@ -1183,12 +1188,14 @@ class AudioGenerator:
+
+         cut_audio = cut_short_sentence_phrase_audio(audio, short_sentence_metadata)
+         if cut_audio is not None:
++            _record_short_sentence_cut(short_sentence_metadata, len(audio), trace)
+             left_cut = short_sentence_metadata.get("cut_left")
+             right_cut = short_sentence_metadata.get("cut_right")
+             if isinstance(left_cut, int) and isinstance(right_cut, int):
+                 segment.word_timings = _crop_word_timings(segment.word_timings, left_cut, right_cut)
+             short_sentence_metadata["cut_applied"] = True
+             return cut_audio
++        _record_short_sentence_cut_failure(short_sentence_metadata, trace)
+
+         retry_audio = self._try_short_sentence_phrase_fallbacks(
+             segment,
+@@ -1210,6 +1217,9 @@ class AudioGenerator:
+             )
+             return audio
+
++        short_sentence_metadata["cut_strategy"] = "wrap"
++        if trace is not None:
++            trace.increment_counter("short_sentence_wrap_fallback")
+         logger.warning(
+             "Short sentence phrase cut for '%s' lacked confident boundaries; "
+             "falling back to wrap mode.",
+@@ -1237,6 +1247,8 @@ class AudioGenerator:
+             )
+         short_sentence_metadata["cut_applied"] = True
+         short_sentence_metadata["fallback_used"] = "wrap"
++        short_sentence_metadata["cut_left"] = 0
++        short_sentence_metadata["cut_right"] = len(fallback_audio)
+         segment.phonemes = fallback_phonemes
+         if isinstance(prepared_fallback_tokens, list):
+             segment.tokens = prepared_fallback_tokens
+@@ -1281,6 +1293,8 @@ class AudioGenerator:
+             if retry_attempts >= max_attempts:
+                 break
+             retry_attempts += 1
++            if trace is not None:
++                trace.increment_counter("short_sentence_phrase_retry")
+             logger.info(
+                 "Short sentence phrase cut for '%s' lacked confident boundaries; "
+                 "trying another phrase %d/%d. Failed with: '%s'",
+@@ -1330,8 +1344,10 @@ class AudioGenerator:
+                 populate_short_sentence_boundary_metadata(retry.metadata, timestamped)
+             cut_audio = cut_short_sentence_phrase_audio(retry_audio, retry.metadata)
+             if cut_audio is None:
++                _record_short_sentence_cut_failure(retry.metadata, trace)
+                 failed_template = template
+                 continue
++            _record_short_sentence_cut(retry.metadata, len(retry_audio), trace)
+
+             logger.info(
+                 "Short sentence phrase cut for '%s' succeeded using fallback phrase '%s' (%d/%d).",
+@@ -1820,6 +1836,59 @@ def _short_sentence_phrase_fallback_limit(
+     except (TypeError, ValueError):
+         return max(0, int(default))
+
++def _record_short_sentence_cut(
++    metadata: dict[str, object],
++    audio_length: int,
++    trace: Trace | None,
++) -> None:
++    """Record cut strategy, geometry, and aggregate success counters."""
++    strategy = str(metadata.get("cut_strategy", "energy-valley"))
++    if strategy == "energy-valley":
++        counter = "short_sentence_cut_strict_success"
++    elif strategy == "timestamp-smooth":
++        counter = "short_sentence_cut_adaptive_success"
++    else:
++        counter = "short_sentence_cut_failure"
++    if trace is not None:
++        trace.increment_counter(counter)
++
++    left_cut = metadata.get("cut_left")
++    right_cut = metadata.get("cut_right")
++    if not isinstance(left_cut, int) or not isinstance(right_cut, int):
++        return
++    metadata["cut_left"] = max(0, min(audio_length, left_cut))
++    metadata["cut_right"] = max(0, min(audio_length, right_cut))
++    target_start = _timestamp_to_sample(metadata.get("target_start_ts"))
++    target_end = _timestamp_to_sample(metadata.get("target_end_ts"))
++    if target_start is not None:
++        metadata["left_anchor_distance_samples"] = abs(left_cut - target_start)
++        metadata["left_anchor_distance_ms"] = abs(left_cut - target_start) * 1000.0 / SAMPLE_RATE
++    if target_end is not None:
++        metadata["right_anchor_distance_samples"] = abs(right_cut - target_end)
++        metadata["right_anchor_distance_ms"] = abs(right_cut - target_end) * 1000.0 / SAMPLE_RATE
++    guard_durations: dict[str, float] = {}
++    if target_start is not None:
++        guard_durations["left"] = abs(left_cut - target_start) * 1000.0 / SAMPLE_RATE
++    if target_end is not None:
++        guard_durations["right"] = abs(right_cut - target_end) * 1000.0 / SAMPLE_RATE
++    if guard_durations:
++        metadata["retained_guard_duration_ms"] = guard_durations
++
++
++def _record_short_sentence_cut_failure(
++    metadata: dict[str, object],
++    trace: Trace | None,
++) -> None:
++    """Record an unsuccessful legal phrase cut."""
++    if trace is not None:
++        trace.increment_counter("short_sentence_cut_failure")
++
++
++def _timestamp_to_sample(value: object) -> int | None:
++    if not isinstance(value, (int, float)):
++        return None
++    return round(float(value) * SAMPLE_RATE)
++
+
+ def _is_spoken_token(token: dict[str, object]) -> bool:
+     """Return whether a token corresponds to spoken lexical content."""
+diff --git a/pykokoro/short_sentence_cutters/__init__.py b/pykokoro/short_sentence_cutters/__init__.py
+index 0f2dbd1..7910ad0 100644
+--- a/pykokoro/short_sentence_cutters/__init__.py
++++ b/pykokoro/short_sentence_cutters/__init__.py
+@@ -7,11 +7,13 @@ from collections.abc import Callable
+ import numpy as np
+
+ from .energy_valley import cut_with_energy_valley
++from .timestamp_adaptive import cut_with_timestamp_adaptive
+
+ PhraseCutter = Callable[[np.ndarray, dict[str, object]], np.ndarray | None]
+
+ _CUTTERS: dict[str, PhraseCutter] = {
+     "energy-valley": cut_with_energy_valley,
++    "timestamp-adaptive": cut_with_timestamp_adaptive,
+ }
+
+
+diff --git a/pykokoro/short_sentence_cutters/energy_valley.py b/pykokoro/short_sentence_cutters/energy_valley.py
+index f6fc8e7..287deb3 100644
+--- a/pykokoro/short_sentence_cutters/energy_valley.py
++++ b/pykokoro/short_sentence_cutters/energy_valley.py
+@@ -18,6 +18,7 @@ def cut_with_energy_valley(
+ ) -> np.ndarray | None:
+     """Cut phrase audio at stable low-energy valleys inside legal timestamp windows."""
+     cut_bounds = find_energy_valley_cut_bounds(audio, metadata)
++    metadata["cut_strategy"] = "energy-valley"
+     if cut_bounds is None:
+         return None
+     left_cut, right_cut = cut_bounds
+diff --git a/pykokoro/short_sentence_cutters/timestamp_adaptive.py b/pykokoro/short_sentence_cutters/timestamp_adaptive.py
+new file mode 100644
+index 0000000..7a4647d
+--- /dev/null
++++ b/pykokoro/short_sentence_cutters/timestamp_adaptive.py
+@@ -0,0 +1,140 @@
++"""Timestamp-guided short-sentence phrase cutter with smooth boundaries."""
++
++from __future__ import annotations
++
++from typing import Final
++
++import numpy as np
++from audiosig import find_smooth_cut_point
++
++from pykokoro.constants import SAMPLE_RATE
++
++from .energy_valley import find_energy_valley_cut_bounds
++from .shared import BoundaryWindows, boundary_windows_from_metadata
++
++_SEARCH_RADIUS_SAMPLES: Final = round(SAMPLE_RATE * 0.035)
++_CONTEXT_GUARD_SAMPLES: Final = round(SAMPLE_RATE * 0.008)
++_ANALYSIS_WINDOW_SAMPLES: Final = round(SAMPLE_RATE * 0.005)
++
++
++def cut_with_timestamp_adaptive(
++    audio: np.ndarray,
++    metadata: dict[str, object],
++) -> np.ndarray | None:
++    """Cut phrase audio with strict energy selection followed by smooth boundaries."""
++    cut_bounds = find_timestamp_adaptive_cut_bounds(audio, metadata)
++    if cut_bounds is None:
++        return None
++    left_cut, right_cut = cut_bounds
++    metadata["cut_left"] = left_cut
++    metadata["cut_right"] = right_cut
++    return audio[left_cut:right_cut]
++
++
++def find_timestamp_adaptive_cut_bounds(
++    audio: np.ndarray,
++    metadata: dict[str, object],
++) -> tuple[int, int] | None:
++    """Return legal phrase boundaries, preferring the existing strict cutter."""
++    windows = boundary_windows_from_metadata(len(audio), metadata)
++    if windows is None:
++        return None
++
++    strict_bounds = find_energy_valley_cut_bounds(audio, metadata)
++    if strict_bounds is not None:
++        metadata["cut_strategy"] = "energy-valley"
++        return strict_bounds
++
++    left_cut = _find_left_cut(audio, windows)
++    right_cut = _find_right_cut(audio, windows)
++    if left_cut is None or right_cut is None:
++        return None
++    if not 0 <= left_cut < right_cut <= len(audio):
++        return None
++    if windows.left_window is not None and not (
++        windows.left_window[0] <= left_cut < windows.left_window[1]
++    ):
++        return None
++    if windows.right_window is not None and not (
++        windows.right_window[0] <= right_cut <= windows.right_window[1]
++    ):
++        return None
++    if left_cut >= windows.target_start or right_cut <= windows.target_end:
++        return None
++
++    metadata["cut_strategy"] = "timestamp-smooth"
++    return left_cut, right_cut
++
++
++def _find_left_cut(
++    audio: np.ndarray,
++    windows: BoundaryWindows,
++) -> int | None:
++    if not windows.has_left_context:
++        return 0
++    if windows.left_window is None:
++        return None
++    start, end = _search_interval(
++        windows.left_window,
++        anchor=windows.target_start,
++        side="left",
++    )
++    if end <= start:
++        return None
++    return find_smooth_cut_point(
++        _as_float_audio(audio),
++        start=start,
++        end=end,
++        anchor=windows.target_start,
++        window_length=_ANALYSIS_WINDOW_SAMPLES,
++    )
++
++
++def _find_right_cut(
++    audio: np.ndarray,
++    windows: BoundaryWindows,
++) -> int | None:
++    if not windows.has_right_context:
++        return len(audio)
++    if windows.right_window is None:
++        return None
++    start, end = _search_interval(
++        windows.right_window,
++        anchor=windows.target_end,
++        side="right",
++    )
++    if end <= start:
++        return None
++    return find_smooth_cut_point(
++        _as_float_audio(audio),
++        start=start,
++        end=end,
++        anchor=windows.target_end,
++        window_length=_ANALYSIS_WINDOW_SAMPLES,
++    )
++
++
++def _search_interval(
++    window: tuple[int, int],
++    *,
++    anchor: int,
++    side: str,
++) -> tuple[int, int]:
++    window_start, window_end = window
++    legal_span = window_end - window_start
++    if legal_span <= 0:
++        return window_start, window_start
++    guard = min(_CONTEXT_GUARD_SAMPLES, legal_span // 3)
++    if side == "left":
++        return (
++            max(window_start, anchor - _SEARCH_RADIUS_SAMPLES),
++            min(window_end, anchor - guard),
++        )
++    return (
++        max(window_start, anchor + guard),
++        min(window_end, anchor + _SEARCH_RADIUS_SAMPLES),
++    )
++
++
++def _as_float_audio(audio: np.ndarray) -> np.ndarray:
++    return np.asarray(audio, dtype=np.float32)
+diff --git a/pykokoro/short_sentence_handler.py b/pykokoro/short_sentence_handler.py
+index bd9ddc0..5c72d8a 100644
+--- a/pykokoro/short_sentence_handler.py
++++ b/pykokoro/short_sentence_handler.py
+@@ -57,7 +57,7 @@ class PhraseResolveMode:
+     energy_threshold: float = 0.05
+     silence_threshold: float = 1e-4
+     min_silence_seconds: float = 0.02
+-    cutter: Literal["energy-valley"] = "energy-valley"
++    cutter: Literal["energy-valley", "timestamp-adaptive"] = "timestamp-adaptive"
+
+
+ @dataclass
+@@ -95,11 +95,35 @@ class RandomizedPhraseResolveMode:
+             "At last, the guide called out, {segment}",
+         ]
+     )
++    question_phrases: list[str] = field(
++        default_factory=lambda: [
++            "The question was asked plainly: {segment}",
++            "A quiet voice asked: {segment}",
++        ]
++    )
++    exclamation_phrases: list[str] = field(
++        default_factory=lambda: [
++            "The speaker called out: {segment}",
++            "The announcement ended with: {segment}",
++        ]
++    )
++    ellipsis_phrases: list[str] = field(
++        default_factory=lambda: [
++            "The thought trailed off with: {segment}",
++            "The unfinished sentence was: {segment}",
++        ]
++    )
++    fragment_phrases: list[str] = field(
++        default_factory=lambda: [
++            "The note contained only these words: {segment}",
++            "The short message read: {segment}",
++        ]
++    )
+     frame_duration_ms: int = 5
+     energy_threshold: float = 0.05
+     silence_threshold: float = 1e-4
+     min_silence_seconds: float = 0.02
+-    cutter: Literal["energy-valley"] = "energy-valley"
++    cutter: Literal["energy-valley", "timestamp-adaptive"] = "timestamp-adaptive"
+
+
+ ShortSentenceResolveMode = WrapResolveMode | PhraseResolveMode | RandomizedPhraseResolveMode
+@@ -147,8 +171,8 @@ class ShortSentenceConfig:
+     Mode: phrase and randomized-phrase (default when the model exposes duration timestamps)
+     1. Add a full sentence around the phrase. "Phrase" uses a fixed
+        sentence, "Randomized-Phrase" chooses from a list for variety.
+-    2. Cut out the phrase if confidence level for a clean cut is reached.
+-    3. If not, try another surrounding full sentence.
++    2. Cut out the phrase when timestamp geometry and a legal waveform boundary are available.
++    3. Retry with another surrounding phrase only when alignment or timestamps are unusable.
+     This mode works best, but can increase computation time.
+     Accuracy is voice dependent, but a less accurate voice will only
+     slow it down, not stop it from working.
+@@ -173,8 +197,8 @@ class ShortSentenceConfig:
+         resolve_mode: Resolve mode to apply to all short sentences. Default:
+             "randomized-phrase".
+         phrase_fallback_tries: Number of alternate phrase templates to
+-            try, if confidence level for cutting is too low for a phrase,
+-            before falling back to wrap mode. Default: 5
++            try when alignment or timestamp geometry is unusable,
++            before falling back to wrap mode. Default: 1
+             Higher=more robust and possibly slower for less-accurate
+             voices, Lower=falls back to wrap mode quicker.
+
+@@ -191,7 +215,7 @@ class ShortSentenceConfig:
+             "randomized-phrase": RandomizedPhraseResolveMode(),
+         }
+     )
+-    phrase_fallback_tries: int = 5
++    phrase_fallback_tries: int = 1
+
+     def __post_init__(self) -> None:
+         if (
+@@ -545,9 +569,8 @@ def _select_phrase_fallback_templates(
+         return []
+
+     used = set(used_templates)
+-    use_end_phrase = _uses_end_phrase(segment_text, mode)
+     if isinstance(mode, PhraseResolveMode):
+-        choices = _default_ranked_phrase_choices(use_end_phrase)
++        choices = _default_ranked_phrase_choices(segment_text)
+         return _unique_phrase_templates(choices, used, limit)
+
+     if isinstance(mode, RandomizedPhraseResolveMode):
+@@ -573,11 +596,24 @@ def _phrase_choices(
+ ) -> list[str]:
+     if phrase_defaults is None:
+         phrase_defaults = PhraseResolveMode()
+-    use_end_phrase = _uses_end_phrase(segment_text, mode)
+-    if use_end_phrase:
++    if mode.phrase_selection == "neutral":
++        return mode.neutral_phrases or [phrase_defaults.neutral_phrase]
++    if mode.phrase_selection == "end":
+         return mode.end_phrases or [phrase_defaults.end_phrase]
+-    return mode.neutral_phrases or [phrase_defaults.neutral_phrase]
+-
++    terminal_form = _terminal_form(segment_text)
++    choices = {
++        "question": mode.question_phrases,
++        "exclamation": mode.exclamation_phrases,
++        "ellipsis": mode.ellipsis_phrases,
++        "fragment": mode.neutral_phrases or mode.fragment_phrases,
++        "declarative": mode.end_phrases,
++    }[terminal_form]
++    fallback = (
++        phrase_defaults.end_phrase
++        if terminal_form == "declarative"
++        else phrase_defaults.neutral_phrase
++    )
++    return choices or [fallback]
+
+ def _configured_phrase_mode(config: ShortSentenceConfig) -> PhraseResolveMode | None:
+     mode = config.resolve_modes.get("phrase")
+@@ -586,10 +622,9 @@ def _configured_phrase_mode(config: ShortSentenceConfig) -> PhraseResolveMode |
+     return None
+
+
+-def _default_ranked_phrase_choices(use_end_phrase: bool) -> list[str]:
++def _default_ranked_phrase_choices(segment_text: str) -> list[str]:
+     defaults = RandomizedPhraseResolveMode()
+-    return defaults.end_phrases if use_end_phrase else defaults.neutral_phrases
+-
++    return _phrase_choices(segment_text, defaults)
+
+ def _unique_phrase_templates(
+     choices: list[str],
+@@ -607,14 +642,26 @@ def _unique_phrase_templates(
+     return selected
+
+
++def _terminal_form(segment_text: str) -> Literal["declarative", "question", "exclamation", "ellipsis", "fragment"]:
++    text = segment_text.rstrip()
++    if text.endswith(("…", "...")):
++        return "ellipsis"
++    if text.endswith("?"):
++        return "question"
++    if text.endswith("!"):
++        return "exclamation"
++    if text.endswith("."):
++        return "declarative"
++    return "fragment"
++
++
+ def _uses_end_phrase(segment_text: str, mode: ShortSentenceResolveMode) -> bool:
+     if isinstance(mode, (PhraseResolveMode, RandomizedPhraseResolveMode)):
+         if mode.phrase_selection == "end":
+             return True
+         if mode.phrase_selection == "neutral":
+             return False
+-    return segment_text.rstrip().endswith(".")
+-
++    return _terminal_form(segment_text) != "fragment"
+
+ def _build_short_sentence_metadata(
+     *,
+diff --git a/pykokoro/stages/g2p/kokorog2p.py b/pykokoro/stages/g2p/kokorog2p.py
+index 8f2d8c0..676bb4b 100644
+--- a/pykokoro/stages/g2p/kokorog2p.py
++++ b/pykokoro/stages/g2p/kokorog2p.py
+@@ -1,7 +1,8 @@
+ from __future__ import annotations
+
+ import re
+-from dataclasses import asdict, replace
++from collections import OrderedDict
++from dataclasses import asdict, dataclass, replace
+ from types import ModuleType
+ from typing import TYPE_CHECKING, Any, cast
+
+@@ -29,6 +30,33 @@ if TYPE_CHECKING:
+     from ...types import Segment, Trace
+
+
++def _context_token_value(token: Any, name: str, default: object) -> object:
++    if isinstance(token, dict):
++        return token.get(name, default)
++    return getattr(token, name, default)
++
++
++def _context_token_int(token: Any, name: str) -> int | None:
++    value = _context_token_value(token, name, None)
++    return value if isinstance(value, int) and not isinstance(value, bool) else None
++
++
++@dataclass(frozen=True)
++class _CachedContextToken:
++    text: str
++    phonemes: str
++    whitespace: str
++    char_start: int | None
++    char_end: int | None
++
++
++@dataclass(frozen=True)
++class _CachedContextResult:
++    phonemes: str
++    ids: tuple[int, ...]
++    tokens: tuple[_CachedContextToken, ...]
++
++
+ class KokoroG2PAdapter(G2PAdapter):
+     _cache_schema = 10
+
+@@ -36,6 +64,8 @@ class KokoroG2PAdapter(G2PAdapter):
+         self._g2p: ModuleType | None = None
+         self._g2p_instances: dict[tuple[tuple[str, object], ...], G2PBase] = {}
+
++        self._context_cache: OrderedDict[tuple[object, ...], _CachedContextResult] = OrderedDict()
++        self._context_cache_max_entries = 256
+     def _load(self) -> ModuleType:
+         if self._g2p is not None:
+             return self._g2p
+@@ -727,11 +757,17 @@ class KokoroG2PAdapter(G2PAdapter):
+         return g2p_instance
+
+     def phonemize_context(self, text: str, language: str, cfg: PipelineConfig) -> Any:
+-        """Phonemize synthetic short-sentence context with the configured G2P instance."""
++        """Phonemize synthetic short-sentence context with a bounded LRU cache."""
++        cache_key = self._context_cache_key(text, language, cfg)
++        cached = self._context_cache.get(cache_key)
++        if cached is not None:
++            self._context_cache.move_to_end(cache_key)
++            return cached
++
+         g2p_module = self._load()
+         g2p_instance = self._get_g2p_instance(language, cfg)
+         model_version = self._get_model_version(cfg, language)
+-        return self._phonemize_prepared(
++        result = self._phonemize_prepared(
+             g2p_module,
+             text,
+             language,
+@@ -740,6 +776,61 @@ class KokoroG2PAdapter(G2PAdapter):
+             g2p_instance,
+             target_model=model_version,
+         )
++        normalized = self._normalize_context_result(result)
++        self._context_cache[cache_key] = normalized
++        self._context_cache.move_to_end(cache_key)
++        while len(self._context_cache) > self._context_cache_max_entries:
++            self._context_cache.popitem(last=False)
++        return normalized
++
++    def _context_cache_key(
++        self, text: str, language: str, cfg: PipelineConfig
++    ) -> tuple[object, ...]:
++        profile, backend, _ = self._resolve_frontend_contract(cfg)
++        model_version = self._get_model_version(cfg, language)
++        kwargs = self._g2p_kwargs_for_language(
++            language, cfg, backend, profile, model_version
++        )
++        tokenizer_config = cfg.tokenizer_config
++        lexicon_data_policy = (
++            tokenizer_config.lexicon_data_policy if tokenizer_config is not None else None
++        )
++        return (
++            text,
++            language,
++            tuple(sorted(kwargs.items())),
++            ("lexicon_data_policy", lexicon_data_policy),
++            ("generation_lang", cfg.generation.lang),
++            ("target_model", model_version),
++            ("allow_experimental_frontend", cfg.allow_experimental_frontend),
++        )
++
++    @staticmethod
++    def _normalize_context_result(result: Any) -> _CachedContextResult:
++        phonemes = getattr(result, "phonemes", None) or getattr(result, "phoneme", "")
++        ids = getattr(result, "ids", None)
++        if ids is None:
++            ids = getattr(result, "token_ids", ())
++        tokens = tuple(
++            _CachedContextToken(
++                text=str(_context_token_value(token, "text", "")),
++                phonemes=str(
++                    _context_token_value(token, "phonemes", None)
++                    or _context_token_value(token, "phoneme", "")
++                ),
++                whitespace=str(_context_token_value(token, "whitespace", "") or ""),
++                char_start=_context_token_int(token, "char_start"),
++                char_end=_context_token_int(token, "char_end"),
++            )
++            for token in (getattr(result, "tokens", ()) or ())
++        )
++        return _CachedContextResult(
++            phonemes=str(phonemes),
++            ids=tuple(int(token_id) for token_id in (ids or ())),
++            tokens=tokens,
++        )
++
++
+
+     def _record_selection(
+         self, doc: DocumentResult, lang: str, cfg: PipelineConfig, g2p_instance: G2PBase
+diff --git a/pykokoro/types.py b/pykokoro/types.py
+index 25bb994..56aca5c 100644
+--- a/pykokoro/types.py
++++ b/pykokoro/types.py
+@@ -226,6 +226,10 @@ class Trace:
+     model: dict[str, Any] = field(default_factory=dict)
+     counters: dict[str, int] = field(default_factory=dict)
+
++
++    def increment_counter(self, name: str, amount: int = 1) -> None:
++        """Increment a named trace counter."""
++        self.counters[name] = self.counters.get(name, 0) + amount
+     def inference_summary(self) -> dict[str, float | int | None]:
+         """Return aggregate acoustic inference metrics without retaining extra arrays."""
+         calls = len(self.inference)
+@@ -244,6 +248,21 @@ class Trace:
+             "initial_onnx_calls": self.counters.get("initial_onnx_calls", 0),
+             "short_sentence_retry_calls": self.counters.get("short_sentence_retry_calls", 0),
+             "fallback_onnx_calls": self.counters.get("fallback_onnx_calls", 0),
++            "short_sentence_detected": self.counters.get("short_sentence_detected", 0),
++            "short_sentence_phrase_initial": self.counters.get(
++                "short_sentence_phrase_initial", 0
++            ),
++            "short_sentence_phrase_retry": self.counters.get("short_sentence_phrase_retry", 0),
++            "short_sentence_cut_strict_success": self.counters.get(
++                "short_sentence_cut_strict_success", 0
++            ),
++            "short_sentence_cut_adaptive_success": self.counters.get(
++                "short_sentence_cut_adaptive_success", 0
++            ),
++            "short_sentence_cut_failure": self.counters.get("short_sentence_cut_failure", 0),
++            "short_sentence_wrap_fallback": self.counters.get(
++                "short_sentence_wrap_fallback", 0
++            ),
+         }
+
+     def event_summary(self) -> dict[tuple[str, str], float]:
+diff --git a/pyproject.toml b/pyproject.toml
+index 86d175a..135a845 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -26,7 +26,7 @@ dependencies = [
+     "lexphon>=0.2.3,<0.3",
+     "phrasplit>=0.3.9,<0.4",
+     "numpy",
+-    "audiosig>=0.1.1,<0.2",
++    "audiosig>=0.1.3,<0.2",
+     "platformdirs",
+     "chardet",
+     "charset-normalizer",
+diff --git a/tests/test_audio_generator_performance.py b/tests/test_audio_generator_performance.py
+index 06ccad6..7200973 100644
+--- a/tests/test_audio_generator_performance.py
++++ b/tests/test_audio_generator_performance.py
+@@ -1,8 +1,10 @@
+ from __future__ import annotations
+
++from types import SimpleNamespace
+ from typing import Any
+
+ import numpy as np
++import pytest
+
+ from pykokoro.audio_generator import AudioGenerator
+ from pykokoro.types import Trace
+@@ -170,3 +172,134 @@ def test_inference_cache_evicts_by_bytes_and_close_clears_entries() -> None:
+     assert not generator._inference_cache
+     generator._run_onnx("abc", style, 1.0)
+     assert session.calls == 4
++
++def test_trace_summary_exposes_short_sentence_counters() -> None:
++    trace = Trace()
++    for name in (
++        "short_sentence_detected",
++        "short_sentence_phrase_initial",
++        "short_sentence_phrase_retry",
++        "short_sentence_cut_strict_success",
++        "short_sentence_cut_adaptive_success",
++        "short_sentence_cut_failure",
++        "short_sentence_wrap_fallback",
++    ):
++        trace.increment_counter(name)
++
++    summary = trace.inference_summary()
++    assert all(summary[name] == 1 for name in trace.counters)
++
++class _PhraseSession(_Session):
++    def __init__(self, audio: np.ndarray) -> None:
++        super().__init__()
++        self.audio = audio.astype(np.float32, copy=False)
++
++    def run(self, _outputs: Any, _inputs: dict[str, np.ndarray]) -> list[np.ndarray]:
++        self.calls += 1
++        return [self.audio[None, :], np.array([1.0, 2.0, 3.0], dtype=np.float32)]
++
++
++def _phrase_metadata(*, cutter: str = "energy-valley", valid: bool = True) -> dict[str, object]:
++    target_end = 2400 / 24000 if valid else 1600 / 24000
++    return {
++        "kind": "phrase",
++        "cutter": cutter,
++        "target_start_ts": 1600 / 24000,
++        "target_end_ts": target_end,
++        "previous_token_end_ts": 600 / 24000,
++        "next_token_start_ts": 3400 / 24000,
++        "has_left_context": True,
++        "has_right_context": True,
++        "frame_duration_ms": 5,
++        "energy_threshold": 0.05,
++        "min_silence_seconds": 0.02,
++        "phrase_fallback_templates": ["retry {segment}"],
++        "phrase_fallback_tries": 1,
++        "fallback_phonemes": "—abc—",
++        "fallback_tokens": [1, 2, 3],
++    }
++
++
++@pytest.mark.parametrize(
++    ("waveform", "cutter"),
++    [(np.zeros(4000, dtype=np.float32), "energy-valley"), (np.ones(4000, dtype=np.float32), "timestamp-adaptive")],
++ )
++def test_phrase_cut_success_uses_one_model_call(waveform, cutter) -> None:
++    session = _PhraseSession(waveform)
++    generator = AudioGenerator(session, _Tokenizer(), inference_cache_enabled=False)
++    trace = Trace()
++    audio, _ = generator._run_onnx("abc", np.zeros((2, 256), dtype=np.float32), 1.0, trace)
++    segment = SimpleNamespace(
++        text="Hi!",
++        phonemes="abc",
++        tokens=[1, 2, 3],
++        word_timings=[],
++        ssmd_metadata={"__short_sentence": _phrase_metadata(cutter=cutter)},
++    )
++
++    result = generator._prepare_short_sentence_phrase_audio(
++        segment, audio, np.zeros((2, 256), dtype=np.float32), 1.0, trace=trace
++    )
++
++    assert result.size > 0
++    assert session.calls == 1
++    assert trace.inference_summary()["short_sentence_cut_failure"] == 0
++
++
++def test_invalid_timestamps_use_one_retry(monkeypatch) -> None:
++    from pykokoro.short_sentence_handler import ShortSentenceApplication
++
++    session = _PhraseSession(np.zeros(4000, dtype=np.float32))
++    generator = AudioGenerator(session, _Tokenizer(), inference_cache_enabled=False)
++    trace = Trace()
++    audio, _ = generator._run_onnx("abc", np.zeros((2, 256), dtype=np.float32), 1.0, trace)
++    retry_metadata = _phrase_metadata(valid=True)
++    monkeypatch.setattr(
++        "pykokoro.audio_generator.build_short_sentence_phrase_retry",
++        lambda *args, **kwargs: ShortSentenceApplication("abc", [1, 2, 3], retry_metadata),
++    )
++    segment = SimpleNamespace(
++        text="Hi!",
++        phonemes="abc",
++        tokens=[1, 2, 3],
++        word_timings=[],
++        ssmd_metadata={"__short_sentence": _phrase_metadata(valid=False)},
++    )
++
++    result = generator._prepare_short_sentence_phrase_audio(
++        segment, audio, np.zeros((2, 256), dtype=np.float32), 1.0, trace=trace
++    )
++
++    assert result.size > 0
++    assert session.calls == 2
++    assert trace.inference_summary()["short_sentence_phrase_retry"] == 1
++
++
++def test_retry_failure_uses_one_retry_and_wrap_fallback(monkeypatch) -> None:
++    from pykokoro.short_sentence_handler import ShortSentenceApplication
++
++    session = _PhraseSession(np.zeros(4000, dtype=np.float32))
++    generator = AudioGenerator(session, _Tokenizer(), inference_cache_enabled=False)
++    trace = Trace()
++    audio, _ = generator._run_onnx("abc", np.zeros((2, 256), dtype=np.float32), 1.0, trace)
++    retry_metadata = _phrase_metadata(valid=False)
++    monkeypatch.setattr(
++        "pykokoro.audio_generator.build_short_sentence_phrase_retry",
++        lambda *args, **kwargs: ShortSentenceApplication("abc", [1, 2, 3], retry_metadata),
++    )
++    segment = SimpleNamespace(
++        text="Hi!",
++        phonemes="abc",
++        tokens=[1, 2, 3],
++        word_timings=[],
++        ssmd_metadata={"__short_sentence": _phrase_metadata(valid=False)},
++    )
++
++    result = generator._prepare_short_sentence_phrase_audio(
++        segment, audio, np.zeros((2, 256), dtype=np.float32), 1.0, trace=trace
++    )
++
++    assert result.size > 0
++    assert session.calls == 3
++    assert trace.inference_summary()["short_sentence_phrase_retry"] == 1
++    assert trace.inference_summary()["short_sentence_wrap_fallback"] == 1
+diff --git a/tests/test_g2p_cache.py b/tests/test_g2p_cache.py
+index e8dfce0..bca9b89 100644
+--- a/tests/test_g2p_cache.py
++++ b/tests/test_g2p_cache.py
+@@ -167,3 +167,81 @@ def test_previous_g2p_cache_schema_is_recomputed_with_cleaned_payload(
+     assert payload["schema"] == 10
+     assert payload["phonemes"] == "bykə"
+     assert payload["tokens"] == [ord(char) for char in "bykə"]
++
++def test_context_g2p_cache_normalizes_results_and_covers_frontend_key(monkeypatch) -> None:
++    adapter = KokoroG2PAdapter()
++    config = PipelineConfig(generation=GenerationConfig(lang="en-us"))
++    calls = {"count": 0}
++    raw_ids = [1, 2]
++    raw_tokens = [{"text": "Hi", "phonemes": "h", "whitespace": ""}]
++    raw = SimpleNamespace(phonemes="h", ids=raw_ids, tokens=raw_tokens)
++
++    monkeypatch.setattr(adapter, "_load", lambda: object())
++    monkeypatch.setattr(adapter, "_get_g2p_instance", lambda lang, cfg: object())
++    monkeypatch.setattr(
++        adapter,
++        "_resolve_frontend_contract",
++        lambda cfg: (None, "kokorog2p", None),
++    )
++    monkeypatch.setattr(adapter, "_get_model_version", lambda cfg, lang=None: "model")
++    monkeypatch.setattr(
++        adapter,
++        "_g2p_kwargs_for_language",
++        lambda *args: {"language": str(args[0]), "contract": "same"},
++    )
++
++    def phonemize_prepared(*args, **kwargs):
++        calls["count"] += 1
++        return raw
++
++    monkeypatch.setattr(adapter, "_phonemize_prepared", phonemize_prepared)
++
++    first = adapter.phonemize_context("Hi", "en-us", config)
++    raw_ids.append(3)
++    raw_tokens[0]["text"] = "mutated"
++    second = adapter.phonemize_context("Hi", "en-us", config)
++
++    assert calls["count"] == 1
++    assert first is second
++    assert first.ids == (1, 2)
++    assert first.tokens[0].text == "Hi"
++    assert first.tokens[0].char_start is None
++
++    changed_config = PipelineConfig(generation=GenerationConfig(lang="de"))
++    adapter.phonemize_context("Hi", "en-us", changed_config)
++    assert calls["count"] == 2
++
++
++def test_context_g2p_cache_is_bounded_lru(monkeypatch) -> None:
++    adapter = KokoroG2PAdapter()
++    adapter._context_cache_max_entries = 2
++    config = PipelineConfig(generation=GenerationConfig(lang="en-us"))
++    calls = {"count": 0}
++
++    monkeypatch.setattr(adapter, "_load", lambda: object())
++    monkeypatch.setattr(adapter, "_get_g2p_instance", lambda lang, cfg: object())
++    monkeypatch.setattr(
++        adapter,
++        "_resolve_frontend_contract",
++        lambda cfg: (None, "kokorog2p", None),
++    )
++    monkeypatch.setattr(adapter, "_get_model_version", lambda cfg, lang=None: "model")
++    monkeypatch.setattr(
++        adapter,
++        "_g2p_kwargs_for_language",
++        lambda *args: {"language": str(args[0]), "contract": "same"},
++    )
++    monkeypatch.setattr(
++        adapter,
++        "_phonemize_prepared",
++        lambda *args, **kwargs: (
++            calls.__setitem__("count", calls["count"] + 1)
++            or SimpleNamespace(phonemes="h", ids=[1], tokens=[])
++        ),
++    )
++
++    for text in ("one", "two", "three"):
++        adapter.phonemize_context(text, "en-us", config)
++    assert len(adapter._context_cache) == 2
++    adapter.phonemize_context("one", "en-us", config)
++    assert calls["count"] == 4
+diff --git a/tests/test_packaging_metadata.py b/tests/test_packaging_metadata.py
+index 0b105a8..b82e780 100644
+--- a/tests/test_packaging_metadata.py
++++ b/tests/test_packaging_metadata.py
+@@ -94,7 +94,7 @@ def test_audiosig_is_the_only_declared_dsp_backend() -> None:
+     dependencies = pyproject["project"]["dependencies"]
+     optional = pyproject["project"]["optional-dependencies"]
+
+-    assert "audiosig>=0.1.1,<0.2" in dependencies
++    assert "audiosig>=0.1.3,<0.2" in dependencies
+     assert "prosody" not in optional
+
+     requirements = [requirement.lower() for requirement in dependencies]
+@@ -114,6 +114,11 @@ def test_audiosig_is_the_only_declared_dsp_backend() -> None:
+     assert not any(name in requirement for requirement in requirements for name in forbidden)
+
+
++def test_audiosig_smooth_cut_api_contract() -> None:
++    from audiosig import find_smooth_cut_point
++
++    assert callable(find_smooth_cut_point)
++
+ def test_production_source_has_no_forbidden_dsp_imports() -> None:
+     forbidden = (
+         "import librosa",
+diff --git a/tests/test_short_sentence_cutters.py b/tests/test_short_sentence_cutters.py
+new file mode 100644
+index 0000000..8bdc063
+--- /dev/null
++++ b/tests/test_short_sentence_cutters.py
+@@ -0,0 +1,122 @@
++from __future__ import annotations
++
++import numpy as np
++
++from pykokoro.short_sentence_cutters.energy_valley import find_energy_valley_cut_bounds
++from pykokoro.short_sentence_cutters.timestamp_adaptive import (
++    cut_with_timestamp_adaptive,
++    find_timestamp_adaptive_cut_bounds,
++)
++
++
++def _metadata(*, left: bool = True, right: bool = True) -> dict[str, object]:
++    return {
++        "target_start_ts": 1600 / 24000,
++        "target_end_ts": 2400 / 24000,
++        "previous_token_end_ts": 600 / 24000,
++        "next_token_start_ts": 3400 / 24000,
++        "has_left_context": left,
++        "has_right_context": right,
++        "frame_duration_ms": 5,
++        "energy_threshold": 0.05,
++        "min_silence_seconds": 0.02,
++    }
++
++
++def test_timestamp_adaptive_preserves_strict_energy_bounds() -> None:
++    audio = np.zeros(4000, dtype=np.float32)
++    metadata = _metadata()
++
++    expected = find_energy_valley_cut_bounds(audio, metadata)
++    actual = find_timestamp_adaptive_cut_bounds(audio, metadata)
++
++    assert expected is not None
++    assert actual == expected
++    assert metadata["cut_strategy"] == "energy-valley"
++
++
++def test_timestamp_adaptive_uses_smooth_context_points_after_strict_failure(monkeypatch) -> None:
++    audio = np.ones(4000, dtype=np.float32)
++    metadata = _metadata()
++    calls: list[tuple[int, int, int]] = []
++
++    monkeypatch.setattr(
++        "pykokoro.short_sentence_cutters.timestamp_adaptive.find_energy_valley_cut_bounds",
++        lambda _audio, _metadata: None,
++    )
++
++    def smooth_point(_audio, *, start, end, anchor, window_length):
++        calls.append((start, end, anchor))
++        return start if anchor == 1600 else end - 1
++
++    monkeypatch.setattr(
++        "pykokoro.short_sentence_cutters.timestamp_adaptive.find_smooth_cut_point",
++        smooth_point,
++    )
++
++    cut = cut_with_timestamp_adaptive(audio, metadata)
++
++    assert cut is not None
++    assert metadata["cut_strategy"] == "timestamp-smooth"
++    assert metadata["cut_left"] == calls[0][0]
++    assert metadata["cut_right"] == calls[1][1] - 1
++    assert calls[0][1] <= 1600
++    assert calls[1][0] >= 2400
++    assert metadata["cut_left"] < 1600
++    assert metadata["cut_right"] > 2400
++
++
++def test_timestamp_adaptive_shrinks_guard_for_narrow_context(monkeypatch) -> None:
++    audio = np.ones(3000, dtype=np.float32)
++    metadata = _metadata()
++    metadata.update(
++        {
++            "previous_token_end_ts": 1500 / 24000,
++            "next_token_start_ts": 2500 / 24000,
++        }
++    )
++    intervals: list[tuple[int, int]] = []
++
++    monkeypatch.setattr(
++        "pykokoro.short_sentence_cutters.timestamp_adaptive.find_energy_valley_cut_bounds",
++        lambda _audio, _metadata: None,
++    )
++
++    def smooth_point(_audio, *, start, end, anchor, window_length):
++        intervals.append((start, end))
++        return start if anchor == 1600 else end - 1
++
++    monkeypatch.setattr(
++        "pykokoro.short_sentence_cutters.timestamp_adaptive.find_smooth_cut_point",
++        smooth_point,
++    )
++
++    assert find_timestamp_adaptive_cut_bounds(audio, metadata) is not None
++    assert intervals == [(1500, 1567), (2433, 2500)]
++
++
++def test_timestamp_adaptive_preserves_one_sided_context(monkeypatch) -> None:
++    audio = np.ones(3000, dtype=np.float32)
++    metadata = _metadata(left=False, right=True)
++    monkeypatch.setattr(
++        "pykokoro.short_sentence_cutters.timestamp_adaptive.find_energy_valley_cut_bounds",
++        lambda _audio, _metadata: None,
++    )
++    monkeypatch.setattr(
++        "pykokoro.short_sentence_cutters.timestamp_adaptive.find_smooth_cut_point",
++        lambda _audio, *, start, end, anchor, window_length: end - 1,
++    )
++
++    bounds = find_timestamp_adaptive_cut_bounds(audio, metadata)
++
++    assert bounds is not None
++    assert bounds[0] == 0
++    assert bounds[1] > 2400
++
++
++def test_timestamp_adaptive_rejects_invalid_timestamp_geometry() -> None:
++    audio = np.ones(4000, dtype=np.float32)
++    metadata = _metadata()
++    metadata["target_end_ts"] = metadata["target_start_ts"]
++
++    assert find_timestamp_adaptive_cut_bounds(audio, metadata) is None
+diff --git a/tests/test_short_sentence_handler.py b/tests/test_short_sentence_handler.py
+index 004cf91..c417223 100644
+--- a/tests/test_short_sentence_handler.py
++++ b/tests/test_short_sentence_handler.py
+@@ -2,13 +2,43 @@
+
+ from pykokoro.short_sentence_handler import (
+     PhraseResolveMode,
++    RandomizedPhraseResolveMode,
+     ShortSentenceConfig,
++    _phrase_choices,
++    _terminal_form,
+     is_segment_empty,
+     is_segment_short,
+ )
+ from pykokoro.types import PhonemeSegment
+
+
++def test_phrase_cutters_default_to_timestamp_adaptive_with_compatibility_option() -> None:
++    assert PhraseResolveMode().cutter == "timestamp-adaptive"
++    assert RandomizedPhraseResolveMode().cutter == "timestamp-adaptive"
++    assert PhraseResolveMode(cutter="energy-valley").cutter == "energy-valley"
++    assert RandomizedPhraseResolveMode(cutter="energy-valley").cutter == "energy-valley"
++
++def test_randomized_templates_match_terminal_punctuation() -> None:
++    mode = RandomizedPhraseResolveMode()
++    expected = {
++        "Hello.": mode.end_phrases,
++        "Why?": mode.question_phrases,
++        "Stop!": mode.exclamation_phrases,
++        "Wait…": mode.ellipsis_phrases,
++        "Go": mode.neutral_phrases,
++    }
++    for text, templates in expected.items():
++        assert _terminal_form(text) in {
++            "declarative",
++            "question",
++            "exclamation",
++            "ellipsis",
++            "fragment",
++        }
++        assert _phrase_choices(text, mode) == templates
++        if text != "Go":
++            assert all(template.endswith("{segment}") for template in templates)
++
+ def test_short_sentence_config_rejects_negative_thresholds_and_retries():
+     import pytest
+

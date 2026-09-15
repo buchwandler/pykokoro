@@ -1,0 +1,1464 @@
+ benchmarks/short_sentence_latency.py               | 127 +++++++++----
+ pykokoro/audio_generator.py                        | 114 +++++++++++-
+ pykokoro/short_sentence_cutters/shared.py          |  34 +++-
+ .../short_sentence_cutters/timestamp_adaptive.py   | 121 +++++++++----
+ pykokoro/short_sentence_handler.py                 | 196 ++++++++++++++++++---
+ pykokoro/short_sentence_phrases.py                 | 134 ++++++++++++++
+ pykokoro/stages/g2p/kokorog2p.py                   |  53 ++++--
+ tests/test_audio_splitting.py                      |   5 +-
+ tests/test_short_sentence_cutters.py               |  73 ++++++++
+ tests/test_short_sentence_handler.py               |  65 ++++++-
+ 10 files changed, 793 insertions(+), 129 deletions(-)
+
+diff --git a/benchmarks/short_sentence_latency.py b/benchmarks/short_sentence_latency.py
+index 01a2058..f09bcf7 100644
+--- a/benchmarks/short_sentence_latency.py
++++ b/benchmarks/short_sentence_latency.py
+@@ -39,14 +39,19 @@ DEMO_TEXTS = (
+ )
+
+ SCENARIOS = (
+-    ("short-declarative", "Oh No."),
+-    ("short-question", "Why?"),
+-    ("short-exclamation", "Help!"),
+-    ("one-word-interjection", "Oh!"),
+-    ("two-word-phrase", "No thanks."),
+-    ("fragment", "thing on her chest."),
+-    ("ellipsis", "Wait …"),
+-    ("near-min-phoneme-length", "One small step."),
++    ("short-declarative", "Oh No.", "en-us"),
++    ("short-question", "Why?", "en-us"),
++    ("short-exclamation", "Help!", "en-us"),
++    ("one-word-interjection", "Oh!", "en-us"),
++    ("two-word-phrase", "No thanks.", "en-us"),
++    ("fragment", "thing on her chest.", "en-us"),
++    ("ellipsis", "Wait …", "en-us"),
++    ("near-min-phoneme-length", "One small step.", "en-us"),
++    ("zero-gap-fragment", "three", "en-us"),
++    ("terminal-fragment", "tomato and dictionary.", "en-us"),
++    ("german-declarative", "zwölf.", "de"),
++    ("german-question", "wirklich?", "de"),
++    ("german-exclamation", "Hilfe!", "de"),
+ )
+ POLICIES = ("disabled", "energy-valley", "timestamp-adaptive", "wrap")
+
+@@ -70,10 +75,12 @@ def _summary(result: Any, *, policy: str, scenario: str, text: str, wall_ms: flo
+     counters = trace.counters if trace is not None else {}
+     audio_seconds = result.audio.size / result.sample_rate if result.sample_rate else 0.0
+     boundary_metrics = _waveform_boundary_metrics(result.audio)
++    short_metadata: dict[str, object] = {}
+     if trace is not None:
+         for event in trace.prosody:
+             metadata = event.get("short_sentence") if isinstance(event, dict) else None
+             if isinstance(metadata, dict):
++                short_metadata = metadata
+                 boundary_metrics.update(
+                     {
+                         key: value
+@@ -100,8 +107,27 @@ def _summary(result: Any, *, policy: str, scenario: str, text: str, wall_ms: flo
+         "adaptive_cut_successes": counters.get("short_sentence_cut_adaptive_success", 0),
+         "cut_failures": counters.get("short_sentence_cut_failure", 0),
+         "boundary_metrics": boundary_metrics,
++        "cut_strategy": short_metadata.get("cut_strategy"),
++        "cut_failure_reason": short_metadata.get("cut_failure_reason"),
++        "left_gap_samples": _metadata_gap(short_metadata, "previous_token_end_ts", "target_start_ts"),
++        "right_gap_samples": _metadata_gap(short_metadata, "target_end_ts", "next_token_start_ts"),
++        "timing_model_position_count": short_metadata.get("timing_model_position_count"),
++        "generated_token_count": short_metadata.get("generated_token_count"),
++        "timing_alignment_complete": short_metadata.get("timing_alignment_complete"),
+     }
+
++def _metadata_gap(
++    metadata: dict[str, object],
++    start_key: str,
++    end_key: str,
++) -> int | None:
++    start = metadata.get(start_key)
++    end = metadata.get(end_key)
++    if not isinstance(start, (int, float)) or not isinstance(end, (int, float)):
++        return None
++    return round((float(end) - float(start)) * 24000)
++
++
+ def _waveform_boundary_metrics(audio: Any) -> dict[str, object]:
+     values = np.asarray(audio, dtype=np.float32).reshape(-1)
+     if values.size < 2:
+@@ -129,49 +155,76 @@ def _add_arguments(parser: argparse.ArgumentParser) -> None:
+ def run_benchmark(args: argparse.Namespace) -> list[dict[str, Any]]:
+     voices = tuple(voice.strip() for voice in args.voices.split(",") if voice.strip())
+     policies = POLICIES
++    languages = tuple(sorted({language for _, _, language in SCENARIOS}))
+     if args.dry_run:
+         return [
+-            {"policy": policy, "scenario": scenario, "text": text, "voice": voice}
++            {
++                "policy": policy,
++                "scenario": scenario,
++                "text": text,
++                "language": language,
++                "voice": voice,
++            }
+             for voice in voices
+             for policy in policies
+-            for scenario, text in (*SCENARIOS, ("demo-corpus", "|".join(DEMO_TEXTS)))
++            for scenario, text, language in SCENARIOS
+         ]
+
+-    pipelines: dict[str, KokoroPipeline] = {}
++    pipelines: dict[tuple[str, str], KokoroPipeline] = {}
+     try:
+         for policy in policies:
+-            pipelines[policy] = KokoroPipeline(
+-                PipelineConfig(
+-                    voice=voices[0],
+-                    model_source=args.model_source,
+-                    model_variant=args.model_variant,
+-                    model_path=args.model_path,
+-                    voices_path=args.voices_path,
+-                    generation=GenerationConfig(lang="en-us", speed=1.0),
+-                    short_sentence_config=_short_sentence_config(policy),
+-                    return_trace=True,
++            for language in languages:
++                pipelines[(policy, language)] = KokoroPipeline(
++                    PipelineConfig(
++                        voice=voices[0],
++                        model_source=args.model_source,
++                        model_variant=args.model_variant,
++                        model_path=args.model_path,
++                        voices_path=args.voices_path,
++                        generation=GenerationConfig(lang=language, speed=1.0),
++                        short_sentence_config=_short_sentence_config(policy),
++                        return_trace=True,
++                    )
+                 )
+-            )
+         for pipeline in pipelines.values():
+             pipeline.warmup()
+
+         rows: list[dict[str, Any]] = []
+         for voice in voices:
+-            for policy, pipeline in pipelines.items():
+-                for scenario, text in SCENARIOS:
+-                    started = time.perf_counter()
+-                    result = pipeline.run(text, voice=voice)
+-                    wall_ms = (time.perf_counter() - started) * 1000.0
+-                    row = _summary(result, policy=policy, scenario=scenario, text=text, wall_ms=wall_ms)
+-                    row["voice"] = voice
+-                    rows.append(row)
+-                for text in DEMO_TEXTS:
+-                    started = time.perf_counter()
+-                    result = pipeline.run(text, voice=voice)
+-                    wall_ms = (time.perf_counter() - started) * 1000.0
+-                    row = _summary(result, policy=policy, scenario="demo-corpus", text=text, wall_ms=wall_ms)
+-                    row["voice"] = voice
+-                    rows.append(row)
++            for policy in policies:
++                for language in languages:
++                    pipeline = pipelines[(policy, language)]
++                    for scenario, text, scenario_language in SCENARIOS:
++                        if scenario_language != language:
++                            continue
++                        started = time.perf_counter()
++                        result = pipeline.run(text, voice=voice)
++                        wall_ms = (time.perf_counter() - started) * 1000.0
++                        row = _summary(
++                            result,
++                            policy=policy,
++                            scenario=scenario,
++                            text=text,
++                            wall_ms=wall_ms,
++                        )
++                        row["voice"] = voice
++                        row["language"] = language
++                        rows.append(row)
++                    if language == "en-us":
++                        for text in DEMO_TEXTS:
++                            started = time.perf_counter()
++                            result = pipeline.run(text, voice=voice)
++                            wall_ms = (time.perf_counter() - started) * 1000.0
++                            row = _summary(
++                                result,
++                                policy=policy,
++                                scenario="demo-corpus",
++                                text=text,
++                                wall_ms=wall_ms,
++                            )
++                            row["voice"] = voice
++                            row["language"] = language
++                            rows.append(row)
+         return rows
+     finally:
+         for pipeline in pipelines.values():
+diff --git a/pykokoro/audio_generator.py b/pykokoro/audio_generator.py
+index a65aaa0..6bda507 100644
+--- a/pykokoro/audio_generator.py
++++ b/pykokoro/audio_generator.py
+@@ -1150,7 +1150,9 @@ class AudioGenerator:
+         timing_tokens = short_sentence_metadata.get("timing_tokens")
+         if not isinstance(timing_tokens, list):
+             return
+-        timestamped = _join_timestamps(timing_tokens, pred_dur)
++        _record_short_sentence_timing_alignment(short_sentence_metadata, timing_tokens)
++        strict_join = "generated_token_count" in short_sentence_metadata
++        timestamped = _join_timestamps(timing_tokens, pred_dur, strict=strict_join)
+         populate_short_sentence_boundary_metadata(
+             short_sentence_metadata,
+             timestamped,
+@@ -1189,12 +1191,14 @@ class AudioGenerator:
+         cut_audio = cut_short_sentence_phrase_audio(audio, short_sentence_metadata)
+         if cut_audio is not None:
+             _record_short_sentence_cut(short_sentence_metadata, len(audio), trace)
++            _log_short_sentence_cut_success(segment, short_sentence_metadata)
+             left_cut = short_sentence_metadata.get("cut_left")
+             right_cut = short_sentence_metadata.get("cut_right")
+             if isinstance(left_cut, int) and isinstance(right_cut, int):
+                 segment.word_timings = _crop_word_timings(segment.word_timings, left_cut, right_cut)
+             short_sentence_metadata["cut_applied"] = True
+             return cut_audio
++        _log_short_sentence_cut_failure(segment, short_sentence_metadata, len(audio))
+         _record_short_sentence_cut_failure(short_sentence_metadata, trace)
+
+         retry_audio = self._try_short_sentence_phrase_fallbacks(
+@@ -1234,7 +1238,11 @@ class AudioGenerator:
+         )
+         if trace is None:
+             fallback_audio, _ = self._run_onnx(
+-                fallback_phonemes, voice_style, speed, tokens=prepared_fallback_tokens
++                fallback_phonemes,
++                voice_style,
++                speed,
++                attempt_kind="fallback",
++                tokens=prepared_fallback_tokens,
+             )
+         else:
+             fallback_audio, _ = self._run_onnx(
+@@ -1319,7 +1327,11 @@ class AudioGenerator:
+
+             if trace is None:
+                 retry_audio, pred_dur = self._run_onnx(
+-                    retry.phonemes, voice_style, speed, tokens=retry.tokens
++                    retry.phonemes,
++                    voice_style,
++                    speed,
++                    attempt_kind="retry",
++                    tokens=retry.tokens,
+                 )
+             else:
+                 retry_audio, pred_dur = self._run_onnx(
+@@ -1340,15 +1352,18 @@ class AudioGenerator:
+                     len(retry_audio),
+                     local_target_offsets=True,
+                 )
+-                timestamped = _join_timestamps(timing_tokens, pred_dur)
++                _record_short_sentence_timing_alignment(retry.metadata, timing_tokens)
++                timestamped = _join_timestamps(timing_tokens, pred_dur, strict=True)
+                 populate_short_sentence_boundary_metadata(retry.metadata, timestamped)
+             cut_audio = cut_short_sentence_phrase_audio(retry_audio, retry.metadata)
+             if cut_audio is None:
++                _log_short_sentence_cut_failure(segment, retry.metadata, len(retry_audio))
+                 _record_short_sentence_cut_failure(retry.metadata, trace)
+                 failed_template = template
+                 continue
+             _record_short_sentence_cut(retry.metadata, len(retry_audio), trace)
+
++            _log_short_sentence_cut_success(segment, retry.metadata)
+             logger.info(
+                 "Short sentence phrase cut for '%s' succeeded using fallback phrase '%s' (%d/%d).",
+                 segment.text[:50],
+@@ -1744,9 +1759,15 @@ def _join_timestamps(
+
+         token_count = token.get("model_token_count")
+         if not isinstance(token_count, int) or isinstance(token_count, bool) or token_count <= 0:
++            if strict:
++                complete = False
++                break
+             token_count = len(phonemes)
+         model_span_count = _model_span_token_count(token)
+         if model_span_count is None:
++            if strict:
++                complete = False
++                break
+             model_span_count = token_count + (1 if whitespace else 0)
+         speech_end_index = i + token_count
+         if speech_end_index >= len(durations):
+@@ -1773,6 +1794,37 @@ def _join_timestamps(
+     return timestamped
+
+
++def _record_short_sentence_timing_alignment(
++    metadata: dict[str, object],
++    timing_tokens: list[object],
++) -> None:
++    model_position_count = 0
++    complete = True
++    for raw_token in timing_tokens:
++        token = dict(raw_token) if isinstance(raw_token, dict) else {}
++        phonemes = str(token.get("phonemes") or "")
++        if not phonemes:
++            if token.get("whitespace"):
++                model_position_count += 1
++            continue
++        model_span_count = _model_span_token_count(token)
++        if model_span_count is None:
++            complete = False
++            continue
++        model_position_count += model_span_count
++    generated_token_count = metadata.get("generated_token_count")
++    metadata["timing_model_position_count"] = model_position_count
++    metadata["timing_alignment_complete"] = (
++        complete
++        and isinstance(generated_token_count, int)
++        and model_position_count == generated_token_count
++    )
++    if not metadata["timing_alignment_complete"]:
++        metadata["cut_failure_reason"] = "timing-model-position-mismatch"
++
++
++
++
+ def populate_short_sentence_boundary_metadata(
+     metadata: dict[str, object],
+     timestamped: list[dict[str, object]],
+@@ -1845,7 +1897,7 @@ def _record_short_sentence_cut(
+     strategy = str(metadata.get("cut_strategy", "energy-valley"))
+     if strategy == "energy-valley":
+         counter = "short_sentence_cut_strict_success"
+-    elif strategy == "timestamp-smooth":
++    elif strategy.startswith("timestamp-"):
+         counter = "short_sentence_cut_adaptive_success"
+     else:
+         counter = "short_sentence_cut_failure"
+@@ -1875,6 +1927,58 @@ def _record_short_sentence_cut(
+         metadata["retained_guard_duration_ms"] = guard_durations
+
+
++def _log_short_sentence_cut_failure(
++    segment: PhonemeSegment,
++    metadata: dict[str, object],
++    audio_length: int,
++) -> None:
++    reason = str(metadata.setdefault("cut_failure_reason", "unknown-cutter"))
++    target_start = _timestamp_to_sample(metadata.get("target_start_ts"))
++    target_end = _timestamp_to_sample(metadata.get("target_end_ts"))
++    previous_end = _timestamp_to_sample(metadata.get("previous_token_end_ts"))
++    next_start = _timestamp_to_sample(metadata.get("next_token_start_ts"))
++    logger.warning(
++        "short_sentence.cut.failure segment=%r segment_language=%s phrase_language=%s "
++        "terminal_form=%s template=%r reason=%s audio_samples=%d target_start=%s "
++        "target_end=%s previous_end=%s next_start=%s left_gap_samples=%s "
++        "right_gap_samples=%s has_left_context=%s has_right_context=%s cutter=%s",
++        segment.text,
++        getattr(segment, "lang", None),
++        metadata.get("phrase_language"),
++        metadata.get("phrase_terminal_form"),
++        metadata.get("phrase_template"),
++        reason,
++        audio_length,
++        target_start,
++        target_end,
++        previous_end,
++        next_start,
++        target_start - previous_end if target_start is not None and previous_end is not None else None,
++        next_start - target_end if next_start is not None and target_end is not None else None,
++        metadata.get("has_left_context"),
++        metadata.get("has_right_context"),
++        metadata.get("cutter"),
++    )
++
++
++
++def _log_short_sentence_cut_success(
++    segment: PhonemeSegment,
++    metadata: dict[str, object],
++) -> None:
++    logger.debug(
++        "short_sentence.cut.success segment=%r strategy=%s left_cut=%s right_cut=%s "
++        "left_distance_ms=%s right_distance_ms=%s phrase_language=%s",
++        segment.text,
++        metadata.get("cut_strategy"),
++        metadata.get("cut_left"),
++        metadata.get("cut_right"),
++        metadata.get("left_anchor_distance_ms"),
++        metadata.get("right_anchor_distance_ms"),
++        metadata.get("phrase_language"),
++    )
++
++
+ def _record_short_sentence_cut_failure(
+     metadata: dict[str, object],
+     trace: Trace | None,
+diff --git a/pykokoro/short_sentence_cutters/shared.py b/pykokoro/short_sentence_cutters/shared.py
+index deb9d29..882669d 100644
+--- a/pykokoro/short_sentence_cutters/shared.py
++++ b/pykokoro/short_sentence_cutters/shared.py
+@@ -4,6 +4,8 @@ from __future__ import annotations
+
+ from dataclasses import dataclass
+
++import numpy as np
++
+ from pykokoro.constants import SAMPLE_RATE
+
+
+@@ -26,7 +28,11 @@ def boundary_windows_from_metadata(
+     """Build legal cut windows from target and neighboring token timestamps."""
+     target_start = _sample_index(metadata.get("target_start_ts"), audio_length)
+     target_end = _sample_index(metadata.get("target_end_ts"), audio_length)
+-    if target_start is None or target_end is None or target_end <= target_start:
++    if target_start is None or target_end is None:
++        metadata["cut_failure_reason"] = "missing-target-timestamps"
++        return None
++    if target_end <= target_start:
++        metadata["cut_failure_reason"] = "invalid-target-range"
+         return None
+
+     has_left_context = bool(metadata.get("has_left_context", True))
+@@ -36,13 +42,21 @@ def boundary_windows_from_metadata(
+
+     if has_left_context:
+         previous_end = _sample_index(metadata.get("previous_token_end_ts"), audio_length)
+-        if previous_end is None or previous_end > target_start:
++        if previous_end is None:
++            metadata["cut_failure_reason"] = "left-context-timestamp-missing"
++            return None
++        if previous_end > target_start:
++            metadata["cut_failure_reason"] = "left-search-invalid"
+             return None
+         left_window = (previous_end, target_start)
+
+     if has_right_context:
+         next_start = _sample_index(metadata.get("next_token_start_ts"), audio_length)
+-        if next_start is None or next_start < target_end:
++        if next_start is None:
++            metadata["cut_failure_reason"] = "right-context-timestamp-missing"
++            return None
++        if next_start < target_end:
++            metadata["cut_failure_reason"] = "right-search-invalid"
+             return None
+         right_window = (target_end, next_start)
+
+@@ -56,6 +70,20 @@ def boundary_windows_from_metadata(
+     )
+
+
++
++def _sample_index(value: object, audio_length: int) -> int | None:
++    if isinstance(value, bool) or not isinstance(value, (int, float)):
++        return None
++    numeric = float(value)
++    if not np.isfinite(numeric):
++        return None
++    sample = round(numeric * SAMPLE_RATE)
++    tolerance = 2
++    if sample < -tolerance or sample > audio_length + tolerance:
++        return None
++    return min(audio_length, max(0, sample))
++
++
+ def _sample_index(value: object, audio_length: int) -> int | None:
+     if not isinstance(value, (int, float)):
+         return None
+diff --git a/pykokoro/short_sentence_cutters/timestamp_adaptive.py b/pykokoro/short_sentence_cutters/timestamp_adaptive.py
+index 7a4647d..d34d71a 100644
+--- a/pykokoro/short_sentence_cutters/timestamp_adaptive.py
++++ b/pykokoro/short_sentence_cutters/timestamp_adaptive.py
+@@ -21,7 +21,7 @@ def cut_with_timestamp_adaptive(
+     audio: np.ndarray,
+     metadata: dict[str, object],
+ ) -> np.ndarray | None:
+-    """Cut phrase audio with strict energy selection followed by smooth boundaries."""
++    """Cut phrase audio using strict valleys, then legal smooth boundaries."""
+     cut_bounds = find_timestamp_adaptive_cut_bounds(audio, metadata)
+     if cut_bounds is None:
+         return None
+@@ -45,73 +45,116 @@ def find_timestamp_adaptive_cut_bounds(
+         metadata["cut_strategy"] = "energy-valley"
+         return strict_bounds
+
+-    left_cut = _find_left_cut(audio, windows)
+-    right_cut = _find_right_cut(audio, windows)
+-    if left_cut is None or right_cut is None:
++    left_result = _find_left_cut(audio, windows, metadata)
++    right_result = _find_right_cut(audio, windows, metadata)
++    if left_result is None or right_result is None:
+         return None
+-    if not 0 <= left_cut < right_cut <= len(audio):
++    left_cut, left_strategy = left_result
++    right_cut, right_strategy = right_result
++
++    if not 0 <= left_cut <= right_cut <= len(audio):
++        metadata["cut_failure_reason"] = "cut-order-invalid"
+         return None
+-    if windows.left_window is not None and not (
+-        windows.left_window[0] <= left_cut < windows.left_window[1]
+-    ):
++    if windows.has_left_context:
++        if windows.left_window is None:
++            metadata["cut_failure_reason"] = "left-search-invalid"
++            return None
++        previous_end, target_start = windows.left_window
++        if not previous_end <= left_cut <= target_start:
++            metadata["cut_failure_reason"] = "left-cut-outside-safe-range"
++            return None
++    elif left_cut != 0:
++        metadata["cut_failure_reason"] = "left-cut-outside-safe-range"
+         return None
+-    if windows.right_window is not None and not (
+-        windows.right_window[0] <= right_cut <= windows.right_window[1]
+-    ):
++    if windows.has_right_context:
++        if windows.right_window is None:
++            metadata["cut_failure_reason"] = "right-search-invalid"
++            return None
++        target_end, next_start = windows.right_window
++        if not target_end <= right_cut <= next_start:
++            metadata["cut_failure_reason"] = "right-cut-outside-safe-range"
++            return None
++    elif right_cut != len(audio):
++        metadata["cut_failure_reason"] = "right-cut-outside-safe-range"
+         return None
+-    if left_cut >= windows.target_start or right_cut <= windows.target_end:
++    if right_cut <= left_cut:
++        metadata["cut_failure_reason"] = "empty-target-audio"
+         return None
+
+-    metadata["cut_strategy"] = "timestamp-smooth"
++    strategies = {left_strategy, right_strategy}
++    if "timestamp-anchor" in strategies:
++        metadata["cut_strategy"] = "timestamp-anchor"
++    elif "timestamp-smooth-relaxed" in strategies:
++        metadata["cut_strategy"] = "timestamp-smooth-relaxed"
++    else:
++        metadata["cut_strategy"] = "timestamp-smooth"
+     return left_cut, right_cut
+
+
+ def _find_left_cut(
+     audio: np.ndarray,
+     windows: BoundaryWindows,
+-) -> int | None:
++    metadata: dict[str, object],
++) -> tuple[int, str] | None:
+     if not windows.has_left_context:
+-        return 0
++        return 0, "no-context"
+     if windows.left_window is None:
++        metadata["cut_failure_reason"] = "left-search-invalid"
+         return None
+-    start, end = _search_interval(
++    interval = _search_interval(
+         windows.left_window,
+         anchor=windows.target_start,
+         side="left",
++        audio_length=len(audio),
+     )
+-    if end <= start:
++    if interval is None:
++        metadata["cut_failure_reason"] = "left-search-invalid"
+         return None
+-    return find_smooth_cut_point(
++    start, end, strategy = interval
++    cut = find_smooth_cut_point(
+         _as_float_audio(audio),
+         start=start,
+         end=end,
+         anchor=windows.target_start,
+         window_length=_ANALYSIS_WINDOW_SAMPLES,
+     )
++    if cut is None:
++        metadata["cut_failure_reason"] = "left-search-invalid"
++        return None
++    return cut, strategy
+
+
+ def _find_right_cut(
+     audio: np.ndarray,
+     windows: BoundaryWindows,
+-) -> int | None:
++    metadata: dict[str, object],
++) -> tuple[int, str] | None:
+     if not windows.has_right_context:
+-        return len(audio)
++        return len(audio), "no-context"
+     if windows.right_window is None:
++        metadata["cut_failure_reason"] = "right-search-invalid"
+         return None
+-    start, end = _search_interval(
++    interval = _search_interval(
+         windows.right_window,
+         anchor=windows.target_end,
+         side="right",
++        audio_length=len(audio),
+     )
+-    if end <= start:
++    if interval is None:
++        metadata["cut_failure_reason"] = "right-search-invalid"
+         return None
+-    return find_smooth_cut_point(
++    start, end, strategy = interval
++    cut = find_smooth_cut_point(
+         _as_float_audio(audio),
+         start=start,
+         end=end,
+         anchor=windows.target_end,
+         window_length=_ANALYSIS_WINDOW_SAMPLES,
+     )
++    if cut is None:
++        metadata["cut_failure_reason"] = "right-search-invalid"
++        return None
++    return cut, strategy
+
+
+ def _search_interval(
+@@ -119,21 +162,25 @@ def _search_interval(
+     *,
+     anchor: int,
+     side: str,
+-) -> tuple[int, int]:
+-    window_start, window_end = window
+-    legal_span = window_end - window_start
+-    if legal_span <= 0:
+-        return window_start, window_start
+-    guard = min(_CONTEXT_GUARD_SAMPLES, legal_span // 3)
++    audio_length: int,
++) -> tuple[int, int, str] | None:
++    safe_low, safe_high = window
++    guard = min(_CONTEXT_GUARD_SAMPLES, (safe_high - safe_low) // 3)
+     if side == "left":
+-        return (
+-            max(window_start, anchor - _SEARCH_RADIUS_SAMPLES),
+-            min(window_end, anchor - guard),
+-        )
+-    return (
+-        max(window_start, anchor + guard),
+-        min(window_end, anchor + _SEARCH_RADIUS_SAMPLES),
+-    )
++        start = max(safe_low, anchor - _SEARCH_RADIUS_SAMPLES)
++        end = min(safe_high, anchor - guard)
++    else:
++        start = max(safe_low, anchor + guard)
++        end = min(safe_high, anchor + _SEARCH_RADIUS_SAMPLES)
++    if end > start:
++        return start, end, "timestamp-smooth"
++
++    relaxed_start = max(safe_low, anchor - _SEARCH_RADIUS_SAMPLES)
++    relaxed_end = min(audio_length, safe_high + 1, anchor + _SEARCH_RADIUS_SAMPLES + 1)
++    if relaxed_end <= relaxed_start:
++        return None
++    strategy = "timestamp-anchor" if safe_low == safe_high == anchor else "timestamp-smooth-relaxed"
++    return relaxed_start, relaxed_end, strategy
+
+
+ def _as_float_audio(audio: np.ndarray) -> np.ndarray:
+diff --git a/pykokoro/short_sentence_handler.py b/pykokoro/short_sentence_handler.py
+index 5c72d8a..cdabec5 100644
+--- a/pykokoro/short_sentence_handler.py
++++ b/pykokoro/short_sentence_handler.py
+@@ -26,6 +26,11 @@ import numpy as np
+
+ from .constants import MAX_PHONEME_LENGTH, SUPPORTED_LANGUAGES
+ from .short_sentence_cutters import cut_phrase_audio
++from .short_sentence_phrases import (
++    ShortSentencePhraseSet,
++    resolve_short_sentence_phrase_language,
++    resolve_short_sentence_phrase_set,
++)
+
+ if TYPE_CHECKING:
+     from .types import PhonemeSegment
+@@ -148,6 +153,7 @@ class ShortSentenceTimingToken:
+     is_target: bool = False
+     char_start: int | None = None
+     char_end: int | None = None
++    model_token_count: int | None = None
+
+     def to_dict(self) -> dict[str, object]:
+         return {
+@@ -157,6 +163,7 @@ class ShortSentenceTimingToken:
+             "is_target": self.is_target,
+             "char_start": self.char_start,
+             "char_end": self.char_end,
++            "model_token_count": self.model_token_count,
+         }
+
+
+@@ -217,6 +224,7 @@ class ShortSentenceConfig:
+     )
+     phrase_fallback_tries: int = 1
+
++    phrase_catalog: dict[str, ShortSentencePhraseSet] | None = None
+     def __post_init__(self) -> None:
+         if (
+             isinstance(self.min_phoneme_length, bool)
+@@ -252,10 +260,24 @@ class ShortSentenceConfig:
+             if isinstance(mode, PhraseResolveMode):
+                 templates = [mode.neutral_phrase, mode.end_phrase]
+             elif isinstance(mode, RandomizedPhraseResolveMode):
+-                templates = [*mode.neutral_phrases, *mode.end_phrases]
+-            if any("{segment}" not in template for template in templates):
+-                raise ValueError("phrase templates must contain the '{segment}' placeholder")
+-
++                templates = [
++                    *mode.neutral_phrases,
++                    *mode.end_phrases,
++                    *mode.question_phrases,
++                    *mode.exclamation_phrases,
++                    *mode.ellipsis_phrases,
++                    *mode.fragment_phrases,
++                ]
++            if any(template.count("{segment}") != 1 for template in templates):
++                raise ValueError(
++                    "phrase templates must contain exactly one '{segment}' placeholder"
++                )
++        if self.phrase_catalog is not None:
++            for key, phrase_set in self.phrase_catalog.items():
++                if not isinstance(phrase_set, ShortSentencePhraseSet):
++                    raise ValueError("phrase_catalog values must be ShortSentencePhraseSet")
++                if key.strip().lower().replace("_", "-") != phrase_set.language.lower():
++                    raise ValueError("phrase catalog key must match its declared language")
+     def should_use_pause_surrounding(self, phoneme_length: int, text: str) -> bool:
+         """Check if segment should use pause surrounding.
+
+@@ -359,16 +381,32 @@ def phonemize_short_sentence_phrase(
+     segment: PhonemeSegment,
+     phrase_template: str,
+     context_phonemizer: Callable[[str, str], Any] | None = None,
++    *,
++    phrase_language: str | None = None,
+ ) -> tuple[str, list[int], list[dict[str, object]]]:
+     """Phonemize a phrase containing the short segment text."""
+     phrase_text = phrase_template.replace("{segment}", segment.text)
+     segment_start = phrase_template.find("{segment}")
+     segment_end = segment_start + len(segment.text) if segment_start >= 0 else -1
++    segment_language = resolve_short_sentence_phrase_language(segment.lang) or segment.lang
++    resolved_phrase_language = (
++        resolve_short_sentence_phrase_language(phrase_language)
++        if phrase_language is not None
++        else segment_language
++    )
++    if resolved_phrase_language != segment_language:
++        raise ValueError(
++            f"short sentence phrase language {phrase_language!r} does not match "
++            f"segment language {segment.lang!r}"
++        )
+     lang = SUPPORTED_LANGUAGES.get(segment.lang, segment.lang)
+     started = time.perf_counter()
+     logger.debug(
+-        "short_sentence.context_g2p.start mode=phrase language=%s reuse=%s",
+-        lang,
++        "short_sentence.context_g2p.start mode=phrase segment_language=%s phrase_language=%s "
++        "terminal_form=%s reuse=%s",
++        segment_language,
++        resolved_phrase_language,
++        _terminal_form(segment.text),
+         context_phonemizer is not None,
+     )
+     if context_phonemizer is None:
+@@ -396,6 +434,32 @@ def phonemize_short_sentence_phrase(
+     return str(phonemes), list(tokens), timing_tokens
+
+
++def _build_wrap_application(
++    segment: PhonemeSegment,
++    phonemes: str,
++    tokens: list[int],
++    config: ShortSentenceConfig,
++    mode_name: str,
++    tokenize: Callable[[str], list[int]],
++    cut_failure_reason: str | None = None,
++) -> ShortSentenceApplication:
++    wrap_mode = config.resolve_modes.get("wrap")
++    pretext = wrap_mode.phoneme_pretext if isinstance(wrap_mode, WrapResolveMode) else config.phoneme_pretext
++    if pretext == "—":
++        pretext = config.phoneme_pretext
++    wrapped = f"{pretext}{phonemes}{pretext}"
++    wrapped_tokens = tokenize(wrapped)
++    metadata: dict[str, object] = {
++        "mode": mode_name,
++        "kind": "wrap",
++        "original_token_count": len(tokens),
++        "generated_token_count": len(wrapped_tokens),
++    }
++    if cut_failure_reason is not None:
++        metadata["cut_failure_reason"] = cut_failure_reason
++    return ShortSentenceApplication(wrapped, wrapped_tokens, metadata)
++
++
+ def apply_short_sentence_mode(
+     segment: PhonemeSegment,
+     phonemes: str,
+@@ -416,33 +480,37 @@ def apply_short_sentence_mode(
+         return ShortSentenceApplication(phonemes, tokens)
+
+     if mode.kind == "wrap":
+-        pretext = mode.phoneme_pretext
+-        if pretext == "—":
+-            pretext = config.phoneme_pretext
+-        wrapped = f"{pretext}{phonemes}{pretext}"
+-        wrapped_tokens = tokenize(wrapped)
+-        return ShortSentenceApplication(
+-            wrapped,
+-            wrapped_tokens,
+-            {
+-                "mode": mode_name,
+-                "kind": mode.kind,
+-                "original_token_count": len(tokens),
+-                "generated_token_count": len(wrapped_tokens),
+-            },
++        return _build_wrap_application(segment, phonemes, tokens, config, mode_name, tokenize)
++    phrase_set, phrase_language, catalog_source = resolve_short_sentence_phrase_set(
++        segment.lang, config.phrase_catalog
++    )
++    if phrase_set is None or phrase_language is None:
++        logger.info(
++            "short_sentence.phrase.unavailable language=%s action=wrap reason=no-localized-phrase-catalog",
++            segment.lang,
++        )
++        return _build_wrap_application(
++            segment,
++            phonemes,
++            tokens,
++            config,
++            mode_name,
++            tokenize,
++            cut_failure_reason="no-localized-phrase-catalog",
+         )
+-
+     phrase_mode = _configured_phrase_mode(config)
+     phrase_template = _select_phrase_template(
+         segment.text,
+         mode,
+         phrase_mode=phrase_mode,
++        phrase_set=phrase_set,
+         rng=rng,
+     )
+     phrase_fallback_templates = _select_phrase_fallback_templates(
+         segment.text,
+         mode,
+         phrase_mode=phrase_mode,
++        phrase_set=phrase_set,
+         used_templates=[phrase_template],
+         limit=config.phrase_fallback_tries,
+     )
+@@ -477,6 +545,9 @@ def apply_short_sentence_mode(
+         original_token_count=len(tokens),
+         generated_token_count=len(phrase_tokens),
+         phrase_template=phrase_template,
++        phrase_language=phrase_language,
++        phrase_terminal_form=_terminal_form(segment.text),
++        phrase_catalog_source=catalog_source,
+         phrase_fallback_templates=phrase_fallback_templates,
+         phrase_fallback_tries=config.phrase_fallback_tries,
+         timing_tokens=timing_tokens,
+@@ -544,14 +615,23 @@ def _select_phrase_template(
+     mode: ShortSentenceResolveMode,
+     *,
+     phrase_mode: PhraseResolveMode | None = None,
++    phrase_set: ShortSentencePhraseSet | None = None,
+     rng: random.Random | None = None,
+ ) -> str:
+     use_end_phrase = _uses_end_phrase(segment_text, mode)
+     if isinstance(mode, RandomizedPhraseResolveMode):
+-        choices = _phrase_choices(segment_text, mode, phrase_mode)
++        effective_phrase_set = phrase_set if mode == RandomizedPhraseResolveMode() else None
++        choices = _phrase_choices(segment_text, mode, phrase_mode, effective_phrase_set)
+         chooser = rng if rng is not None else random
+         return chooser.choice(choices)
+     if isinstance(mode, PhraseResolveMode):
++        effective_phrase_set = phrase_set if mode == PhraseResolveMode() else None
++        if effective_phrase_set is not None and use_end_phrase:
++            choices = effective_phrase_set.declarative or effective_phrase_set.neutral
++            return choices[0]
++        if effective_phrase_set is not None:
++            choices = effective_phrase_set.neutral or effective_phrase_set.fragment
++            return choices[0]
+         return mode.end_phrase if use_end_phrase else mode.neutral_phrase
+     return ""
+
+@@ -561,6 +641,7 @@ def _select_phrase_fallback_templates(
+     mode: ShortSentenceResolveMode,
+     *,
+     phrase_mode: PhraseResolveMode | None = None,
++    phrase_set: ShortSentencePhraseSet | None = None,
+     used_templates: list[str],
+     limit: int,
+ ) -> list[str]:
+@@ -570,11 +651,21 @@ def _select_phrase_fallback_templates(
+
+     used = set(used_templates)
+     if isinstance(mode, PhraseResolveMode):
+-        choices = _default_ranked_phrase_choices(segment_text)
++        effective_phrase_set = (
++            phrase_set
++            if phrase_set is not None and phrase_set.language != "en"
++            else None
++        )
++        choices = _default_ranked_phrase_choices(segment_text, effective_phrase_set)
+         return _unique_phrase_templates(choices, used, limit)
+
+     if isinstance(mode, RandomizedPhraseResolveMode):
+-        choices = _phrase_choices(segment_text, mode, phrase_mode)
++        choices = _phrase_choices(
++            segment_text,
++            mode,
++            phrase_mode,
++            phrase_set if mode == RandomizedPhraseResolveMode() else None,
++        )
+         selected = used_templates[-1] if used_templates else ""
+         try:
+             selected_index = choices.index(selected)
+@@ -593,19 +684,41 @@ def _phrase_choices(
+     segment_text: str,
+     mode: RandomizedPhraseResolveMode,
+     phrase_defaults: PhraseResolveMode | None = None,
++    phrase_set: ShortSentencePhraseSet | None = None,
+ ) -> list[str]:
+     if phrase_defaults is None:
+         phrase_defaults = PhraseResolveMode()
+     if mode.phrase_selection == "neutral":
++        if phrase_set is not None:
++            return list(phrase_set.neutral or phrase_set.fragment)
+         return mode.neutral_phrases or [phrase_defaults.neutral_phrase]
+     if mode.phrase_selection == "end":
++        if phrase_set is not None:
++            return list(phrase_set.declarative or phrase_set.neutral)
+         return mode.end_phrases or [phrase_defaults.end_phrase]
+     terminal_form = _terminal_form(segment_text)
++    if phrase_set is not None:
++        choices = {
++            "question": phrase_set.question,
++            "exclamation": phrase_set.exclamation,
++            "ellipsis": phrase_set.ellipsis,
++            "fragment": phrase_set.fragment,
++            "declarative": phrase_set.declarative,
++        }[terminal_form]
++        fallback = phrase_set.declarative if terminal_form == "declarative" else phrase_set.neutral
++        return list(choices or fallback)
++    fragment_choices = mode.fragment_phrases
++    defaults = RandomizedPhraseResolveMode()
++    if (
++        mode.neutral_phrases != defaults.neutral_phrases
++        and mode.fragment_phrases == defaults.fragment_phrases
++    ):
++        fragment_choices = mode.neutral_phrases
+     choices = {
+         "question": mode.question_phrases,
+         "exclamation": mode.exclamation_phrases,
+         "ellipsis": mode.ellipsis_phrases,
+-        "fragment": mode.neutral_phrases or mode.fragment_phrases,
++        "fragment": fragment_choices,
+         "declarative": mode.end_phrases,
+     }[terminal_form]
+     fallback = (
+@@ -622,9 +735,18 @@ def _configured_phrase_mode(config: ShortSentenceConfig) -> PhraseResolveMode |
+     return None
+
+
+-def _default_ranked_phrase_choices(segment_text: str) -> list[str]:
+-    defaults = RandomizedPhraseResolveMode()
+-    return _phrase_choices(segment_text, defaults)
++def _default_ranked_phrase_choices(
++    segment_text: str,
++    phrase_set: ShortSentencePhraseSet | None = None,
++) -> list[str]:
++    if phrase_set is None and _terminal_form(segment_text) == "fragment":
++        return list(RandomizedPhraseResolveMode().neutral_phrases)
++    defaults = (
++        RandomizedPhraseResolveMode(fragment_phrases=())
++        if phrase_set is None
++        else RandomizedPhraseResolveMode()
++    )
++    return _phrase_choices(segment_text, defaults, phrase_set=phrase_set)
+
+ def _unique_phrase_templates(
+     choices: list[str],
+@@ -670,6 +792,9 @@ def _build_short_sentence_metadata(
+     original_token_count: int,
+     generated_token_count: int,
+     phrase_template: str | None = None,
++    phrase_language: str | None = None,
++    phrase_terminal_form: str | None = None,
++    phrase_catalog_source: str | None = None,
+     phrase_fallback_templates: list[str] | None = None,
+     phrase_fallback_tries: int | None = None,
+     timing_tokens: list[dict[str, object]] | None = None,
+@@ -695,6 +820,9 @@ def _build_short_sentence_metadata(
+         "mode": mode_name,
+         "kind": mode.kind,
+         "phrase_template": phrase_template,
++        "phrase_language": phrase_language,
++        "phrase_terminal_form": phrase_terminal_form,
++        "phrase_catalog_source": phrase_catalog_source,
+         "original_token_count": original_token_count,
+         "generated_token_count": generated_token_count,
+         "expected_cut_ratio": max(0.01, min(0.99, expected_cut_ratio)),
+@@ -733,6 +861,9 @@ def _build_short_sentence_retry_metadata(
+         "mode": base_metadata.get("mode"),
+         "kind": base_metadata.get("kind"),
+         "phrase_template": phrase_template,
++        "phrase_language": base_metadata.get("phrase_language"),
++        "phrase_terminal_form": base_metadata.get("phrase_terminal_form"),
++        "phrase_catalog_source": base_metadata.get("phrase_catalog_source"),
+         "original_token_count": original_token_count,
+         "generated_token_count": generated_token_count,
+         "expected_cut_ratio": max(0.01, min(0.99, expected_cut_ratio)),
+@@ -796,6 +927,14 @@ def _build_timing_tokens(
+         source_end = (
+             max(0, char_end - segment_start) if isinstance(char_end, int) and is_target else None
+         )
++        raw_model_token_count = _token_attr(token, "model_token_count")
++        model_token_count = (
++            raw_model_token_count
++            if isinstance(raw_model_token_count, int)
++            and not isinstance(raw_model_token_count, bool)
++            and raw_model_token_count > 0
++            else None
++        )
+         timing_tokens.append(
+             ShortSentenceTimingToken(
+                 text=text,
+@@ -804,6 +943,7 @@ def _build_timing_tokens(
+                 is_target=is_target,
+                 char_start=source_start,
+                 char_end=source_end,
++                model_token_count=model_token_count,
+             ).to_dict()
+         )
+     return timing_tokens
+diff --git a/pykokoro/short_sentence_phrases.py b/pykokoro/short_sentence_phrases.py
+new file mode 100644
+index 0000000..742a387
+--- /dev/null
++++ b/pykokoro/short_sentence_phrases.py
+@@ -0,0 +1,134 @@
++"""Language-aware lexical context catalogs for short-sentence synthesis."""
++
++from __future__ import annotations
++
++from dataclasses import dataclass
++
++
++@dataclass(frozen=True)
++class ShortSentencePhraseSet:
++    """Validated lexical context templates for one canonical language."""
++
++    language: str
++    neutral: tuple[str, ...] = ()
++    declarative: tuple[str, ...] = ()
++    question: tuple[str, ...] = ()
++    exclamation: tuple[str, ...] = ()
++    ellipsis: tuple[str, ...] = ()
++    fragment: tuple[str, ...] = ()
++
++    def __post_init__(self) -> None:
++        if not self.language.strip():
++            raise ValueError("phrase catalog language must not be empty")
++        for category in self.categories():
++            if any(not template.strip() for template in category):
++                raise ValueError("phrase catalog templates must not be empty")
++            if any(template.count("{segment}") != 1 for template in category):
++                raise ValueError("phrase catalog templates must contain exactly one '{segment}'")
++
++    def categories(self) -> tuple[tuple[str, ...], ...]:
++        return (
++            self.neutral,
++            self.declarative,
++            self.question,
++            self.exclamation,
++            self.ellipsis,
++            self.fragment,
++        )
++
++
++ENGLISH_SHORT_SENTENCE_PHRASES = ShortSentencePhraseSet(
++    language="en",
++    neutral=(
++        "The conversation stopped, {segment}, before someone answered.",
++        "The hallway went quiet; {segment}; then footsteps resumed.",
++        "The radio paused; {segment}; then the broadcast continued.",
++        "The student thought, {segment}, before the teacher continued.",
++        "He paused…: {segment}…? … Is that you?",
++        "The screen changed; {segment}; then the next slide appeared.",
++        "The transcript paused…: {segment}; the next entry followed.",
++        "The music stopped: {segment}. Then the singer continued.",
++        "He paused…: {segment}? Is that you?",
++        "The clerk paused, {segment}, before the next name was called.",
++    ),
++    declarative=(
++        "The conversation stopped after one last reply: {segment}",
++        "The teacher waited for a response. {segment}",
++        "The announcement ended like this: {segment}",
++        "There was a pause before the answer came: {segment}",
++        "The report concludes with this note: {segment}",
++        "The recording trails off after the words, … {segment}",
++        "The lesson ended when the teacher asked, {segment}",
++        "The host asked again, more quietly this time: {segment}",
++        "The letter closed with this unfinished thought — {segment}",
++        "The note on the desk simply said, {segment}",
++        "At last, the guide called out, {segment}",
++    ),
++    question=("The question was asked plainly: {segment}", "A quiet voice asked: {segment}"),
++    exclamation=("The speaker called out: {segment}", "The announcement ended with: {segment}"),
++    ellipsis=("The thought trailed off with: {segment}", "The unfinished sentence was: {segment}"),
++    fragment=("The note contained only these words: {segment}", "The short message read: {segment}"),
++)
++
++GERMAN_SHORT_SENTENCE_PHRASES = ShortSentencePhraseSet(
++    language="de",
++    declarative=("Die kurze Nachricht lautete: {segment}", "Am Ende stand: {segment}"),
++    question=("Die Frage lautete: {segment}", "Dann kam die Frage: {segment}"),
++    exclamation=("Der Ausruf lautete: {segment}", "Dann rief jemand: {segment}"),
++    ellipsis=("Der unvollständige Gedanke lautete: {segment}",),
++    fragment=("Die kurze Notiz lautete: {segment}", "Auf dem Zettel stand: {segment}"),
++)
++
++BUILTIN_SHORT_SENTENCE_PHRASES: dict[str, ShortSentencePhraseSet] = {
++    "en": ENGLISH_SHORT_SENTENCE_PHRASES,
++    "de": GERMAN_SHORT_SENTENCE_PHRASES,
++}
++
++SHORT_SENTENCE_PHRASE_LANGUAGE_ALIASES = {
++    "en-us": "en",
++    "en-gb": "en",
++    "de-de": "de",
++    "de-at": "de",
++    "de-ch": "de",
++}
++
++
++def _normalized_language(language: str) -> str:
++    return language.strip().lower().replace("_", "-")
++
++
++def resolve_short_sentence_phrase_language(
++    language: str,
++    catalog: dict[str, ShortSentencePhraseSet] | None = None,
++) -> str | None:
++    """Resolve a segment language to a language present in the phrase catalog."""
++    if not isinstance(language, str) or not language.strip():
++        return None
++    available = BUILTIN_SHORT_SENTENCE_PHRASES if catalog is None else catalog
++    normalized_catalog = {_normalized_language(key): key for key in available}
++    normalized = _normalized_language(language)
++    if normalized in normalized_catalog:
++        return normalized_catalog[normalized]
++    alias = SHORT_SENTENCE_PHRASE_LANGUAGE_ALIASES.get(normalized)
++    if alias in normalized_catalog:
++        return normalized_catalog[alias]
++    base = normalized.split("-", 1)[0]
++    if base in normalized_catalog:
++        return normalized_catalog[base]
++    return None
++
++
++def resolve_short_sentence_phrase_set(
++    language: str,
++    overlay: dict[str, ShortSentencePhraseSet] | None = None,
++) -> tuple[ShortSentencePhraseSet | None, str | None, str]:
++    """Return a phrase set, canonical language, and source for a segment language."""
++    catalog = dict(BUILTIN_SHORT_SENTENCE_PHRASES)
++    source = "builtin"
++    if overlay:
++        catalog.update(overlay)
++        source = "user" if resolve_short_sentence_phrase_language(language, overlay) else "builtin"
++    resolved = resolve_short_sentence_phrase_language(language, catalog)
++    if resolved is None:
++        return None, None, source
++    return catalog[resolved], resolved, source
+diff --git a/pykokoro/stages/g2p/kokorog2p.py b/pykokoro/stages/g2p/kokorog2p.py
+index 676bb4b..b8e7178 100644
+--- a/pykokoro/stages/g2p/kokorog2p.py
++++ b/pykokoro/stages/g2p/kokorog2p.py
+@@ -48,7 +48,7 @@ class _CachedContextToken:
+     whitespace: str
+     char_start: int | None
+     char_end: int | None
+-
++    model_token_count: int | None
+
+ @dataclass(frozen=True)
+ class _CachedContextResult:
+@@ -776,7 +776,9 @@ class KokoroG2PAdapter(G2PAdapter):
+             g2p_instance,
+             target_model=model_version,
+         )
+-        normalized = self._normalize_context_result(result)
++        normalized = self._normalize_context_result(
++            result, g2p_module=g2p_module, model_version=model_version
++        )
+         self._context_cache[cache_key] = normalized
+         self._context_cache.move_to_end(cache_key)
+         while len(self._context_cache) > self._context_cache_max_entries:
+@@ -806,32 +808,49 @@ class KokoroG2PAdapter(G2PAdapter):
+         )
+
+     @staticmethod
+-    def _normalize_context_result(result: Any) -> _CachedContextResult:
++    def _normalize_context_result(
++        result: Any,
++        *,
++        g2p_module: Any | None = None,
++        model_version: str | None = None,
++    ) -> _CachedContextResult:
+         phonemes = getattr(result, "phonemes", None) or getattr(result, "phoneme", "")
+         ids = getattr(result, "ids", None)
+         if ids is None:
+             ids = getattr(result, "token_ids", ())
+-        tokens = tuple(
+-            _CachedContextToken(
+-                text=str(_context_token_value(token, "text", "")),
+-                phonemes=str(
+-                    _context_token_value(token, "phonemes", None)
+-                    or _context_token_value(token, "phoneme", "")
+-                ),
+-                whitespace=str(_context_token_value(token, "whitespace", "") or ""),
+-                char_start=_context_token_int(token, "char_start"),
+-                char_end=_context_token_int(token, "char_end"),
++        normalized_tokens: list[_CachedContextToken] = []
++        for token in getattr(result, "tokens", ()) or ():
++            token_phonemes = str(
++                _context_token_value(token, "phonemes", None)
++                or _context_token_value(token, "phoneme", "")
++            )
++            model_token_count = _context_token_int(token, "model_token_count")
++            if model_token_count is not None and model_token_count <= 0:
++                model_token_count = None
++            if model_token_count is None and token_phonemes and g2p_module is not None:
++                try:
++                    model_token_count = len(
++                        g2p_module.phonemes_to_ids(token_phonemes, model=model_version)
++                    )
++                except (AttributeError, TypeError, ValueError, RuntimeError):
++                    model_token_count = None
++            normalized_tokens.append(
++                _CachedContextToken(
++                    text=str(_context_token_value(token, "text", "")),
++                    phonemes=token_phonemes,
++                    whitespace=str(_context_token_value(token, "whitespace", "") or ""),
++                    char_start=_context_token_int(token, "char_start"),
++                    char_end=_context_token_int(token, "char_end"),
++                    model_token_count=model_token_count,
++                )
+             )
+-            for token in (getattr(result, "tokens", ()) or ())
+-        )
+         return _CachedContextResult(
+             phonemes=str(phonemes),
+             ids=tuple(int(token_id) for token_id in (ids or ())),
+-            tokens=tokens,
++            tokens=tuple(normalized_tokens),
+         )
+
+
+-
+     def _record_selection(
+         self, doc: DocumentResult, lang: str, cfg: PipelineConfig, g2p_instance: G2PBase
+     ) -> None:
+diff --git a/tests/test_audio_splitting.py b/tests/test_audio_splitting.py
+index d4b3548..a8a7cdc 100644
+--- a/tests/test_audio_splitting.py
++++ b/tests/test_audio_splitting.py
+@@ -1258,6 +1258,7 @@ def test_prepare_phrase_audio_falls_back_to_wrap_when_cut_is_uncertain(
+         speed: float,
+         *,
+         tokens=None,
++        attempt_kind=None,
+     ):
+         _ = voice_style, speed
+         assert phonemes == "—abc—"
+@@ -1339,6 +1340,7 @@ def test_prepare_phrase_audio_tries_phrase_fallbacks_before_wrap(
+         speed: float,
+         *,
+         tokens=None,
++        attempt_kind=None,
+     ):
+         _ = phonemes, voice_style, speed
+         return retry_audio, np.array([1.0, 1.0, 1.0], dtype=np.float32)
+@@ -1428,6 +1430,7 @@ def test_prepare_phrase_audio_obeys_phrase_fallback_tries(
+         speed: float,
+         *,
+         tokens=None,
++        attempt_kind=None,
+     ):
+         _ = phonemes, voice_style, speed
+         return np.ones(240, dtype=np.float32), np.array([1.0, 1.0], dtype=np.float32)
+@@ -1527,7 +1530,7 @@ def test_prepare_phrase_audio_replaces_stale_timings_with_cropped_retry_timings(
+     monkeypatch.setattr(
+         generator,
+         "_run_onnx",
+-        lambda phonemes, voice_style, speed, tokens=None: (
++        lambda phonemes, voice_style, speed, tokens=None, attempt_kind=None: (
+             retry_audio,
+             np.asarray([1.0, 10.0, 1.0], dtype=np.float32),
+         ),
+diff --git a/tests/test_short_sentence_cutters.py b/tests/test_short_sentence_cutters.py
+index 8bdc063..79a863e 100644
+--- a/tests/test_short_sentence_cutters.py
++++ b/tests/test_short_sentence_cutters.py
+@@ -120,3 +120,76 @@ def test_timestamp_adaptive_rejects_invalid_timestamp_geometry() -> None:
+     metadata["target_end_ts"] = metadata["target_start_ts"]
+
+     assert find_timestamp_adaptive_cut_bounds(audio, metadata) is None
++
++
++def test_timestamp_adaptive_accepts_zero_width_context_gaps(monkeypatch) -> None:
++    audio = np.ones(3000, dtype=np.float32)
++    metadata = _metadata()
++    metadata.update(
++        {
++            "previous_token_end_ts": 1000 / 24000,
++            "target_start_ts": 1000 / 24000,
++            "target_end_ts": 2000 / 24000,
++            "next_token_start_ts": 2000 / 24000,
++        }
++    )
++    intervals: list[tuple[int, int]] = []
++    monkeypatch.setattr(
++        "pykokoro.short_sentence_cutters.timestamp_adaptive.find_energy_valley_cut_bounds",
++        lambda _audio, _metadata: None,
++    )
++    def smooth_point(_audio, *, start, end, anchor, window_length):
++        intervals.append((start, end))
++        return anchor
++    monkeypatch.setattr(
++        "pykokoro.short_sentence_cutters.timestamp_adaptive.find_smooth_cut_point",
++        smooth_point,
++    )
++    assert find_timestamp_adaptive_cut_bounds(audio, metadata) == (1000, 2000)
++    assert intervals == [(1000, 1001), (2000, 2001)]
++    assert metadata["cut_strategy"] == "timestamp-anchor"
++
++
++def test_timestamp_adaptive_accepts_terminal_target_at_audio_end(monkeypatch) -> None:
++    audio = np.ones(3000, dtype=np.float32)
++    metadata = _metadata(left=True, right=False)
++    metadata["target_end_ts"] = 3000 / 24000
++    monkeypatch.setattr(
++        "pykokoro.short_sentence_cutters.timestamp_adaptive.find_energy_valley_cut_bounds",
++        lambda _audio, _metadata: None,
++    )
++    monkeypatch.setattr(
++        "pykokoro.short_sentence_cutters.timestamp_adaptive.find_smooth_cut_point",
++        lambda _audio, *, anchor, **kwargs: anchor,
++    )
++    assert find_timestamp_adaptive_cut_bounds(audio, metadata) == (1600, 3000)
++
++
++def test_timestamp_adaptive_accepts_target_at_audio_start(monkeypatch) -> None:
++    audio = np.ones(3000, dtype=np.float32)
++    metadata = _metadata(left=False, right=True)
++    metadata["target_start_ts"] = 0.0
++    metadata["target_end_ts"] = 800 / 24000
++    monkeypatch.setattr(
++        "pykokoro.short_sentence_cutters.timestamp_adaptive.find_smooth_cut_point",
++        lambda _audio, *, anchor, **kwargs: anchor,
++    )
++    assert find_timestamp_adaptive_cut_bounds(audio, metadata) == (0, 800)
++
++
++def test_timestamp_adaptive_accepts_one_sample_context_gaps(monkeypatch) -> None:
++    audio = np.ones(3000, dtype=np.float32)
++    metadata = _metadata()
++    metadata.update(
++        {
++            "previous_token_end_ts": 999 / 24000,
++            "target_start_ts": 1000 / 24000,
++            "target_end_ts": 2000 / 24000,
++            "next_token_start_ts": 2001 / 24000,
++        }
++    )
++    monkeypatch.setattr(
++        "pykokoro.short_sentence_cutters.timestamp_adaptive.find_smooth_cut_point",
++        lambda _audio, *, anchor, **kwargs: anchor,
++    )
++    assert find_timestamp_adaptive_cut_bounds(audio, metadata) == (1000, 2000)
+diff --git a/tests/test_short_sentence_handler.py b/tests/test_short_sentence_handler.py
+index c417223..814780c 100644
+--- a/tests/test_short_sentence_handler.py
++++ b/tests/test_short_sentence_handler.py
+@@ -6,9 +6,14 @@ from pykokoro.short_sentence_handler import (
+     ShortSentenceConfig,
+     _phrase_choices,
+     _terminal_form,
++    apply_short_sentence_mode,
+     is_segment_empty,
+     is_segment_short,
+ )
++from pykokoro.short_sentence_phrases import (
++    ShortSentencePhraseSet,
++    resolve_short_sentence_phrase_language,
++)
+ from pykokoro.types import PhonemeSegment
+
+
+@@ -25,7 +30,7 @@ def test_randomized_templates_match_terminal_punctuation() -> None:
+         "Why?": mode.question_phrases,
+         "Stop!": mode.exclamation_phrases,
+         "Wait…": mode.ellipsis_phrases,
+-        "Go": mode.neutral_phrases,
++        "Go": mode.fragment_phrases,
+     }
+     for text, templates in expected.items():
+         assert _terminal_form(text) in {
+@@ -139,3 +144,61 @@ class TestIsSegmentShort:
+         segment = make_segment(text="Go", phonemes="abc")
+         config = ShortSentenceConfig(enabled=False)
+         assert is_segment_short(segment, config=config) is False
++
++
++def test_phrase_language_aliases_are_explicit() -> None:
++    assert resolve_short_sentence_phrase_language("en-US") == "en"
++    assert resolve_short_sentence_phrase_language("de_DE") == "de"
++    assert resolve_short_sentence_phrase_language("xx-YY") is None
++
++
++def test_custom_phrase_catalog_is_selected_for_segment_language() -> None:
++    custom = ShortSentencePhraseSet(
++        language="xx",
++        declarative=("LOCAL {segment}",),
++        question=("LOCAL? {segment}",),
++        exclamation=("LOCAL! {segment}",),
++        ellipsis=("LOCAL… {segment}",),
++        fragment=("LOCAL {segment}",),
++    )
++    config = ShortSentenceConfig(
++        phrase_catalog={"xx": custom},
++        resolve_mode="phrase",
++    )
++    segment = make_segment("word", "abc")
++    segment.lang = "xx"
++    calls: list[tuple[str, str]] = []
++    def context_phonemizer(text: str, language: str):
++        calls.append((text, language))
++        return type("Result", (), {"phonemes": "context", "ids": [1], "tokens": []})()
++    result = apply_short_sentence_mode(
++        segment,
++        segment.phonemes,
++        [1],
++        config,
++        lambda text: [1 for _ in text],
++        context_phonemizer=context_phonemizer,
++    )
++    assert result.metadata is not None
++    assert result.metadata["phrase_language"] == "xx"
++    assert result.metadata["phrase_template"] == "LOCAL {segment}"
++    assert calls == [("LOCAL word", "xx")]
++
++
++def test_unsupported_phrase_language_uses_wrap_without_english_context() -> None:
++    config = ShortSentenceConfig(resolve_mode="phrase")
++    segment = make_segment("word", "abc")
++    segment.lang = "sv"
++    calls: list[tuple[str, str]] = []
++    result = apply_short_sentence_mode(
++        segment,
++        segment.phonemes,
++        [1],
++        config,
++        lambda text: [1 for _ in text],
++        context_phonemizer=lambda text, language: calls.append((text, language)),
++    )
++    assert result.metadata is not None
++    assert result.metadata["kind"] == "wrap"
++    assert result.metadata["cut_failure_reason"] == "no-localized-phrase-catalog"
++    assert calls == []

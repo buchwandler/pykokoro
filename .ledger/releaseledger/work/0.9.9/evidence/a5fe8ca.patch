@@ -1,0 +1,788 @@
+ pykokoro/audio_generator.py                        | 201 +++++++++++++--------
+ pykokoro/short_sentence_cutters/energy_valley.py   |   2 +
+ .../short_sentence_cutters/timestamp_adaptive.py   |   2 +
+ pykokoro/short_sentence_handler.py                 |  11 +-
+ pykokoro/stages/g2p/kokorog2p.py                   | 113 ++++++++----
+ pykokoro/types.py                                  |  44 ++++-
+ tests/test_audio_splitting.py                      |  14 ++
+ tests/test_word_timings.py                         | 140 ++++++++++++++
+ 8 files changed, 410 insertions(+), 117 deletions(-)
+
+diff --git a/pykokoro/audio_generator.py b/pykokoro/audio_generator.py
+index 531c0c6..36dc5bb 100644
+--- a/pykokoro/audio_generator.py
++++ b/pykokoro/audio_generator.py
+@@ -26,7 +26,7 @@ from .short_sentence_handler import (
+     cut_short_sentence_phrase_audio,
+ )
+ from .tokenizer import Tokenizer
+-from .types import G2PAlignmentToken, PhonemeSegment, WordTiming, _model_span_token_count
++from .types import G2PAlignmentToken, PhonemeSegment, WordTiming, _exact_timing_geometry
+ from .utils import generate_silence
+ from .voice_manager import normalize_voice_style
+
+@@ -1094,7 +1094,12 @@ class AudioGenerator:
+                 token["char_start"] = segment.char_start + char_start
+                 token["char_end"] = segment.char_start + char_end
+             valid_tokens.append(token)
+-        timestamped = _join_timestamps(cast(list[object], valid_tokens), durations, strict=True)
++        timestamped = _join_timestamps(
++            cast(list[object], valid_tokens),
++            durations,
++            strict=True,
++            require_final_cursor=False,
++        )
+         if not timestamped:
+             return []
+         grouped: dict[tuple[int, int], WordTiming] = {}
+@@ -1161,8 +1166,30 @@ class AudioGenerator:
+             short_sentence_metadata.setdefault("failure_stage", "timing-token-build")
+             short_sentence_metadata.setdefault("cut_failure_reason", "missing-duration-output")
+             return
++        if not short_sentence_metadata.get("timing_alignment_complete", False):
++            short_sentence_metadata["timestamp_join_complete"] = False
++            return
++        expected_duration_count = short_sentence_metadata.get("expected_pred_duration_count")
++        actual_duration_count = short_sentence_metadata.get("pred_duration_count")
++        if (
++            isinstance(expected_duration_count, int)
++            and isinstance(actual_duration_count, int)
++            and actual_duration_count != expected_duration_count
++        ):
++            short_sentence_metadata["timing_failure_detail"] = "duration-position-count-mismatch"
++            short_sentence_metadata["timing_failure_reason"] = "timing-model-position-mismatch"
++            short_sentence_metadata["failure_stage"] = "timing-alignment"
++            short_sentence_metadata["cut_failure_reason"] = "timing-model-position-mismatch"
++            short_sentence_metadata["timestamp_join_complete"] = False
++            short_sentence_metadata["cutter_reached"] = False
++            return
+         strict_join = "generated_token_count" in short_sentence_metadata
+-        timestamped = _join_timestamps(timing_tokens, pred_dur, strict=strict_join)
++        timestamped = _join_timestamps(
++            timing_tokens,
++            pred_dur,
++            strict=strict_join,
++            metadata=short_sentence_metadata,
++        )
+         short_sentence_metadata["timestamp_join_complete"] = bool(timestamped)
+         if not timestamped:
+             short_sentence_metadata.setdefault("timing_failure_reason", "timestamp-join-incomplete")
+@@ -1335,6 +1362,16 @@ class AudioGenerator:
+         if not isinstance(templates, list):
+             return None
+
++        non_retryable_details = {
++            "missing-duration-output",
++            "duration-position-count-mismatch",
++            "unresolved-model-span",
++            "alignment-position-count-mismatch",
++        }
++        if short_sentence_metadata.get("timing_failure_detail") in non_retryable_details:
++            short_sentence_metadata["retry_attempts"] = 0
++            short_sentence_metadata["retry_skipped_reason"] = "non-retryable-timing-failure"
++            return None
+         max_attempts = _short_sentence_phrase_fallback_limit(
+             short_sentence_metadata,
+             default=len(templates),
+@@ -1432,7 +1469,26 @@ class AudioGenerator:
+                     timing_tokens,
+                     pred_duration_count=int(np.asarray(pred_dur).reshape(-1).size),
+                 )
+-                timestamped = _join_timestamps(timing_tokens, pred_dur, strict=True)
++                expected_duration_count = retry.metadata.get("expected_pred_duration_count")
++                actual_duration_count = retry.metadata.get("pred_duration_count")
++                if (
++                    not retry.metadata.get("timing_alignment_complete", False)
++                    or (
++                        isinstance(expected_duration_count, int)
++                        and actual_duration_count != expected_duration_count
++                    )
++                ):
++                    timestamped = []
++                    if retry.metadata.get("timing_alignment_complete", False):
++                        retry.metadata["timing_failure_detail"] = "duration-position-count-mismatch"
++                    retry.metadata["timestamp_join_complete"] = False
++                else:
++                    timestamped = _join_timestamps(
++                        timing_tokens,
++                        pred_dur,
++                        strict=True,
++                        metadata=retry.metadata,
++                    )
+                 populate_short_sentence_boundary_metadata(retry.metadata, timestamped)
+             cut_audio = cut_short_sentence_phrase_audio(retry_audio, retry.metadata)
+             if cut_audio is None:
+@@ -1819,79 +1875,66 @@ def _join_timestamps(
+     pred_dur: np.ndarray,
+     *,
+     strict: bool = False,
++    require_final_cursor: bool = True,
++    metadata: dict[str, object] | None = None,
+ ) -> list[dict[str, object]]:
+-    """Map model durations to G2P tokens, optionally rejecting partial mappings."""
++    """Map model durations to G2P tokens using declared model geometry."""
+     durations = np.asarray(pred_dur).reshape(-1)
+     if not tokens or len(durations) < 3:
+         return []
+-
+     timestamped: list[dict[str, object]] = []
+     divisor = 80
+     left = right = 2 * max(0.0, float(durations[0].item()) - 3)
+-    i = 1
++    cursor = 1
++    eos_index = len(durations) - 1
+     complete = True
+-
+     for raw_token in tokens:
+-        if i >= len(durations) - 1:
+-            complete = False
+-            break
+         token = dict(raw_token) if isinstance(raw_token, dict) else {}
+         phonemes = str(token.get("phonemes") or "")
+         whitespace = str(token.get("whitespace") or "")
+-
+-        if not phonemes:
+-            if whitespace and i < len(durations):
+-                i += 1
+-                if i < len(durations):
+-                    left = right + float(durations[i].item())
+-                    right = left + float(durations[i].item())
+-                    i += 1
+-                else:
+-                    complete = False
+-            timestamped.append(token)
+-            continue
+-
+-        token_count = token.get("model_token_count")
+-        if not isinstance(token_count, int) or isinstance(token_count, bool) or token_count <= 0:
++        geometry = _exact_timing_geometry(token)
++        if geometry is None:
+             if strict:
+                 complete = False
+                 break
+-            token_count = len(phonemes)
+-        if (
+-            strict
+-            and "model_span_token_count" in token
+-            and token.get("model_span_token_count") is None
+-        ):
++            speech_count = len(phonemes)
++            span_count = speech_count + (1 if whitespace else 0)
++        else:
++            speech_count, span_count = geometry
++        if speech_count < 0 or span_count < speech_count:
+             complete = False
+             break
+-        model_span_count = _model_span_token_count(token)
+-        if model_span_count is None:
+-            if strict:
+-                complete = False
+-                break
+-            model_span_count = token_count + (1 if whitespace else 0)
+-        speech_end_index = i + token_count
+-        if speech_end_index >= len(durations):
++        end_cursor = cursor + span_count
++        if end_cursor > eos_index:
+             complete = False
+             break
+-        space_dur = 0.0
+-        if whitespace:
+-            if speech_end_index >= len(durations) - 1:
+-                complete = False
+-                break
+-            space_dur = float(durations[speech_end_index].item())
+-        token["start_ts"] = left / divisor
+-        token_dur = float(durations[i:speech_end_index].sum().item())
+-        speech_end = right + (2 * token_dur)
+-        token["speech_end_ts"] = speech_end / divisor
+-        left = speech_end + space_dur
+-        token["end_ts"] = left / divisor
+-        right = left + space_dur
+-        i += model_span_count
++        speech_end_cursor = cursor + speech_count
++        gap_dur = float(durations[speech_end_cursor:end_cursor].sum().item())
++        if speech_count:
++            token["start_ts"] = left / divisor
++            token_dur = float(durations[cursor:speech_end_cursor].sum().item())
++            speech_end = right + (2 * token_dur)
++            token["speech_end_ts"] = speech_end / divisor
++            left = speech_end + gap_dur
++            token["end_ts"] = left / divisor
++            right = left + gap_dur
++        elif span_count:
++            left = right + gap_dur
++            right = left + gap_dur
++        cursor = end_cursor
+         timestamped.append(token)
+-
+-    if strict and not complete:
++    if strict and (
++        not complete or (require_final_cursor and cursor != eos_index)
++    ):
++        if metadata is not None:
++            metadata["timing_final_duration_cursor"] = cursor
++            metadata["timing_expected_final_duration_cursor"] = eos_index
++            metadata["timing_duration_cursor_delta"] = cursor - eos_index
+         return []
++    if metadata is not None:
++        metadata["timing_final_duration_cursor"] = cursor
++        metadata["timing_expected_final_duration_cursor"] = eos_index
++        metadata["timing_duration_cursor_delta"] = cursor - eos_index
+     return timestamped
+
+
+@@ -1912,30 +1955,14 @@ def _record_short_sentence_timing_alignment(
+         token = dict(raw_token) if isinstance(raw_token, dict) else {}
+         if token.get("is_target"):
+             target_token_count += 1
+-        phonemes = str(token.get("phonemes") or "")
+-        if not phonemes:
+-            if token.get("whitespace"):
+-                model_position_count += 1
+-            continue
+-        requires_exact_span = isinstance(metadata.get("generated_token_count"), int)
+-        if (
+-            requires_exact_span
+-            and "model_span_token_count" in token
+-            and token.get("model_span_token_count") is None
+-        ):
++        geometry = _exact_timing_geometry(token)
++        if geometry is None:
+             complete = False
+             if first_unresolved is None:
+                 first_unresolved = (index, token)
+             continue
+-        model_span_count = _model_span_token_count(token)
+-        if model_span_count is None and not requires_exact_span:
+-            model_span_count = len(phonemes) + (1 if token.get("whitespace") else 0)
+-        if model_span_count is None:
+-            complete = False
+-            if first_unresolved is None:
+-                first_unresolved = (index, token)
+-            continue
+-        model_position_count += model_span_count
++        _, span_count = geometry
++        model_position_count += span_count
+     generated_token_count = metadata.get("generated_token_count")
+     metadata["timing_token_count"] = len(timing_tokens)
+     metadata["timing_target_token_count"] = target_token_count
+@@ -1945,14 +1972,31 @@ def _record_short_sentence_timing_alignment(
+         if isinstance(generated_token_count, int) and not isinstance(generated_token_count, bool)
+         else None
+     )
++    expected_pred_duration_count = (
++        generated_token_count + 2
++        if isinstance(generated_token_count, int) and not isinstance(generated_token_count, bool)
++        else None
++    )
++    metadata["expected_pred_duration_count"] = expected_pred_duration_count
+     if pred_duration_count is not None:
+         metadata["pred_duration_count"] = pred_duration_count
++        metadata["pred_duration_count_delta"] = (
++            pred_duration_count - expected_pred_duration_count
++            if expected_pred_duration_count is not None
++            else None
++        )
+     if first_unresolved is not None:
+         index, token = first_unresolved
+         metadata["timing_first_unresolved_token_index"] = index
+         metadata["timing_first_unresolved_token_text"] = token.get("text")
+         metadata["timing_first_unresolved_token_phonemes"] = token.get("phonemes")
+         metadata["timing_first_unresolved_token_whitespace"] = token.get("whitespace")
++        metadata["timing_first_unresolved_token_model_token_count"] = token.get(
++            "model_token_count"
++        )
++        metadata["timing_first_unresolved_token_model_span_token_count"] = token.get(
++            "model_span_token_count"
++        )
+     metadata["timing_alignment_complete"] = (
+         complete
+         and isinstance(generated_token_count, int)
+@@ -1964,12 +2008,15 @@ def _record_short_sentence_timing_alignment(
+     if target_timestamp_count is not None:
+         metadata["target_timestamp_count"] = target_timestamp_count
+     if not metadata["timing_alignment_complete"]:
++        metadata["timing_failure_detail"] = (
++            "unresolved-model-span" if first_unresolved is not None
++            else "alignment-position-count-mismatch"
++        )
+         metadata["cutter_reached"] = False
+         metadata.setdefault("timing_failure_reason", "timing-model-position-mismatch")
+         metadata.setdefault("failure_stage", "timing-alignment")
+         metadata.setdefault("cut_failure_reason", "timing-model-position-mismatch")
+
+-
+ def populate_short_sentence_boundary_metadata(
+     metadata: dict[str, object],
+     timestamped: list[dict[str, object]],
+diff --git a/pykokoro/short_sentence_cutters/energy_valley.py b/pykokoro/short_sentence_cutters/energy_valley.py
+index 287deb3..dbdf425 100644
+--- a/pykokoro/short_sentence_cutters/energy_valley.py
++++ b/pykokoro/short_sentence_cutters/energy_valley.py
+@@ -35,6 +35,8 @@ def find_energy_valley_cut_bounds(
+     windows = boundary_windows_from_metadata(len(audio), metadata)
+     if windows is None:
+         return None
++    metadata["cut_search_reached"] = True
++    metadata["cutter_reached"] = True
+
+     frame_duration_ms = int(cast(Any, metadata.get("frame_duration_ms", 5)))
+     frame_length = max(1, int(SAMPLE_RATE * frame_duration_ms / 1000))
+diff --git a/pykokoro/short_sentence_cutters/timestamp_adaptive.py b/pykokoro/short_sentence_cutters/timestamp_adaptive.py
+index 8ea0121..5f8d7ce 100644
+--- a/pykokoro/short_sentence_cutters/timestamp_adaptive.py
++++ b/pykokoro/short_sentence_cutters/timestamp_adaptive.py
+@@ -33,6 +33,8 @@ def find_timestamp_adaptive_cut_bounds(
+     windows = boundary_windows_from_metadata(len(audio), metadata)
+     if windows is None:
+         return None
++    metadata["cut_search_reached"] = True
++    metadata["cutter_reached"] = True
+
+     strict_bounds = find_energy_valley_cut_bounds(audio, metadata)
+     if strict_bounds is not None:
+diff --git a/pykokoro/short_sentence_handler.py b/pykokoro/short_sentence_handler.py
+index c92ccd4..ec7768d 100644
+--- a/pykokoro/short_sentence_handler.py
++++ b/pykokoro/short_sentence_handler.py
+@@ -641,8 +641,11 @@ def cut_short_sentence_phrase_audio(
+         return audio
+     if audio.size == 0:
+         return audio
+-    metadata["cutter_reached"] = True
+-    return cut_phrase_audio(audio, metadata)
++    metadata["cutter_invoked"] = True
++    result = cut_phrase_audio(audio, metadata)
++    if result is not None:
++        metadata["cutter_reached"] = True
++    return result
+
+
+ def build_short_sentence_phrase_retry(
+@@ -1033,7 +1036,7 @@ def _build_timing_tokens(
+             raw_model_token_count
+             if isinstance(raw_model_token_count, int)
+             and not isinstance(raw_model_token_count, bool)
+-            and raw_model_token_count > 0
++            and raw_model_token_count >= 0
+             else None
+         )
+         raw_model_span_count = _token_attr(token, "model_span_token_count")
+@@ -1041,7 +1044,7 @@ def _build_timing_tokens(
+             raw_model_span_count
+             if isinstance(raw_model_span_count, int)
+             and not isinstance(raw_model_span_count, bool)
+-            and raw_model_span_count > 0
++            and raw_model_span_count >= 0
+             else None
+         )
+         timing_tokens.append(
+diff --git a/pykokoro/stages/g2p/kokorog2p.py b/pykokoro/stages/g2p/kokorog2p.py
+index 8d04b5d..6456b00 100644
+--- a/pykokoro/stages/g2p/kokorog2p.py
++++ b/pykokoro/stages/g2p/kokorog2p.py
+@@ -51,6 +51,11 @@ class _CachedContextToken:
+     model_token_count: int | None
+     model_span_token_count: int | None
+
++@dataclass(frozen=True)
++class _ContextModelGeometry:
++    speech_count: int
++    span_count: int
++
+
+ @dataclass(frozen=True)
+ class _CachedContextResult:
+@@ -818,6 +823,69 @@ class KokoroG2PAdapter(G2PAdapter):
+             ("allow_experimental_frontend", cfg.allow_experimental_frontend),
+         )
+
++    @staticmethod
++    def _explicit_context_model_geometry(
++        tokens: list[_CachedContextToken],
++        ids: tuple[int, ...],
++    ) -> list[_ContextModelGeometry] | None:
++        geometry: list[_ContextModelGeometry] = []
++        for token in tokens:
++            speech_count = getattr(token, "model_token_count", None)
++            span_count = getattr(token, "model_span_token_count", None)
++            if (
++                not isinstance(speech_count, int)
++                or isinstance(speech_count, bool)
++                or speech_count < 0
++                or not isinstance(span_count, int)
++                or isinstance(span_count, bool)
++                or span_count < speech_count
++            ):
++                return None
++            geometry.append(_ContextModelGeometry(speech_count, span_count))
++        if sum(item.span_count for item in geometry) != len(ids):
++            return None
++        return geometry
++
++    @staticmethod
++    def _derive_context_model_geometry(
++        tokens: list[_CachedContextToken],
++        ids: tuple[int, ...],
++        g2p_module: Any | None,
++        model_version: str | None,
++    ) -> list[_ContextModelGeometry | None]:
++        """Derive exact speech and span positions in one phrase-wide coordinate system."""
++        tokenizer = getattr(g2p_module, "phonemes_to_ids", None)
++        if callable(tokenizer) and tokens:
++            prefix = ""
++            previous_count = 0
++            geometry: list[_ContextModelGeometry] = []
++            try:
++                for token in tokens:
++                    speech_prefix = prefix + token.phonemes
++                    speech_end_count = len(
++                        tokenizer(speech_prefix, model=model_version)
++                    )
++                    full_prefix = speech_prefix + token.whitespace
++                    full_end_count = len(
++                        tokenizer(full_prefix, model=model_version)
++                    )
++                    speech_count = speech_end_count - previous_count
++                    span_count = full_end_count - previous_count
++                    if speech_count < 0 or span_count < speech_count:
++                        raise ValueError("non-monotonic contextual model geometry")
++                    geometry.append(_ContextModelGeometry(speech_count, span_count))
++                    prefix = full_prefix
++                    previous_count = full_end_count
++            except (AttributeError, TypeError, ValueError, RuntimeError):
++                geometry = []
++            else:
++                if previous_count == len(ids):
++                    return cast(list[_ContextModelGeometry | None], geometry)
++        explicit = KokoroG2PAdapter._explicit_context_model_geometry(tokens, ids)
++        if explicit is not None:
++            return cast(list[_ContextModelGeometry | None], explicit)
++        return [None for _ in tokens]
++
+     @staticmethod
+     def _derive_context_model_spans(
+         tokens: list[_CachedContextToken],
+@@ -825,32 +893,11 @@ class KokoroG2PAdapter(G2PAdapter):
+         g2p_module: Any | None,
+         model_version: str | None,
+     ) -> list[int | None]:
+-        """Reconcile alignment items against the exact phrase tokenizer output."""
+-        explicit = [token.model_span_token_count for token in tokens]
+-        if all(
+-            isinstance(span, int) and not isinstance(span, bool) and span > 0 for span in explicit
+-        ) and sum(cast(list[int], explicit)) == len(ids):
+-            return cast(list[int | None], explicit)
+-        tokenizer = getattr(g2p_module, "phonemes_to_ids", None)
+-        if not callable(tokenizer) or not tokens:
+-            return [None for _ in tokens]
+-        prefix = ""
+-        previous_count = 0
+-        spans: list[int | None] = []
+-        try:
+-            for token in tokens:
+-                prefix += token.phonemes + token.whitespace
+-                current_count = len(tokenizer(prefix, model=model_version))
+-                span = current_count - previous_count
+-                if span <= 0:
+-                    return [None for _ in tokens]
+-                spans.append(span)
+-                previous_count = current_count
+-        except (AttributeError, TypeError, ValueError, RuntimeError):
+-            return [None for _ in tokens]
+-        if previous_count != len(ids):
+-            return [None for _ in tokens]
+-        return spans
++        """Compatibility wrapper returning only contextual total-span counts."""
++        geometry = KokoroG2PAdapter._derive_context_model_geometry(
++            tokens, ids, g2p_module, model_version
++        )
++        return [item.span_count if item is not None else None for item in geometry]
+
+     @staticmethod
+     def _normalize_context_result(
+@@ -870,10 +917,10 @@ class KokoroG2PAdapter(G2PAdapter):
+                 or _context_token_value(token, "phoneme", "")
+             )
+             model_token_count = _context_token_int(token, "model_token_count")
+-            if model_token_count is not None and model_token_count <= 0:
++            if model_token_count is not None and model_token_count < 0:
+                 model_token_count = None
+             explicit_span = _context_token_int(token, "model_span_token_count")
+-            if explicit_span is not None and explicit_span <= 0:
++            if explicit_span is not None and explicit_span < 0:
+                 explicit_span = None
+             if model_token_count is None and token_phonemes and g2p_module is not None:
+                 try:
+@@ -894,12 +941,16 @@ class KokoroG2PAdapter(G2PAdapter):
+                 )
+             )
+         ids_tuple = tuple(int(token_id) for token_id in (ids or ()))
+-        spans = KokoroG2PAdapter._derive_context_model_spans(
++        geometry = KokoroG2PAdapter._derive_context_model_geometry(
+             normalized_tokens, ids_tuple, g2p_module, model_version
+         )
+         normalized_tokens = [
+-            replace(token, model_span_token_count=span)
+-            for token, span in zip(normalized_tokens, spans, strict=True)
++            replace(
++                token,
++                model_token_count=item.speech_count if item is not None else None,
++                model_span_token_count=item.span_count if item is not None else None,
++            )
++            for token, item in zip(normalized_tokens, geometry, strict=True)
+         ]
+         return _CachedContextResult(
+             phonemes=str(phonemes),
+diff --git a/pykokoro/types.py b/pykokoro/types.py
+index bce49ad..ef5981b 100644
+--- a/pykokoro/types.py
++++ b/pykokoro/types.py
+@@ -112,6 +112,33 @@ class G2PAlignmentToken:
+         return result
+
+
++def _exact_timing_geometry(token: G2PAlignmentToken | dict[str, Any]) -> tuple[int, int] | None:
++    """Return exact speech and total-span model positions for one item."""
++    if isinstance(token, G2PAlignmentToken):
++        model_token_count = token.model_token_count
++        explicit_span = token.model_span_token_count
++        whitespace = token.whitespace
++    else:
++        model_token_count = token.get("model_token_count")
++        explicit_span = token.get("model_span_token_count")
++        whitespace = token.get("whitespace") or ""
++    if (
++        not isinstance(model_token_count, int)
++        or isinstance(model_token_count, bool)
++        or model_token_count < 0
++    ):
++        return None
++    if explicit_span is not None:
++        if (
++            not isinstance(explicit_span, int)
++            or isinstance(explicit_span, bool)
++            or explicit_span < model_token_count
++        ):
++            return None
++        return model_token_count, explicit_span
++    return model_token_count, model_token_count + (1 if whitespace else 0)
++
++
+ def _model_span_token_count(token: G2PAlignmentToken | dict[str, Any]) -> int | None:
+     """Return model input positions consumed by an alignment item, including whitespace."""
+     if isinstance(token, G2PAlignmentToken):
+@@ -122,15 +149,22 @@ def _model_span_token_count(token: G2PAlignmentToken | dict[str, Any]) -> int |
+         model_token_count = token.get("model_token_count")
+         explicit_span = token.get("model_span_token_count")
+         whitespace = token.get("whitespace") or ""
+-    if isinstance(explicit_span, int) and not isinstance(explicit_span, bool) and explicit_span > 0:
++    if explicit_span is not None:
++        if (
++            not isinstance(explicit_span, int)
++            or isinstance(explicit_span, bool)
++            or explicit_span < 0
++        ):
++            return None
+         return explicit_span
+-    if not isinstance(model_token_count, int) or isinstance(model_token_count, bool):
+-        return None
+-    if model_token_count <= 0:
++    if (
++        not isinstance(model_token_count, int)
++        or isinstance(model_token_count, bool)
++        or model_token_count < 0
++    ):
+         return None
+     return model_token_count + (1 if whitespace else 0)
+
+-
+ @dataclass
+ class PhonemeSegment:
+     """A segment of text with its phoneme representation.
+diff --git a/tests/test_audio_splitting.py b/tests/test_audio_splitting.py
+index 5b20bee..b42b3b6 100644
+--- a/tests/test_audio_splitting.py
++++ b/tests/test_audio_splitting.py
+@@ -1568,3 +1568,17 @@ def test_prepare_phrase_audio_replaces_stale_timings_with_cropped_retry_timings(
+     assert len(segment.word_timings) == 1
+     assert segment.word_timings[0].start_sample == 0
+     assert segment.word_timings[0].end_sample == 90
++
++def test_strict_join_consumes_empty_and_separator_spans_exactly() -> None:
++    tokens = [
++        {"phonemes": "a", "model_token_count": 1, "model_span_token_count": 1},
++        {
++            "phonemes": "",
++            "whitespace": " ",
++            "model_token_count": 0,
++            "model_span_token_count": 2,
++        },
++        {"phonemes": "b", "model_token_count": 1, "model_span_token_count": 1},
++    ]
++    assert _join_timestamps(tokens, np.ones(6, dtype=np.float32), strict=True)
++    assert _join_timestamps(tokens, np.ones(7, dtype=np.float32), strict=True) == []
+diff --git a/tests/test_word_timings.py b/tests/test_word_timings.py
+index a336369..bbd9363 100644
+--- a/tests/test_word_timings.py
++++ b/tests/test_word_timings.py
+@@ -9,8 +9,10 @@ from pykokoro.audio_generator import (
+     AudioGenerator,
+     _crop_word_timings,
+     _join_timestamps,
++    _record_short_sentence_timing_alignment,
+     _scale_word_timings,
+     _translate_word_timings,
++    populate_short_sentence_boundary_metadata,
+ )
+ from pykokoro.constants import MAX_PHONEME_LENGTH
+ from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
+@@ -19,6 +21,7 @@ from pykokoro.types import (
+     PhonemeSegment,
+     Segment,
+     WordTiming,
++    _exact_timing_geometry,
+     _model_span_token_count,
+ )
+
+@@ -289,3 +292,140 @@ def test_context_normalization_reconciles_prefix_spans_with_whole_phrase_ids() -
+     assert sum(token.model_span_token_count or 0 for token in normalized.tokens) == len(
+         normalized.ids
+     )
++
++def test_context_geometry_preserves_zero_width_items_and_uses_contextual_deltas() -> None:
++    class FakeG2P:
++        @staticmethod
++        def phonemes_to_ids(phonemes: str, *, model: str) -> list[int]:
++            _ = model
++            return list(range(len(phonemes.replace(".", ""))))
++
++    tokens = [
++        SimpleNamespace(phonemes="a", whitespace=""),
++        SimpleNamespace(phonemes="", whitespace="."),
++        SimpleNamespace(phonemes="b", whitespace=""),
++    ]
++    geometry = KokoroG2PAdapter._derive_context_model_geometry(
++        tokens, (1, 2), FakeG2P(), "1.0"
++    )
++    assert [(item.speech_count, item.span_count) for item in geometry] == [(1, 1), (0, 0), (1, 1)]
++
++def test_context_geometry_allows_empty_phoneme_positive_span() -> None:
++    class FakeG2P:
++        @staticmethod
++        def phonemes_to_ids(phonemes: str, *, model: str) -> list[int]:
++            _ = model
++            return list(range(len(phonemes)))
++
++    tokens = [
++        SimpleNamespace(phonemes="a", whitespace=""),
++        SimpleNamespace(phonemes="", whitespace="  "),
++    ]
++    geometry = KokoroG2PAdapter._derive_context_model_geometry(
++        tokens, (1, 2, 3), FakeG2P(), "1.0"
++    )
++    assert [(item.speech_count, item.span_count) for item in geometry] == [(1, 1), (0, 2)]
++
++def test_context_geometry_rejects_non_monotonic_and_final_sum_mismatch() -> None:
++    class NonMonotonicG2P:
++        @staticmethod
++        def phonemes_to_ids(phonemes: str, *, model: str) -> list[int]:
++            _ = model
++            return list(range(1 if phonemes == "a" else 0))
++
++    tokens = [
++        SimpleNamespace(phonemes="a", whitespace=""),
++        SimpleNamespace(phonemes="b", whitespace=""),
++    ]
++    assert KokoroG2PAdapter._derive_context_model_geometry(
++        tokens, (1,), NonMonotonicG2P(), "1.0"
++    ) == [None, None]
++
++def test_record_alignment_uses_explicit_zero_span_without_whitespace_plus_one() -> None:
++    for span in (0, 1, 2):
++        metadata: dict[str, object] = {"generated_token_count": span}
++        _record_short_sentence_timing_alignment(
++            metadata,
++            [{
++                "phonemes": "",
++                "whitespace": " ",
++                "model_token_count": 0,
++                "model_span_token_count": span,
++            }],
++        )
++        assert metadata["timing_model_position_count"] == span
++        assert metadata["timing_alignment_complete"] is True
++
++def test_exact_timing_geometry_accepts_zero_and_rejects_invalid_counts() -> None:
++    assert _exact_timing_geometry({"model_token_count": 0, "model_span_token_count": 0}) == (0, 0)
++    assert _exact_timing_geometry({"model_token_count": 1, "model_span_token_count": 0}) is None
++    assert _exact_timing_geometry({"model_token_count": -1, "model_span_token_count": 0}) is None
++
++def test_alignment_metadata_records_duration_and_unresolved_geometry_diagnostics() -> None:
++    metadata: dict[str, object] = {"generated_token_count": 2}
++    _record_short_sentence_timing_alignment(
++        metadata,
++        [{
++            "text": ".",
++            "phonemes": "",
++            "whitespace": "",
++            "model_token_count": None,
++            "model_span_token_count": None,
++        }],
++        pred_duration_count=5,
++    )
++    assert metadata["expected_pred_duration_count"] == 4
++    assert metadata["pred_duration_count_delta"] == 1
++    assert metadata["timing_failure_detail"] == "unresolved-model-span"
++    assert metadata["timing_first_unresolved_token_model_token_count"] is None
++    assert metadata["timing_first_unresolved_token_model_span_token_count"] is None
++
++def test_model_free_phrase_timing_produces_target_boundaries() -> None:
++    timing_tokens = [
++        {
++            "text": "Before",
++            "phonemes": "ab",
++            "whitespace": "",
++            "model_token_count": 2,
++            "model_span_token_count": 2,
++            "is_target": False,
++        },
++        {
++            "text": ".",
++            "phonemes": "",
++            "whitespace": ".",
++            "model_token_count": 0,
++            "model_span_token_count": 0,
++            "is_target": False,
++        },
++        {
++            "text": "Go",
++            "phonemes": "g",
++            "whitespace": "",
++            "model_token_count": 1,
++            "model_span_token_count": 1,
++            "is_target": True,
++        },
++        {
++            "text": "!",
++            "phonemes": "",
++            "whitespace": " ",
++            "model_token_count": 0,
++            "model_span_token_count": 1,
++            "is_target": False,
++        },
++    ]
++    metadata: dict[str, object] = {"generated_token_count": 4}
++    _record_short_sentence_timing_alignment(
++        metadata, timing_tokens, pred_duration_count=6
++    )
++    joined = _join_timestamps(
++        timing_tokens, np.ones(6, dtype=np.float32), strict=True, metadata=metadata
++    )
++    populate_short_sentence_boundary_metadata(metadata, joined)
++    assert metadata["timing_alignment_complete"] is True
++    assert joined
++    assert metadata["timing_model_position_count"] == 4
++    assert metadata["pred_duration_count"] == 6
++    assert metadata["target_start_ts"] is not None
++    assert metadata["target_end_ts"] is not None

@@ -1,0 +1,1100 @@
+ README.md                                |  27 +-
+ benchmarks/short_sentence_diagnostics.py |  62 ++++-
+ docs/languages.md                        |  15 +-
+ examples/README.md                       |   4 +-
+ examples/german2.py                      |   2 +-
+ pykokoro/frontend_contracts.py           |   2 +-
+ pykokoro/model_profiles.py               |   1 +
+ pykokoro/short_sentence_handler.py       |   6 +-
+ pykokoro/short_sentence_phrases.py       | 451 +++++++++++++++++++++++++++++++
+ pykokoro/stages/g2p/kokorog2p.py         |   1 +
+ tests/test_frontend_contracts.py         |  12 +-
+ tests/test_g2p_cache.py                  |   4 +-
+ tests/test_german_examples.py            |   2 +-
+ tests/test_german_tts_samples_example.py |   2 +-
+ tests/test_model_discovery.py            |   5 +-
+ tests/test_release_profiles.py           |   2 +-
+ tests/test_short_sentence_diagnostics.py |  19 ++
+ tests/test_short_sentence_handler.py     |  49 +++-
+ tests/test_short_sentence_phrases.py     |  55 ++++
+ tests/test_word_timings.py               |   8 +-
+ 20 files changed, 688 insertions(+), 41 deletions(-)
+
+diff --git a/README.md b/README.md
+index 528b350..f4f9265 100644
+--- a/README.md
++++ b/README.md
+@@ -57,12 +57,12 @@ Runtime model selection uses the canonical `catalog/models.json` registry. Model
+ metadata, voices, frontend IDs, runtime layouts, artifact hashes, provider, and
+ redistribution policy are not inferred from GitHub release names.
+
+-| Status                      | Meaning                                                                 | Examples                                                                                                                 |
+-| --------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+-| ready                       | Registry distribution and PyKokoro frontend/layout are usable           | `v1.0`, `v1.1-zh`, `v1.2-de-martin`, `de-thorsten`, `th-wayu`, `sv-joakim`, `kk-anuarsv`, `vi-anphunl`, Zaakirio Russian |
+-| experimental                | Usable only when explicitly enabled for an experimental frontend        | Profiles marked experimental by the local compatibility policy                                                           |
+-| restricted                  | Runtime is visible but redistribution policy is not ordinary            | `he-hebrew-nc`                                                                                                           |
+-| unsupported-layout/frontend | Registry metadata is valid but the local implementation cannot serve it | A future registry layout or frontend                                                                                     |
++| Status                      | Meaning                                                                 | Examples                                                                                                                             |
++| --------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
++| ready                       | Registry distribution and PyKokoro frontend/layout are usable           | `v1.0`, `v1.1-zh`, `v1.2-de-martin`, `de-crane`, `de-thorsten`, `th-wayu`, `sv-joakim`, `kk-anuarsv`, `vi-anphunl`, Zaakirio Russian |
++| experimental                | Usable only when explicitly enabled for an experimental frontend        | Profiles marked experimental by the local compatibility policy                                                                       |
++| restricted                  | Runtime is visible but redistribution policy is not ordinary            | `he-hebrew-nc`                                                                                                                       |
++| unsupported-layout/frontend | Registry metadata is valid but the local implementation cannot serve it | A future registry layout or frontend                                                                                                 |
+
+ Thai Wayu uses the registry's `split-onnx-v1` layout and selects its prosody, curves,
+ and decoder components as one distribution. Russian Zaakirio uses pinned upstream-only
+@@ -1014,10 +1014,15 @@ This happens automatically during `pipe.run()` - no configuration needed! Phrase
+ modes require a model duration/timestamp output. When no explicit short-sentence
+ configuration is supplied, PyKokoro automatically uses `wrap` for models without that
+ output. If a phrase mode is explicitly requested for such a model, PyKokoro logs a
+-warning and falls back to `wrap`. Multilingual showcase code should use `wrap` until
+-localized phrase templates exist.
++warning and falls back to `wrap`. Phrase-based short-sentence handling uses
++language-localized carrier catalogs for English, German, Spanish, French, Italian,
++Portuguese, European Portuguese, Korean, Japanese, Chinese/Mandarin, Arabic, Hebrew,
++Kazakh, Swedish, Thai, Vietnamese, Russian, Hindi, Polish, and Turkish. Unknown
++languages never fall back to English carrier phrases. They use `wrap` unless a
++user-provided `ShortSentencePhraseSet` is supplied.
+
+-NOTE: Phrase and randomized-phrase templates currently support ENGLISH text only.
++NOTE: Carrier quality remains voice and model dependent. Benchmark localized phrases
++before relying on them in production.
+
+ **Customizing the Behavior:**
+
+@@ -1104,8 +1109,8 @@ See `examples/optimal_phoneme_length_demo.py` for a demonstration.
+ **Advanced customization of short-sentence handling**
+
+ You can add custom template phrases used to add context in phrase mode, but THIS IS NOT
+-RECOMMENDED for most users! However, you can use it to add support for more languages
+-than just english.
++RECOMMENDED for most users! You can supply a `ShortSentencePhraseSet` when you need
++custom carrier wording or language coverage beyond the built-in catalogs.
+
+ WARNING: The quality of the phrase makes a huge difference. If possible, test the
+ phrases first, e.g. by using the various short-sentence py scripts in metrics/. All
+diff --git a/benchmarks/short_sentence_diagnostics.py b/benchmarks/short_sentence_diagnostics.py
+index a766c03..fa49aca 100644
+--- a/benchmarks/short_sentence_diagnostics.py
++++ b/benchmarks/short_sentence_diagnostics.py
+@@ -15,6 +15,8 @@ from typing import Any
+
+ import numpy as np
+
++from pykokoro.short_sentence_phrases import resolve_short_sentence_phrase_set
++
+ SAMPLE_RATE = 24000
+ SCHEMA = "pykokoro.short-sentence-diagnostics.v1"
+ DEFAULT_TEMPLATE = "The short message read: {segment}"
+@@ -74,6 +76,8 @@ class DiagnosticSettings:
+     resolve_mode: str = "phrase"
+     phrase_fallback_tries: int = 0
+
++    phrase_language: str | None = None
++
+     def as_dict(self) -> dict[str, object]:
+         return asdict(self)
+
+@@ -148,6 +152,9 @@ def build_diagnostic_cases(
+     matrix: str = "all",
+     speed: float = 1.0,
+     random_seed: int = 0,
++    catalog: bool = False,
++    language: str = "en-us",
++    terminal_form: str = "fragment",
+ ) -> list[DiagnosticCase]:
+     """Build the deterministic baseline plus the requested OFAT matrix."""
+     if matrix not in {"default", "alignment", "cutter", "all"}:
+@@ -158,6 +165,34 @@ def build_diagnostic_cases(
+     def add(axis: str, value: object, settings: DiagnosticSettings) -> None:
+         cases.append(DiagnosticCase(f"{len(cases) + 1:03d}", axis, value, settings))
+
++    if catalog:
++        if terminal_form not in {
++            "fragment",
++            "declarative",
++            "question",
++            "exclamation",
++            "ellipsis",
++        }:
++            raise ValueError(f"unknown terminal form {terminal_form!r}")
++        phrase_set, phrase_language, _ = resolve_short_sentence_phrase_set(language)
++        if phrase_set is None or phrase_language is None:
++            raise ValueError(f"no built-in phrase catalog for language {language!r}")
++        templates = getattr(phrase_set, terminal_form)
++        for template in templates:
++            add(
++                "phrase-template",
++                _slug(template.removesuffix(" {segment}")),
++                _case_settings(
++                    base,
++                    neutral_phrase=template,
++                    end_phrase=template,
++                    phrase_selection="auto",
++                    phrase_language=phrase_language,
++                ),
++            )
++        _ = text
++        return cases
++
+     add("baseline", "default", base)
+     if matrix in {"default", "alignment", "all"}:
+         for template in CARRIER_TEMPLATES:
+@@ -197,6 +232,7 @@ def _settings_lines(settings: dict[str, object]) -> list[str]:
+         "neutral_phrase": "phrase.neutral_phrase",
+         "end_phrase": "phrase.end_phrase",
+         "frame_duration_ms": "phrase.frame_duration_ms",
++        "phrase_language": "phrase.language",
+         "energy_threshold": "phrase.energy_threshold",
+         "silence_threshold": "phrase.silence_threshold",
+         "min_silence_seconds": "phrase.min_silence_seconds",
+@@ -226,6 +262,8 @@ def format_header(
+         f"voice: {args.voice}",
+         f"language: {args.lang}",
+         f"model_source: {args.model_source}",
++        f"catalog: {getattr(args, 'catalog', False)}",
++        f"terminal_form: {getattr(args, 'terminal_form', '-')}",
+         f"model_variant: {args.model_variant}",
+         f"model_path: {metadata.get('model_path', args.model_path or '-')}",
+         f"voices_path: {metadata.get('voices_path', args.voices_path or '-')}",
+@@ -510,12 +548,21 @@ def run_phrase_probe(
+         context_guard_ms=settings.context_guard_ms,
+         analysis_window_ms=settings.analysis_window_ms,
+     )
++    phrase_catalog = None
++    if settings.phrase_language is not None:
++        phrase_set, resolved_language, _ = resolve_short_sentence_phrase_set(
++            settings.phrase_language
++        )
++        if phrase_set is None or resolved_language is None:
++            raise ValueError(f"no built-in phrase catalog for {settings.phrase_language!r}")
++        phrase_catalog = {resolved_language: phrase_set}
+     config = ShortSentenceConfig(
+         min_phoneme_length=settings.min_phoneme_length,
+         phoneme_pretext=settings.phoneme_pretext,
+         enabled=True,
+         resolve_mode="phrase",
+         resolve_modes={"phrase": mode},
++        phrase_catalog=phrase_catalog,
+         phrase_fallback_tries=0,
+     )
+     tokenizer = backend.tokenizer
+@@ -698,6 +745,7 @@ def format_case_report(result: ShortSentenceDiagnosticCase) -> str:
+         "PHRASE",
+         f"  template: {result.settings.get('neutral_phrase')!r}",
+         f"  text: {result.phrase_text!r}",
++        f"  phrase_language: {result.settings.get('phrase_language', '-')!r}",
+         f"  phonemes: {result.phonemes!r}",
+         f"  phoneme_char_count: {len(result.phonemes)}",
+         f"  generated_token_count: {len(result.token_ids)}",
+@@ -859,6 +907,12 @@ def _add_arguments(parser: argparse.ArgumentParser) -> None:
+     parser.add_argument("--text", default="who")
+     parser.add_argument("--voice", default="af_sarah")
+     parser.add_argument("--lang", default="en-us")
++    parser.add_argument("--catalog", action="store_true")
++    parser.add_argument(
++        "--terminal-form",
++        choices=("fragment", "declarative", "question", "exclamation", "ellipsis"),
++        default="fragment",
++    )
+     parser.add_argument("--model-source", choices=("github", "huggingface"), default="huggingface")
+     parser.add_argument("--model-variant", default="v1.0")
+     parser.add_argument("--model-path", type=Path)
+@@ -884,7 +938,13 @@ def main(argv: list[str] | None = None) -> int:
+     logging.basicConfig(level=getattr(logging, str(args.log_level).upper(), logging.WARNING))
+     try:
+         cases = build_diagnostic_cases(
+-            text=args.text, matrix=args.matrix, speed=args.speed, random_seed=args.random_seed
++            text=args.text,
++            matrix=args.matrix,
++            speed=args.speed,
++            random_seed=args.random_seed,
++            catalog=args.catalog,
++            language=args.lang,
++            terminal_form=args.terminal_form,
+         )
+         if args.case is not None:
+             cases = [case for case in cases if case.case_id == args.case]
+diff --git a/docs/languages.md b/docs/languages.md
+index cb01f7b..a60e66f 100644
+--- a/docs/languages.md
++++ b/docs/languages.md
+@@ -33,18 +33,17 @@ purpose: it lists published release artifacts rather than runtime capabilities.
+ - voice: `martin`
+ - vocabulary: built-in Kokoro v1.0
+
+-| Model           | Variant          | Voice      | Status        | Selection                                     |
+-| --------------- | ---------------- | ---------- | ------------- | --------------------------------------------- |
+-| Martin          | `v1.2-de-martin` | `martin`   | ready/default | automatic for `lang="de"`                     |
+-| Kerstin / Crane | `de-crane`       | `default`  | experimental  | explicit + `allow_experimental_frontend=True` |
+-| Thorsten        | `de-thorsten`    | `thorsten` | ready         | explicit                                      |
++| Model           | Variant          | Voice      | Status        | Selection                 |
++| --------------- | ---------------- | ---------- | ------------- | ------------------------- |
++| Martin          | `v1.2-de-martin` | `martin`   | ready/default | automatic for `lang="de"` |
++| Kerstin / Crane | `de-crane`       | `default`  | ready         | explicit                  |
++| Thorsten        | `de-thorsten`    | `thorsten` | ready         | explicit                  |
+
+ The document language is explicit in v0.9. Pass `GenerationConfig(lang="de")` or
+ `run(..., lang="de")`; voice and model profiles never infer it. Martin is the default
+ German acoustic model when that language is selected. Kerstin/Crane and Thorsten are
+-explicit alternative acoustic models; Crane currently requires experimental frontend
+-opt-in. Compare them with the maintained examples `examples/german.py`,
+-`examples/german2.py`, and `examples/german3.py`.
++explicit alternative acoustic models. Compare them with the maintained examples
++`examples/german.py`, `examples/german2.py`, and `examples/german3.py`.
+
+ The integrated pipeline performs Spokenform preparation before sentence segmentation and
+ G2P. Spokenform owns written-to-spoken forms such as dates, measurements, ordinals,
+diff --git a/examples/README.md b/examples/README.md
+index 56d6e84..32d2595 100644
+--- a/examples/README.md
++++ b/examples/README.md
+@@ -9,8 +9,8 @@ scripts below use the current pipeline-first API.
+   requires ONNX Runtime/model assets.
+ - `english_7m.py` — English TTS with the explicitly selected `en-oddadmix-7m-distill` 7M
+   model and `af_msa` voice.
+-- `german2.py` — German Kerstin/Crane; explicitly selects `de-crane`, opts into its
+-  experimental readiness status, and uses the shared native German G2P path.
++- `german2.py` — German Kerstin/Crane; explicitly selects the ready `de-crane` model and
++  uses the shared native German G2P path.
+ - `german3.py` — German Thorsten; explicitly selects the ready `de-thorsten` model.
+ - `models_and_languages.py` — inspect the canonical runtime registry and display models,
+   languages, providers, voices, qualities, frontend/layout status, and optionally
+diff --git a/examples/german2.py b/examples/german2.py
+index 877fb80..6a08e95 100644
+--- a/examples/german2.py
++++ b/examples/german2.py
+@@ -39,7 +39,7 @@ def make_config(*, lexicons: str | tuple[str, ...] | None = None) -> PipelineCon
+         model_source="github",
+         model_variant="de-crane",
+         model_quality="fp32",
+-        allow_experimental_frontend=True,
++        allow_experimental_frontend=False,
+         generation=GenerationConfig(lang="de", speed=1.0),
+         tokenizer_config=TokenizerConfig(lexicons=lexicons),
+         return_trace=True,
+diff --git a/pykokoro/frontend_contracts.py b/pykokoro/frontend_contracts.py
+index 785711b..1b735ce 100644
+--- a/pykokoro/frontend_contracts.py
++++ b/pykokoro/frontend_contracts.py
+@@ -33,7 +33,7 @@ FRONTEND_FIXTURES: dict[ModelVariant, FrontendFixture] = {
+         "sˈi1n tʃˈaː2w",
+     ),
+     "ar-nabra": FrontendFixture("ar-nabra", "ar", "مَرْحَبًا", "espeak", "mˈarħabˌan"),
+-    "de-crane": FrontendFixture("de-crane", "de", "Hallo", "espeak", "hˈaloː"),
++    "de-crane": FrontendFixture("de-crane", "de", "Hallo", "espeak", "hˈaloː", release_ready=True),
+     "he-hebrew-nc": FrontendFixture("he-hebrew-nc", "he", "שלום", "espeak", "ʃalˈom"),
+     "de-anna": FrontendFixture(
+         "de-anna",
+diff --git a/pykokoro/model_profiles.py b/pykokoro/model_profiles.py
+index 2c7d266..65e888b 100644
+--- a/pykokoro/model_profiles.py
++++ b/pykokoro/model_profiles.py
+@@ -131,6 +131,7 @@ MODEL_PROFILES: dict[tuple[ModelSource, ModelVariant], RuntimeProfile] = {
+         "german-ipa-v1",
+         {"input_ids": "int64", "style": "float32", "speed": "float32"},
+         g2p_backend="kokorog2p",
++        frontend_experimental=False,
+     ),
+     ("github", "he-hebrew-nc"): _github_profile(
+         "he-hebrew-nc",
+diff --git a/pykokoro/short_sentence_handler.py b/pykokoro/short_sentence_handler.py
+index ec7768d..1e3268a 100644
+--- a/pykokoro/short_sentence_handler.py
++++ b/pykokoro/short_sentence_handler.py
+@@ -854,11 +854,11 @@ def _terminal_form(
+     text = segment_text.rstrip()
+     if text.endswith(("…", "...")):
+         return "ellipsis"
+-    if text.endswith("?"):
++    if text.endswith(("?", "？", "؟")):
+         return "question"
+-    if text.endswith("!"):
++    if text.endswith(("!", "！")):
+         return "exclamation"
+-    if text.endswith("."):
++    if text.endswith((".", "。", "।")):
+         return "declarative"
+     return "fragment"
+
+diff --git a/pykokoro/short_sentence_phrases.py b/pykokoro/short_sentence_phrases.py
+index fe10e96..4a201f1 100644
+--- a/pykokoro/short_sentence_phrases.py
++++ b/pykokoro/short_sentence_phrases.py
+@@ -82,9 +82,459 @@ GERMAN_SHORT_SENTENCE_PHRASES = ShortSentencePhraseSet(
+     fragment=("Die kurze Notiz lautete: {segment}", "Auf dem Zettel stand: {segment}"),
+ )
+
++SPANISH_SHORT_SENTENCE_PHRASES = ShortSentencePhraseSet(
++    language="es",
++    declarative=(
++        "El mensaje decía: {segment}",
++        "Al final decía: {segment}",
++    ),
++    question=(
++        "La pregunta era: {segment}",
++        "Entonces alguien preguntó: {segment}",
++    ),
++    exclamation=(
++        "Alguien gritó: {segment}",
++        "El aviso terminó así: {segment}",
++    ),
++    ellipsis=(
++        "La frase quedó incompleta: {segment}",
++        "Las palabras se interrumpieron así: {segment}",
++    ),
++    fragment=(
++        "La nota decía: {segment}",
++        "El mensaje corto decía: {segment}",
++    ),
++)
++
++FRENCH_SHORT_SENTENCE_PHRASES = ShortSentencePhraseSet(
++    language="fr",
++    declarative=(
++        "Le message disait: {segment}",
++        "À la fin il était écrit: {segment}",
++    ),
++    question=(
++        "La question était: {segment}",
++        "Puis quelqu'un a demandé: {segment}",
++    ),
++    exclamation=(
++        "Quelqu'un a crié: {segment}",
++        "L'annonce s'est terminée ainsi: {segment}",
++    ),
++    ellipsis=(
++        "La phrase est restée inachevée: {segment}",
++        "Les mots se sont interrompus ainsi: {segment}",
++    ),
++    fragment=(
++        "La note disait: {segment}",
++        "Le court message disait: {segment}",
++    ),
++)
++
++ITALIAN_SHORT_SENTENCE_PHRASES = ShortSentencePhraseSet(
++    language="it",
++    declarative=(
++        "Il messaggio diceva: {segment}",
++        "Alla fine c'era scritto: {segment}",
++    ),
++    question=(
++        "La domanda era: {segment}",
++        "Poi qualcuno chiese: {segment}",
++    ),
++    exclamation=(
++        "Qualcuno gridò: {segment}",
++        "L'annuncio finì così: {segment}",
++    ),
++    ellipsis=(
++        "La frase rimase incompleta: {segment}",
++        "Le parole si interruppero così: {segment}",
++    ),
++    fragment=(
++        "Il biglietto diceva: {segment}",
++        "Il breve messaggio diceva: {segment}",
++    ),
++)
++
++PORTUGUESE_SHORT_SENTENCE_PHRASES = ShortSentencePhraseSet(
++    language="pt",
++    declarative=(
++        "A mensagem dizia: {segment}",
++        "No final estava escrito: {segment}",
++    ),
++    question=(
++        "A pergunta era: {segment}",
++        "Então alguém perguntou: {segment}",
++    ),
++    exclamation=(
++        "Alguém gritou: {segment}",
++        "O anúncio terminou assim: {segment}",
++    ),
++    ellipsis=(
++        "A frase ficou incompleta: {segment}",
++        "As palavras pararam assim: {segment}",
++    ),
++    fragment=(
++        "O bilhete dizia: {segment}",
++        "A mensagem curta dizia: {segment}",
++    ),
++)
++
++EUROPEAN_PORTUGUESE_SHORT_SENTENCE_PHRASES = ShortSentencePhraseSet(
++    language="pt-pt",
++    declarative=(
++        "A mensagem dizia: {segment}",
++        "No fim estava escrito: {segment}",
++    ),
++    question=(
++        "A pergunta era: {segment}",
++        "Depois alguém perguntou: {segment}",
++    ),
++    exclamation=(
++        "Alguém gritou: {segment}",
++        "O anúncio terminou assim: {segment}",
++    ),
++    ellipsis=(
++        "A frase ficou incompleta: {segment}",
++        "As palavras ficaram por acabar: {segment}",
++    ),
++    fragment=(
++        "O bilhete dizia: {segment}",
++        "A mensagem curta dizia: {segment}",
++    ),
++)
++
++KOREAN_SHORT_SENTENCE_PHRASES = ShortSentencePhraseSet(
++    language="ko",
++    declarative=(
++        "메시지에는 이렇게 적혀 있었습니다: {segment}",
++        "마지막에는 이렇게 적혀 있었습니다: {segment}",
++    ),
++    question=(
++        "질문은 이랬습니다: {segment}",
++        "누군가 물었습니다: {segment}",
++    ),
++    exclamation=(
++        "누군가 외쳤습니다: {segment}",
++        "마지막으로 이렇게 외쳤습니다: {segment}",
++    ),
++    ellipsis=(
++        "문장은 여기서 끊겼습니다: {segment}",
++        "말은 여기서 흐려졌습니다: {segment}",
++    ),
++    fragment=(
++        "짧은 메모에는 이렇게 적혀 있었습니다: {segment}",
++        "쪽지에는 이렇게 적혀 있었습니다: {segment}",
++    ),
++)
++
++JAPANESE_SHORT_SENTENCE_PHRASES = ShortSentencePhraseSet(
++    language="ja",
++    declarative=(
++        "メッセージにはこうありました: {segment}",
++        "最後にはこうありました: {segment}",
++    ),
++    question=(
++        "質問はこうでした: {segment}",
++        "そして誰かが尋ねました: {segment}",
++    ),
++    exclamation=(
++        "誰かが叫びました: {segment}",
++        "最後にこう叫びました: {segment}",
++    ),
++    ellipsis=(
++        "文はここで途切れました: {segment}",
++        "言葉はここで途切れました: {segment}",
++    ),
++    fragment=(
++        "短いメモにはこうありました: {segment}",
++        "メモにはこう書かれていました: {segment}",
++    ),
++)
++
++CHINESE_SHORT_SENTENCE_PHRASES = ShortSentencePhraseSet(
++    language="zh",
++    declarative=(
++        "消息里写着: {segment}",
++        "最后写着: {segment}",
++    ),
++    question=(
++        "问题是: {segment}",
++        "接着有人问: {segment}",
++    ),
++    exclamation=(
++        "有人喊道: {segment}",
++        "最后有人喊道: {segment}",
++    ),
++    ellipsis=(
++        "这句话没有说完: {segment}",
++        "话说到这里停了: {segment}",
++    ),
++    fragment=(
++        "纸条上写着: {segment}",
++        "短消息写着: {segment}",
++    ),
++)
++
++ARABIC_SHORT_SENTENCE_PHRASES = ShortSentencePhraseSet(
++    language="ar",
++    declarative=(
++        "نص الرسالة هو: {segment}",
++        "في النهاية ورد: {segment}",
++    ),
++    question=(
++        "كان السؤال: {segment}",
++        "ثم جاء السؤال: {segment}",
++    ),
++    exclamation=(
++        "صاح أحدهم: {segment}",
++        "ثم جاء النداء: {segment}",
++    ),
++    ellipsis=(
++        "توقفت العبارة عند: {segment}",
++        "انقطعت الكلمات عند: {segment}",
++    ),
++    fragment=(
++        "نص الملاحظة هو: {segment}",
++        "الرسالة القصيرة هي: {segment}",
++    ),
++)
++
++HEBREW_SHORT_SENTENCE_PHRASES = ShortSentencePhraseSet(
++    language="he",
++    declarative=(
++        "בהודעה היה כתוב: {segment}",
++        "בסוף היה כתוב: {segment}",
++    ),
++    question=(
++        "השאלה הייתה: {segment}",
++        "ואז מישהו שאל: {segment}",
++    ),
++    exclamation=(
++        "מישהו קרא: {segment}",
++        "ואז נשמעה הקריאה: {segment}",
++    ),
++    ellipsis=(
++        "המשפט נקטע כך: {segment}",
++        "המילים נקטעו כך: {segment}",
++    ),
++    fragment=(
++        "בפתק היה כתוב: {segment}",
++        "בהודעה הקצרה היה כתוב: {segment}",
++    ),
++)
++
++KAZAKH_SHORT_SENTENCE_PHRASES = ShortSentencePhraseSet(
++    language="kk",
++    declarative=(
++        "Хабарламада былай жазылған: {segment}",
++        "Соңында былай жазылған: {segment}",
++    ),
++    question=(
++        "Сұрақ былай қойылды: {segment}",
++        "Сосын біреу сұрады: {segment}",
++    ),
++    exclamation=(
++        "Біреу айқайлады: {segment}",
++        "Соңында біреу дауыстады: {segment}",
++    ),
++    ellipsis=(
++        "Сөйлем осылай үзіліп қалды: {segment}",
++        "Сөз осылай үзіліп қалды: {segment}",
++    ),
++    fragment=(
++        "Жазбада былай жазылған: {segment}",
++        "Қысқа хабарламада былай жазылған: {segment}",
++    ),
++)
++
++SWEDISH_SHORT_SENTENCE_PHRASES = ShortSentencePhraseSet(
++    language="sv",
++    declarative=(
++        "Meddelandet löd: {segment}",
++        "Till sist stod det: {segment}",
++    ),
++    question=(
++        "Frågan löd: {segment}",
++        "Sedan frågade någon: {segment}",
++    ),
++    exclamation=(
++        "Någon ropade: {segment}",
++        "Till sist ropade någon: {segment}",
++    ),
++    ellipsis=(
++        "Meningen avbröts så här: {segment}",
++        "Orden tog slut så här: {segment}",
++    ),
++    fragment=(
++        "På lappen stod: {segment}",
++        "Det korta meddelandet löd: {segment}",
++    ),
++)
++
++THAI_SHORT_SENTENCE_PHRASES = ShortSentencePhraseSet(
++    language="th",
++    declarative=(
++        "ข้อความเขียนว่า: {segment}",
++        "ตอนท้ายเขียนว่า: {segment}",
++    ),
++    question=(
++        "คำถามคือ: {segment}",
++        "จากนั้นมีคนถามว่า: {segment}",
++    ),
++    exclamation=(
++        "มีคนตะโกนว่า: {segment}",
++        "ตอนท้ายมีคนตะโกนว่า: {segment}",
++    ),
++    ellipsis=(
++        "ประโยคค้างไว้ว่า: {segment}",
++        "คำพูดหยุดลงตรงนี้: {segment}",
++    ),
++    fragment=(
++        "ในโน้ตเขียนว่า: {segment}",
++        "ข้อความสั้นเขียนว่า: {segment}",
++    ),
++)
++
++VIETNAMESE_SHORT_SENTENCE_PHRASES = ShortSentencePhraseSet(
++    language="vi",
++    declarative=(
++        "Tin nhắn ghi: {segment}",
++        "Cuối cùng có dòng: {segment}",
++    ),
++    question=(
++        "Câu hỏi là: {segment}",
++        "Rồi có người hỏi: {segment}",
++    ),
++    exclamation=(
++        "Có người gọi lớn: {segment}",
++        "Cuối cùng có tiếng gọi: {segment}",
++    ),
++    ellipsis=(
++        "Câu nói còn dang dở: {segment}",
++        "Lời nói dừng lại ở: {segment}",
++    ),
++    fragment=(
++        "Mẩu giấy ghi: {segment}",
++        "Tin nhắn ngắn ghi: {segment}",
++    ),
++)
++
++RUSSIAN_SHORT_SENTENCE_PHRASES = ShortSentencePhraseSet(
++    language="ru",
++    declarative=(
++        "В сообщении было написано: {segment}",
++        "В конце было написано: {segment}",
++    ),
++    question=(
++        "Вопрос был такой: {segment}",
++        "Потом кто-то спросил: {segment}",
++    ),
++    exclamation=(
++        "Кто-то крикнул: {segment}",
++        "В конце кто-то крикнул: {segment}",
++    ),
++    ellipsis=(
++        "Фраза оборвалась на словах: {segment}",
++        "Слова оборвались так: {segment}",
++    ),
++    fragment=(
++        "В записке было написано: {segment}",
++        "Короткое сообщение гласило: {segment}",
++    ),
++)
++
++HINDI_SHORT_SENTENCE_PHRASES = ShortSentencePhraseSet(
++    language="hi",
++    declarative=(
++        "संदेश में लिखा था: {segment}",
++        "अंत में लिखा था: {segment}",
++    ),
++    question=(
++        "सवाल था: {segment}",
++        "फिर किसी ने पूछा: {segment}",
++    ),
++    exclamation=(
++        "किसी ने पुकारा: {segment}",
++        "अंत में किसी ने पुकारा: {segment}",
++    ),
++    ellipsis=(
++        "वाक्य अधूरा रह गया: {segment}",
++        "बात यहीं अधूरी रह गई: {segment}",
++    ),
++    fragment=(
++        "पर्ची पर लिखा था: {segment}",
++        "छोटे संदेश में लिखा था: {segment}",
++    ),
++)
++
++POLISH_SHORT_SENTENCE_PHRASES = ShortSentencePhraseSet(
++    language="pl",
++    declarative=(
++        "Wiadomość brzmiała: {segment}",
++        "Na końcu było napisane: {segment}",
++    ),
++    question=(
++        "Pytanie brzmiało: {segment}",
++        "Potem ktoś zapytał: {segment}",
++    ),
++    exclamation=(
++        "Ktoś zawołał: {segment}",
++        "Na końcu ktoś krzyknął: {segment}",
++    ),
++    ellipsis=(
++        "Zdanie pozostało niedokończone: {segment}",
++        "Słowa urwały się tak: {segment}",
++    ),
++    fragment=(
++        "Na kartce było napisane: {segment}",
++        "Krótka wiadomość brzmiała: {segment}",
++    ),
++)
++
++TURKISH_SHORT_SENTENCE_PHRASES = ShortSentencePhraseSet(
++    language="tr",
++    declarative=(
++        "Mesajda şöyle yazıyordu: {segment}",
++        "Sonunda şöyle yazıyordu: {segment}",
++    ),
++    question=(
++        "Soru şuydu: {segment}",
++        "Sonra biri sordu: {segment}",
++    ),
++    exclamation=(
++        "Biri seslendi: {segment}",
++        "Sonunda biri bağırdı: {segment}",
++    ),
++    ellipsis=(
++        "Cümle yarım kaldı: {segment}",
++        "Sözler burada kesildi: {segment}",
++    ),
++    fragment=(
++        "Notta şöyle yazıyordu: {segment}",
++        "Kısa mesajda şöyle yazıyordu: {segment}",
++    ),
++)
++
+ BUILTIN_SHORT_SENTENCE_PHRASES: dict[str, ShortSentencePhraseSet] = {
+     "en": ENGLISH_SHORT_SENTENCE_PHRASES,
+     "de": GERMAN_SHORT_SENTENCE_PHRASES,
++    "es": SPANISH_SHORT_SENTENCE_PHRASES,
++    "fr": FRENCH_SHORT_SENTENCE_PHRASES,
++    "it": ITALIAN_SHORT_SENTENCE_PHRASES,
++    "pt": PORTUGUESE_SHORT_SENTENCE_PHRASES,
++    "pt-pt": EUROPEAN_PORTUGUESE_SHORT_SENTENCE_PHRASES,
++    "ko": KOREAN_SHORT_SENTENCE_PHRASES,
++    "ja": JAPANESE_SHORT_SENTENCE_PHRASES,
++    "zh": CHINESE_SHORT_SENTENCE_PHRASES,
++    "ar": ARABIC_SHORT_SENTENCE_PHRASES,
++    "he": HEBREW_SHORT_SENTENCE_PHRASES,
++    "kk": KAZAKH_SHORT_SENTENCE_PHRASES,
++    "sv": SWEDISH_SHORT_SENTENCE_PHRASES,
++    "th": THAI_SHORT_SENTENCE_PHRASES,
++    "vi": VIETNAMESE_SHORT_SENTENCE_PHRASES,
++    "ru": RUSSIAN_SHORT_SENTENCE_PHRASES,
++    "hi": HINDI_SHORT_SENTENCE_PHRASES,
++    "pl": POLISH_SHORT_SENTENCE_PHRASES,
++    "tr": TURKISH_SHORT_SENTENCE_PHRASES,
+ }
+
+ SHORT_SENTENCE_PHRASE_LANGUAGE_ALIASES = {
+@@ -93,6 +543,7 @@ SHORT_SENTENCE_PHRASE_LANGUAGE_ALIASES = {
+     "de-de": "de",
+     "de-at": "de",
+     "de-ch": "de",
++    "cmn": "zh",
+ }
+
+
+diff --git a/pykokoro/stages/g2p/kokorog2p.py b/pykokoro/stages/g2p/kokorog2p.py
+index 3342aed..1e8bc6e 100644
+--- a/pykokoro/stages/g2p/kokorog2p.py
++++ b/pykokoro/stages/g2p/kokorog2p.py
+@@ -41,6 +41,7 @@ def _context_token_value(token: Any, name: str, default: object) -> object:
+         return metadata[name]
+     return default
+
++
+ def _context_token_int(token: Any, name: str) -> int | None:
+     value = _context_token_value(token, name, None)
+     return value if isinstance(value, int) and not isinstance(value, bool) else None
+diff --git a/tests/test_frontend_contracts.py b/tests/test_frontend_contracts.py
+index ea41539..a0d3b4a 100644
+--- a/tests/test_frontend_contracts.py
++++ b/tests/test_frontend_contracts.py
+@@ -14,7 +14,6 @@ from pykokoro.model_profiles import get_model_profile
+         ("vi-contextbox", "vig2p-v1", "espeak"),
+         ("vi-anphunl", "vig2p-v1", "espeak"),
+         ("vi-ngoc-huyen", "vig2p-v1", "espeak"),
+-        ("de-crane", "german-ipa-v1", "kokorog2p"),
+         ("he-hebrew-nc", "hebrew-g2p-v1", "espeak"),
+     ],
+ )
+@@ -32,6 +31,17 @@ def test_experimental_frontend_contracts_are_explicit(variant, frontend, g2p_bac
+     assert require_frontend(variant, allow_experimental=True) == frontend
+
+
++def test_crane_german_ipa_frontend_is_release_ready() -> None:
++    profile = get_model_profile("de-crane", "github")
++    fixture = FRONTEND_FIXTURES["de-crane"]
++
++    assert profile.frontend == "german-ipa-v1"
++    assert profile.g2p_backend == "kokorog2p"
++    assert profile.frontend_experimental is False
++    assert fixture.release_ready is True
++    assert require_frontend("de-crane", allow_experimental=False) == profile.frontend
++
++
+ def test_nabra_frontend_is_release_ready():
+     from kokorog2p import get_g2p
+
+diff --git a/tests/test_g2p_cache.py b/tests/test_g2p_cache.py
+index 70b0585..f56dc2e 100644
+--- a/tests/test_g2p_cache.py
++++ b/tests/test_g2p_cache.py
+@@ -90,7 +90,7 @@ def test_german_short_u_cleanup_retokenizes_uncached_and_cached_results(
+     cache_files = list(tmp_path.glob("*.json"))
+     assert len(cache_files) == 1
+     payload = DiskCache(tmp_path).get(cache_files[0].stem)
+-    assert payload["schema"] == 10
++    assert payload["schema"] == 11
+     assert payload["phonemes"] == "bykə"
+     assert payload["tokens"] == [ord(char) for char in "bykə"]
+
+@@ -164,7 +164,7 @@ def test_previous_g2p_cache_schema_is_recomputed_with_cleaned_payload(
+
+     assert calls["phonemize"] == 1
+     assert result[0].phonemes == "bykə"
+-    assert payload["schema"] == 10
++    assert payload["schema"] == 11
+     assert payload["phonemes"] == "bykə"
+     assert payload["tokens"] == [ord(char) for char in "bykə"]
+
+diff --git a/tests/test_german_examples.py b/tests/test_german_examples.py
+index 8aa88ea..53a94cf 100644
+--- a/tests/test_german_examples.py
++++ b/tests/test_german_examples.py
+@@ -24,7 +24,7 @@ def test_german_model_configurations() -> None:
+     assert crane.voice == "default"
+     assert crane.generation.lang == "de"
+     assert crane.generation.speed == 1.0
+-    assert crane.allow_experimental_frontend is True
++    assert crane.allow_experimental_frontend is False
+     assert german2.OUTPUT_FILE == "german_kerstin_crane.wav"
+
+     assert thorsten.model_source == "github"
+diff --git a/tests/test_german_tts_samples_example.py b/tests/test_german_tts_samples_example.py
+index 4f330c6..d9a0d92 100644
+--- a/tests/test_german_tts_samples_example.py
++++ b/tests/test_german_tts_samples_example.py
+@@ -92,7 +92,7 @@ def test_invalid_choices_fail_in_argparse(arguments: list[str]) -> None:
+     ("model_id", "voice", "experimental"),
+     [
+         ("v1.2-de-martin", "martin", False),
+-        ("de-crane", "default", True),
++        ("de-crane", "default", False),
+         ("de-thorsten", "thorsten", False),
+         ("de-anna", "df_anna", False),
+     ],
+diff --git a/tests/test_model_discovery.py b/tests/test_model_discovery.py
+index 5671772..2d37d8f 100644
+--- a/tests/test_model_discovery.py
++++ b/tests/test_model_discovery.py
+@@ -195,7 +195,6 @@ def test_discovery_returns_complete_sorted_contract(monkeypatch: pytest.MonkeyPa
+     assert thorsten.voices == ("thorsten",)
+     assert thorsten.qualities == ("fp32",)
+     assert thorsten.g2p_backend == "kokorog2p"
+-    assert thorsten.lexicons == ("gold", "crane")
+     assert thorsten.frontend == "kokorog2p-de-thorsten-v1"
+     assert thorsten.status == "ready"
+     assert thorsten.experimental is False
+@@ -218,8 +217,8 @@ def test_discovery_returns_complete_sorted_contract(monkeypatch: pytest.MonkeyPa
+     crane = next(model for model in result.models if model.model_id == "de-crane")
+     assert crane.voices == ("default",)
+     assert crane.default_voice == "default"
+-    assert crane.status == "experimental"
+-    assert crane.experimental is True
++    assert crane.status == "ready"
++    assert crane.experimental is False
+
+     assert (
+         next(model for model in result.models if model.model_id == "restricted").status
+diff --git a/tests/test_release_profiles.py b/tests/test_release_profiles.py
+index 78da21c..9460ad0 100644
+--- a/tests/test_release_profiles.py
++++ b/tests/test_release_profiles.py
+@@ -28,7 +28,7 @@ def test_runtime_profiles_do_not_duplicate_published_inventory():
+         assert profile.quality_files == {}
+         assert profile.voice_names == ()
+         assert profile.onnx_inputs["speed"] == "float32"
+-        assert profile.frontend_experimental is (variant != "ar-nabra")
++        assert profile.frontend_experimental is (variant not in {"ar-nabra", "de-crane"})
+         assert profile.g2p_backend == expected_backends[variant]
+     nabra = get_model_profile("ar-nabra", "github")
+     assert nabra.vocabulary_source == "downloaded-release"
+diff --git a/tests/test_short_sentence_diagnostics.py b/tests/test_short_sentence_diagnostics.py
+index febb7c8..0cae665 100644
+--- a/tests/test_short_sentence_diagnostics.py
++++ b/tests/test_short_sentence_diagnostics.py
+@@ -61,6 +61,25 @@ def test_matrix_is_deterministic_and_covers_axes() -> None:
+     assert len(first) == 54
+
+
++def test_catalog_mode_uses_localized_templates_for_terminal_form() -> None:
++    cases = build_diagnostic_cases(
++        catalog=True,
++        language="es",
++        terminal_form="fragment",
++    )
++
++    assert len(cases) == 2
++    assert all(case.axis == "phrase-template" for case in cases)
++    assert all(case.settings.phrase_language == "es" for case in cases)
++    assert [case.settings.neutral_phrase for case in cases] == [
++        "La nota decía: {segment}",
++        "El mensaje corto decía: {segment}",
++    ]
++    assert all(
++        case.settings.neutral_phrase != "The short message read: {segment}" for case in cases
++    )
++
++
+ def test_geometry_rows_keep_unresolved_counts_visible() -> None:
+     rows = compute_geometry_rows(
+         [
+diff --git a/tests/test_short_sentence_handler.py b/tests/test_short_sentence_handler.py
+index 1c7dde3..f762f9a 100644
+--- a/tests/test_short_sentence_handler.py
++++ b/tests/test_short_sentence_handler.py
+@@ -1,5 +1,7 @@
+ """Tests for pykokoro.short_sentence_handler module."""
+
++import pytest
++
+ from pykokoro.short_sentence_handler import (
+     PhraseResolveMode,
+     RandomizedPhraseResolveMode,
+@@ -217,7 +219,7 @@ def test_custom_phrase_catalog_is_selected_for_segment_language() -> None:
+ def test_unsupported_phrase_language_uses_wrap_without_english_context() -> None:
+     config = ShortSentenceConfig(resolve_mode="phrase")
+     segment = make_segment("word", "abc")
+-    segment.lang = "sv"
++    segment.lang = "xx"
+     calls: list[tuple[str, str]] = []
+     result = apply_short_sentence_mode(
+         segment,
+@@ -233,6 +235,51 @@ def test_unsupported_phrase_language_uses_wrap_without_english_context() -> None
+     assert calls == []
+
+
++def test_swedish_builtin_phrase_catalog_is_used() -> None:
++    config = ShortSentenceConfig(resolve_mode="phrase")
++    segment = make_segment("Ja.", "abc")
++    segment.lang = "sv"
++    calls: list[tuple[str, str]] = []
++
++    def context_phonemizer(text: str, language: str):
++        calls.append((text, language))
++        return type(
++            "Result",
++            (),
++            {"phonemes": "context", "ids": [1], "tokens": []},
++        )()
++
++    result = apply_short_sentence_mode(
++        segment,
++        segment.phonemes,
++        [1],
++        config,
++        lambda text: [1 for _ in text],
++        context_phonemizer=context_phonemizer,
++    )
++
++    assert result.metadata is not None
++    assert result.metadata["kind"] == "phrase"
++    assert result.metadata["phrase_language"] == "sv"
++    assert "Ja." in calls[0][0]
++    assert calls[0][1] == "sv"
++
++
++@pytest.mark.parametrize(
++    ("text", "expected"),
++    [
++        ("はい。", "declarative"),
++        ("为什么？", "question"),
++        ("لماذا؟", "question"),
++        ("止まれ！", "exclamation"),
++        ("हाँ।", "declarative"),
++        ("等等……", "ellipsis"),
++    ],
++)
++def test_terminal_form_supports_native_punctuation(text: str, expected: str) -> None:
++    assert _terminal_form(text) == expected
++
++
+ def test_cutter_override_keeps_german_builtin_carrier_localized() -> None:
+     from pykokoro.short_sentence_phrases import GERMAN_SHORT_SENTENCE_PHRASES
+
+diff --git a/tests/test_short_sentence_phrases.py b/tests/test_short_sentence_phrases.py
+new file mode 100644
+index 0000000..b5eaf8a
+--- /dev/null
++++ b/tests/test_short_sentence_phrases.py
+@@ -0,0 +1,55 @@
++"""Tests for built-in short-sentence phrase catalogs."""
++
++import pytest
++
++from pykokoro.constants import ESPEAK_ONLY_LANGUAGES, SUPPORTED_LANGUAGES
++from pykokoro.short_sentence_phrases import (
++    BUILTIN_SHORT_SENTENCE_PHRASES,
++    resolve_short_sentence_phrase_language,
++    resolve_short_sentence_phrase_set,
++)
++
++
++@pytest.mark.parametrize(
++    "language",
++    sorted(set(SUPPORTED_LANGUAGES) | set(ESPEAK_ONLY_LANGUAGES)),
++)
++def test_builtin_phrase_catalog_covers_every_advertised_language(language: str) -> None:
++    phrase_set, phrase_language, source = resolve_short_sentence_phrase_set(language)
++
++    assert phrase_set is not None
++    assert phrase_language is not None
++    assert source == "builtin"
++
++
++def test_mandarin_alias_resolves_to_chinese_catalog() -> None:
++    assert resolve_short_sentence_phrase_language("zh") == "zh"
++    assert resolve_short_sentence_phrase_language("cmn") == "zh"
++    assert resolve_short_sentence_phrase_language("zh-CN") == "zh"
++    assert resolve_short_sentence_phrase_language("zh-TW") == "zh"
++
++
++def test_european_portuguese_keeps_its_own_catalog() -> None:
++    assert resolve_short_sentence_phrase_language("pt") == "pt"
++    assert resolve_short_sentence_phrase_language("pt-PT") == "pt-pt"
++
++
++def test_new_catalogs_have_retry_capacity_for_every_terminal_form() -> None:
++    for language, phrase_set in BUILTIN_SHORT_SENTENCE_PHRASES.items():
++        if language in {"en", "de"}:
++            continue
++        assert len(phrase_set.declarative) >= 2
++        assert len(phrase_set.question) >= 2
++        assert len(phrase_set.exclamation) >= 2
++        assert len(phrase_set.ellipsis) >= 2
++        assert len(phrase_set.fragment) >= 2
++
++
++def test_new_catalog_templates_keep_target_at_phrase_end() -> None:
++    for language, phrase_set in BUILTIN_SHORT_SENTENCE_PHRASES.items():
++        if language in {"en", "de"}:
++            continue
++        for category in phrase_set.categories():
++            for template in category:
++                assert template.endswith("{segment}")
++                assert template.count("{segment}") == 1
+diff --git a/tests/test_word_timings.py b/tests/test_word_timings.py
+index 333cb0f..45eda73 100644
+--- a/tests/test_word_timings.py
++++ b/tests/test_word_timings.py
+@@ -312,10 +312,10 @@ def test_context_normalization_reads_kokorog2p_tokenspan_meta() -> None:
+     assert [token.char_end for token in normalized.tokens] == [3, 7]
+     assert [token.model_token_count for token in normalized.tokens] == [3, 2]
+     assert [token.model_span_token_count for token in normalized.tokens] == [4, 2]
+-    assert sum(
+-        token.model_span_token_count or 0
+-        for token in normalized.tokens
+-    ) == len(normalized.ids)
++    assert sum(token.model_span_token_count or 0 for token in normalized.tokens) == len(
++        normalized.ids
++    )
++
+
+ def test_context_normalization_reconciles_prefix_spans_with_whole_phrase_ids() -> None:
+     class FakeG2P:

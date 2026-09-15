@@ -1,0 +1,224 @@
+rows:
+  - sha: b0934ea8f63f5823433fe8a9e015ea9ac9f6c2d3
+    inspected: true
+    inspected_paths:
+      - examples/README.md
+      - examples/english_7m.py
+      - pykokoro/pipeline.py
+      - tests/test_pipeline_lifecycle.py
+    observed_behavior:
+      Added the English 7M Distill example and changed preparation config copying to
+      preserve the stateful asset progress callback while avoiding callback deepcopy.
+    public_impact: public
+    decision: accepted
+    target_entry_key: english-7m
+    target_entry_id: null
+    notes: Covered by the English 7M and preparation behavior entry.
+    stale: false
+  - sha: 19cf312b5d706afd25a2842f5db755b30b1dcf32
+    inspected: true
+    inspected_paths:
+      - examples/README.md
+      - tests/test_pipeline_lifecycle.py
+    observed_behavior:
+      Adjusted example indexing and lifecycle test imports without changing runtime
+      behavior.
+    public_impact: internal
+    decision: internal
+    target_entry_key: internal-example-test-maintenance
+    target_entry_id: null
+    notes: Maintenance-only change excluded from the public changelog.
+    stale: false
+  - sha: b1de82c1e4723bd0f45b1a67b00a22ad86f4358c
+    inspected: true
+    inspected_paths:
+      - .github/workflows/tests.yml
+    observed_behavior: Updated the CI workflow Spokenform dependency pin.
+    public_impact: internal
+    decision: internal
+    target_entry_key: internal-ci-dependency
+    target_entry_id: null
+    notes: CI maintenance-only change excluded from the public changelog.
+    stale: false
+  - sha: 67f1e00293843bc0cb0bf38a16dee562198bc061
+    inspected: true
+    inspected_paths:
+      - benchmarks/short_sentence_latency.py
+      - docs/short_sentence_quality.md
+      - pykokoro/audio_generator.py
+      - pykokoro/short_sentence_cutters/timestamp_adaptive.py
+      - pykokoro/short_sentence_handler.py
+      - tests/test_short_sentence_cutters.py
+      - tests/test_short_sentence_handler.py
+    observed_behavior:
+      Added timestamp-adaptive short-sentence cutting, warm policy benchmarking,
+      structural counters, and quality validation guidance for short rendered segments.
+    public_impact: public
+    decision: accepted
+    target_entry_key: short-sentence-quality
+    target_entry_id: null
+    notes: Covered by the short-sentence quality tooling entry.
+    stale: false
+  - sha: f0151af78f17bd1d2ec7852fa7ea9869fd226c5a
+    inspected: true
+    inspected_paths:
+      - pykokoro/audio_generator.py
+      - pykokoro/short_sentence_cutters/shared.py
+      - pykokoro/short_sentence_cutters/timestamp_adaptive.py
+      - pykokoro/short_sentence_handler.py
+      - pykokoro/short_sentence_phrases.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - tests/test_short_sentence_cutters.py
+      - tests/test_short_sentence_handler.py
+    observed_behavior:
+      Introduced language-aware phrase catalog structures and strengthened
+      short-sentence timing alignment, legal boundary checks, cut diagnostics, and
+      adaptive waveform extraction.
+    public_impact: public
+    decision: accepted
+    target_entry_key: short-sentence-extraction
+    target_entry_id: null
+    notes: Covered by the short-sentence extraction entry.
+    stale: false
+  - sha: 16aef7ef3510dd04d8d48bd2b2a18b9c1bb27cf8
+    inspected: true
+    inspected_paths:
+      - README.md
+      - pykokoro/lexicon_discovery.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/tokenizer.py
+      - tests/test_lexicon_discovery.py
+      - tests/test_tokenizer.py
+    observed_behavior:
+      Added public metadata-only named-lexicon discovery and selected the static
+      de-de:espeak lexicon for implicit German lexicon configuration.
+    public_impact: public
+    decision: accepted
+    target_entry_key: german-lexicon-discovery
+    target_entry_id: null
+    notes: Covered by the German lexicon entry.
+    stale: false
+  - sha: b105e92be4b410a5e2d67ba13c8119524d79fdb7
+    inspected: true
+    inspected_paths:
+      - README.md
+      - pykokoro/audio_generator.py
+      - pykokoro/short_sentence_handler.py
+      - pykokoro/short_sentence_phrases.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - tests/test_short_sentence_handler.py
+    observed_behavior:
+      Expanded short-sentence handling and its benchmark support with explicit fallback
+      accounting, reproducible parameter sweeps, and documented listening-oriented
+      quality checks.
+    public_impact: public
+    decision: accepted
+    target_entry_key: short-sentence-quality
+    target_entry_id: null
+    notes: Covered by the short-sentence quality tooling entry.
+    stale: false
+  - sha: d02da5561ec39d7c91c757777b06c394d9cb3708
+    inspected: true
+    inspected_paths:
+      - benchmarks/short_sentence_latency.py
+      - benchmarks/short_sentence_parameter_sweep.py
+      - pykokoro/audio_generator.py
+      - pykokoro/short_sentence_handler.py
+      - tests/test_short_sentence_handler.py
+      - tests/test_word_timings.py
+    observed_behavior:
+      Added attempt-level short-sentence benchmark accounting and tightened audio,
+      timing, and fallback behavior around phrase rendering.
+    public_impact: public
+    decision: accepted
+    target_entry_key: short-sentence-quality
+    target_entry_id: null
+    notes: Covered by the short-sentence quality tooling entry.
+    stale: false
+  - sha: 39119fdd2598db05a5e75e5344dcadd7e7864886
+    inspected: true
+    inspected_paths:
+      - benchmarks/_short_sentence_reporting.py
+      - benchmarks/short_sentence_latency.py
+      - benchmarks/short_sentence_parameter_sweep.py
+      - tests/test_short_sentence_benchmark_reporting.py
+      - tests/test_short_sentence_parameter_sweep.py
+    observed_behavior:
+      Added normalized benchmark outcome reporting, retry-budget comparisons, success
+      strategy summaries, and failure-stage reporting.
+    public_impact: public
+    decision: accepted
+    target_entry_key: short-sentence-quality
+    target_entry_id: null
+    notes: Covered by the short-sentence quality tooling entry.
+    stale: false
+  - sha: a5fe8cae92cb585783f716adee9d27a0da84c08a
+    inspected: true
+    inspected_paths:
+      - pykokoro/audio_generator.py
+      - pykokoro/short_sentence_cutters/energy_valley.py
+      - pykokoro/short_sentence_cutters/timestamp_adaptive.py
+      - pykokoro/short_sentence_handler.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - tests/test_audio_splitting.py
+      - tests/test_word_timings.py
+    observed_behavior:
+      Added exact model-token geometry for timestamp joins and made timing mismatches
+      non-retryable when a reliable cut cannot be formed.
+    public_impact: public
+    decision: accepted
+    target_entry_key: short-sentence-extraction
+    target_entry_id: null
+    notes: Covered by the short-sentence extraction entry.
+    stale: false
+  - sha: 5ab600df4f67fbe24a54071b6ab4cca91b7dfb9f
+    inspected: true
+    inspected_paths:
+      - benchmarks/short_sentence_diagnostics.py
+      - pykokoro/audio_generator.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - tests/test_short_sentence_diagnostics.py
+      - tests/test_word_timings.py
+    observed_behavior:
+      Added model-free short-sentence diagnostics with deterministic matrices and
+      invariant checks for token geometry, durations, timestamps, boundaries, and cuts.
+    public_impact: public
+    decision: accepted
+    target_entry_key: short-sentence-quality
+    target_entry_id: null
+    notes: Covered by the short-sentence quality tooling entry.
+    stale: false
+  - sha: 3134ed6d72b274fefea55d1b34a324f5b1667ed8
+    inspected: true
+    inspected_paths:
+      - pykokoro/stages/g2p/kokorog2p.py
+      - tests/test_word_timings.py
+    observed_behavior:
+      Preserved token span metadata when KokoroG2P tokens expose it through their meta
+      mapping, keeping context timing geometry aligned with generated IDs.
+    public_impact: public
+    decision: accepted
+    target_entry_key: short-sentence-extraction
+    target_entry_id: null
+    notes: Covered by the short-sentence extraction entry.
+    stale: false
+  - sha: c382ef8b2c6ad48fbc49dfcbb33cd1fda395e37e
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/languages.md
+      - pykokoro/model_profiles.py
+      - pykokoro/short_sentence_handler.py
+      - pykokoro/short_sentence_phrases.py
+      - tests/test_short_sentence_phrases.py
+      - tests/test_release_profiles.py
+    observed_behavior:
+      Added localized phrase catalogs and punctuation-aware terminal forms, marked the
+      German Crane profile release-ready, and expanded catalog diagnostics and
+      documentation.
+    public_impact: public
+    decision: accepted
+    target_entry_key: multilingual-short-sentences
+    target_entry_id: null
+    notes: Covered by the multilingual short-sentence entry.
+    stale: false

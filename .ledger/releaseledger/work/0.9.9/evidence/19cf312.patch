@@ -1,0 +1,37 @@
+ examples/README.md               | 1 +
+ tests/test_pipeline_lifecycle.py | 3 +--
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/examples/README.md b/examples/README.md
+index 7cbff83..02a80ff 100644
+--- a/examples/README.md
++++ b/examples/README.md
+@@ -126,6 +126,7 @@ language demos are also import-safe and indexed here: `abbreviations.py`,
+ `automatic_pauses_demo.py`, `backend_comparison.py`, `boundary_detection_analysis.py`,
+ `chinese.py`, `compare_prosody_algorithms.py`, `contractions.py`,
+ `contractions_advanced.py`, `cpu_benchmark.py`, `dash_variations.py`, `english.py`,
++`english_7m.py`,
+ `english_clausal_comma_pause.py`, `french.py`, `headings_demo.py`, `hindi.py`,
+ `homographs.py`, `italian.py`, `japanese.py`, `korean.py`, `mixed_language.py`,
+ `optimal_phoneme_length_demo.py`, `paragraph_streaming.py`, `pauses_demo.py`,
+diff --git a/tests/test_pipeline_lifecycle.py b/tests/test_pipeline_lifecycle.py
+index dc379dc..f9f8dfd 100644
+--- a/tests/test_pipeline_lifecycle.py
++++ b/tests/test_pipeline_lifecycle.py
+@@ -7,7 +7,7 @@ import pytest
+ from pykokoro.asset_progress import ConsoleAssetProgress
+ from pykokoro.generation_config import GenerationConfig
+ from pykokoro.onnx_backend import Kokoro
+-from pykokoro.pipeline import KokoroPipeline
++from pykokoro.pipeline import KokoroPipeline, _copy_config_for_preparation
+ from pykokoro.pipeline_config import PipelineConfig
+ from pykokoro.stages.audio_generation.onnx import OnnxAudioGenerationAdapter
+ from pykokoro.stages.audio_postprocessing.onnx import OnnxAudioPostprocessingAdapter
+@@ -238,7 +238,6 @@ def test_kokoro_close_is_safe_after_partial_initialization():
+
+
+ def test_pipeline_config_copy_preserves_stateful_asset_progress_callback() -> None:
+-    from pykokoro.pipeline import _copy_config_for_preparation
+
+     progress = ConsoleAssetProgress()
+     config = PipelineConfig(

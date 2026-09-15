@@ -1,0 +1,2745 @@
+ README.md                                          |  30 +-
+ benchmarks/_short_sentence_reporting.py            | 229 ++++++++++
+ benchmarks/short_sentence_latency.py               | 222 +++++++---
+ benchmarks/short_sentence_parameter_sweep.py       | 489 +++++++++++++++++++++
+ docs/short_sentence_quality.md                     | 107 +++--
+ examples/README.md                                 |  28 +-
+ examples/short_sentence_voices_demo.py             |  10 +-
+ pykokoro/__init__.py                               |   6 +-
+ pykokoro/audio_generator.py                        |  98 ++++-
+ pykokoro/lexicon_discovery.py                      |   4 +-
+ pykokoro/short_sentence_cutters/shared.py          |  23 +-
+ .../short_sentence_cutters/timestamp_adaptive.py   |  96 ++--
+ pykokoro/short_sentence_handler.py                 | 105 ++++-
+ pykokoro/short_sentence_phrases.py                 |   5 +-
+ pykokoro/stages/g2p/kokorog2p.py                   |   8 +-
+ pykokoro/tokenizer.py                              |   1 +
+ pykokoro/types.py                                  |  10 +-
+ tests/test_audio_generator_performance.py          |   9 +-
+ tests/test_audio_splitting.py                      |   3 +
+ tests/test_g2p_adapter_spacy_model.py              |   1 +
+ tests/test_g2p_cache.py                            |   1 +
+ tests/test_lexicon_discovery.py                    |   6 +-
+ tests/test_packaging_metadata.py                   |   1 +
+ tests/test_short_sentence_benchmark_reporting.py   | 110 +++++
+ tests/test_short_sentence_cutters.py               |  65 ++-
+ tests/test_short_sentence_handler.py               |  28 ++
+ tests/test_short_sentence_parameter_sweep.py       | 131 ++++++
+ tests/test_tokenizer.py                            |   2 +-
+ 28 files changed, 1647 insertions(+), 181 deletions(-)
+
+diff --git a/README.md b/README.md
+index d383b02..528b350 100644
+--- a/README.md
++++ b/README.md
+@@ -443,6 +443,24 @@ print(resolve_execution_provider("auto"))
+ Maintainer benchmark documentation for the PolyNorm phoneme gate lives in
+ `docs/polynorm_benchmark.md`.
+
++### Short-sentence benchmark tools
++
++PyKokoro has separate tools for structural diagnosis and listening-based parameter
++comparison:
++
++- `benchmarks/short_sentence_latency.py` runs the warm policy/scenario benchmark and
++  reports final cases, actual cut strategies, failures, retries, and inference costs. It
++  defaults to a human-readable table, supports `--output-format table|jsonl|both`, JSONL
++  and summary JSON export, and `--dry-run`. It does not write WAV artifacts.
++- `benchmarks/short_sentence_parameter_sweep.py` renders one fixed short segment for an
++  ordered parameter sweep. It writes one combined labeled WAV and a JSON manifest.
++  Labels use short-sentence handling disabled, phrase retries default to zero, and the
++  manifest records reproducibility metadata and audio offsets.
++
++Use the parameter sweep for human listening, not automatic optimization. See
++[`docs/short_sentence_quality.md`](docs/short_sentence_quality.md) for CLI examples,
++supported parameters, starting ranges, and artifact details.
++
+ ### Basic Text-to-Speech
+
+ ```python
+@@ -1546,12 +1564,12 @@ gold_config = TokenizerConfig(lexicons="gold")
+ crane_config = TokenizerConfig(lexicons="crane")
+ ```
+
+-`lexicons=None` uses PyKokoro's language defaults. For German, the implicit selection is the static
+-de-de:espeak lexicon. An explicit selection takes precedence over legacy dictionary flags.
+-`lexicons=("gold", "crane")` are supported for layered lookup, where the first matching
+-layer wins. That layered lookup is not a Gold-versus-Crane A/B comparison. For an A/B
+-comparison, render separately with `("gold",)` and `("crane",)` and combine the results
+-yourself.
++`lexicons=None` uses PyKokoro's language defaults. For German, the implicit selection is
++the static de-de:espeak lexicon. An explicit selection takes precedence over legacy
++dictionary flags. `lexicons=("gold", "crane")` are supported for layered lookup, where
++the first matching layer wins. That layered lookup is not a Gold-versus-Crane A/B
++comparison. For an A/B comparison, render separately with `("gold",)` and `("crane",)`
++and combine the results yourself.
+
+ Provider-only operation is explicit with `lexicons=()`; it selects no static Lexphon
+ layers and can use `fallback="espeak"` or `fallback="goruut"`. A static lexicon named
+diff --git a/benchmarks/_short_sentence_reporting.py b/benchmarks/_short_sentence_reporting.py
+new file mode 100644
+index 0000000..7930e4a
+--- /dev/null
++++ b/benchmarks/_short_sentence_reporting.py
+@@ -0,0 +1,229 @@
++"""Model-free reporting helpers for short-sentence benchmark results."""
++
++from __future__ import annotations
++
++from collections import Counter, defaultdict
++from typing import Any
++
++SUCCESSFUL_CUT_STRATEGIES = frozenset(
++    {
++        "energy-valley",
++        "timestamp-smooth",
++        "timestamp-smooth-relaxed",
++        "timestamp-anchor",
++    }
++)
++
++
++def classify_short_sentence_outcome(
++    configured_policy: str,
++    metadata: dict[str, object] | None,
++) -> str:
++    """Classify the final result of one rendered short-sentence case."""
++    if configured_policy == "disabled":
++        return "disabled"
++    if not metadata:
++        return "unresolved"
++
++    kind = metadata.get("kind")
++    fallback_used = metadata.get("fallback_used")
++    cut_strategy = metadata.get("cut_strategy")
++    failure_reason = metadata.get("timing_failure_reason") or metadata.get("cut_failure_reason")
++
++    if configured_policy == "wrap" and kind == "wrap":
++        return "wrap-configured"
++    if kind == "wrap":
++        if failure_reason == "no-localized-phrase-catalog":
++            return "wrap-no-localized-catalog"
++        return "wrap-runtime-resolution"
++    if fallback_used == "wrap" or cut_strategy == "wrap":
++        return "wrap-fallback"
++    if cut_strategy in SUCCESSFUL_CUT_STRATEGIES:
++        if fallback_used == "phrase":
++            return "phrase-cut-retry"
++        return "phrase-cut-initial"
++    return "unresolved"
++
++
++def normalize_short_sentence_row(row: dict[str, Any]) -> dict[str, Any]:
++    """Add final-case fields to a raw latency row without discarding raw fields."""
++    normalized = dict(row)
++    policy = str(row.get("configured_policy", row.get("policy", "")))
++    metadata = row.get("short_sentence_metadata")
++    if not isinstance(metadata, dict):
++        metadata = {
++            key: row[key]
++            for key in (
++                "kind",
++                "fallback_used",
++                "cut_strategy",
++                "timing_failure_reason",
++                "cut_failure_reason",
++                "failure_stage",
++            )
++            if key in row
++        }
++    outcome = classify_short_sentence_outcome(policy, metadata)
++    normalized.update(
++        {
++            "configured_policy": policy,
++            "final_outcome": outcome,
++            "phrase_cut_succeeded": outcome in {"phrase-cut-initial", "phrase-cut-retry"},
++            "phrase_cut_used_retry": outcome == "phrase-cut-retry",
++            "actual_cut_strategy": metadata.get("cut_strategy"),
++            "fallback_used": metadata.get("fallback_used", row.get("fallback_used")),
++            "retry_attempts": metadata.get("retry_attempts", row.get("retry_attempts", 0)),
++            "cut_failure_reason": metadata.get("cut_failure_reason", row.get("cut_failure_reason")),
++            "timing_failure_reason": metadata.get(
++                "timing_failure_reason", row.get("timing_failure_reason")
++            ),
++            "failure_stage": metadata.get("failure_stage", row.get("failure_stage")),
++        }
++    )
++    return normalized
++
++
++def _integer(row: dict[str, Any], key: str) -> int:
++    value = row.get(key, 0)
++    return value if isinstance(value, int) and not isinstance(value, bool) else 0
++
++
++def aggregate_short_sentence_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
++    """Aggregate normalized final cases and independent attempt-level counters."""
++    normalized_rows = [normalize_short_sentence_row(row) for row in rows]
++    policies: dict[str, dict[str, Any]] = defaultdict(
++        lambda: {
++            "cases": 0,
++            "phrase_cut_successes": 0,
++            "initial_successes": 0,
++            "retry_successes": 0,
++            "wrap_fallbacks": 0,
++            "unresolved": 0,
++        }
++    )
++    actual_strategies: Counter[str] = Counter()
++    failure_reasons: Counter[str] = Counter()
++    attempts = {
++        "initial_phrase_attempts": 0,
++        "phrase_retries": 0,
++        "cut_failures": 0,
++        "wrap_fallback_renders": 0,
++        "onnx_calls": 0,
++    }
++    for row in normalized_rows:
++        policy = row["configured_policy"]
++        outcome = row["final_outcome"]
++        summary = policies[policy]
++        summary["cases"] += 1
++        if row["phrase_cut_succeeded"]:
++            summary["phrase_cut_successes"] += 1
++            if outcome == "phrase-cut-initial":
++                summary["initial_successes"] += 1
++            else:
++                summary["retry_successes"] += 1
++            strategy = row.get("actual_cut_strategy")
++            if strategy in SUCCESSFUL_CUT_STRATEGIES:
++                actual_strategies[str(strategy)] += 1
++        elif outcome == "wrap-fallback":
++            summary["wrap_fallbacks"] += 1
++        elif outcome == "unresolved":
++            summary["unresolved"] += 1
++
++        reason = row.get("timing_failure_reason") or row.get("cut_failure_reason")
++        if isinstance(reason, str) and reason:
++            failure_reasons[reason] += 1
++        for key in attempts:
++            attempts[key] += _integer(row, key)
++
++    for summary in policies.values():
++        cases = summary["cases"]
++        summary["phrase_cut_success_rate"] = (
++            summary["phrase_cut_successes"] / cases if cases else 0.0
++        )
++    return {
++        "cases": dict(policies),
++        "actual_cut_strategies": dict(actual_strategies),
++        "failure_reasons": dict(failure_reasons),
++        "attempts": attempts,
++        "rows": normalized_rows,
++    }
++
++
++def build_short_sentence_summary(
++    rows: list[dict[str, Any]],
++    *,
++    metadata: dict[str, Any] | None = None,
++) -> dict[str, Any]:
++    """Build a JSON-serializable summary while retaining normalized raw rows."""
++    summary = aggregate_short_sentence_rows(rows)
++    result: dict[str, Any] = {
++        "schema": "pykokoro.short-sentence-benchmark.v1",
++        "cases": summary["cases"],
++        "actual_cut_strategies": summary["actual_cut_strategies"],
++        "failure_reasons": summary["failure_reasons"],
++        "attempts": summary["attempts"],
++        "rows": summary["rows"],
++    }
++    if metadata:
++        result["run"] = dict(metadata)
++    return result
++
++
++def _percentage(value: int, total: int) -> str:
++    return f"{value / total * 100:.1f}%" if total else "-"
++
++
++def format_short_sentence_table(summary: dict[str, Any]) -> str:
++    """Format a compact human-readable report from ``build_short_sentence_summary``."""
++    lines = ["Short-sentence benchmark summary"]
++    run = summary.get("run", {})
++    if isinstance(run, dict):
++        for label, key in (("Voice", "voice"), ("Model", "model")):
++            if run.get(key) is not None:
++                lines.append(f"{label}: {run[key]}")
++    lines.extend(
++        [
++            "",
++            "Configured policy      Cases  Phrase cut  Initial  Retry  Wrap fallback  Unresolved",
++        ]
++    )
++    for policy, values in summary.get("cases", {}).items():
++        cases = int(values["cases"])
++        lines.append(
++            f"{policy:<22}{cases:>5}  {values['phrase_cut_successes']:>11}  "
++            f"{values['initial_successes']:>7}  {values['retry_successes']:>5}  "
++            f"{values['wrap_fallbacks']:>13}  {values['unresolved']:>10}"
++        )
++    lines.extend(["", "Phrase-cut success rate"])
++    for policy, values in summary.get("cases", {}).items():
++        if values["phrase_cut_successes"]:
++            lines.append(
++                f"{policy:<22}{values['phrase_cut_successes']}/{values['cases']}  "
++                f"{_percentage(values['phrase_cut_successes'], values['cases'])}"
++            )
++    lines.extend(["", "Actual successful cut strategies"])
++    for strategy, count in summary.get("actual_cut_strategies", {}).items():
++        lines.append(f"{strategy:<30}{count}")
++    lines.extend(["", "Phrase attempt accounting"])
++    labels = {
++        "initial_phrase_attempts": "Initial phrase attempts",
++        "phrase_retries": "Phrase retries",
++        "cut_failures": "Cut failures",
++        "wrap_fallback_renders": "Wrap fallback renders",
++    }
++    for key, label in labels.items():
++        lines.append(f"{label:<30}{summary.get('attempts', {}).get(key, 0)}")
++    lines.extend(["", "Failure reasons"])
++    for reason, count in summary.get("failure_reasons", {}).items():
++        lines.append(f"{reason:<30}{count}")
++    return "\n".join(lines)
++
++
++__all__ = [
++    "SUCCESSFUL_CUT_STRATEGIES",
++    "aggregate_short_sentence_rows",
++    "build_short_sentence_summary",
++    "classify_short_sentence_outcome",
++    "format_short_sentence_table",
++    "normalize_short_sentence_row",
++]
+diff --git a/benchmarks/short_sentence_latency.py b/benchmarks/short_sentence_latency.py
+index f09bcf7..dca7648 100644
+--- a/benchmarks/short_sentence_latency.py
++++ b/benchmarks/short_sentence_latency.py
+@@ -1,14 +1,15 @@
+ """Benchmark warm short-sentence rendering and structural inference counters.
+
+-This benchmark intentionally reports wall time without using it as a CI threshold.
+-Use ``--dry-run`` to inspect the complete scenario and policy matrix without loading
+-model assets.
++This is the engineering benchmark. It reports final case outcomes separately from
++attempt-level costs and does not create listening artifacts. Use ``--dry-run`` to
++inspect the complete matrix without loading model assets.
+ """
+
+ from __future__ import annotations
+
+ import argparse
+ import json
++import logging
+ import time
+ from pathlib import Path
+ from typing import Any
+@@ -17,10 +18,22 @@ import numpy as np
+
+ from pykokoro import GenerationConfig, PipelineConfig
+ from pykokoro.pipeline import KokoroPipeline
+-from pykokoro.short_sentence_handler import (
+-    PhraseResolveMode,
+-    ShortSentenceConfig,
+-)
++from pykokoro.short_sentence_handler import PhraseResolveMode, ShortSentenceConfig
++
++try:
++    from benchmarks._short_sentence_reporting import (
++        build_short_sentence_summary,
++        format_short_sentence_table,
++        normalize_short_sentence_row,
++    )
++except ModuleNotFoundError:
++    from _short_sentence_reporting import (
++        build_short_sentence_summary,
++        format_short_sentence_table,
++        normalize_short_sentence_row,
++    )
++
++logger = logging.getLogger(__name__)
+
+ DEMO_TEXTS = (
+     "Hi!",
+@@ -63,35 +76,46 @@ def _short_sentence_config(policy: str) -> ShortSentenceConfig:
+         return ShortSentenceConfig(resolve_mode="wrap")
+     return ShortSentenceConfig(
+         resolve_mode="phrase",
+-        resolve_modes={
+-            "phrase": PhraseResolveMode(cutter=policy),
+-        },
++        resolve_modes={"phrase": PhraseResolveMode(cutter=policy)},
+     )
+
+
+-def _summary(result: Any, *, policy: str, scenario: str, text: str, wall_ms: float) -> dict[str, Any]:
++def _short_sentence_metadata(trace: Any) -> dict[str, object]:
++    if trace is None:
++        return {}
++    for event in trace.prosody:
++        metadata = event.get("short_sentence") if isinstance(event, dict) else None
++        if isinstance(metadata, dict):
++            return dict(metadata)
++    return {}
++
++
++def _summary(
++    result: Any,
++    *,
++    policy: str,
++    scenario: str,
++    text: str,
++    wall_ms: float,
++) -> dict[str, Any]:
+     trace = result.trace
+     inference_summary = trace.inference_summary() if trace is not None else {}
+     counters = trace.counters if trace is not None else {}
+     audio_seconds = result.audio.size / result.sample_rate if result.sample_rate else 0.0
++    short_metadata = _short_sentence_metadata(trace)
+     boundary_metrics = _waveform_boundary_metrics(result.audio)
+-    short_metadata: dict[str, object] = {}
+-    if trace is not None:
+-        for event in trace.prosody:
+-            metadata = event.get("short_sentence") if isinstance(event, dict) else None
+-            if isinstance(metadata, dict):
+-                short_metadata = metadata
+-                boundary_metrics.update(
+-                    {
+-                        key: value
+-                        for key, value in metadata.items()
+-                        if key.endswith("_distance_samples")
+-                        or key.endswith("_distance_ms")
+-                        or key == "retained_guard_duration_ms"
+-                    }
+-                )
+-    return {
++    boundary_metrics.update(
++        {
++            key: value
++            for key, value in short_metadata.items()
++            if key.endswith("_distance_samples")
++            or key.endswith("_distance_ms")
++            or key == "retained_guard_duration_ms"
++        }
++    )
++    row = {
+         "policy": policy,
++        "configured_policy": policy,
+         "scenario": scenario,
+         "text": text,
+         "wall_ms": wall_ms,
+@@ -103,18 +127,34 @@ def _summary(result: Any, *, policy: str, scenario: str, text: str, wall_ms: flo
+         "initial_phrase_attempts": counters.get("short_sentence_phrase_initial", 0),
+         "phrase_retries": counters.get("short_sentence_phrase_retry", 0),
+         "wrap_fallbacks": counters.get("short_sentence_wrap_fallback", 0),
++        "wrap_fallback_renders": counters.get("short_sentence_wrap_fallback", 0),
+         "strict_cut_successes": counters.get("short_sentence_cut_strict_success", 0),
+         "adaptive_cut_successes": counters.get("short_sentence_cut_adaptive_success", 0),
+         "cut_failures": counters.get("short_sentence_cut_failure", 0),
+         "boundary_metrics": boundary_metrics,
++        "short_sentence_metadata": short_metadata,
+         "cut_strategy": short_metadata.get("cut_strategy"),
++        "actual_cut_strategy": short_metadata.get("cut_strategy"),
++        "fallback_used": short_metadata.get("fallback_used"),
++        "retry_attempts": short_metadata.get("retry_attempts", 0),
+         "cut_failure_reason": short_metadata.get("cut_failure_reason"),
+-        "left_gap_samples": _metadata_gap(short_metadata, "previous_token_end_ts", "target_start_ts"),
+-        "right_gap_samples": _metadata_gap(short_metadata, "target_end_ts", "next_token_start_ts"),
++        "timing_failure_reason": short_metadata.get("timing_failure_reason"),
++        "failure_stage": short_metadata.get("failure_stage"),
++        "timing_token_count": short_metadata.get("timing_token_count"),
++        "timing_target_token_count": short_metadata.get("timing_target_token_count"),
+         "timing_model_position_count": short_metadata.get("timing_model_position_count"),
+         "generated_token_count": short_metadata.get("generated_token_count"),
++        "pred_duration_count": short_metadata.get("pred_duration_count"),
+         "timing_alignment_complete": short_metadata.get("timing_alignment_complete"),
++        "timestamp_join_complete": short_metadata.get("timestamp_join_complete"),
++        "target_timestamp_count": short_metadata.get("target_timestamp_count"),
++        "left_gap_samples": _metadata_gap(
++            short_metadata, "previous_token_end_ts", "target_start_ts"
++        ),
++        "right_gap_samples": _metadata_gap(short_metadata, "target_end_ts", "next_token_start_ts"),
+     }
++    return normalize_short_sentence_row(row)
++
+
+ def _metadata_gap(
+     metadata: dict[str, object],
+@@ -149,30 +189,51 @@ def _add_arguments(parser: argparse.ArgumentParser) -> None:
+     parser.add_argument("--model-path", type=Path)
+     parser.add_argument("--voices-path", type=Path)
+     parser.add_argument("--voices", default="af_sarah")
++    parser.add_argument("--output-format", choices=("table", "jsonl", "both"), default="table")
++    parser.add_argument("--jsonl", type=Path)
++    parser.add_argument("--summary-json", type=Path)
++    parser.add_argument("--log-level", default="WARNING")
+     parser.add_argument("--dry-run", action="store_true")
+
+
++def _dry_run_rows(voices: tuple[str, ...]) -> list[dict[str, Any]]:
++    rows: list[dict[str, Any]] = []
++    for voice in voices:
++        for policy in POLICIES:
++            for scenario, text, language in SCENARIOS:
++                rows.append(
++                    {
++                        "policy": policy,
++                        "configured_policy": policy,
++                        "scenario": scenario,
++                        "text": text,
++                        "language": language,
++                        "voice": voice,
++                    }
++                )
++            for text in DEMO_TEXTS:
++                rows.append(
++                    {
++                        "policy": policy,
++                        "configured_policy": policy,
++                        "scenario": "demo-corpus",
++                        "text": text,
++                        "language": "en-us",
++                        "voice": voice,
++                    }
++                )
++    return rows
++
++
+ def run_benchmark(args: argparse.Namespace) -> list[dict[str, Any]]:
+     voices = tuple(voice.strip() for voice in args.voices.split(",") if voice.strip())
+-    policies = POLICIES
+     languages = tuple(sorted({language for _, _, language in SCENARIOS}))
+     if args.dry_run:
+-        return [
+-            {
+-                "policy": policy,
+-                "scenario": scenario,
+-                "text": text,
+-                "language": language,
+-                "voice": voice,
+-            }
+-            for voice in voices
+-            for policy in policies
+-            for scenario, text, language in SCENARIOS
+-        ]
++        return _dry_run_rows(voices)
+
+     pipelines: dict[tuple[str, str], KokoroPipeline] = {}
+     try:
+-        for policy in policies:
++        for policy in POLICIES:
+             for language in languages:
+                 pipelines[(policy, language)] = KokoroPipeline(
+                     PipelineConfig(
+@@ -191,7 +252,7 @@ def run_benchmark(args: argparse.Namespace) -> list[dict[str, Any]]:
+
+         rows: list[dict[str, Any]] = []
+         for voice in voices:
+-            for policy in policies:
++            for policy in POLICIES:
+                 for language in languages:
+                     pipeline = pipelines[(policy, language)]
+                     for scenario, text, scenario_language in SCENARIOS:
+@@ -207,8 +268,14 @@ def run_benchmark(args: argparse.Namespace) -> list[dict[str, Any]]:
+                             text=text,
+                             wall_ms=wall_ms,
+                         )
+-                        row["voice"] = voice
+-                        row["language"] = language
++                        row.update(
++                            {
++                                "voice": voice,
++                                "language": language,
++                                "model_source": args.model_source,
++                                "model_variant": args.model_variant,
++                            }
++                        )
+                         rows.append(row)
+                     if language == "en-us":
+                         for text in DEMO_TEXTS:
+@@ -222,8 +289,14 @@ def run_benchmark(args: argparse.Namespace) -> list[dict[str, Any]]:
+                                 text=text,
+                                 wall_ms=wall_ms,
+                             )
+-                            row["voice"] = voice
+-                            row["language"] = language
++                            row.update(
++                                {
++                                    "voice": voice,
++                                    "language": language,
++                                    "model_source": args.model_source,
++                                    "model_variant": args.model_variant,
++                                }
++                            )
+                             rows.append(row)
+         return rows
+     finally:
+@@ -231,12 +304,61 @@ def run_benchmark(args: argparse.Namespace) -> list[dict[str, Any]]:
+             pipeline.close()
+
+
++def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
++    path.parent.mkdir(parents=True, exist_ok=True)
++    path.write_text(
++        "".join(json.dumps(row, sort_keys=True, ensure_ascii=False) + "\n" for row in rows),
++        encoding="utf-8",
++    )
++
++
++def _print_dry_run(rows: list[dict[str, Any]]) -> None:
++    voices = sorted({str(row["voice"]) for row in rows})
++    languages = sorted({str(row["language"]) for row in rows})
++    policies = sorted({str(row["configured_policy"]) for row in rows})
++    scenarios = len({(row["scenario"], row["text"], row["language"]) for row in rows})
++    print("Short-sentence benchmark dry run")
++    print(f"Voices: {', '.join(voices)}")
++    print(f"Languages: {', '.join(languages)}")
++    print(f"Policies: {', '.join(policies)}")
++    print(f"Scenario count: {scenarios}")
++    print(f"Expected total renders: {len(rows)}")
++
++
+ def main() -> int:
+     parser = argparse.ArgumentParser(description=__doc__)
+     _add_arguments(parser)
+     args = parser.parse_args()
+-    for row in run_benchmark(args):
+-        print(json.dumps(row, sort_keys=True))
++    logging.basicConfig(level=getattr(logging, args.log_level.upper()))
++    rows = run_benchmark(args)
++    if args.dry_run:
++        _print_dry_run(rows)
++        return 0
++
++    summary = build_short_sentence_summary(
++        rows,
++        metadata={
++            "model_source": args.model_source,
++            "model_variant": args.model_variant,
++            "voices": [row.get("voice") for row in rows[:1]],
++        },
++    )
++    if args.output_format in {"jsonl", "both"}:
++        if args.jsonl is not None:
++            _write_jsonl(args.jsonl, rows)
++        else:
++            for row in rows:
++                print(json.dumps(row, sort_keys=True))
++    elif args.jsonl is not None:
++        _write_jsonl(args.jsonl, rows)
++    if args.output_format in {"table", "both"}:
++        print(format_short_sentence_table(summary))
++    if args.summary_json is not None:
++        args.summary_json.parent.mkdir(parents=True, exist_ok=True)
++        args.summary_json.write_text(
++            json.dumps(summary, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
++            encoding="utf-8",
++        )
+     return 0
+
+
+diff --git a/benchmarks/short_sentence_parameter_sweep.py b/benchmarks/short_sentence_parameter_sweep.py
+new file mode 100644
+index 0000000..5762260
+--- /dev/null
++++ b/benchmarks/short_sentence_parameter_sweep.py
+@@ -0,0 +1,489 @@
++"""Generate one ordered listening WAV for a short-sentence parameter sweep."""
++
++from __future__ import annotations
++
++import argparse
++import json
++from collections.abc import Callable
++from dataclasses import dataclass, replace
++from pathlib import Path
++from typing import Any
++
++import numpy as np
++
++from pykokoro import GenerationConfig, PipelineConfig
++from pykokoro.pipeline import KokoroPipeline
++from pykokoro.short_sentence_handler import PhraseResolveMode, ShortSentenceConfig
++
++try:
++    from benchmarks._short_sentence_reporting import classify_short_sentence_outcome
++except ModuleNotFoundError:
++    from _short_sentence_reporting import classify_short_sentence_outcome
++
++
++SAMPLE_RATE = 24000
++SHORT_PAUSE_SECONDS = 0.25
++CANDIDATE_PAUSE_SECONDS = 0.70
++SECTION_PAUSE_SECONDS = 1.20
++DEFAULT_PHRASE_TEMPLATE = "The question was asked plainly: {segment}"
++
++
++@dataclass(frozen=True)
++class ParameterSpec:
++    """Definition of one supported sweep parameter."""
++
++    field: str | None
++    parser: Callable[[str], int | float | str]
++    cutters: frozenset[str]
++
++
++PARAMETERS: dict[str, ParameterSpec] = {
++    "energy-threshold": ParameterSpec(
++        "energy_threshold", float, frozenset({"energy-valley", "timestamp-adaptive"})
++    ),
++    "frame-duration-ms": ParameterSpec(
++        "frame_duration_ms", int, frozenset({"energy-valley", "timestamp-adaptive"})
++    ),
++    "min-silence-seconds": ParameterSpec(
++        "min_silence_seconds", float, frozenset({"energy-valley", "timestamp-adaptive"})
++    ),
++    "search-radius-ms": ParameterSpec("search_radius_ms", float, frozenset({"timestamp-adaptive"})),
++    "context-guard-ms": ParameterSpec("context_guard_ms", float, frozenset({"timestamp-adaptive"})),
++    "analysis-window-ms": ParameterSpec(
++        "analysis_window_ms", float, frozenset({"timestamp-adaptive"})
++    ),
++    "cutter": ParameterSpec(None, str, frozenset({"energy-valley", "timestamp-adaptive"})),
++}
++
++
++@dataclass(frozen=True)
++class RenderedAudio:
++    audio: np.ndarray
++    sample_rate: int
++    metadata: dict[str, object]
++    trace: Any = None
++
++
++def _default_phrase_template(text: str) -> str:
++    if text.rstrip().endswith("?"):
++        return DEFAULT_PHRASE_TEMPLATE
++    if text.rstrip().endswith("!"):
++        return "The speaker called out: {segment}"
++    return "The conversation stopped after one last reply: {segment}"
++
++
++def _parse_value(parameter: str, raw: str) -> int | float | str:
++    if parameter == "silence-threshold":
++        raise ValueError(
++            "silence-threshold is present in compatibility metadata but is not used by the "
++            "current short-sentence cutters and therefore cannot be optimized."
++        )
++    spec = PARAMETERS.get(parameter)
++    if spec is None:
++        choices = ", ".join(sorted([*PARAMETERS, "silence-threshold"]))
++        raise ValueError(f"unsupported parameter {parameter!r}; choose from {choices}")
++    try:
++        return spec.parser(raw.strip())
++    except (TypeError, ValueError) as exc:
++        raise ValueError(f"invalid value {raw!r} for parameter {parameter!r}") from exc
++
++
++def parse_parameter_values(parameter: str, values: str) -> list[int | float | str]:
++    """Parse ordered CLI values using the explicit parameter registry."""
++    parsed = [_parse_value(parameter, raw) for raw in values.split(",") if raw.strip()]
++    if not parsed:
++        raise ValueError("at least one sweep value is required")
++    return parsed
++
++
++def validate_parameter(parameter: str, cutter: str, values: list[int | float | str]) -> None:
++    """Validate parameter and cutter compatibility before model loading."""
++    if parameter == "silence-threshold":
++        _parse_value(parameter, "0")
++    spec = PARAMETERS.get(parameter)
++    if spec is None:
++        _parse_value(parameter, "0")
++        return
++    if cutter not in {"energy-valley", "timestamp-adaptive"}:
++        raise ValueError(f"unsupported cutter {cutter!r}")
++    if cutter not in spec.cutters:
++        raise ValueError(f"parameter {parameter!r} is incompatible with cutter {cutter!r}")
++    if parameter == "cutter":
++        invalid = [value for value in values if value not in spec.cutters]
++        if invalid:
++            raise ValueError(
++                f"invalid cutter value(s) {invalid!r}; choose from {sorted(spec.cutters)}"
++            )
++
++
++def format_parameter_value(value: int | float | str) -> str:
++    """Format a candidate deterministically for spoken labels and filenames."""
++    if isinstance(value, float):
++        if value.is_integer():
++            return str(int(value))
++        return format(value, ".12g")
++    return str(value)
++
++
++def display_parameter_name(parameter: str) -> str:
++    return parameter.replace("-", " ").capitalize()
++
++
++def build_short_sentence_config(
++    cutter: str,
++    phrase_template: str,
++    parameter: str,
++    value: int | float | str,
++    *,
++    phrase_fallback_tries: int = 0,
++) -> ShortSentenceConfig:
++    """Build a candidate config with the same explicit phrase for every value."""
++    effective_cutter = str(value) if parameter == "cutter" else cutter
++    mode = PhraseResolveMode(
++        phrase_selection="neutral",
++        neutral_phrase=phrase_template,
++        end_phrase=phrase_template,
++        cutter=effective_cutter,
++    )
++    spec = PARAMETERS.get(parameter)
++    if spec is not None and spec.field is not None and parameter != "cutter":
++        mode = replace(mode, **{spec.field: value})
++    return ShortSentenceConfig(
++        resolve_mode="phrase",
++        resolve_modes={"phrase": mode},
++        phrase_fallback_tries=phrase_fallback_tries,
++    )
++
++
++def _disabled_config() -> ShortSentenceConfig:
++    return ShortSentenceConfig(enabled=False)
++
++
++def _extract_metadata(trace: Any) -> dict[str, object]:
++    if trace is None:
++        return {}
++    for event in trace.prosody:
++        metadata = event.get("short_sentence") if isinstance(event, dict) else None
++        if isinstance(metadata, dict):
++            return dict(metadata)
++    return {}
++
++
++def _render_result(result: Any) -> RenderedAudio:
++    return RenderedAudio(
++        np.asarray(result.audio, dtype=np.float32).reshape(-1),
++        int(result.sample_rate),
++        _extract_metadata(result.trace),
++        result.trace,
++    )
++
++
++def _audio_with_pause(sample_rate: int, seconds: float) -> np.ndarray:
++    return np.zeros(round(sample_rate * seconds), dtype=np.float32)
++
++
++def assemble_sweep_audio(
++    intro: np.ndarray,
++    candidates: list[tuple[np.ndarray, np.ndarray]],
++    sample_rate: int,
++) -> tuple[np.ndarray, list[tuple[int, int]]]:
++    """Concatenate intro and label/candidate pairs, returning candidate sample offsets."""
++    sections = [np.asarray(intro, dtype=np.float32).reshape(-1)]
++    sections.append(_audio_with_pause(sample_rate, SECTION_PAUSE_SECONDS))
++    offsets: list[tuple[int, int]] = []
++    offset = sum(len(section) for section in sections)
++    for label, candidate in candidates:
++        label_audio = np.asarray(label, dtype=np.float32).reshape(-1)
++        candidate_audio = np.asarray(candidate, dtype=np.float32).reshape(-1)
++        sections.extend(
++            [
++                label_audio,
++                _audio_with_pause(sample_rate, SHORT_PAUSE_SECONDS),
++            ]
++        )
++        start = offset + len(label_audio) + round(sample_rate * SHORT_PAUSE_SECONDS)
++        end = start + len(candidate_audio)
++        sections.extend([candidate_audio, _audio_with_pause(sample_rate, CANDIDATE_PAUSE_SECONDS)])
++        offsets.append((start, end))
++        offset = sum(len(section) for section in sections)
++    return np.concatenate(sections).astype(np.float32, copy=False), offsets
++
++
++def _candidate_manifest_entry(
++    index: int,
++    value: int | float | str,
++    label: str,
++    start: int,
++    end: int,
++    rendered: RenderedAudio,
++    cutter: str,
++) -> dict[str, object]:
++    metadata = rendered.metadata
++    outcome = classify_short_sentence_outcome(cutter, metadata)
++    entry: dict[str, object] = {
++        "index": index,
++        "value": value,
++        "label": label,
++        "start_seconds": start / rendered.sample_rate,
++        "end_seconds": end / rendered.sample_rate,
++        "final_outcome": outcome,
++        "actual_cut_strategy": metadata.get("cut_strategy"),
++        "fallback_used": metadata.get("fallback_used"),
++        "retry_attempts": metadata.get("retry_attempts", 0),
++        "cut_failure_reason": metadata.get("cut_failure_reason"),
++        "timing_failure_reason": metadata.get("timing_failure_reason"),
++        "failure_stage": metadata.get("failure_stage"),
++    }
++    for key in (
++        "left_endpoint_abs_amplitude",
++        "right_endpoint_abs_amplitude",
++        "left_cross_boundary_slope",
++        "right_cross_boundary_slope",
++        "left_local_rms",
++        "right_local_rms",
++        "left_anchor_distance_ms",
++        "right_anchor_distance_ms",
++        "retained_guard_duration_ms",
++    ):
++        if key in metadata:
++            entry[key] = metadata[key]
++    return entry
++
++
++def run_parameter_sweep(
++    *,
++    text: str,
++    cutter: str,
++    parameter: str,
++    values: list[int | float | str],
++    phrase_template: str,
++    voice: str,
++    language: str,
++    model_source: str,
++    model_variant: str,
++    model_path: Path | None = None,
++    voices_path: Path | None = None,
++    speed: float = 1.0,
++    phrase_fallback_tries: int = 0,
++    random_seed: int = 0,
++    label_template: str = "{parameter} is {value}.",
++    render_text: Callable[[str, ShortSentenceConfig], RenderedAudio] | None = None,
++    save_individual: bool = False,
++    individual_dir: Path | None = None,
++) -> tuple[np.ndarray, dict[str, object]]:
++    """Render candidates and labels, returning the combined audio and manifest."""
++    validate_parameter(parameter, cutter, values)
++    if not phrase_template.count("{segment}") == 1:
++        raise ValueError("phrase-template must contain exactly one '{segment}' placeholder")
++
++    pipelines: list[KokoroPipeline] = []
++    if render_text is None:
++
++        def render_text(text_to_render: str, config: ShortSentenceConfig) -> RenderedAudio:
++            pipeline = KokoroPipeline(
++                PipelineConfig(
++                    voice=voice,
++                    model_source=model_source,
++                    model_variant=model_variant,
++                    model_path=model_path,
++                    voices_path=voices_path,
++                    generation=GenerationConfig(lang=language, speed=speed),
++                    short_sentence_config=config,
++                    return_trace=True,
++                )
++            )
++            pipelines.append(pipeline)
++            pipeline.warmup()
++            return _render_result(pipeline.run(text_to_render, voice=voice))
++
++    try:
++        intro = render_text("Short sentence parameter sweep.", _disabled_config())
++        candidates: list[tuple[np.ndarray, np.ndarray]] = []
++        manifest_candidates: list[dict[str, object]] = []
++        labels: list[str] = []
++        rendered_candidates: list[RenderedAudio] = []
++        for _index, value in enumerate(values, start=1):
++            value_text = format_parameter_value(value)
++            candidate_cutter = str(value) if parameter == "cutter" else cutter
++            label = label_template.format(
++                parameter=display_parameter_name(parameter),
++                value=value_text,
++            )
++            label_audio = render_text(label, _disabled_config())
++            config = build_short_sentence_config(
++                candidate_cutter,
++                phrase_template,
++                parameter,
++                value,
++                phrase_fallback_tries=phrase_fallback_tries,
++            )
++            rendered = render_text(text, config)
++            if (
++                rendered.sample_rate != intro.sample_rate
++                or label_audio.sample_rate != intro.sample_rate
++            ):
++                raise ValueError("all rendered audio must use the same sample rate")
++            labels.append(label)
++            rendered_candidates.append(rendered)
++            candidates.append((label_audio.audio, rendered.audio))
++        combined, offsets = assemble_sweep_audio(intro.audio, candidates, intro.sample_rate)
++        if save_individual:
++            if individual_dir is None:
++                raise ValueError("individual_dir is required when save_individual is enabled")
++            individual_dir.mkdir(parents=True, exist_ok=True)
++            import soundfile as sf
++
++            for index, (value, rendered) in enumerate(
++                zip(values, rendered_candidates, strict=True), start=1
++            ):
++                filename = f"{index:03d}_{parameter}_{format_parameter_value(value)}.wav"
++                sf.write(
++                    individual_dir / filename,
++                    rendered.audio,
++                    rendered.sample_rate,
++                    subtype="PCM_16",
++                )
++        for index, (value, rendered, (start, end), label) in enumerate(
++            zip(values, rendered_candidates, offsets, labels, strict=True), start=1
++        ):
++            manifest_candidates.append(
++                _candidate_manifest_entry(
++                    index,
++                    value,
++                    label,
++                    start,
++                    end,
++                    rendered,
++                    str(value) if parameter == "cutter" else cutter,
++                )
++            )
++        manifest: dict[str, object] = {
++            "schema": "pykokoro.short-sentence-sweep.v1",
++            "model_source": model_source,
++            "model_variant": model_variant,
++            "voice": voice,
++            "language": language,
++            "speed": speed,
++            "text": text,
++            "phrase_template": phrase_template,
++            "cutter": cutter,
++            "parameter": parameter,
++            "label_template": label_template,
++            "candidates": manifest_candidates,
++            "candidate_values": values,
++            "phrase_fallback_tries": phrase_fallback_tries,
++            "random_seed": random_seed,
++            "sample_rate": intro.sample_rate,
++            "pause_seconds": {
++                "short": SHORT_PAUSE_SECONDS,
++                "candidate": CANDIDATE_PAUSE_SECONDS,
++                "section": SECTION_PAUSE_SECONDS,
++            },
++            "short_sentence_config": {"announcement_enabled": False, "candidate_enabled": True},
++        }
++        return combined, manifest
++    finally:
++        for pipeline in pipelines:
++            pipeline.close()
++
++
++def _add_arguments(parser: argparse.ArgumentParser) -> None:
++    parser.add_argument("--model-source", choices=("github", "huggingface"), default="huggingface")
++    parser.add_argument("--model-variant", default="v1.0")
++    parser.add_argument("--model-path", type=Path)
++    parser.add_argument("--voices-path", type=Path)
++    parser.add_argument("--voice", default="af_sarah")
++    parser.add_argument("--lang", default="en-us")
++    parser.add_argument("--speed", type=float, default=1.0)
++    parser.add_argument("--text", required=True)
++    parser.add_argument(
++        "--cutter", choices=("energy-valley", "timestamp-adaptive"), default="timestamp-adaptive"
++    )
++    parser.add_argument("--parameter", required=True)
++    parser.add_argument("--values", required=True)
++    parser.add_argument("--phrase-template")
++    parser.add_argument("--label-template", default="{parameter} is {value}.")
++    parser.add_argument("--allow-retries", type=int, default=0)
++    parser.add_argument("--random-seed", type=int, default=0)
++    parser.add_argument(
++        "--output-wav", type=Path, default=Path("artifacts/short_sentence_parameter_sweep.wav")
++    )
++    parser.add_argument(
++        "--output-json", type=Path, default=Path("artifacts/short_sentence_parameter_sweep.json")
++    )
++    parser.add_argument("--save-individual", action="store_true")
++    parser.add_argument("--dry-run", action="store_true")
++
++
++def _print_dry_run(
++    args: argparse.Namespace, values: list[int | float | str], phrase_template: str
++) -> None:
++    print(f"Text: {args.text}")
++    print(f"Cutter: {args.cutter}")
++    print(f"Fixed phrase: {phrase_template}")
++    print(f"Retries: {args.allow_retries}")
++    for index, value in enumerate(values, start=1):
++        print(f"{index}  {args.parameter}={format_parameter_value(value)}")
++
++
++def main() -> int:
++    parser = argparse.ArgumentParser(description=__doc__)
++    _add_arguments(parser)
++    args = parser.parse_args()
++    if args.allow_retries < 0:
++        parser.error("--allow-retries must be non-negative")
++    try:
++        values = parse_parameter_values(args.parameter, args.values)
++        validate_parameter(args.parameter, args.cutter, values)
++    except ValueError as exc:
++        parser.error(str(exc))
++    phrase_template = args.phrase_template or _default_phrase_template(args.text)
++    if args.dry_run:
++        _print_dry_run(args, values, phrase_template)
++        return 0
++
++    combined, manifest = run_parameter_sweep(
++        text=args.text,
++        cutter=args.cutter,
++        parameter=args.parameter,
++        values=values,
++        phrase_template=phrase_template,
++        voice=args.voice,
++        language=args.lang,
++        model_source=args.model_source,
++        model_variant=args.model_variant,
++        model_path=args.model_path,
++        voices_path=args.voices_path,
++        speed=args.speed,
++        phrase_fallback_tries=args.allow_retries,
++        label_template=args.label_template,
++        random_seed=args.random_seed,
++        save_individual=args.save_individual,
++        individual_dir=args.output_wav.parent / "short_sentence_sweep",
++    )
++    args.output_wav.parent.mkdir(parents=True, exist_ok=True)
++    import soundfile as sf
++
++    sf.write(args.output_wav, combined, int(manifest["sample_rate"]), subtype="PCM_16")
++    args.output_json.parent.mkdir(parents=True, exist_ok=True)
++    args.output_json.write_text(
++        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
++    )
++    print("Candidates")
++    print("Value    Outcome             Actual strategy             Retry  Failure")
++    for candidate in manifest["candidates"]:
++        assert isinstance(candidate, dict)
++        print(
++            f"{str(candidate['value']):<8} {str(candidate['final_outcome']):<19} "
++            f"{str(candidate['actual_cut_strategy'] or '-'): <28} "
++            f"{str(candidate['retry_attempts']):>5}  {candidate['cut_failure_reason'] or '-'}"
++        )
++    print("Created:")
++    print(f"  {args.output_wav}")
++    print(f"  {args.output_json}")
++    print("Listen in printed order. Each sample is preceded by its spoken parameter value.")
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/docs/short_sentence_quality.md b/docs/short_sentence_quality.md
+index b44bcab..e39401a 100644
+--- a/docs/short_sentence_quality.md
++++ b/docs/short_sentence_quality.md
+@@ -1,7 +1,12 @@
+-# Short-sentence quality validation
++# Short-sentence benchmark tools
+
+-The warm benchmark compares the four supported policies using the same persistent
+-pipelines:
++PyKokoro provides two separate benchmark tools. They answer different questions and
++should not be combined.
++
++## Engineering benchmark
++
++`benchmarks/short_sentence_latency.py` compares the configured policies using a warm
++pipeline matrix:
+
+ ```text
+ disabled
+@@ -10,30 +15,80 @@ timestamp-adaptive
+ wrap
+ ```
+
+-Run it with model assets available:
++It reports final cases separately from phrase attempts. The default output is a compact
++table containing cases per policy, phrase-cut success rates, initial and retry success,
++wrap fallbacks, actual successful cut strategies, failure reasons, and inference costs.
++Raw rows can be exported independently:
++
++```bash
++python benchmarks/short_sentence_latency.py \
++  --model-source github \
++  --voices af_sarah \
++  --output-format both \
++  --jsonl artifacts/short_sentence_rows.jsonl \
++  --summary-json artifacts/short_sentence_summary.json
++```
++
++Use `--dry-run` to inspect voices, languages, policies, scenario count, and expected
++render count without loading model assets. `--log-level` controls benchmark logging.
++This benchmark does not write listening WAVs.
++
++Each row retains timing diagnostics, ONNX counters, wall time, RTF, boundary metrics,
++configured policy, final outcome, actual cut strategy, retry count, fallback, and stage-
++specific failure reasons. Wall-clock values are informational, not CI thresholds.
++
++## Listening parameter sweep
++
++`benchmarks/short_sentence_parameter_sweep.py` renders one fixed short segment for one
++ordered parameter sweep. Each candidate is preceded by a spoken label and separated by
++pauses in one combined WAV. Announcement rendering always disables short-sentence
++handling so the parameter under test cannot change the label.
++
++Example:
+
+ ```bash
+-python benchmarks/short_sentence_latency.py --voices af_sarah
++python benchmarks/short_sentence_parameter_sweep.py \
++  --model-source github \
++  --model-variant v1.0 \
++  --voice af_sarah \
++  --lang en-us \
++  --text "Why?" \
++  --cutter timestamp-adaptive \
++  --parameter energy-threshold \
++  --values 0.02,0.03,0.05,0.07,0.10
+ ```
+
+-Use `--dry-run` to inspect the scenario matrix without loading model assets. The
+-benchmark includes the existing 13 demo texts and the required declarative,
+-question, exclamation, interjection, two-word, fragment, ellipsis, and near-minimum
+-scenarios. It reports structural counters for ONNX calls, phrase attempts, retries,
+-wrap fallbacks, strict cuts, adaptive cuts, and failures. Wall-clock values are
+-informational and are not CI pass/fail gates.
+-
+-Each rendered row also reports objective boundary measurements:
+-
+-- absolute amplitude at the returned left and right endpoints;
+-- adjacent sample slope at each endpoint;
+-- local RMS near each endpoint;
+-- distance from each timestamp anchor in samples and milliseconds;
+-- retained guard duration in milliseconds when timestamp metadata is available.
+-
+-Review the generated outputs in an A/B listening pass. Check for missing initial
+-consonants, clipped final consonants, leaked neighboring context, clicks, abrupt
+-gating, and incorrect question or exclamation prosody. Compare old energy-valley,
+-new timestamp-adaptive, disabled, and wrap outputs. No human reference recording is
+-required, and no wall-clock improvement should be claimed without a real warm
+-benchmark run on the target hardware.
++The default artifacts are:
++
++```text
++artifacts/short_sentence_parameter_sweep.wav
++artifacts/short_sentence_parameter_sweep.json
++```
++
++Use `--phrase-template` to pin the same context phrase for every candidate,
++`--label-template` to localize announcements, `--allow-retries N` only for robustness
++experiments, and `--save-individual` for secondary per-candidate files. Retries default
++to zero for valid acoustic comparisons. Use `--dry-run` to validate the candidate list
++without loading a model.
++
++Supported parameters are `energy-threshold`, `frame-duration-ms`, `min-silence-seconds`,
++`search-radius-ms`, `context-guard-ms`, `analysis-window-ms`, and the categorical
++`cutter` comparison. Starting ranges are suggestions, not optimum values:
++
++```text
++energy-threshold:     0.02, 0.03, 0.04, 0.05, 0.06, 0.08, 0.10
++frame-duration-ms:    3, 4, 5, 6, 8, 10
++min-silence-seconds:  0.010, 0.015, 0.020, 0.025, 0.030, 0.040
++search-radius-ms:     20, 25, 35, 45, 60
++context-guard-ms:     0, 4, 8, 12, 16
++analysis-window-ms:   2, 3, 5, 8, 10
++```
++
++`silence-threshold` remains compatibility metadata and is not consumed by the current
++cutters, so the sweep rejects it. The manifest records model, voice, language, speed,
++text, phrase template, cutter, seed, fallback policy, sample rate, candidate values,
++audio offsets, outcomes, strategies, retries, failure reasons, and raw boundary metrics.
++
++The sweep is a listening aid, not an automatic optimizer. Compare candidates in printed
++order and choose based on human perception. Smooth objective boundary metrics do not
++replace listening for clipping, retained context, consonants, or prosody.
+diff --git a/examples/README.md b/examples/README.md
+index 075ad3b..56d6e84 100644
+--- a/examples/README.md
++++ b/examples/README.md
+@@ -87,8 +87,8 @@ python examples/german_tts_samples.py --model de-crane --lexicon olaph
+ python examples/german_tts_samples.py --model de-thorsten --lexicon crane
+ ```
+
+-Omitting `--lexicon` selects the static `de-de:espeak` lexicon. Pass `--lexicon` explicitly to compare
+-`gold`, `crane`, `espeak`, or `olaph` across the German models.
++Omitting `--lexicon` selects the static `de-de:espeak` lexicon. Pass `--lexicon`
++explicitly to compare `gold`, `crane`, `espeak`, or `olaph` across the German models.
+
+ Outputs are written below `example-artifacts/german_tts_samples/<model>/<lexicon>/`,
+ with one file for each sentence. The four named lexicons may require Lexphon data
+@@ -97,10 +97,11 @@ offline provisioning guidance.
+
+ ## German lexicon data
+
+-The German examples use named KokoroG2P lexicons. PyKokoro defaults to the static `de-de:espeak`
+-lexicon for implicit German selections and provides automatic Lexphon provisioning: on a missing
+-selected asset, it installs the asset and retries G2P construction once. This first-use step may
+-access the catalog and network. Later runs use the local store.
++The German examples use named KokoroG2P lexicons. PyKokoro defaults to the static
++`de-de:espeak` lexicon for implicit German selections and provides automatic Lexphon
++provisioning: on a missing selected asset, it installs the asset and retries G2P
++construction once. This first-use step may access the catalog and network. Later runs
++use the local store.
+
+ For offline deployments, pre-provision the required assets and select strict
+ installed-only behavior in `TokenizerConfig`:
+@@ -129,14 +130,13 @@ language demos are also import-safe and indexed here: `abbreviations.py`,
+ `automatic_pauses_demo.py`, `backend_comparison.py`, `boundary_detection_analysis.py`,
+ `chinese.py`, `compare_prosody_algorithms.py`, `contractions.py`,
+ `contractions_advanced.py`, `cpu_benchmark.py`, `dash_variations.py`, `english.py`,
+-`english_7m.py`,
+-`english_clausal_comma_pause.py`, `french.py`, `headings_demo.py`, `hindi.py`,
+-`homographs.py`, `italian.py`, `japanese.py`, `korean.py`, `mixed_language.py`,
+-`optimal_phoneme_length_demo.py`, `paragraph_streaming.py`, `pauses_demo.py`,
+-`phoneme_print_demo.py`, `pipeline_g2p_onnx_minimal.py`, `podcast.py`, `portuguese.py`,
+-`prosody_algorithm_selection.py`, `prosody_demo.py`, `provider_info.py`,
+-`punctuation.py`, `punctuation_variations.py`, `repro_dup_words.py`, `say_as_demo.py`,
+-`short_sentence_demo.py`, `short_sentence_randomized_demo.py`,
++`english_7m.py`, `english_clausal_comma_pause.py`, `french.py`, `headings_demo.py`,
++`hindi.py`, `homographs.py`, `italian.py`, `japanese.py`, `korean.py`,
++`mixed_language.py`, `optimal_phoneme_length_demo.py`, `paragraph_streaming.py`,
++`pauses_demo.py`, `phoneme_print_demo.py`, `pipeline_g2p_onnx_minimal.py`, `podcast.py`,
++`portuguese.py`, `prosody_algorithm_selection.py`, `prosody_demo.py`,
++`provider_info.py`, `punctuation.py`, `punctuation_variations.py`, `repro_dup_words.py`,
++`say_as_demo.py`, `short_sentence_demo.py`, `short_sentence_randomized_demo.py`,
+ `short_sentence_voices_demo.py`, `spanish.py`, `split_and_phonemize_demo.py`,
+ `ssmd_080_portable_podcast.py`, `ssmd_demo.py`, and `termux_android_onnx.py`.
+
+diff --git a/examples/short_sentence_voices_demo.py b/examples/short_sentence_voices_demo.py
+index bfb9255..9bc149f 100644
+--- a/examples/short_sentence_voices_demo.py
++++ b/examples/short_sentence_voices_demo.py
+@@ -107,12 +107,10 @@ def test_sentence_with_config(
+     """Generate audio with a persistent pipeline and per-run voice override."""
+     result = pipeline.run(text, voice=voice)
+     samples, sample_rate = result.audio, result.sample_rate
+-    print(
+-        f"  {config_name:25} -> {len(samples):6} samples "
+-        f"({len(samples) / sample_rate:.3f}s)"
+-    )
++    print(f"  {config_name:25} -> {len(samples):6} samples ({len(samples) / sample_rate:.3f}s)")
+     return samples, sample_rate
+
++
+ def main() -> None:
+     """Generate audio demonstrating short sentence handling."""
+     print_separator("SHORT SENTENCE HANDLER DEMONSTRATION")
+@@ -153,7 +151,9 @@ def main() -> None:
+         sample_rate = 24000
+         pause = np.zeros(int(sample_rate * 0.5), dtype=np.float32)
+
+-        all_samples.extend([phrase_pipeline.run("With context extraction", voice=VOICE).audio, pause])
++        all_samples.extend(
++            [phrase_pipeline.run("With context extraction", voice=VOICE).audio, pause]
++        )
+         baseline_samples.extend(
+             [baseline_pipeline.run("Without context extraction", voice=VOICE).audio, pause]
+         )
+diff --git a/pykokoro/__init__.py b/pykokoro/__init__.py
+index c552962..7cc6e7d 100644
+--- a/pykokoro/__init__.py
++++ b/pykokoro/__init__.py
+@@ -49,7 +49,11 @@ def __getattr__(name: str) -> Any:
+             "VoiceCapabilities": VoiceCapabilities,
+         }[name]
+     if name in {"LexiconCapabilities", "LexiconDiscoveryResult", "discover_lexicons"}:
+-        from .lexicon_discovery import LexiconCapabilities, LexiconDiscoveryResult, discover_lexicons
++        from .lexicon_discovery import (
++            LexiconCapabilities,
++            LexiconDiscoveryResult,
++            discover_lexicons,
++        )
+
+         return {
+             "LexiconCapabilities": LexiconCapabilities,
+diff --git a/pykokoro/audio_generator.py b/pykokoro/audio_generator.py
+index 6bda507..1448018 100644
+--- a/pykokoro/audio_generator.py
++++ b/pykokoro/audio_generator.py
+@@ -1142,21 +1142,44 @@ class AudioGenerator:
+         segment: PhonemeSegment,
+         pred_dur: np.ndarray | None,
+     ) -> None:
+-        if pred_dur is None:
+-            return
+         short_sentence_metadata = (segment.ssmd_metadata or {}).get(SHORT_SENTENCE_META_KEY)
+         if not isinstance(short_sentence_metadata, dict):
+             return
+         timing_tokens = short_sentence_metadata.get("timing_tokens")
+         if not isinstance(timing_tokens, list):
+             return
++        short_sentence_metadata["pred_duration_count"] = (
++            0 if pred_dur is None else int(np.asarray(pred_dur).reshape(-1).size)
++        )
+         _record_short_sentence_timing_alignment(short_sentence_metadata, timing_tokens)
++        if pred_dur is None:
++            short_sentence_metadata.setdefault("timing_failure_reason", "missing-duration-output")
++            short_sentence_metadata.setdefault("failure_stage", "timing-token-build")
++            short_sentence_metadata.setdefault("cut_failure_reason", "missing-duration-output")
++            return
+         strict_join = "generated_token_count" in short_sentence_metadata
+         timestamped = _join_timestamps(timing_tokens, pred_dur, strict=strict_join)
++        short_sentence_metadata["timestamp_join_complete"] = bool(timestamped)
++        if not timestamped:
++            short_sentence_metadata.setdefault("timing_failure_reason", "timestamp-join-incomplete")
++            short_sentence_metadata.setdefault("failure_stage", "timestamp-join")
++            short_sentence_metadata.setdefault("cut_failure_reason", "timestamp-join-incomplete")
+         populate_short_sentence_boundary_metadata(
+             short_sentence_metadata,
+             timestamped,
+         )
++        target_timestamp_count = sum(
++            1
++            for token in timestamped
++            if token.get("is_target")
++            and isinstance(token.get("start_ts"), (int, float))
++            and isinstance(token.get("end_ts"), (int, float))
++        )
++        short_sentence_metadata["target_timestamp_count"] = target_timestamp_count
++        if timestamped and target_timestamp_count == 0:
++            short_sentence_metadata.setdefault("timing_failure_reason", "missing-target-timestamps")
++            short_sentence_metadata.setdefault("failure_stage", "target-boundary")
++            short_sentence_metadata.setdefault("cut_failure_reason", "missing-target-timestamps")
+         for token in timestamped:
+             if not token.get("is_target"):
+                 continue
+@@ -1190,6 +1213,9 @@ class AudioGenerator:
+
+         cut_audio = cut_short_sentence_phrase_audio(audio, short_sentence_metadata)
+         if cut_audio is not None:
++            _record_short_sentence_attempt(
++                short_sentence_metadata, attempt=0, kind="initial", succeeded=True
++            )
+             _record_short_sentence_cut(short_sentence_metadata, len(audio), trace)
+             _log_short_sentence_cut_success(segment, short_sentence_metadata)
+             left_cut = short_sentence_metadata.get("cut_left")
+@@ -1199,6 +1225,9 @@ class AudioGenerator:
+             short_sentence_metadata["cut_applied"] = True
+             return cut_audio
+         _log_short_sentence_cut_failure(segment, short_sentence_metadata, len(audio))
++        _record_short_sentence_attempt(
++            short_sentence_metadata, attempt=0, kind="initial", succeeded=False
++        )
+         _record_short_sentence_cut_failure(short_sentence_metadata, trace)
+
+         retry_audio = self._try_short_sentence_phrase_fallbacks(
+@@ -1358,9 +1387,21 @@ class AudioGenerator:
+             cut_audio = cut_short_sentence_phrase_audio(retry_audio, retry.metadata)
+             if cut_audio is None:
+                 _log_short_sentence_cut_failure(segment, retry.metadata, len(retry_audio))
++                _record_short_sentence_attempt(
++                    retry.metadata,
++                    attempt=retry_attempts,
++                    kind="retry",
++                    succeeded=False,
++                )
+                 _record_short_sentence_cut_failure(retry.metadata, trace)
+                 failed_template = template
+                 continue
++            _record_short_sentence_attempt(
++                retry.metadata,
++                attempt=retry_attempts,
++                kind="retry",
++                succeeded=True,
++            )
+             _record_short_sentence_cut(retry.metadata, len(retry_audio), trace)
+
+             _log_short_sentence_cut_success(segment, retry.metadata)
+@@ -1797,11 +1838,18 @@ def _join_timestamps(
+ def _record_short_sentence_timing_alignment(
+     metadata: dict[str, object],
+     timing_tokens: list[object],
++    pred_duration_count: int | None = None,
++    *,
++    timestamp_join_complete: bool | None = None,
++    target_timestamp_count: int | None = None,
+ ) -> None:
+     model_position_count = 0
+     complete = True
++    target_token_count = 0
+     for raw_token in timing_tokens:
+         token = dict(raw_token) if isinstance(raw_token, dict) else {}
++        if token.get("is_target"):
++            target_token_count += 1
+         phonemes = str(token.get("phonemes") or "")
+         if not phonemes:
+             if token.get("whitespace"):
+@@ -1813,16 +1861,24 @@ def _record_short_sentence_timing_alignment(
+             continue
+         model_position_count += model_span_count
+     generated_token_count = metadata.get("generated_token_count")
++    metadata["timing_token_count"] = len(timing_tokens)
++    metadata["timing_target_token_count"] = target_token_count
+     metadata["timing_model_position_count"] = model_position_count
++    if pred_duration_count is not None:
++        metadata["pred_duration_count"] = pred_duration_count
+     metadata["timing_alignment_complete"] = (
+         complete
+         and isinstance(generated_token_count, int)
+         and model_position_count == generated_token_count
+     )
++    if timestamp_join_complete is not None:
++        metadata["timestamp_join_complete"] = timestamp_join_complete
++    if target_timestamp_count is not None:
++        metadata["target_timestamp_count"] = target_timestamp_count
+     if not metadata["timing_alignment_complete"]:
+-        metadata["cut_failure_reason"] = "timing-model-position-mismatch"
+-
+-
++        metadata.setdefault("timing_failure_reason", "timing-model-position-mismatch")
++        metadata.setdefault("failure_stage", "timing-alignment")
++        metadata.setdefault("cut_failure_reason", "timing-model-position-mismatch")
+
+
+ def populate_short_sentence_boundary_metadata(
+@@ -1888,6 +1944,7 @@ def _short_sentence_phrase_fallback_limit(
+     except (TypeError, ValueError):
+         return max(0, int(default))
+
++
+ def _record_short_sentence_cut(
+     metadata: dict[str, object],
+     audio_length: int,
+@@ -1953,7 +2010,9 @@ def _log_short_sentence_cut_failure(
+         target_end,
+         previous_end,
+         next_start,
+-        target_start - previous_end if target_start is not None and previous_end is not None else None,
++        target_start - previous_end
++        if target_start is not None and previous_end is not None
++        else None,
+         next_start - target_end if next_start is not None and target_end is not None else None,
+         metadata.get("has_left_context"),
+         metadata.get("has_right_context"),
+@@ -1961,7 +2020,6 @@ def _log_short_sentence_cut_failure(
+     )
+
+
+-
+ def _log_short_sentence_cut_success(
+     segment: PhonemeSegment,
+     metadata: dict[str, object],
+@@ -1988,6 +2046,32 @@ def _record_short_sentence_cut_failure(
+         trace.increment_counter("short_sentence_cut_failure")
+
+
++def _record_short_sentence_attempt(
++    metadata: dict[str, object],
++    *,
++    attempt: int,
++    kind: str,
++    succeeded: bool,
++) -> None:
++    history = metadata.setdefault("short_sentence_attempts", [])
++    if not isinstance(history, list):
++        return
++    entry: dict[str, object] = {
++        "attempt": attempt,
++        "kind": kind,
++        "phrase_template": metadata.get("phrase_template"),
++        "cutter": metadata.get("cutter"),
++        "cut_strategy": metadata.get("cut_strategy"),
++        "succeeded": succeeded,
++    }
++    if not succeeded:
++        entry["failure_stage"] = metadata.get("failure_stage")
++        entry["failure_reason"] = metadata.get(
++            "timing_failure_reason", metadata.get("cut_failure_reason")
++        )
++    history.append(entry)
++
++
+ def _timestamp_to_sample(value: object) -> int | None:
+     if not isinstance(value, (int, float)):
+         return None
+diff --git a/pykokoro/lexicon_discovery.py b/pykokoro/lexicon_discovery.py
+index cccfb17..a19f5c4 100644
+--- a/pykokoro/lexicon_discovery.py
++++ b/pykokoro/lexicon_discovery.py
+@@ -53,9 +53,7 @@ def _language_matches(requested: str | None, locale: str) -> bool:
+         return True
+     requested = _normalize_language(requested)
+     locale = _normalize_language(locale)
+-    return locale == requested or (
+-        "-" not in requested and locale.partition("-")[0] == requested
+-    )
++    return locale == requested or ("-" not in requested and locale.partition("-")[0] == requested)
+
+
+ def _installed_state(asset_id: str | None) -> bool | None:
+diff --git a/pykokoro/short_sentence_cutters/shared.py b/pykokoro/short_sentence_cutters/shared.py
+index 882669d..04d503a 100644
+--- a/pykokoro/short_sentence_cutters/shared.py
++++ b/pykokoro/short_sentence_cutters/shared.py
+@@ -29,10 +29,10 @@ def boundary_windows_from_metadata(
+     target_start = _sample_index(metadata.get("target_start_ts"), audio_length)
+     target_end = _sample_index(metadata.get("target_end_ts"), audio_length)
+     if target_start is None or target_end is None:
+-        metadata["cut_failure_reason"] = "missing-target-timestamps"
++        record_cut_failure(metadata, "missing-target-timestamps", "target-boundary")
+         return None
+     if target_end <= target_start:
+-        metadata["cut_failure_reason"] = "invalid-target-range"
++        record_cut_failure(metadata, "invalid-target-range", "target-boundary")
+         return None
+
+     has_left_context = bool(metadata.get("has_left_context", True))
+@@ -43,20 +43,20 @@ def boundary_windows_from_metadata(
+     if has_left_context:
+         previous_end = _sample_index(metadata.get("previous_token_end_ts"), audio_length)
+         if previous_end is None:
+-            metadata["cut_failure_reason"] = "left-context-timestamp-missing"
++            record_cut_failure(metadata, "left-context-timestamp-missing", "cut-window")
+             return None
+         if previous_end > target_start:
+-            metadata["cut_failure_reason"] = "left-search-invalid"
++            record_cut_failure(metadata, "left-search-invalid", "cut-window")
+             return None
+         left_window = (previous_end, target_start)
+
+     if has_right_context:
+         next_start = _sample_index(metadata.get("next_token_start_ts"), audio_length)
+         if next_start is None:
+-            metadata["cut_failure_reason"] = "right-context-timestamp-missing"
++            record_cut_failure(metadata, "right-context-timestamp-missing", "cut-window")
+             return None
+         if next_start < target_end:
+-            metadata["cut_failure_reason"] = "right-search-invalid"
++            record_cut_failure(metadata, "right-search-invalid", "cut-window")
+             return None
+         right_window = (target_end, next_start)
+
+@@ -70,6 +70,11 @@ def boundary_windows_from_metadata(
+     )
+
+
++def record_cut_failure(metadata: dict[str, object], reason: str, stage: str = "cut-window") -> None:
++    """Record the first cut failure and its pipeline stage."""
++    metadata.setdefault("cut_failure_reason", reason)
++    metadata.setdefault("failure_stage", stage)
++
+
+ def _sample_index(value: object, audio_length: int) -> int | None:
+     if isinstance(value, bool) or not isinstance(value, (int, float)):
+@@ -82,9 +87,3 @@ def _sample_index(value: object, audio_length: int) -> int | None:
+     if sample < -tolerance or sample > audio_length + tolerance:
+         return None
+     return min(audio_length, max(0, sample))
+-
+-
+-def _sample_index(value: object, audio_length: int) -> int | None:
+-    if not isinstance(value, (int, float)):
+-        return None
+-    return min(audio_length, max(0, int(float(value) * SAMPLE_RATE)))
+diff --git a/pykokoro/short_sentence_cutters/timestamp_adaptive.py b/pykokoro/short_sentence_cutters/timestamp_adaptive.py
+index d34d71a..8ea0121 100644
+--- a/pykokoro/short_sentence_cutters/timestamp_adaptive.py
++++ b/pykokoro/short_sentence_cutters/timestamp_adaptive.py
+@@ -2,19 +2,13 @@
+
+ from __future__ import annotations
+
+-from typing import Final
+-
+ import numpy as np
+ from audiosig import find_smooth_cut_point
+
+ from pykokoro.constants import SAMPLE_RATE
+
+ from .energy_valley import find_energy_valley_cut_bounds
+-from .shared import BoundaryWindows, boundary_windows_from_metadata
+-
+-_SEARCH_RADIUS_SAMPLES: Final = round(SAMPLE_RATE * 0.035)
+-_CONTEXT_GUARD_SAMPLES: Final = round(SAMPLE_RATE * 0.008)
+-_ANALYSIS_WINDOW_SAMPLES: Final = round(SAMPLE_RATE * 0.005)
++from .shared import BoundaryWindows, boundary_windows_from_metadata, record_cut_failure
+
+
+ def cut_with_timestamp_adaptive(
+@@ -45,40 +39,57 @@ def find_timestamp_adaptive_cut_bounds(
+         metadata["cut_strategy"] = "energy-valley"
+         return strict_bounds
+
+-    left_result = _find_left_cut(audio, windows, metadata)
+-    right_result = _find_right_cut(audio, windows, metadata)
++    search_radius_samples = _metadata_samples(metadata, "search_radius_ms", 35.0)
++    context_guard_samples = _metadata_samples(metadata, "context_guard_ms", 8.0, minimum=0)
++    analysis_window_samples = _metadata_samples(metadata, "analysis_window_ms", 5.0)
++    left_result = _find_left_cut(
++        audio,
++        windows,
++        metadata,
++        search_radius_samples=search_radius_samples,
++        context_guard_samples=context_guard_samples,
++        analysis_window_samples=analysis_window_samples,
++    )
++    right_result = _find_right_cut(
++        audio,
++        windows,
++        metadata,
++        search_radius_samples=search_radius_samples,
++        context_guard_samples=context_guard_samples,
++        analysis_window_samples=analysis_window_samples,
++    )
+     if left_result is None or right_result is None:
+         return None
+     left_cut, left_strategy = left_result
+     right_cut, right_strategy = right_result
+
+     if not 0 <= left_cut <= right_cut <= len(audio):
+-        metadata["cut_failure_reason"] = "cut-order-invalid"
++        record_cut_failure(metadata, "cut-order-invalid", "cut-validation")
+         return None
+     if windows.has_left_context:
+         if windows.left_window is None:
+-            metadata["cut_failure_reason"] = "left-search-invalid"
++            record_cut_failure(metadata, "left-search-invalid", "cut-search")
+             return None
+         previous_end, target_start = windows.left_window
+         if not previous_end <= left_cut <= target_start:
+-            metadata["cut_failure_reason"] = "left-cut-outside-safe-range"
++            record_cut_failure(metadata, "left-cut-outside-safe-range", "cut-validation")
+             return None
+     elif left_cut != 0:
+-        metadata["cut_failure_reason"] = "left-cut-outside-safe-range"
++        record_cut_failure(metadata, "left-cut-outside-safe-range", "cut-validation")
+         return None
+     if windows.has_right_context:
+         if windows.right_window is None:
+-            metadata["cut_failure_reason"] = "right-search-invalid"
++            record_cut_failure(metadata, "right-search-invalid", "cut-search")
+             return None
+         target_end, next_start = windows.right_window
+         if not target_end <= right_cut <= next_start:
+-            metadata["cut_failure_reason"] = "right-cut-outside-safe-range"
++            record_cut_failure(metadata, "right-cut-outside-safe-range", "cut-validation")
+             return None
+     elif right_cut != len(audio):
+-        metadata["cut_failure_reason"] = "right-cut-outside-safe-range"
++        record_cut_failure(metadata, "right-cut-outside-safe-range", "cut-validation")
+         return None
+     if right_cut <= left_cut:
+-        metadata["cut_failure_reason"] = "empty-target-audio"
++        record_cut_failure(metadata, "empty-target-audio", "cut-validation")
+         return None
+
+     strategies = {left_strategy, right_strategy}
+@@ -95,20 +106,26 @@ def _find_left_cut(
+     audio: np.ndarray,
+     windows: BoundaryWindows,
+     metadata: dict[str, object],
++    *,
++    search_radius_samples: int,
++    context_guard_samples: int,
++    analysis_window_samples: int,
+ ) -> tuple[int, str] | None:
+     if not windows.has_left_context:
+         return 0, "no-context"
+     if windows.left_window is None:
+-        metadata["cut_failure_reason"] = "left-search-invalid"
++        record_cut_failure(metadata, "left-search-invalid", "cut-search")
+         return None
+     interval = _search_interval(
+         windows.left_window,
+         anchor=windows.target_start,
+         side="left",
+         audio_length=len(audio),
++        search_radius_samples=search_radius_samples,
++        context_guard_samples=context_guard_samples,
+     )
+     if interval is None:
+-        metadata["cut_failure_reason"] = "left-search-invalid"
++        record_cut_failure(metadata, "left-search-invalid", "cut-search")
+         return None
+     start, end, strategy = interval
+     cut = find_smooth_cut_point(
+@@ -116,10 +133,10 @@ def _find_left_cut(
+         start=start,
+         end=end,
+         anchor=windows.target_start,
+-        window_length=_ANALYSIS_WINDOW_SAMPLES,
++        window_length=analysis_window_samples,
+     )
+     if cut is None:
+-        metadata["cut_failure_reason"] = "left-search-invalid"
++        record_cut_failure(metadata, "left-search-invalid", "cut-search")
+         return None
+     return cut, strategy
+
+@@ -128,20 +145,26 @@ def _find_right_cut(
+     audio: np.ndarray,
+     windows: BoundaryWindows,
+     metadata: dict[str, object],
++    *,
++    search_radius_samples: int,
++    context_guard_samples: int,
++    analysis_window_samples: int,
+ ) -> tuple[int, str] | None:
+     if not windows.has_right_context:
+         return len(audio), "no-context"
+     if windows.right_window is None:
+-        metadata["cut_failure_reason"] = "right-search-invalid"
++        record_cut_failure(metadata, "right-search-invalid", "cut-search")
+         return None
+     interval = _search_interval(
+         windows.right_window,
+         anchor=windows.target_end,
+         side="right",
+         audio_length=len(audio),
++        search_radius_samples=search_radius_samples,
++        context_guard_samples=context_guard_samples,
+     )
+     if interval is None:
+-        metadata["cut_failure_reason"] = "right-search-invalid"
++        record_cut_failure(metadata, "right-search-invalid", "cut-search")
+         return None
+     start, end, strategy = interval
+     cut = find_smooth_cut_point(
+@@ -149,10 +172,10 @@ def _find_right_cut(
+         start=start,
+         end=end,
+         anchor=windows.target_end,
+-        window_length=_ANALYSIS_WINDOW_SAMPLES,
++        window_length=analysis_window_samples,
+     )
+     if cut is None:
+-        metadata["cut_failure_reason"] = "right-search-invalid"
++        record_cut_failure(metadata, "right-search-invalid", "cut-search")
+         return None
+     return cut, strategy
+
+@@ -163,25 +186,38 @@ def _search_interval(
+     anchor: int,
+     side: str,
+     audio_length: int,
++    search_radius_samples: int,
++    context_guard_samples: int,
+ ) -> tuple[int, int, str] | None:
+     safe_low, safe_high = window
+-    guard = min(_CONTEXT_GUARD_SAMPLES, (safe_high - safe_low) // 3)
++    guard = min(context_guard_samples, (safe_high - safe_low) // 3)
+     if side == "left":
+-        start = max(safe_low, anchor - _SEARCH_RADIUS_SAMPLES)
++        start = max(safe_low, anchor - search_radius_samples)
+         end = min(safe_high, anchor - guard)
+     else:
+         start = max(safe_low, anchor + guard)
+-        end = min(safe_high, anchor + _SEARCH_RADIUS_SAMPLES)
++        end = min(safe_high, anchor + search_radius_samples)
+     if end > start:
+         return start, end, "timestamp-smooth"
+
+-    relaxed_start = max(safe_low, anchor - _SEARCH_RADIUS_SAMPLES)
+-    relaxed_end = min(audio_length, safe_high + 1, anchor + _SEARCH_RADIUS_SAMPLES + 1)
++    relaxed_start = max(safe_low, anchor - search_radius_samples)
++    relaxed_end = min(audio_length, safe_high + 1, anchor + search_radius_samples + 1)
+     if relaxed_end <= relaxed_start:
+         return None
+     strategy = "timestamp-anchor" if safe_low == safe_high == anchor else "timestamp-smooth-relaxed"
+     return relaxed_start, relaxed_end, strategy
+
+
++def _metadata_samples(
++    metadata: dict[str, object],
++    key: str,
++    default_ms: float,
++    *,
++    minimum: int = 1,
++) -> int:
++    value = metadata.get(key, default_ms)
++    return max(minimum, round(SAMPLE_RATE * float(value) / 1000.0))
++
++
+ def _as_float_audio(audio: np.ndarray) -> np.ndarray:
+     return np.asarray(audio, dtype=np.float32)
+diff --git a/pykokoro/short_sentence_handler.py b/pykokoro/short_sentence_handler.py
+index cdabec5..9bd4039 100644
+--- a/pykokoro/short_sentence_handler.py
++++ b/pykokoro/short_sentence_handler.py
+@@ -16,6 +16,7 @@ sufficient context for natural prosody.
+ from __future__ import annotations
+
+ import logging
++import math
+ import random
+ import time
+ from collections.abc import Callable
+@@ -42,6 +43,46 @@ ResolveModeName = str | Literal[False]
+ PhraseSelection = Literal["auto", "neutral", "end"]
+
+
++def _validate_phrase_cutter_settings(
++    frame_duration_ms: int,
++    energy_threshold: float,
++    min_silence_seconds: float,
++    search_radius_ms: float,
++    context_guard_ms: float,
++    analysis_window_ms: float,
++) -> None:
++    if (
++        isinstance(frame_duration_ms, bool)
++        or not isinstance(frame_duration_ms, int)
++        or frame_duration_ms <= 0
++    ):
++        raise ValueError("frame_duration_ms must be a positive integer")
++    numeric_values = {
++        "energy_threshold": energy_threshold,
++        "min_silence_seconds": min_silence_seconds,
++        "search_radius_ms": search_radius_ms,
++        "context_guard_ms": context_guard_ms,
++        "analysis_window_ms": analysis_window_ms,
++    }
++    for name, value in numeric_values.items():
++        if (
++            isinstance(value, bool)
++            or not isinstance(value, (int, float))
++            or not math.isfinite(value)
++        ):
++            raise ValueError(f"{name} must be a finite number")
++    if not 0 <= energy_threshold <= 1:
++        raise ValueError("energy_threshold must be between 0 and 1")
++    if min_silence_seconds < 0:
++        raise ValueError("min_silence_seconds must be non-negative")
++    if search_radius_ms <= 0:
++        raise ValueError("search_radius_ms must be positive")
++    if context_guard_ms < 0:
++        raise ValueError("context_guard_ms must be non-negative")
++    if analysis_window_ms <= 0:
++        raise ValueError("analysis_window_ms must be positive")
++
++
+ @dataclass
+ class WrapResolveMode:
+     """Configuration for phoneme pretext wrapping."""
+@@ -63,6 +104,19 @@ class PhraseResolveMode:
+     silence_threshold: float = 1e-4
+     min_silence_seconds: float = 0.02
+     cutter: Literal["energy-valley", "timestamp-adaptive"] = "timestamp-adaptive"
++    search_radius_ms: float = 35.0
++    context_guard_ms: float = 8.0
++    analysis_window_ms: float = 5.0
++
++    def __post_init__(self) -> None:
++        _validate_phrase_cutter_settings(
++            self.frame_duration_ms,
++            self.energy_threshold,
++            self.min_silence_seconds,
++            self.search_radius_ms,
++            self.context_guard_ms,
++            self.analysis_window_ms,
++        )
+
+
+ @dataclass
+@@ -129,6 +183,19 @@ class RandomizedPhraseResolveMode:
+     silence_threshold: float = 1e-4
+     min_silence_seconds: float = 0.02
+     cutter: Literal["energy-valley", "timestamp-adaptive"] = "timestamp-adaptive"
++    search_radius_ms: float = 35.0
++    context_guard_ms: float = 8.0
++    analysis_window_ms: float = 5.0
++
++    def __post_init__(self) -> None:
++        _validate_phrase_cutter_settings(
++            self.frame_duration_ms,
++            self.energy_threshold,
++            self.min_silence_seconds,
++            self.search_radius_ms,
++            self.context_guard_ms,
++            self.analysis_window_ms,
++        )
+
+
+ ShortSentenceResolveMode = WrapResolveMode | PhraseResolveMode | RandomizedPhraseResolveMode
+@@ -225,6 +292,7 @@ class ShortSentenceConfig:
+     phrase_fallback_tries: int = 1
+
+     phrase_catalog: dict[str, ShortSentencePhraseSet] | None = None
++
+     def __post_init__(self) -> None:
+         if (
+             isinstance(self.min_phoneme_length, bool)
+@@ -278,6 +346,7 @@ class ShortSentenceConfig:
+                     raise ValueError("phrase_catalog values must be ShortSentencePhraseSet")
+                 if key.strip().lower().replace("_", "-") != phrase_set.language.lower():
+                     raise ValueError("phrase catalog key must match its declared language")
++
+     def should_use_pause_surrounding(self, phoneme_length: int, text: str) -> bool:
+         """Check if segment should use pause surrounding.
+
+@@ -444,7 +513,11 @@ def _build_wrap_application(
+     cut_failure_reason: str | None = None,
+ ) -> ShortSentenceApplication:
+     wrap_mode = config.resolve_modes.get("wrap")
+-    pretext = wrap_mode.phoneme_pretext if isinstance(wrap_mode, WrapResolveMode) else config.phoneme_pretext
++    pretext = (
++        wrap_mode.phoneme_pretext
++        if isinstance(wrap_mode, WrapResolveMode)
++        else config.phoneme_pretext
++    )
+     if pretext == "—":
+         pretext = config.phoneme_pretext
+     wrapped = f"{pretext}{phonemes}{pretext}"
+@@ -652,9 +725,7 @@ def _select_phrase_fallback_templates(
+     used = set(used_templates)
+     if isinstance(mode, PhraseResolveMode):
+         effective_phrase_set = (
+-            phrase_set
+-            if phrase_set is not None and phrase_set.language != "en"
+-            else None
++            phrase_set if phrase_set is not None and phrase_set.language != "en" else None
+         )
+         choices = _default_ranked_phrase_choices(segment_text, effective_phrase_set)
+         return _unique_phrase_templates(choices, used, limit)
+@@ -728,6 +799,7 @@ def _phrase_choices(
+     )
+     return choices or [fallback]
+
++
+ def _configured_phrase_mode(config: ShortSentenceConfig) -> PhraseResolveMode | None:
+     mode = config.resolve_modes.get("phrase")
+     if isinstance(mode, PhraseResolveMode):
+@@ -748,6 +820,7 @@ def _default_ranked_phrase_choices(
+     )
+     return _phrase_choices(segment_text, defaults, phrase_set=phrase_set)
+
++
+ def _unique_phrase_templates(
+     choices: list[str],
+     used: set[str],
+@@ -764,7 +837,9 @@ def _unique_phrase_templates(
+     return selected
+
+
+-def _terminal_form(segment_text: str) -> Literal["declarative", "question", "exclamation", "ellipsis", "fragment"]:
++def _terminal_form(
++    segment_text: str,
++) -> Literal["declarative", "question", "exclamation", "ellipsis", "fragment"]:
+     text = segment_text.rstrip()
+     if text.endswith(("…", "...")):
+         return "ellipsis"
+@@ -785,6 +860,7 @@ def _uses_end_phrase(segment_text: str, mode: ShortSentenceResolveMode) -> bool:
+             return False
+     return _terminal_form(segment_text) != "fragment"
+
++
+ def _build_short_sentence_metadata(
+     *,
+     mode_name: str,
+@@ -807,12 +883,18 @@ def _build_short_sentence_metadata(
+         silence_threshold = 1e-4
+         min_silence_seconds = 0.02
+         cutter = "energy-valley"
++        search_radius_ms = 35.0
++        context_guard_ms = 8.0
++        analysis_window_ms = 5.0
+     else:
+         frame_duration_ms = mode.frame_duration_ms
+         energy_threshold = mode.energy_threshold
+         silence_threshold = mode.silence_threshold
+         min_silence_seconds = mode.min_silence_seconds
+         cutter = mode.cutter
++        search_radius_ms = mode.search_radius_ms
++        context_guard_ms = mode.context_guard_ms
++        analysis_window_ms = mode.analysis_window_ms
+     expected_cut_ratio = 1.0
+     if generated_token_count > 0:
+         expected_cut_ratio = original_token_count / generated_token_count
+@@ -831,6 +913,9 @@ def _build_short_sentence_metadata(
+         "silence_threshold": silence_threshold,
+         "min_silence_seconds": min_silence_seconds,
+         "cutter": cutter,
++        "search_radius_ms": search_radius_ms,
++        "context_guard_ms": context_guard_ms,
++        "analysis_window_ms": analysis_window_ms,
+     }
+     if timing_tokens:
+         metadata["timing_tokens"] = timing_tokens
+@@ -872,10 +957,18 @@ def _build_short_sentence_retry_metadata(
+         "silence_threshold": base_metadata.get("silence_threshold", 1e-4),
+         "min_silence_seconds": base_metadata.get("min_silence_seconds", 0.02),
+         "cutter": base_metadata.get("cutter", "energy-valley"),
++        "search_radius_ms": base_metadata.get("search_radius_ms", 35.0),
++        "context_guard_ms": base_metadata.get("context_guard_ms", 8.0),
++        "analysis_window_ms": base_metadata.get("analysis_window_ms", 5.0),
+     }
+     if timing_tokens:
+         metadata["timing_tokens"] = timing_tokens
+-    for key in ("fallback_phonemes", "fallback_tokens", "phrase_fallback_tries"):
++    for key in (
++        "fallback_phonemes",
++        "fallback_tokens",
++        "phrase_fallback_tries",
++        "short_sentence_attempts",
++    ):
+         if key in base_metadata:
+             metadata[key] = base_metadata[key]
+     return metadata
+diff --git a/pykokoro/short_sentence_phrases.py b/pykokoro/short_sentence_phrases.py
+index 742a387..fe10e96 100644
+--- a/pykokoro/short_sentence_phrases.py
++++ b/pykokoro/short_sentence_phrases.py
+@@ -67,7 +67,10 @@ ENGLISH_SHORT_SENTENCE_PHRASES = ShortSentencePhraseSet(
+     question=("The question was asked plainly: {segment}", "A quiet voice asked: {segment}"),
+     exclamation=("The speaker called out: {segment}", "The announcement ended with: {segment}"),
+     ellipsis=("The thought trailed off with: {segment}", "The unfinished sentence was: {segment}"),
+-    fragment=("The note contained only these words: {segment}", "The short message read: {segment}"),
++    fragment=(
++        "The note contained only these words: {segment}",
++        "The short message read: {segment}",
++    ),
+ )
+
+ GERMAN_SHORT_SENTENCE_PHRASES = ShortSentencePhraseSet(
+diff --git a/pykokoro/stages/g2p/kokorog2p.py b/pykokoro/stages/g2p/kokorog2p.py
+index b2c7430..aad5854 100644
+--- a/pykokoro/stages/g2p/kokorog2p.py
++++ b/pykokoro/stages/g2p/kokorog2p.py
+@@ -50,6 +50,7 @@ class _CachedContextToken:
+     char_end: int | None
+     model_token_count: int | None
+
++
+ @dataclass(frozen=True)
+ class _CachedContextResult:
+     phonemes: str
+@@ -66,6 +67,7 @@ class KokoroG2PAdapter(G2PAdapter):
+
+         self._context_cache: OrderedDict[tuple[object, ...], _CachedContextResult] = OrderedDict()
+         self._context_cache_max_entries = 256
++
+     def _load(self) -> ModuleType:
+         if self._g2p is not None:
+             return self._g2p
+@@ -703,6 +705,7 @@ class KokoroG2PAdapter(G2PAdapter):
+             _effective_lexicons,
+             _legacy_fallback_kwargs,
+         )
++
+         tokenizer_config = cfg.tokenizer_config or TokenizerConfig()
+         kokorog2p_lang = SUPPORTED_LANGUAGES.get(lang, lang)
+         default_language = normalize_language_code(cfg.generation.lang or lang)
+@@ -796,9 +799,7 @@ class KokoroG2PAdapter(G2PAdapter):
+     ) -> tuple[object, ...]:
+         profile, backend, _ = self._resolve_frontend_contract(cfg)
+         model_version = self._get_model_version(cfg, language)
+-        kwargs = self._g2p_kwargs_for_language(
+-            language, cfg, backend, profile, model_version
+-        )
++        kwargs = self._g2p_kwargs_for_language(language, cfg, backend, profile, model_version)
+         tokenizer_config = cfg.tokenizer_config
+         lexicon_data_policy = (
+             tokenizer_config.lexicon_data_policy if tokenizer_config is not None else None
+@@ -856,7 +857,6 @@ class KokoroG2PAdapter(G2PAdapter):
+             tokens=tuple(normalized_tokens),
+         )
+
+-
+     def _record_selection(
+         self, doc: DocumentResult, lang: str, cfg: PipelineConfig, g2p_instance: G2PBase
+     ) -> None:
+diff --git a/pykokoro/tokenizer.py b/pykokoro/tokenizer.py
+index bbfe204..3c8522a 100644
+--- a/pykokoro/tokenizer.py
++++ b/pykokoro/tokenizer.py
+@@ -76,6 +76,7 @@ def _default_lexicons_for_language(language: str) -> tuple[str, ...] | None:
+         return GERMAN_DEFAULT_LEXICONS
+     return None
+
++
+ def _normalize_lexicons(
+     value: str | Sequence[str] | None,
+ ) -> tuple[str, ...] | None:
+diff --git a/pykokoro/types.py b/pykokoro/types.py
+index 56aca5c..e14d89f 100644
+--- a/pykokoro/types.py
++++ b/pykokoro/types.py
+@@ -226,10 +226,10 @@ class Trace:
+     model: dict[str, Any] = field(default_factory=dict)
+     counters: dict[str, int] = field(default_factory=dict)
+
+-
+     def increment_counter(self, name: str, amount: int = 1) -> None:
+         """Increment a named trace counter."""
+         self.counters[name] = self.counters.get(name, 0) + amount
++
+     def inference_summary(self) -> dict[str, float | int | None]:
+         """Return aggregate acoustic inference metrics without retaining extra arrays."""
+         calls = len(self.inference)
+@@ -249,9 +249,7 @@ class Trace:
+             "short_sentence_retry_calls": self.counters.get("short_sentence_retry_calls", 0),
+             "fallback_onnx_calls": self.counters.get("fallback_onnx_calls", 0),
+             "short_sentence_detected": self.counters.get("short_sentence_detected", 0),
+-            "short_sentence_phrase_initial": self.counters.get(
+-                "short_sentence_phrase_initial", 0
+-            ),
++            "short_sentence_phrase_initial": self.counters.get("short_sentence_phrase_initial", 0),
+             "short_sentence_phrase_retry": self.counters.get("short_sentence_phrase_retry", 0),
+             "short_sentence_cut_strict_success": self.counters.get(
+                 "short_sentence_cut_strict_success", 0
+@@ -260,9 +258,7 @@ class Trace:
+                 "short_sentence_cut_adaptive_success", 0
+             ),
+             "short_sentence_cut_failure": self.counters.get("short_sentence_cut_failure", 0),
+-            "short_sentence_wrap_fallback": self.counters.get(
+-                "short_sentence_wrap_fallback", 0
+-            ),
++            "short_sentence_wrap_fallback": self.counters.get("short_sentence_wrap_fallback", 0),
+         }
+
+     def event_summary(self) -> dict[tuple[str, str], float]:
+diff --git a/tests/test_audio_generator_performance.py b/tests/test_audio_generator_performance.py
+index 7200973..44ec9f6 100644
+--- a/tests/test_audio_generator_performance.py
++++ b/tests/test_audio_generator_performance.py
+@@ -173,6 +173,7 @@ def test_inference_cache_evicts_by_bytes_and_close_clears_entries() -> None:
+     generator._run_onnx("abc", style, 1.0)
+     assert session.calls == 4
+
++
+ def test_trace_summary_exposes_short_sentence_counters() -> None:
+     trace = Trace()
+     for name in (
+@@ -189,6 +190,7 @@ def test_trace_summary_exposes_short_sentence_counters() -> None:
+     summary = trace.inference_summary()
+     assert all(summary[name] == 1 for name in trace.counters)
+
++
+ class _PhraseSession(_Session):
+     def __init__(self, audio: np.ndarray) -> None:
+         super().__init__()
+@@ -222,8 +224,11 @@ def _phrase_metadata(*, cutter: str = "energy-valley", valid: bool = True) -> di
+
+ @pytest.mark.parametrize(
+     ("waveform", "cutter"),
+-    [(np.zeros(4000, dtype=np.float32), "energy-valley"), (np.ones(4000, dtype=np.float32), "timestamp-adaptive")],
+- )
++    [
++        (np.zeros(4000, dtype=np.float32), "energy-valley"),
++        (np.ones(4000, dtype=np.float32), "timestamp-adaptive"),
++    ],
++)
+ def test_phrase_cut_success_uses_one_model_call(waveform, cutter) -> None:
+     session = _PhraseSession(waveform)
+     generator = AudioGenerator(session, _Tokenizer(), inference_cache_enabled=False)
+diff --git a/tests/test_audio_splitting.py b/tests/test_audio_splitting.py
+index a8a7cdc..5b20bee 100644
+--- a/tests/test_audio_splitting.py
++++ b/tests/test_audio_splitting.py
+@@ -261,6 +261,9 @@ def test_preprocess_phrase_mode_uses_phrase_phonemes_and_metadata(monkeypatch):
+     assert metadata["phrase_template"] == "The word, {segment}, appears here."
+     assert metadata["original_token_count"] == 3
+     assert metadata["generated_token_count"] == 8
++    assert metadata["search_radius_ms"] == 35.0
++    assert metadata["context_guard_ms"] == 8.0
++    assert metadata["analysis_window_ms"] == 5.0
+
+
+ def test_preprocess_phrase_mode_uses_pipeline_context_phonemizer() -> None:
+diff --git a/tests/test_g2p_adapter_spacy_model.py b/tests/test_g2p_adapter_spacy_model.py
+index e288534..9dfa232 100644
+--- a/tests/test_g2p_adapter_spacy_model.py
++++ b/tests/test_g2p_adapter_spacy_model.py
+@@ -222,6 +222,7 @@ def test_kokorog2p_adapter_uses_german_implicit_espeak_lexicon(monkeypatch):
+
+     assert captured["lexicons"] == ("espeak",)
+
++
+ def test_g2p_instance_cache_distinguishes_named_lexicons(monkeypatch):
+     created: list[dict[str, object]] = []
+
+diff --git a/tests/test_g2p_cache.py b/tests/test_g2p_cache.py
+index bca9b89..70b0585 100644
+--- a/tests/test_g2p_cache.py
++++ b/tests/test_g2p_cache.py
+@@ -168,6 +168,7 @@ def test_previous_g2p_cache_schema_is_recomputed_with_cleaned_payload(
+     assert payload["phonemes"] == "bykə"
+     assert payload["tokens"] == [ord(char) for char in "bykə"]
+
++
+ def test_context_g2p_cache_normalizes_results_and_covers_frontend_key(monkeypatch) -> None:
+     adapter = KokoroG2PAdapter()
+     config = PipelineConfig(generation=GenerationConfig(lang="en-us"))
+diff --git a/tests/test_lexicon_discovery.py b/tests/test_lexicon_discovery.py
+index 1c53f82..8d9c945 100644
+--- a/tests/test_lexicon_discovery.py
++++ b/tests/test_lexicon_discovery.py
+@@ -2,9 +2,9 @@ from __future__ import annotations
+
+ from types import SimpleNamespace
+
+-import pykokoro
+ import pytest
+
++import pykokoro
+ from pykokoro import lexicon_discovery
+
+
+@@ -59,9 +59,7 @@ def test_known_model_filter_and_unknown_capability(monkeypatch: pytest.MonkeyPat
+         lexicon_discovery,
+         "discover_models",
+         lambda **_kwargs: SimpleNamespace(
+-            models=(
+-                SimpleNamespace(model_id="de-thorsten", lexicons=("gold", "crane")),
+-            )
++            models=(SimpleNamespace(model_id="de-thorsten", lexicons=("gold", "crane")),)
+         ),
+     )
+
+diff --git a/tests/test_packaging_metadata.py b/tests/test_packaging_metadata.py
+index b82e780..d0857e6 100644
+--- a/tests/test_packaging_metadata.py
++++ b/tests/test_packaging_metadata.py
+@@ -119,6 +119,7 @@ def test_audiosig_smooth_cut_api_contract() -> None:
+
+     assert callable(find_smooth_cut_point)
+
++
+ def test_production_source_has_no_forbidden_dsp_imports() -> None:
+     forbidden = (
+         "import librosa",
+diff --git a/tests/test_short_sentence_benchmark_reporting.py b/tests/test_short_sentence_benchmark_reporting.py
+new file mode 100644
+index 0000000..f953213
+--- /dev/null
++++ b/tests/test_short_sentence_benchmark_reporting.py
+@@ -0,0 +1,110 @@
++from __future__ import annotations
++
++from benchmarks._short_sentence_reporting import (
++    aggregate_short_sentence_rows,
++    build_short_sentence_summary,
++    classify_short_sentence_outcome,
++    format_short_sentence_table,
++)
++
++
++def test_classify_short_sentence_outcomes() -> None:
++    assert classify_short_sentence_outcome("disabled", None) == "disabled"
++    assert classify_short_sentence_outcome("wrap", {"kind": "wrap"}) == "wrap-configured"
++    assert (
++        classify_short_sentence_outcome(
++            "energy-valley", {"kind": "phrase", "cut_strategy": "energy-valley"}
++        )
++        == "phrase-cut-initial"
++    )
++    assert (
++        classify_short_sentence_outcome(
++            "phrase", {"kind": "phrase", "cut_strategy": "timestamp-smooth"}
++        )
++        == "phrase-cut-initial"
++    )
++    assert (
++        classify_short_sentence_outcome(
++            "phrase",
++            {
++                "kind": "phrase",
++                "cut_strategy": "timestamp-smooth-relaxed",
++                "fallback_used": "phrase",
++            },
++        )
++        == "phrase-cut-retry"
++    )
++    assert (
++        classify_short_sentence_outcome(
++            "phrase",
++            {"kind": "phrase", "cut_strategy": "timestamp-anchor", "fallback_used": "phrase"},
++        )
++        == "phrase-cut-retry"
++    )
++    assert (
++        classify_short_sentence_outcome(
++            "phrase", {"kind": "phrase", "cut_strategy": "wrap", "fallback_used": "wrap"}
++        )
++        == "wrap-fallback"
++    )
++    assert (
++        classify_short_sentence_outcome(
++            "phrase", {"kind": "wrap", "cut_failure_reason": "no-localized-phrase-catalog"}
++        )
++        == "wrap-no-localized-catalog"
++    )
++    assert classify_short_sentence_outcome("phrase", None) == "unresolved"
++
++
++def test_aggregation_keeps_final_case_denominator_separate_from_attempts() -> None:
++    rows = [
++        {
++            "policy": "timestamp-adaptive",
++            "short_sentence_metadata": {
++                "kind": "phrase",
++                "cut_strategy": "timestamp-smooth-relaxed",
++                "fallback_used": "phrase",
++            },
++            "initial_phrase_attempts": 1,
++            "phrase_retries": 1,
++            "cut_failures": 2,
++            "wrap_fallback_renders": 0,
++        },
++        {
++            "policy": "timestamp-adaptive",
++            "short_sentence_metadata": {
++                "kind": "phrase",
++                "cut_strategy": "wrap",
++                "fallback_used": "wrap",
++                "cut_failure_reason": "left-search-invalid",
++            },
++            "initial_phrase_attempts": 1,
++            "phrase_retries": 0,
++            "cut_failures": 1,
++            "wrap_fallback_renders": 1,
++        },
++    ]
++
++    summary = aggregate_short_sentence_rows(rows)
++    policy = summary["cases"]["timestamp-adaptive"]
++    assert policy["cases"] == 2
++    assert policy["phrase_cut_successes"] == 1
++    assert policy["retry_successes"] == 1
++    assert policy["wrap_fallbacks"] == 1
++    assert policy["phrase_cut_success_rate"] == 0.5
++    assert summary["attempts"]["cut_failures"] == 3
++    assert summary["actual_cut_strategies"] == {"timestamp-smooth-relaxed": 1}
++    assert summary["failure_reasons"] == {"left-search-invalid": 1}
++
++
++def test_summary_and_table_include_run_metadata_and_sections() -> None:
++    summary = build_short_sentence_summary(
++        [{"policy": "disabled"}], metadata={"voice": "af_sarah", "model": "v1.0"}
++    )
++
++    table = format_short_sentence_table(summary)
++    assert summary["schema"] == "pykokoro.short-sentence-benchmark.v1"
++    assert "Voice: af_sarah" in table
++    assert "Configured policy" in table
++    assert "Phrase attempt accounting" in table
++    assert "Failure reasons" in table
+diff --git a/tests/test_short_sentence_cutters.py b/tests/test_short_sentence_cutters.py
+index 79a863e..571248c 100644
+--- a/tests/test_short_sentence_cutters.py
++++ b/tests/test_short_sentence_cutters.py
+@@ -3,6 +3,7 @@ from __future__ import annotations
+ import numpy as np
+
+ from pykokoro.short_sentence_cutters.energy_valley import find_energy_valley_cut_bounds
++from pykokoro.short_sentence_cutters.shared import _sample_index, boundary_windows_from_metadata
+ from pykokoro.short_sentence_cutters.timestamp_adaptive import (
+     cut_with_timestamp_adaptive,
+     find_timestamp_adaptive_cut_bounds,
+@@ -96,7 +97,7 @@ def test_timestamp_adaptive_shrinks_guard_for_narrow_context(monkeypatch) -> Non
+
+
+ def test_timestamp_adaptive_preserves_one_sided_context(monkeypatch) -> None:
+-    audio = np.ones(3000, dtype=np.float32)
++    audio = np.ones(4000, dtype=np.float32)
+     metadata = _metadata(left=False, right=True)
+     monkeypatch.setattr(
+         "pykokoro.short_sentence_cutters.timestamp_adaptive.find_energy_valley_cut_bounds",
+@@ -138,9 +139,11 @@ def test_timestamp_adaptive_accepts_zero_width_context_gaps(monkeypatch) -> None
+         "pykokoro.short_sentence_cutters.timestamp_adaptive.find_energy_valley_cut_bounds",
+         lambda _audio, _metadata: None,
+     )
++
+     def smooth_point(_audio, *, start, end, anchor, window_length):
+         intervals.append((start, end))
+         return anchor
++
+     monkeypatch.setattr(
+         "pykokoro.short_sentence_cutters.timestamp_adaptive.find_smooth_cut_point",
+         smooth_point,
+@@ -166,7 +169,7 @@ def test_timestamp_adaptive_accepts_terminal_target_at_audio_end(monkeypatch) ->
+
+
+ def test_timestamp_adaptive_accepts_target_at_audio_start(monkeypatch) -> None:
+-    audio = np.ones(3000, dtype=np.float32)
++    audio = np.ones(4000, dtype=np.float32)
+     metadata = _metadata(left=False, right=True)
+     metadata["target_start_ts"] = 0.0
+     metadata["target_end_ts"] = 800 / 24000
+@@ -193,3 +196,61 @@ def test_timestamp_adaptive_accepts_one_sample_context_gaps(monkeypatch) -> None
+         lambda _audio, *, anchor, **kwargs: anchor,
+     )
+     assert find_timestamp_adaptive_cut_bounds(audio, metadata) == (1000, 2000)
++
++
++def test_sample_index_rejects_invalid_and_out_of_tolerance_values() -> None:
++    for value in (True, float("nan"), float("inf"), -3 / 24000, (4000 + 3) / 24000):
++        assert _sample_index(value, 4000) is None
++
++    assert _sample_index(-2 / 24000, 4000) == 0
++    assert _sample_index((4000 + 2) / 24000, 4000) == 4000
++
++
++def test_sample_index_accepts_exact_audio_boundaries() -> None:
++    assert _sample_index(0.0, 4000) == 0
++    assert _sample_index(4000 / 24000, 4000) == 4000
++
++
++def test_boundary_failure_does_not_overwrite_timing_failure() -> None:
++    metadata: dict[str, object] = {
++        "target_start_ts": 100 / 24000,
++        "target_end_ts": 200 / 24000,
++        "timing_failure_reason": "timing-model-position-mismatch",
++        "cut_failure_reason": "timing-model-position-mismatch",
++        "failure_stage": "timing-alignment",
++    }
++
++    assert boundary_windows_from_metadata(4000, metadata) is None
++    assert metadata["timing_failure_reason"] == "timing-model-position-mismatch"
++    assert metadata["cut_failure_reason"] == "timing-model-position-mismatch"
++    assert metadata["failure_stage"] == "timing-alignment"
++
++
++def test_timestamp_adaptive_uses_configured_sample_windows(monkeypatch) -> None:
++    audio = np.ones(4000, dtype=np.float32)
++    metadata = _metadata()
++    metadata.update(
++        {
++            "search_radius_ms": 10.0,
++            "context_guard_ms": 0.0,
++            "analysis_window_ms": 2.0,
++        }
++    )
++    intervals: list[tuple[int, int, int]] = []
++
++    monkeypatch.setattr(
++        "pykokoro.short_sentence_cutters.timestamp_adaptive.find_energy_valley_cut_bounds",
++        lambda _audio, _metadata: None,
++    )
++
++    def smooth_point(_audio, *, start, end, anchor, window_length):
++        intervals.append((start, end, window_length))
++        return start if anchor == 1600 else end - 1
++
++    monkeypatch.setattr(
++        "pykokoro.short_sentence_cutters.timestamp_adaptive.find_smooth_cut_point",
++        smooth_point,
++    )
++
++    assert find_timestamp_adaptive_cut_bounds(audio, metadata) == (1360, 2639)
++    assert intervals == [(1360, 1600, 48), (2400, 2640, 48)]
+diff --git a/tests/test_short_sentence_handler.py b/tests/test_short_sentence_handler.py
+index 814780c..bf77094 100644
+--- a/tests/test_short_sentence_handler.py
++++ b/tests/test_short_sentence_handler.py
+@@ -23,6 +23,7 @@ def test_phrase_cutters_default_to_timestamp_adaptive_with_compatibility_option(
+     assert PhraseResolveMode(cutter="energy-valley").cutter == "energy-valley"
+     assert RandomizedPhraseResolveMode(cutter="energy-valley").cutter == "energy-valley"
+
++
+ def test_randomized_templates_match_terminal_punctuation() -> None:
+     mode = RandomizedPhraseResolveMode()
+     expected = {
+@@ -44,6 +45,7 @@ def test_randomized_templates_match_terminal_punctuation() -> None:
+         if text != "Go":
+             assert all(template.endswith("{segment}") for template in templates)
+
++
+ def test_short_sentence_config_rejects_negative_thresholds_and_retries():
+     import pytest
+
+@@ -53,6 +55,30 @@ def test_short_sentence_config_rejects_negative_thresholds_and_retries():
+         ShortSentenceConfig(phrase_fallback_tries=-1)
+
+
++def test_phrase_modes_validate_cutter_settings() -> None:
++    import pytest
++
++    mode_types = (PhraseResolveMode, RandomizedPhraseResolveMode)
++    invalid_values = {
++        "frame_duration_ms": 0,
++        "energy_threshold": float("nan"),
++        "min_silence_seconds": -0.1,
++        "search_radius_ms": 0.0,
++        "context_guard_ms": -1.0,
++        "analysis_window_ms": float("inf"),
++    }
++    for mode_type in mode_types:
++        for field_name, value in invalid_values.items():
++            with pytest.raises(ValueError, match=field_name):
++                mode_type(**{field_name: value})
++
++    for mode_type in mode_types:
++        mode = mode_type()
++        assert mode.search_radius_ms == 35.0
++        assert mode.context_guard_ms == 8.0
++        assert mode.analysis_window_ms == 5.0
++
++
+ def test_short_sentence_config_rejects_unknown_mode_and_malformed_template():
+     import pytest
+
+@@ -168,9 +194,11 @@ def test_custom_phrase_catalog_is_selected_for_segment_language() -> None:
+     segment = make_segment("word", "abc")
+     segment.lang = "xx"
+     calls: list[tuple[str, str]] = []
++
+     def context_phonemizer(text: str, language: str):
+         calls.append((text, language))
+         return type("Result", (), {"phonemes": "context", "ids": [1], "tokens": []})()
++
+     result = apply_short_sentence_mode(
+         segment,
+         segment.phonemes,
+diff --git a/tests/test_short_sentence_parameter_sweep.py b/tests/test_short_sentence_parameter_sweep.py
+new file mode 100644
+index 0000000..8c9594f
+--- /dev/null
++++ b/tests/test_short_sentence_parameter_sweep.py
+@@ -0,0 +1,131 @@
++from __future__ import annotations
++
++import subprocess
++import sys
++from pathlib import Path
++
++import numpy as np
++import pytest
++
++from benchmarks.short_sentence_parameter_sweep import (
++    RenderedAudio,
++    assemble_sweep_audio,
++    build_short_sentence_config,
++    format_parameter_value,
++    parse_parameter_values,
++    run_parameter_sweep,
++    validate_parameter,
++)
++
++
++def test_parameter_values_keep_cli_order_and_use_stable_formatting() -> None:
++    assert parse_parameter_values("energy-threshold", "0.05,0.02,0.10") == [0.05, 0.02, 0.10]
++    assert format_parameter_value(0.02) == "0.02"
++    assert format_parameter_value(5.0) == "5"
++
++
++def test_parameter_validation_rejects_unused_and_incompatible_parameters() -> None:
++    with pytest.raises(ValueError, match="not used"):
++        parse_parameter_values("silence-threshold", "0.01")
++    with pytest.raises(ValueError, match="incompatible"):
++        validate_parameter("search-radius-ms", "energy-valley", [20.0])
++
++
++def test_candidate_config_pins_phrase_and_varies_only_requested_field() -> None:
++    config = build_short_sentence_config(
++        "timestamp-adaptive",
++        "Fixed {segment}",
++        "energy-threshold",
++        0.02,
++    )
++    mode = config.resolve_modes["phrase"]
++    assert mode.neutral_phrase == "Fixed {segment}"
++    assert mode.end_phrase == "Fixed {segment}"
++    assert mode.energy_threshold == 0.02
++    assert mode.cutter == "timestamp-adaptive"
++    assert config.phrase_fallback_tries == 0
++
++
++def test_assemble_sweep_audio_returns_ordered_candidate_offsets() -> None:
++    audio, offsets = assemble_sweep_audio(
++        np.ones(1, dtype=np.float32),
++        [
++            (np.ones(2, dtype=np.float32), np.ones(3, dtype=np.float32)),
++            (np.ones(4, dtype=np.float32), np.ones(5, dtype=np.float32)),
++        ],
++        10,
++    )
++
++    assert offsets == [(17, 20), (33, 38)]
++    assert len(audio) == 45
++    assert audio.dtype == np.float32
++
++
++def test_run_sweep_disables_announcements_and_keeps_candidates_deterministic(
++    tmp_path: Path,
++) -> None:
++    calls: list[tuple[str, bool, str | None, float | None]] = []
++
++    def render_text(text: str, config) -> RenderedAudio:
++        if config.enabled:
++            mode = config.resolve_modes["phrase"]
++            calls.append((text, config.enabled, mode.neutral_phrase, mode.energy_threshold))
++            return RenderedAudio(
++                np.full(3, mode.energy_threshold, dtype=np.float32),
++                10,
++                {"kind": "phrase", "cut_strategy": mode.cutter},
++            )
++        calls.append((text, config.enabled, None, None))
++        return RenderedAudio(np.ones(2, dtype=np.float32), 10, {})
++
++    _, manifest = run_parameter_sweep(
++        text="Why?",
++        cutter="timestamp-adaptive",
++        parameter="energy-threshold",
++        values=[0.02, 0.05],
++        phrase_template="Fixed {segment}",
++        voice="af_sarah",
++        language="en-us",
++        model_source="github",
++        model_variant="v1.0",
++        render_text=render_text,
++        save_individual=False,
++        individual_dir=tmp_path,
++    )
++
++    assert [call[0] for call in calls] == [
++        "Short sentence parameter sweep.",
++        "Energy threshold is 0.02.",
++        "Why?",
++        "Energy threshold is 0.05.",
++        "Why?",
++    ]
++    assert [call[1] for call in calls] == [False, False, True, False, True]
++    assert [call[3] for call in calls if call[1]] == [0.02, 0.05]
++    assert [candidate["value"] for candidate in manifest["candidates"]] == [0.02, 0.05]
++    assert manifest["candidates"][0]["start_seconds"] < manifest["candidates"][1]["start_seconds"]
++    assert manifest["phrase_fallback_tries"] == 0
++    assert manifest["short_sentence_config"]["announcement_enabled"] is False
++
++
++def test_parameter_sweep_dry_run_does_not_load_models() -> None:
++    result = subprocess.run(
++        [
++            sys.executable,
++            "benchmarks/short_sentence_parameter_sweep.py",
++            "--text",
++            "Why?",
++            "--parameter",
++            "energy-threshold",
++            "--values",
++            "0.02,0.05,0.08",
++            "--dry-run",
++        ],
++        check=True,
++        capture_output=True,
++        text=True,
++    )
++
++    assert "Text: Why?" in result.stdout
++    assert "Retries: 0" in result.stdout
++    assert "3  energy-threshold=0.08" in result.stdout
+diff --git a/tests/test_tokenizer.py b/tests/test_tokenizer.py
+index 970bbae..359b1a8 100644
+--- a/tests/test_tokenizer.py
++++ b/tests/test_tokenizer.py
+@@ -254,7 +254,6 @@ class TestTokenizer:
+         assert captured["spacy_model"] is None
+         assert captured["spacy_model_size"] == "lg"
+
+-
+     def test_get_g2p_uses_german_implicit_espeak_lexicon(self, monkeypatch):
+         """Test German defaults to the static de-de:espeak lexicon."""
+         import pykokoro.tokenizer as tokenizer_module
+@@ -288,6 +287,7 @@ class TestTokenizer:
+         tokenizer._get_g2p("en-us")
+
+         assert captured["lexicons"] is None
++
+     def test_normalize_text(self, tokenizer):
+         """Test text normalization."""
+         assert tokenizer.normalize_text("  hello  ") == "hello"

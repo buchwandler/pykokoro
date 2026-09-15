@@ -1,0 +1,176 @@
+ examples/README.md               | 11 +++----
+ examples/english_7m.py           | 64 ++++++++++++++++++++++++++++++++++++++++
+ pykokoro/pipeline.py             | 11 +++++--
+ tests/test_pipeline_lifecycle.py | 16 ++++++++++
+ 4 files changed, 95 insertions(+), 7 deletions(-)
+
+diff --git a/examples/README.md b/examples/README.md
+index 254976f..7cbff83 100644
+--- a/examples/README.md
++++ b/examples/README.md
+@@ -7,6 +7,8 @@ scripts below use the current pipeline-first API.
+
+ - `german.py` — German Martin v1.2; demonstrates automatic German model selection and
+   requires ONNX Runtime/model assets.
++- `english_7m.py` — English TTS with the explicitly selected `en-oddadmix-7m-distill` 7M
++  model and `af_msa` voice.
+ - `german2.py` — German Kerstin/Crane; explicitly selects `de-crane`, opts into its
+   experimental readiness status, and uses the shared native German G2P path.
+ - `german3.py` — German Thorsten; explicitly selects the ready `de-thorsten` model.
+@@ -173,12 +175,11 @@ python examples/run_all.py --include-optional
+
+ Generated WAV files and diagnostic artifacts are written below `example-artifacts/`.
+ When using the runner, each example gets its own subdirectory, making it easy to inspect
+-or compare its files without overwriting another example's output. The directory is
+-intentionally ignored by Git and contains only a tracked `.gitkeep` marker.
++or compare its files. The directory is intentionally ignored by Git and contains only a
++tracked `.gitkeep` marker.
+
+ ## Archived examples
+
+ The `legacy/` directory contains historical scripts that targeted the removed `Kokoro()`
+-/ `.create()` API. They are retained for migration reference only and are not part of
+-the maintained example surface. New examples must use `KokoroPipeline`,
+-`PipelineConfig`, and `GenerationConfig`.
++/ `.create()` API. They are retained for migration reference only. New examples must use
++`KokoroPipeline`, `PipelineConfig`, and `GenerationConfig`.
+diff --git a/examples/english_7m.py b/examples/english_7m.py
+new file mode 100644
+index 0000000..4666225
+--- /dev/null
++++ b/examples/english_7m.py
+@@ -0,0 +1,64 @@
++#!/usr/bin/env python3
++"""English TTS example using the Kokoro 7M Distill model.
++
++Usage:
++    python examples/english_7m.py
++
++Output:
++    english_7m_demo.wav - Generated English speech audio
++"""
++
++from __future__ import annotations
++
++import soundfile as sf
++
++try:
++    from ._output import artifact_path
++except ImportError:
++    from _output import artifact_path
++
++from pykokoro import ConsoleAssetProgress, GenerationConfig, KokoroPipeline, PipelineConfig
++
++TEXT = (
++    "This example uses the compact Kokoro seven million parameter Distill model. "
++    "It speaks English with the af MSA voice while keeping the full PyKokoro pipeline."
++)
++MODEL_SOURCE = "github"
++MODEL_VARIANT = "en-oddadmix-7m-distill"
++MODEL_QUALITY = "fp32"
++VOICE = "af_msa"
++LANG = "en-us"
++
++
++def main() -> None:
++    """Generate English speech with the 7M Distill model."""
++    print("Preparing the Kokoro 7M Distill TTS pipeline...")
++    progress = ConsoleAssetProgress()
++    config = PipelineConfig(
++        model_source=MODEL_SOURCE,
++        model_variant=MODEL_VARIANT,
++        model_quality=MODEL_QUALITY,
++        voice=VOICE,
++        generation=GenerationConfig(lang=LANG, speed=1.0),
++        asset_progress=progress,
++    )
++
++    print(f"Text: {TEXT}")
++    print(f"Model: {MODEL_VARIANT}")
++    print(f"Voice: {VOICE}")
++    print(f"Language: {LANG}")
++    print("\nGenerating audio...")
++
++    with KokoroPipeline(config) as pipe:
++        result = pipe.run(TEXT)
++
++    output_file = artifact_path("english_7m_demo.wav")
++    sf.write(output_file, result.audio, result.sample_rate)
++
++    duration = len(result.audio) / result.sample_rate
++    print(f"Created {output_file}")
++    print(f"Duration: {duration:.2f} seconds")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/pykokoro/pipeline.py b/pykokoro/pipeline.py
+index 0799c71..1a07d66 100644
+--- a/pykokoro/pipeline.py
++++ b/pykokoro/pipeline.py
+@@ -450,6 +450,13 @@ def _merge_config(
+     return cfg
+
+
++def _copy_config_for_preparation(cfg: PipelineConfig) -> PipelineConfig:
++    """Copy preparation settings without copying runtime progress callbacks."""
++    progress = cfg.asset_progress
++    copied = deepcopy(replace(cfg, asset_progress=None))
++    return replace(copied, asset_progress=progress)
++
++
+ PipelineConfigTransform = Callable[[PipelineConfig], PipelineConfig]
+
+
+@@ -911,7 +918,7 @@ class KokoroPipeline:
+         """Prepare a document globally for sequential unit rendering."""
+         if unit not in ("paragraph", "sentence"):
+             raise ValueError(f"Unsupported audio unit kind: {unit!r}")
+-        cfg = deepcopy(self._resolve_run_config(overrides))
++        cfg = _copy_config_for_preparation(self._resolve_run_config(overrides))
+         prepared = self._prepare_document(text, cfg, unit)
+         result = PreparedAudioUnits(self, prepared)
+         self._prepared_objects.append(result)
+@@ -927,7 +934,7 @@ class KokoroPipeline:
+         """Prepare lexicon-independent frontend state for repeated rendering."""
+         if unit not in ("paragraph", "sentence"):
+             raise ValueError(f"Unsupported audio unit kind: {unit!r}")
+-        cfg = deepcopy(self._resolve_run_config(overrides))
++        cfg = _copy_config_for_preparation(self._resolve_run_config(overrides))
+         if cfg.tokenizer_config is not None:
+             cfg = replace(
+                 cfg,
+diff --git a/tests/test_pipeline_lifecycle.py b/tests/test_pipeline_lifecycle.py
+index 6cde668..dc379dc 100644
+--- a/tests/test_pipeline_lifecycle.py
++++ b/tests/test_pipeline_lifecycle.py
+@@ -4,6 +4,7 @@ from typing import Any
+ import numpy as np
+ import pytest
+
++from pykokoro.asset_progress import ConsoleAssetProgress
+ from pykokoro.generation_config import GenerationConfig
+ from pykokoro.onnx_backend import Kokoro
+ from pykokoro.pipeline import KokoroPipeline
+@@ -236,6 +237,21 @@ def test_kokoro_close_is_safe_after_partial_initialization():
+     assert kokoro._session is None
+
+
++def test_pipeline_config_copy_preserves_stateful_asset_progress_callback() -> None:
++    from pykokoro.pipeline import _copy_config_for_preparation
++
++    progress = ConsoleAssetProgress()
++    config = PipelineConfig(
++        voice="af",
++        generation=GenerationConfig(lang="en-us"),
++        asset_progress=progress,
++    )
++
++    copied = _copy_config_for_preparation(config)
++
++    assert copied.asset_progress is progress
++
++
+ def test_pipeline_propagates_asset_progress_to_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+     callbacks = []
+     instances = []

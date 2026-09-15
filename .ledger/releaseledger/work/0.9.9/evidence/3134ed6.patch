@@ -1,0 +1,83 @@
+ pykokoro/stages/g2p/kokorog2p.py |  9 ++++++--
+ tests/test_word_timings.py       | 48 ++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 55 insertions(+), 2 deletions(-)
+
+diff --git a/pykokoro/stages/g2p/kokorog2p.py b/pykokoro/stages/g2p/kokorog2p.py
+index ee53a40..3342aed 100644
+--- a/pykokoro/stages/g2p/kokorog2p.py
++++ b/pykokoro/stages/g2p/kokorog2p.py
+@@ -33,8 +33,13 @@ if TYPE_CHECKING:
+ def _context_token_value(token: Any, name: str, default: object) -> object:
+     if isinstance(token, dict):
+         return token.get(name, default)
+-    return getattr(token, name, default)
+-
++    value = getattr(token, name, None)
++    if value is not None:
++        return value
++    metadata = getattr(token, "meta", None)
++    if isinstance(metadata, dict) and name in metadata:
++        return metadata[name]
++    return default
+
+ def _context_token_int(token: Any, name: str) -> int | None:
+     value = _context_token_value(token, name, None)
+diff --git a/tests/test_word_timings.py b/tests/test_word_timings.py
+index a1a41d3..333cb0f 100644
+--- a/tests/test_word_timings.py
++++ b/tests/test_word_timings.py
+@@ -269,6 +269,54 @@ def test_explicit_model_span_overrides_compatibility_whitespace_rule() -> None:
+     assert token.to_dict()["model_span_token_count"] == 7
+
+
++def test_context_normalization_reads_kokorog2p_tokenspan_meta() -> None:
++    from kokorog2p.types import TokenSpan
++
++    class FakeG2P:
++        @staticmethod
++        def phonemes_to_ids(phonemes: str, *, model: str) -> list[int]:
++            _ = model
++            return list(range(len(phonemes)))
++
++    raw_tokens = [
++        TokenSpan(
++            text="The",
++            char_start=0,
++            char_end=3,
++            meta={"phonemes": "abc", "whitespace": " "},
++        ),
++        TokenSpan(
++            text="who",
++            char_start=4,
++            char_end=7,
++            meta={"phonemes": "de", "whitespace": ""},
++        ),
++    ]
++    phrase_phonemes = "abc de"
++    result = SimpleNamespace(
++        phonemes=phrase_phonemes,
++        token_ids=FakeG2P.phonemes_to_ids(phrase_phonemes, model="1.0"),
++        tokens=raw_tokens,
++    )
++
++    normalized = KokoroG2PAdapter._normalize_context_result(
++        result,
++        g2p_module=FakeG2P(),
++        model_version="1.0",
++    )
++
++    assert [token.text for token in normalized.tokens] == ["The", "who"]
++    assert [token.phonemes for token in normalized.tokens] == ["abc", "de"]
++    assert [token.whitespace for token in normalized.tokens] == [" ", ""]
++    assert [token.char_start for token in normalized.tokens] == [0, 4]
++    assert [token.char_end for token in normalized.tokens] == [3, 7]
++    assert [token.model_token_count for token in normalized.tokens] == [3, 2]
++    assert [token.model_span_token_count for token in normalized.tokens] == [4, 2]
++    assert sum(
++        token.model_span_token_count or 0
++        for token in normalized.tokens
++    ) == len(normalized.ids)
++
+ def test_context_normalization_reconciles_prefix_spans_with_whole_phrase_ids() -> None:
+     class FakeG2P:
+         @staticmethod

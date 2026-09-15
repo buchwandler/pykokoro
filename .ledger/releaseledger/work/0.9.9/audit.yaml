@@ -1,0 +1,342 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 1
+release_version: 0.9.9
+git_base_ref: v0.9.8
+git_base_sha: 43e268a563cba245894e7fdf8121755d0fcec080
+git_head_ref: HEAD
+git_head_sha: c382ef8b2c6ad48fbc49dfcbb33cd1fda395e37e
+git_range: 43e268a563cba245894e7fdf8121755d0fcec080..c382ef8b2c6ad48fbc49dfcbb33cd1fda395e37e
+commit_count: 13
+rows:
+  - sha: b0934ea8f63f5823433fe8a9e015ea9ac9f6c2d3
+    source_ref: git:b0934ea8f63f5823433fe8a9e015ea9ac9f6c2d3
+    short_sha: b0934ea
+    changed_paths:
+      - examples/README.md
+      - examples/english_7m.py
+      - pykokoro/pipeline.py
+      - tests/test_pipeline_lifecycle.py
+    stats:
+      files_changed: 0
+      insertions: 95
+      deletions: 7
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: fix copy config for preparation"
+  - sha: 19cf312b5d706afd25a2842f5db755b30b1dcf32
+    source_ref: git:19cf312b5d706afd25a2842f5db755b30b1dcf32
+    short_sha: 19cf312
+    changed_paths:
+      - examples/README.md
+      - tests/test_pipeline_lifecycle.py
+    stats:
+      files_changed: 0
+      insertions: 2
+      deletions: 2
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "chore: fix test"
+  - sha: b1de82c1e4723bd0f45b1a67b00a22ad86f4358c
+    source_ref: git:b1de82c1e4723bd0f45b1a67b00a22ad86f4358c
+    short_sha: b1de82c
+    changed_paths:
+      - .github/workflows/tests.yml
+    stats:
+      files_changed: 0
+      insertions: 1
+      deletions: 1
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "chore: ci"
+  - sha: 67f1e00293843bc0cb0bf38a16dee562198bc061
+    source_ref: git:67f1e00293843bc0cb0bf38a16dee562198bc061
+    short_sha: 67f1e00
+    changed_paths:
+      - .github/workflows/tests.yml
+      - benchmarks/short_sentence_latency.py
+      - docs/short_sentence_quality.md
+      - examples/optimal_phoneme_length_demo.py
+      - examples/short_sentence_voices_demo.py
+      - pykokoro/audio_generator.py
+      - pykokoro/short_sentence_cutters/__init__.py
+      - pykokoro/short_sentence_cutters/energy_valley.py
+      - pykokoro/short_sentence_cutters/timestamp_adaptive.py
+      - pykokoro/short_sentence_handler.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/types.py
+      - pyproject.toml
+      - tests/test_audio_generator_performance.py
+      - tests/test_g2p_cache.py
+      - tests/test_packaging_metadata.py
+      - tests/test_short_sentence_cutters.py
+      - tests/test_short_sentence_handler.py
+    stats:
+      files_changed: 0
+      insertions: 1067
+      deletions: 114
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: short sentence optimization"
+  - sha: f0151af78f17bd1d2ec7852fa7ea9869fd226c5a
+    source_ref: git:f0151af78f17bd1d2ec7852fa7ea9869fd226c5a
+    short_sha: f0151af
+    changed_paths:
+      - benchmarks/short_sentence_latency.py
+      - pykokoro/audio_generator.py
+      - pykokoro/short_sentence_cutters/shared.py
+      - pykokoro/short_sentence_cutters/timestamp_adaptive.py
+      - pykokoro/short_sentence_handler.py
+      - pykokoro/short_sentence_phrases.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - tests/test_audio_splitting.py
+      - tests/test_short_sentence_cutters.py
+      - tests/test_short_sentence_handler.py
+    stats:
+      files_changed: 0
+      insertions: 793
+      deletions: 129
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: improved short sentence optimization"
+  - sha: 16aef7ef3510dd04d8d48bd2b2a18b9c1bb27cf8
+    source_ref: git:16aef7ef3510dd04d8d48bd2b2a18b9c1bb27cf8
+    short_sha: 16aef7e
+    changed_paths:
+      - README.md
+      - examples/README.md
+      - examples/german_tts_samples.py
+      - pykokoro/__init__.py
+      - pykokoro/frontend_contracts.py
+      - pykokoro/lexicon_discovery.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/tokenizer.py
+      - tests/test_g2p_adapter_spacy_model.py
+      - tests/test_german_tts_samples_example.py
+      - tests/test_lexicon_discovery.py
+      - tests/test_tokenizer.py
+    stats:
+      files_changed: 0
+      insertions: 360
+      deletions: 13
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: german use espeak lexicon per default"
+  - sha: b105e92be4b410a5e2d67ba13c8119524d79fdb7
+    source_ref: git:b105e92be4b410a5e2d67ba13c8119524d79fdb7
+    short_sha: b105e92
+    changed_paths:
+      - README.md
+      - benchmarks/_short_sentence_reporting.py
+      - benchmarks/short_sentence_latency.py
+      - benchmarks/short_sentence_parameter_sweep.py
+      - docs/short_sentence_quality.md
+      - examples/README.md
+      - examples/short_sentence_voices_demo.py
+      - pykokoro/__init__.py
+      - pykokoro/audio_generator.py
+      - pykokoro/lexicon_discovery.py
+      - pykokoro/short_sentence_cutters/shared.py
+      - pykokoro/short_sentence_cutters/timestamp_adaptive.py
+      - pykokoro/short_sentence_handler.py
+      - pykokoro/short_sentence_phrases.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/tokenizer.py
+      - pykokoro/types.py
+      - tests/test_audio_generator_performance.py
+      - tests/test_audio_splitting.py
+      - tests/test_g2p_adapter_spacy_model.py
+      - tests/test_g2p_cache.py
+      - tests/test_lexicon_discovery.py
+      - tests/test_packaging_metadata.py
+      - tests/test_short_sentence_benchmark_reporting.py
+      - tests/test_short_sentence_cutters.py
+      - tests/test_short_sentence_handler.py
+      - tests/test_short_sentence_parameter_sweep.py
+      - tests/test_tokenizer.py
+    stats:
+      files_changed: 0
+      insertions: 1647
+      deletions: 181
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: improved short sentence handler with benchmark"
+  - sha: d02da5561ec39d7c91c757777b06c394d9cb3708
+    source_ref: git:d02da5561ec39d7c91c757777b06c394d9cb3708
+    short_sha: d02da55
+    changed_paths:
+      - benchmarks/_short_sentence_reporting.py
+      - benchmarks/short_sentence_latency.py
+      - benchmarks/short_sentence_parameter_sweep.py
+      - pykokoro/audio_generator.py
+      - pykokoro/lexicon_discovery.py
+      - pykokoro/short_sentence_handler.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/types.py
+      - tests/test_lexicon_discovery.py
+      - tests/test_short_sentence_benchmark_reporting.py
+      - tests/test_short_sentence_handler.py
+      - tests/test_short_sentence_parameter_sweep.py
+      - tests/test_word_timings.py
+    stats:
+      files_changed: 0
+      insertions: 591
+      deletions: 231
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: retry count and better benchmark"
+  - sha: 39119fdd2598db05a5e75e5344dcadd7e7864886
+    source_ref: git:39119fdd2598db05a5e75e5344dcadd7e7864886
+    short_sha: 39119fd
+    changed_paths:
+      - benchmarks/_short_sentence_reporting.py
+      - benchmarks/short_sentence_latency.py
+      - benchmarks/short_sentence_parameter_sweep.py
+      - pykokoro/audio_generator.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - tests/test_short_sentence_benchmark_reporting.py
+      - tests/test_short_sentence_handler.py
+      - tests/test_short_sentence_parameter_sweep.py
+      - tests/test_word_timings.py
+    stats:
+      files_changed: 0
+      insertions: 268
+      deletions: 70
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "chore: pre-commit"
+  - sha: a5fe8cae92cb585783f716adee9d27a0da84c08a
+    source_ref: git:a5fe8cae92cb585783f716adee9d27a0da84c08a
+    short_sha: a5fe8ca
+    changed_paths:
+      - pykokoro/audio_generator.py
+      - pykokoro/short_sentence_cutters/energy_valley.py
+      - pykokoro/short_sentence_cutters/timestamp_adaptive.py
+      - pykokoro/short_sentence_handler.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/types.py
+      - tests/test_audio_splitting.py
+      - tests/test_word_timings.py
+    stats:
+      files_changed: 0
+      insertions: 410
+      deletions: 117
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: try to improve short audio"
+  - sha: 5ab600df4f67fbe24a54071b6ab4cca91b7dfb9f
+    source_ref: git:5ab600df4f67fbe24a54071b6ab4cca91b7dfb9f
+    short_sha: 5ab600d
+    changed_paths:
+      - benchmarks/short_sentence_diagnostics.py
+      - pykokoro/audio_generator.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/types.py
+      - tests/test_audio_splitting.py
+      - tests/test_short_sentence_diagnostics.py
+      - tests/test_word_timings.py
+    stats:
+      files_changed: 0
+      insertions: 1217
+      deletions: 42
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: improved short sentence benchmark"
+  - sha: 3134ed6d72b274fefea55d1b34a324f5b1667ed8
+    source_ref: git:3134ed6d72b274fefea55d1b34a324f5b1667ed8
+    short_sha: 3134ed6
+    changed_paths:
+      - pykokoro/stages/g2p/kokorog2p.py
+      - tests/test_word_timings.py
+    stats:
+      files_changed: 0
+      insertions: 55
+      deletions: 2
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "fix: metadata for _context_token_value"
+  - sha: c382ef8b2c6ad48fbc49dfcbb33cd1fda395e37e
+    source_ref: git:c382ef8b2c6ad48fbc49dfcbb33cd1fda395e37e
+    short_sha: c382ef8
+    changed_paths:
+      - README.md
+      - benchmarks/short_sentence_diagnostics.py
+      - docs/languages.md
+      - examples/README.md
+      - examples/german2.py
+      - pykokoro/frontend_contracts.py
+      - pykokoro/model_profiles.py
+      - pykokoro/short_sentence_handler.py
+      - pykokoro/short_sentence_phrases.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - tests/test_frontend_contracts.py
+      - tests/test_g2p_cache.py
+      - tests/test_german_examples.py
+      - tests/test_german_tts_samples_example.py
+      - tests/test_model_discovery.py
+      - tests/test_release_profiles.py
+      - tests/test_short_sentence_diagnostics.py
+      - tests/test_short_sentence_handler.py
+      - tests/test_short_sentence_phrases.py
+      - tests/test_word_timings.py
+    stats:
+      files_changed: 0
+      insertions: 688
+      deletions: 41
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: add short sentence phrases for all languanges"

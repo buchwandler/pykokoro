@@ -1,0 +1,301 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: 0.9.9
+git_base_ref: 43e268a563cba245894e7fdf8121755d0fcec080
+git_base_sha: 43e268a563cba245894e7fdf8121755d0fcec080
+git_head_ref: c382ef8b2c6ad48fbc49dfcbb33cd1fda395e37e
+git_head_sha: c382ef8b2c6ad48fbc49dfcbb33cd1fda395e37e
+include_merges: nontrivial
+entries:
+  - kind: added
+    summary: ""
+    status: draft
+    source_refs:
+      - git:b0934ea8f63f5823433fe8a9e015ea9ac9f6c2d3
+    paths:
+      - examples/README.md
+      - examples/english_7m.py
+      - pykokoro/pipeline.py
+      - tests/test_pipeline_lifecycle.py
+    sources:
+      - git:b0934ea8f63f5823433fe8a9e015ea9ac9f6c2d3
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: internal
+    summary: ""
+    status: draft
+    source_refs:
+      - git:19cf312b5d706afd25a2842f5db755b30b1dcf32
+    paths:
+      - examples/README.md
+      - tests/test_pipeline_lifecycle.py
+    sources:
+      - git:19cf312b5d706afd25a2842f5db755b30b1dcf32
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: internal
+    summary: ""
+    status: draft
+    source_refs:
+      - git:b1de82c1e4723bd0f45b1a67b00a22ad86f4358c
+    paths:
+      - .github/workflows/tests.yml
+    sources:
+      - git:b1de82c1e4723bd0f45b1a67b00a22ad86f4358c
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary: ""
+    status: draft
+    source_refs:
+      - git:67f1e00293843bc0cb0bf38a16dee562198bc061
+    paths:
+      - .github/workflows/tests.yml
+      - benchmarks/short_sentence_latency.py
+      - docs/short_sentence_quality.md
+      - examples/optimal_phoneme_length_demo.py
+      - examples/short_sentence_voices_demo.py
+      - pykokoro/audio_generator.py
+      - pykokoro/short_sentence_cutters/__init__.py
+      - pykokoro/short_sentence_cutters/energy_valley.py
+      - pykokoro/short_sentence_cutters/timestamp_adaptive.py
+      - pykokoro/short_sentence_handler.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/types.py
+      - pyproject.toml
+      - tests/test_audio_generator_performance.py
+      - tests/test_g2p_cache.py
+      - tests/test_packaging_metadata.py
+      - tests/test_short_sentence_cutters.py
+      - tests/test_short_sentence_handler.py
+    sources:
+      - git:67f1e00293843bc0cb0bf38a16dee562198bc061
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary: ""
+    status: draft
+    source_refs:
+      - git:f0151af78f17bd1d2ec7852fa7ea9869fd226c5a
+    paths:
+      - benchmarks/short_sentence_latency.py
+      - pykokoro/audio_generator.py
+      - pykokoro/short_sentence_cutters/shared.py
+      - pykokoro/short_sentence_cutters/timestamp_adaptive.py
+      - pykokoro/short_sentence_handler.py
+      - pykokoro/short_sentence_phrases.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - tests/test_audio_splitting.py
+      - tests/test_short_sentence_cutters.py
+      - tests/test_short_sentence_handler.py
+    sources:
+      - git:f0151af78f17bd1d2ec7852fa7ea9869fd226c5a
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary: ""
+    status: draft
+    source_refs:
+      - git:16aef7ef3510dd04d8d48bd2b2a18b9c1bb27cf8
+    paths:
+      - README.md
+      - examples/README.md
+      - examples/german_tts_samples.py
+      - pykokoro/__init__.py
+      - pykokoro/frontend_contracts.py
+      - pykokoro/lexicon_discovery.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/tokenizer.py
+      - tests/test_g2p_adapter_spacy_model.py
+      - tests/test_german_tts_samples_example.py
+      - tests/test_lexicon_discovery.py
+      - tests/test_tokenizer.py
+    sources:
+      - git:16aef7ef3510dd04d8d48bd2b2a18b9c1bb27cf8
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary: ""
+    status: draft
+    source_refs:
+      - git:b105e92be4b410a5e2d67ba13c8119524d79fdb7
+    paths:
+      - README.md
+      - benchmarks/_short_sentence_reporting.py
+      - benchmarks/short_sentence_latency.py
+      - benchmarks/short_sentence_parameter_sweep.py
+      - docs/short_sentence_quality.md
+      - examples/README.md
+      - examples/short_sentence_voices_demo.py
+      - pykokoro/__init__.py
+      - pykokoro/audio_generator.py
+      - pykokoro/lexicon_discovery.py
+      - pykokoro/short_sentence_cutters/shared.py
+      - pykokoro/short_sentence_cutters/timestamp_adaptive.py
+      - pykokoro/short_sentence_handler.py
+      - pykokoro/short_sentence_phrases.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/tokenizer.py
+      - pykokoro/types.py
+      - tests/test_audio_generator_performance.py
+      - tests/test_audio_splitting.py
+      - tests/test_g2p_adapter_spacy_model.py
+      - tests/test_g2p_cache.py
+      - tests/test_lexicon_discovery.py
+      - tests/test_packaging_metadata.py
+      - tests/test_short_sentence_benchmark_reporting.py
+      - tests/test_short_sentence_cutters.py
+      - tests/test_short_sentence_handler.py
+      - tests/test_short_sentence_parameter_sweep.py
+      - tests/test_tokenizer.py
+    sources:
+      - git:b105e92be4b410a5e2d67ba13c8119524d79fdb7
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary: ""
+    status: draft
+    source_refs:
+      - git:d02da5561ec39d7c91c757777b06c394d9cb3708
+    paths:
+      - benchmarks/_short_sentence_reporting.py
+      - benchmarks/short_sentence_latency.py
+      - benchmarks/short_sentence_parameter_sweep.py
+      - pykokoro/audio_generator.py
+      - pykokoro/lexicon_discovery.py
+      - pykokoro/short_sentence_handler.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/types.py
+      - tests/test_lexicon_discovery.py
+      - tests/test_short_sentence_benchmark_reporting.py
+      - tests/test_short_sentence_handler.py
+      - tests/test_short_sentence_parameter_sweep.py
+      - tests/test_word_timings.py
+    sources:
+      - git:d02da5561ec39d7c91c757777b06c394d9cb3708
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: internal
+    summary: ""
+    status: draft
+    source_refs:
+      - git:39119fdd2598db05a5e75e5344dcadd7e7864886
+    paths:
+      - benchmarks/_short_sentence_reporting.py
+      - benchmarks/short_sentence_latency.py
+      - benchmarks/short_sentence_parameter_sweep.py
+      - pykokoro/audio_generator.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - tests/test_short_sentence_benchmark_reporting.py
+      - tests/test_short_sentence_handler.py
+      - tests/test_short_sentence_parameter_sweep.py
+      - tests/test_word_timings.py
+    sources:
+      - git:39119fdd2598db05a5e75e5344dcadd7e7864886
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary: ""
+    status: draft
+    source_refs:
+      - git:a5fe8cae92cb585783f716adee9d27a0da84c08a
+    paths:
+      - pykokoro/audio_generator.py
+      - pykokoro/short_sentence_cutters/energy_valley.py
+      - pykokoro/short_sentence_cutters/timestamp_adaptive.py
+      - pykokoro/short_sentence_handler.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/types.py
+      - tests/test_audio_splitting.py
+      - tests/test_word_timings.py
+    sources:
+      - git:a5fe8cae92cb585783f716adee9d27a0da84c08a
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary: ""
+    status: draft
+    source_refs:
+      - git:5ab600df4f67fbe24a54071b6ab4cca91b7dfb9f
+    paths:
+      - benchmarks/short_sentence_diagnostics.py
+      - pykokoro/audio_generator.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/types.py
+      - tests/test_audio_splitting.py
+      - tests/test_short_sentence_diagnostics.py
+      - tests/test_word_timings.py
+    sources:
+      - git:5ab600df4f67fbe24a54071b6ab4cca91b7dfb9f
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: fixed
+    summary: ""
+    status: draft
+    source_refs:
+      - git:3134ed6d72b274fefea55d1b34a324f5b1667ed8
+    paths:
+      - pykokoro/stages/g2p/kokorog2p.py
+      - tests/test_word_timings.py
+    sources:
+      - git:3134ed6d72b274fefea55d1b34a324f5b1667ed8
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary: ""
+    status: draft
+    source_refs:
+      - git:c382ef8b2c6ad48fbc49dfcbb33cd1fda395e37e
+    paths:
+      - README.md
+      - benchmarks/short_sentence_diagnostics.py
+      - docs/languages.md
+      - examples/README.md
+      - examples/german2.py
+      - pykokoro/frontend_contracts.py
+      - pykokoro/model_profiles.py
+      - pykokoro/short_sentence_handler.py
+      - pykokoro/short_sentence_phrases.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - tests/test_frontend_contracts.py
+      - tests/test_g2p_cache.py
+      - tests/test_german_examples.py
+      - tests/test_german_tts_samples_example.py
+      - tests/test_model_discovery.py
+      - tests/test_release_profiles.py
+      - tests/test_short_sentence_diagnostics.py
+      - tests/test_short_sentence_handler.py
+      - tests/test_short_sentence_phrases.py
+      - tests/test_word_timings.py
+    sources:
+      - git:c382ef8b2c6ad48fbc49dfcbb33cd1fda395e37e
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

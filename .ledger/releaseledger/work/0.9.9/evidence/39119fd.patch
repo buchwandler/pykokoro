@@ -1,0 +1,691 @@
+ benchmarks/_short_sentence_reporting.py          | 109 +++++++++++++++++-----
+ benchmarks/short_sentence_latency.py             | 110 ++++++++++++++++++-----
+ benchmarks/short_sentence_parameter_sweep.py     |  38 ++++++--
+ pykokoro/audio_generator.py                      |  22 +++--
+ pykokoro/stages/g2p/kokorog2p.py                 |   6 +-
+ tests/test_short_sentence_benchmark_reporting.py |  18 +++-
+ tests/test_short_sentence_handler.py             |   6 +-
+ tests/test_short_sentence_parameter_sweep.py     |  24 +++--
+ tests/test_word_timings.py                       |   5 +-
+ 9 files changed, 268 insertions(+), 70 deletions(-)
+
+diff --git a/benchmarks/_short_sentence_reporting.py b/benchmarks/_short_sentence_reporting.py
+index 3fb5fc9..c333835 100644
+--- a/benchmarks/_short_sentence_reporting.py
++++ b/benchmarks/_short_sentence_reporting.py
+@@ -27,7 +27,11 @@ def classify_short_sentence_outcome(
+     if configured_policy == "wrap" and kind == "wrap":
+         return "wrap-configured"
+     if kind == "wrap":
+-        return "wrap-no-localized-catalog" if failure_reason == "no-localized-phrase-catalog" else "wrap-runtime-resolution"
++        return (
++            "wrap-no-localized-catalog"
++            if failure_reason == "no-localized-phrase-catalog"
++            else "wrap-runtime-resolution"
++        )
+     if fallback_used == "wrap" or cut_strategy == "wrap":
+         return "wrap-fallback"
+     if cut_strategy in SUCCESSFUL_CUT_STRATEGIES:
+@@ -51,9 +55,16 @@ def normalize_short_sentence_row(row: dict[str, Any]) -> dict[str, Any]:
+         metadata = {
+             key: row[key]
+             for key in (
+-                "kind", "fallback_used", "cut_strategy", "timing_failure_reason",
+-                "cut_failure_reason", "failure_stage", "phrase_template", "phrase_language",
+-                "cutter", "configured_cutter",
++                "kind",
++                "fallback_used",
++                "cut_strategy",
++                "timing_failure_reason",
++                "cut_failure_reason",
++                "failure_stage",
++                "phrase_template",
++                "phrase_language",
++                "cutter",
++                "configured_cutter",
+             )
+             if key in row
+         }
+@@ -77,15 +88,21 @@ def normalize_short_sentence_row(row: dict[str, Any]) -> dict[str, Any]:
+             "phrase_attempt_count": attempt_count,
+             "failed_phrase_attempt_count": len(failed_attempts),
+             "success_attempt_ordinal": success_ordinal,
+-            "success_template": (success or {}).get("phrase_template", metadata.get("phrase_template"))
++            "success_template": (success or {}).get(
++                "phrase_template", metadata.get("phrase_template")
++            )
+             if success is not None or outcome.startswith("phrase-cut")
+             else None,
+             "configured_cutter": metadata.get("configured_cutter", metadata.get("cutter")),
+-            "actual_cut_strategy": metadata.get("actual_cut_strategy", metadata.get("cut_strategy")),
++            "actual_cut_strategy": metadata.get(
++                "actual_cut_strategy", metadata.get("cut_strategy")
++            ),
+             "fallback_used": metadata.get("fallback_used", row.get("fallback_used")),
+             "retry_attempts": metadata.get("retry_attempts", row.get("retry_attempts", 0)),
+             "cut_failure_reason": metadata.get("cut_failure_reason", row.get("cut_failure_reason")),
+-            "timing_failure_reason": metadata.get("timing_failure_reason", row.get("timing_failure_reason")),
++            "timing_failure_reason": metadata.get(
++                "timing_failure_reason", row.get("timing_failure_reason")
++            ),
+             "failure_stage": metadata.get("failure_stage", row.get("failure_stage")),
+             "attempt_history": history,
+         }
+@@ -103,8 +120,12 @@ def aggregate_short_sentence_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+     normalized_rows = [normalize_short_sentence_row(row) for row in rows]
+     policies: dict[str, dict[str, Any]] = defaultdict(
+         lambda: {
+-            "cases": 0, "phrase_cut_successes": 0, "initial_successes": 0,
+-            "retry_successes": 0, "wrap_fallbacks": 0, "unresolved": 0,
++            "cases": 0,
++            "phrase_cut_successes": 0,
++            "initial_successes": 0,
++            "retry_successes": 0,
++            "wrap_fallbacks": 0,
++            "unresolved": 0,
+         }
+     )
+     actual_strategies: Counter[str] = Counter()
+@@ -113,11 +134,20 @@ def aggregate_short_sentence_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+     failure_by_stage: Counter[str] = Counter()
+     failure_reasons: Counter[str] = Counter()
+     attempts = {
+-        "initial_phrase_attempts": 0, "phrase_retries": 0, "cut_failures": 0,
+-        "wrap_fallback_renders": 0, "onnx_calls": 0,
++        "initial_phrase_attempts": 0,
++        "phrase_retries": 0,
++        "cut_failures": 0,
++        "wrap_fallback_renders": 0,
++        "onnx_calls": 0,
+     }
+     budgets: dict[str, dict[str, Any]] = defaultdict(
+-        lambda: {"cases": 0, "phrase_cut_successes": 0, "wrap_fallbacks": 0, "onnx_calls": [], "wall_ms": []}
++        lambda: {
++            "cases": 0,
++            "phrase_cut_successes": 0,
++            "wrap_fallbacks": 0,
++            "onnx_calls": [],
++            "wall_ms": [],
++        }
+     )
+     for row in normalized_rows:
+         policy = str(row["configured_policy"])
+@@ -141,7 +171,9 @@ def aggregate_short_sentence_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+                 strategy = attempt.get("actual_cut_strategy", attempt.get("cut_strategy"))
+                 if isinstance(strategy, str) and strategy:
+                     actual_strategies[strategy] += 1
+-                    success_by_ordinal[policy][str(attempt.get("ordinal", _integer(attempt, "attempt") + 1))] += 1
++                    success_by_ordinal[policy][
++                        str(attempt.get("ordinal", _integer(attempt, "attempt") + 1))
++                    ] += 1
+                 template = attempt.get("phrase_template")
+                 if isinstance(template, str) and template:
+                     success_by_template[template] += 1
+@@ -178,7 +210,9 @@ def aggregate_short_sentence_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+
+     for summary in policies.values():
+         cases = summary["cases"]
+-        summary["phrase_cut_success_rate"] = summary["phrase_cut_successes"] / cases if cases else 0.0
++        summary["phrase_cut_success_rate"] = (
++            summary["phrase_cut_successes"] / cases if cases else 0.0
++        )
+     retry_comparison: dict[str, dict[str, Any]] = {}
+     for budget, value in budgets.items():
+         cases = value["cases"]
+@@ -189,13 +223,17 @@ def aggregate_short_sentence_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+             "phrase_cut_successes": value["phrase_cut_successes"],
+             "phrase_cut_success_rate": value["phrase_cut_successes"] / cases if cases else 0.0,
+             "wrap_fallbacks": value["wrap_fallbacks"],
+-            "mean_onnx_calls": sum(value["onnx_calls"]) / len(value["onnx_calls"]) if value["onnx_calls"] else None,
++            "mean_onnx_calls": sum(value["onnx_calls"]) / len(value["onnx_calls"])
++            if value["onnx_calls"]
++            else None,
+             "p50_wall_ms": median(value["wall_ms"]) if value["wall_ms"] else None,
+         }
+     return {
+         "cases": dict(policies),
+         "actual_cut_strategies": dict(actual_strategies),
+-        "success_by_attempt_ordinal": {policy: dict(counts) for policy, counts in success_by_ordinal.items()},
++        "success_by_attempt_ordinal": {
++            policy: dict(counts) for policy, counts in success_by_ordinal.items()
++        },
+         "success_by_strategy": dict(actual_strategies),
+         "success_by_template": dict(success_by_template),
+         "failure_by_stage": dict(failure_by_stage),
+@@ -236,7 +274,9 @@ def format_short_sentence_table(summary: dict[str, Any]) -> str:
+             retries = int(run["fallback_retries"])
+             lines.append(f"Fallback retries: {retries}")
+             lines.append(f"Maximum phrase attempts per short segment: {retries + 1}")
+-    lines.extend(["", "Configured policy      Cases  Phrase cut  Initial  Retry  Wrap fallback  Unresolved"])
++    lines.extend(
++        ["", "Configured policy      Cases  Phrase cut  Initial  Retry  Wrap fallback  Unresolved"]
++    )
+     for policy, values in summary.get("cases", {}).items():
+         lines.append(
+             f"{policy:<22}{values['cases']:>5}  {values['phrase_cut_successes']:>11}  "
+@@ -245,15 +285,28 @@ def format_short_sentence_table(summary: dict[str, Any]) -> str:
+         )
+     lines.extend(["", "Phrase-cut success rate"])
+     for policy, values in summary.get("cases", {}).items():
+-        lines.append(f"{policy:<22}{values['phrase_cut_successes']}/{values['cases']}  {_percentage(values['phrase_cut_successes'], values['cases'])}")
++        lines.append(
++            f"{policy:<22}{values['phrase_cut_successes']}/{values['cases']}  {_percentage(values['phrase_cut_successes'], values['cases'])}"
++        )
+     lines.extend(["", "Success by attempt ordinal"])
+     for policy, values in summary.get("success_by_attempt_ordinal", {}).items():
+-        lines.append(f"{policy:<22}" + "  ".join(f"#{ordinal}: {count}" for ordinal, count in sorted(values.items(), key=lambda item: int(item[0]))))
++        lines.append(
++            f"{policy:<22}"
++            + "  ".join(
++                f"#{ordinal}: {count}"
++                for ordinal, count in sorted(values.items(), key=lambda item: int(item[0]))
++            )
++        )
+     lines.extend(["", "Actual successful cut strategies"])
+     for strategy, count in summary.get("actual_cut_strategies", {}).items():
+         lines.append(f"{strategy:<30}{count}")
+     lines.extend(["", "Phrase attempt accounting"])
+-    labels = {"initial_phrase_attempts": "Initial phrase attempts", "phrase_retries": "Phrase retries", "cut_failures": "Cut failures", "wrap_fallback_renders": "Wrap fallback renders"}
++    labels = {
++        "initial_phrase_attempts": "Initial phrase attempts",
++        "phrase_retries": "Phrase retries",
++        "cut_failures": "Cut failures",
++        "wrap_fallback_renders": "Wrap fallback renders",
++    }
+     for key, label in labels.items():
+         lines.append(f"{label:<30}{summary.get('attempts', {}).get(key, 0)}")
+     lines.extend(["", "Failure stage"])
+@@ -264,13 +317,21 @@ def format_short_sentence_table(summary: dict[str, Any]) -> str:
+         lines.append(f"{reason:<30}{count}")
+     if summary.get("retry_budget_comparison"):
+         lines.extend(["", "Retry-budget comparison"])
+-        lines.append("Retries  Max attempts  Cases  Phrase success  Wrap fallback  Mean ONNX calls  p50 ms")
++        lines.append(
++            "Retries  Max attempts  Cases  Phrase success  Wrap fallback  Mean ONNX calls  p50 ms"
++        )
+         for value in summary["retry_budget_comparison"].values():
+-            lines.append(f"{value['fallback_retries']:>7}  {value['max_phrase_attempts']:>12}  {value['cases']:>5}  {value['phrase_cut_successes']:>14}  {value['wrap_fallbacks']:>13}  {value['mean_onnx_calls']!s:>16}  {value['p50_wall_ms']!s:>6}")
++            lines.append(
++                f"{value['fallback_retries']:>7}  {value['max_phrase_attempts']:>12}  {value['cases']:>5}  {value['phrase_cut_successes']:>14}  {value['wrap_fallbacks']:>13}  {value['mean_onnx_calls']!s:>16}  {value['p50_wall_ms']!s:>6}"
++            )
+     return "\n".join(lines)
+
+
+ __all__ = [
+-    "SUCCESSFUL_CUT_STRATEGIES", "aggregate_short_sentence_rows", "build_short_sentence_summary",
+-    "classify_short_sentence_outcome", "format_short_sentence_table", "normalize_short_sentence_row",
++    "SUCCESSFUL_CUT_STRATEGIES",
++    "aggregate_short_sentence_rows",
++    "build_short_sentence_summary",
++    "classify_short_sentence_outcome",
++    "format_short_sentence_table",
++    "normalize_short_sentence_row",
+ ]
+diff --git a/benchmarks/short_sentence_latency.py b/benchmarks/short_sentence_latency.py
+index 840c31f..c185d5e 100644
+--- a/benchmarks/short_sentence_latency.py
++++ b/benchmarks/short_sentence_latency.py
+@@ -82,6 +82,7 @@ def _short_sentence_config(policy: str, phrase_fallback_tries: int = 1) -> Short
+         phrase_fallback_tries=phrase_fallback_tries,
+     )
+
++
+ def _short_sentence_metadata(trace: Any) -> dict[str, object]:
+     if trace is None:
+         return {}
+@@ -145,18 +146,36 @@ def _summary(
+         "cut_failure_reason": short_metadata.get("cut_failure_reason"),
+         "fallback_retries": short_metadata.get("phrase_fallback_tries", 1),
+         "max_phrase_attempts": int(short_metadata.get("phrase_fallback_tries", 1)) + 1,
+-        "phrase_attempt_count": len(short_metadata.get("short_sentence_attempts", [])) if isinstance(short_metadata.get("short_sentence_attempts"), list) else 0,
++        "phrase_attempt_count": len(short_metadata.get("short_sentence_attempts", []))
++        if isinstance(short_metadata.get("short_sentence_attempts"), list)
++        else 0,
+         "attempt_history": short_metadata.get("short_sentence_attempts", []),
+-        "success_attempt_ordinal": next((attempt.get("ordinal") for attempt in short_metadata.get("short_sentence_attempts", []) if isinstance(attempt, dict) and attempt.get("succeeded") is True), None) if isinstance(short_metadata.get("short_sentence_attempts"), list) else None,
+-        "success_template": short_metadata.get("phrase_template") if short_metadata.get("cut_strategy") in {"energy-valley", "timestamp-smooth", "timestamp-smooth-relaxed", "timestamp-anchor"} else None,
++        "success_attempt_ordinal": next(
++            (
++                attempt.get("ordinal")
++                for attempt in short_metadata.get("short_sentence_attempts", [])
++                if isinstance(attempt, dict) and attempt.get("succeeded") is True
++            ),
++            None,
++        )
++        if isinstance(short_metadata.get("short_sentence_attempts"), list)
++        else None,
++        "success_template": short_metadata.get("phrase_template")
++        if short_metadata.get("cut_strategy")
++        in {"energy-valley", "timestamp-smooth", "timestamp-smooth-relaxed", "timestamp-anchor"}
++        else None,
+         "timing_failure_reason": short_metadata.get("timing_failure_reason"),
+         "failure_stage": short_metadata.get("failure_stage"),
+         "timing_token_count": short_metadata.get("timing_token_count"),
+         "timing_target_token_count": short_metadata.get("timing_target_token_count"),
+         "timing_model_position_count": short_metadata.get("timing_model_position_count"),
+         "timing_model_position_delta": short_metadata.get("timing_model_position_delta"),
+-        "timing_first_unresolved_token_index": short_metadata.get("timing_first_unresolved_token_index"),
+-        "timing_first_unresolved_token_text": short_metadata.get("timing_first_unresolved_token_text"),
++        "timing_first_unresolved_token_index": short_metadata.get(
++            "timing_first_unresolved_token_index"
++        ),
++        "timing_first_unresolved_token_text": short_metadata.get(
++            "timing_first_unresolved_token_text"
++        ),
+         "generated_token_count": short_metadata.get("generated_token_count"),
+         "pred_duration_count": short_metadata.get("pred_duration_count"),
+         "timing_alignment_complete": short_metadata.get("timing_alignment_complete"),
+@@ -215,6 +234,7 @@ def _add_arguments(parser: argparse.ArgumentParser) -> None:
+         help="Comma-separated fallback retry budgets; overrides --phrase-fallback-tries.",
+     )
+
++
+ def _retry_budgets(args: argparse.Namespace) -> tuple[int, ...]:
+     if args.retry_budgets:
+         raw_values = args.retry_budgets.split(",")
+@@ -235,17 +255,31 @@ def _dry_run_rows(voices: tuple[str, ...], budgets: tuple[int, ...]) -> list[dic
+         for voice in voices:
+             for policy in POLICIES:
+                 for scenario, text, language in SCENARIOS:
+-                    rows.append({
+-                        "policy": policy, "configured_policy": policy, "scenario": scenario,
+-                        "text": text, "language": language, "voice": voice,
+-                        "fallback_retries": budget, "max_phrase_attempts": budget + 1,
+-                    })
++                    rows.append(
++                        {
++                            "policy": policy,
++                            "configured_policy": policy,
++                            "scenario": scenario,
++                            "text": text,
++                            "language": language,
++                            "voice": voice,
++                            "fallback_retries": budget,
++                            "max_phrase_attempts": budget + 1,
++                        }
++                    )
+                 for text in DEMO_TEXTS:
+-                    rows.append({
+-                        "policy": policy, "configured_policy": policy, "scenario": "demo-corpus",
+-                        "text": text, "language": "en-us", "voice": voice,
+-                        "fallback_retries": budget, "max_phrase_attempts": budget + 1,
+-                    })
++                    rows.append(
++                        {
++                            "policy": policy,
++                            "configured_policy": policy,
++                            "scenario": "demo-corpus",
++                            "text": text,
++                            "language": "en-us",
++                            "voice": voice,
++                            "fallback_retries": budget,
++                            "max_phrase_attempts": budget + 1,
++                        }
++                    )
+     return rows
+
+
+@@ -262,10 +296,14 @@ def run_benchmark(args: argparse.Namespace) -> list[dict[str, Any]]:
+                 for language in languages:
+                     pipelines[(policy, language, budget)] = KokoroPipeline(
+                         PipelineConfig(
+-                            voice=voices[0], model_source=args.model_source,
+-                            model_variant=args.model_variant, model_path=args.model_path,
+-                            voices_path=args.voices_path, generation=GenerationConfig(lang=language, speed=1.0),
+-                            short_sentence_config=_short_sentence_config(policy, budget), return_trace=True,
++                            voice=voices[0],
++                            model_source=args.model_source,
++                            model_variant=args.model_variant,
++                            model_path=args.model_path,
++                            voices_path=args.voices_path,
++                            generation=GenerationConfig(lang=language, speed=1.0),
++                            short_sentence_config=_short_sentence_config(policy, budget),
++                            return_trace=True,
+                         )
+                     )
+         for pipeline in pipelines.values():
+@@ -282,16 +320,42 @@ def run_benchmark(args: argparse.Namespace) -> list[dict[str, Any]]:
+                             started = time.perf_counter()
+                             result = pipeline.run(text, voice=voice)
+                             wall_ms = (time.perf_counter() - started) * 1000.0
+-                            row = _summary(result, policy=policy, scenario=scenario, text=text, wall_ms=wall_ms)
+-                            row.update({"voice": voice, "language": language, "model_source": args.model_source, "model_variant": args.model_variant, "fallback_retries": budget, "max_phrase_attempts": budget + 1})
++                            row = _summary(
++                                result, policy=policy, scenario=scenario, text=text, wall_ms=wall_ms
++                            )
++                            row.update(
++                                {
++                                    "voice": voice,
++                                    "language": language,
++                                    "model_source": args.model_source,
++                                    "model_variant": args.model_variant,
++                                    "fallback_retries": budget,
++                                    "max_phrase_attempts": budget + 1,
++                                }
++                            )
+                             rows.append(row)
+                         if language == "en-us":
+                             for text in DEMO_TEXTS:
+                                 started = time.perf_counter()
+                                 result = pipeline.run(text, voice=voice)
+                                 wall_ms = (time.perf_counter() - started) * 1000.0
+-                                row = _summary(result, policy=policy, scenario="demo-corpus", text=text, wall_ms=wall_ms)
+-                                row.update({"voice": voice, "language": language, "model_source": args.model_source, "model_variant": args.model_variant, "fallback_retries": budget, "max_phrase_attempts": budget + 1})
++                                row = _summary(
++                                    result,
++                                    policy=policy,
++                                    scenario="demo-corpus",
++                                    text=text,
++                                    wall_ms=wall_ms,
++                                )
++                                row.update(
++                                    {
++                                        "voice": voice,
++                                        "language": language,
++                                        "model_source": args.model_source,
++                                        "model_variant": args.model_variant,
++                                        "fallback_retries": budget,
++                                        "max_phrase_attempts": budget + 1,
++                                    }
++                                )
+                                 rows.append(row)
+         return rows
+     finally:
+diff --git a/benchmarks/short_sentence_parameter_sweep.py b/benchmarks/short_sentence_parameter_sweep.py
+index 92ab87c..ad53b48 100644
+--- a/benchmarks/short_sentence_parameter_sweep.py
++++ b/benchmarks/short_sentence_parameter_sweep.py
+@@ -232,13 +232,29 @@ def _candidate_manifest_entry(
+         "retry_attempts": metadata.get("retry_attempts", 0),
+         "cut_failure_reason": metadata.get("cut_failure_reason"),
+         "attempt_history": metadata.get("short_sentence_attempts", []),
+-        "success_attempt_ordinal": next((attempt.get("ordinal") for attempt in metadata.get("short_sentence_attempts", []) if isinstance(attempt, dict) and attempt.get("succeeded") is True), None) if isinstance(metadata.get("short_sentence_attempts"), list) else None,
++        "success_attempt_ordinal": next(
++            (
++                attempt.get("ordinal")
++                for attempt in metadata.get("short_sentence_attempts", [])
++                if isinstance(attempt, dict) and attempt.get("succeeded") is True
++            ),
++            None,
++        )
++        if isinstance(metadata.get("short_sentence_attempts"), list)
++        else None,
+         "configured_cutter": metadata.get("cutter", cutter),
+         "timing_model_position_count": metadata.get("timing_model_position_count"),
+         "generated_token_count": metadata.get("generated_token_count"),
+         "timing_model_position_delta": metadata.get("timing_model_position_delta"),
+-        "cutter_reached": metadata.get("cutter_reached", metadata.get("failure_stage") not in {"timing-alignment", "timestamp-join", "target-boundary"}),
+-        "parameter_evaluation": "valid" if metadata.get("failure_stage") not in {"timing-alignment", "timestamp-join", "target-boundary"} else "not-a-cutter-evaluation",
++        "cutter_reached": metadata.get(
++            "cutter_reached",
++            metadata.get("failure_stage")
++            not in {"timing-alignment", "timestamp-join", "target-boundary"},
++        ),
++        "parameter_evaluation": "valid"
++        if metadata.get("failure_stage")
++        not in {"timing-alignment", "timestamp-join", "target-boundary"}
++        else "not-a-cutter-evaluation",
+         "timing_failure_reason": metadata.get("timing_failure_reason"),
+         "failure_stage": metadata.get("failure_stage"),
+     }
+@@ -260,7 +276,11 @@ def _candidate_manifest_entry(
+
+ def _is_pre_cutter_failure(metadata: dict[str, object]) -> bool:
+     """Return whether timing failed before any cutter parameter could matter."""
+-    return metadata.get("failure_stage") in {"timing-alignment", "timestamp-join", "target-boundary"} or metadata.get("cutter_reached") is False
++    return (
++        metadata.get("failure_stage") in {"timing-alignment", "timestamp-join", "target-boundary"}
++        or metadata.get("cutter_reached") is False
++    )
++
+
+ def run_parameter_sweep(
+     *,
+@@ -332,7 +352,9 @@ def run_parameter_sweep(
+             )
+             rendered = render_text(text, config)
+             if _index == 1 and _is_pre_cutter_failure(rendered.metadata) and not keep_invalid:
+-                reason = rendered.metadata.get("timing_failure_reason", rendered.metadata.get("failure_stage"))
++                reason = rendered.metadata.get(
++                    "timing_failure_reason", rendered.metadata.get("failure_stage")
++                )
+                 raise ValueError(
+                     "The carrier phrase did not produce valid target timing geometry. "
+                     "Parameter sweep aborted because this parameter cannot affect the observed failure. "
+@@ -427,7 +449,11 @@ def _add_arguments(parser: argparse.ArgumentParser) -> None:
+     parser.add_argument("--label-template", default="{parameter} is {value}.")
+     parser.add_argument("--allow-retries", type=int, default=0)
+     parser.add_argument("--random-seed", type=int, default=0)
+-    parser.add_argument("--keep-invalid", action="store_true", help="Retain candidates after pre-cutter timing failures.")
++    parser.add_argument(
++        "--keep-invalid",
++        action="store_true",
++        help="Retain candidates after pre-cutter timing failures.",
++    )
+     parser.add_argument(
+         "--output-wav", type=Path, default=Path("artifacts/short_sentence_parameter_sweep.wav")
+     )
+diff --git a/pykokoro/audio_generator.py b/pykokoro/audio_generator.py
+index 78e0433..531c0c6 100644
+--- a/pykokoro/audio_generator.py
++++ b/pykokoro/audio_generator.py
+@@ -1152,7 +1152,9 @@ class AudioGenerator:
+             0 if pred_dur is None else int(np.asarray(pred_dur).reshape(-1).size)
+         )
+         _record_short_sentence_timing_alignment(
+-            short_sentence_metadata, timing_tokens, pred_duration_count=short_sentence_metadata["pred_duration_count"]
++            short_sentence_metadata,
++            timing_tokens,
++            pred_duration_count=short_sentence_metadata["pred_duration_count"],
+         )
+         if pred_dur is None:
+             short_sentence_metadata.setdefault("timing_failure_reason", "missing-duration-output")
+@@ -1265,9 +1267,11 @@ class AudioGenerator:
+         if trace is not None:
+             trace.increment_counter("short_sentence_wrap_fallback")
+         history = short_sentence_metadata.get("short_sentence_attempts")
+-        failures = [
+-            item for item in history if isinstance(item, dict) and item.get("succeeded") is False
+-        ] if isinstance(history, list) else []
++        failures = (
++            [item for item in history if isinstance(item, dict) and item.get("succeeded") is False]
++            if isinstance(history, list)
++            else []
++        )
+         reasons: dict[str, int] = {}
+         for item in failures:
+             reason = item.get("failure_reason")
+@@ -1853,7 +1857,11 @@ def _join_timestamps(
+                 complete = False
+                 break
+             token_count = len(phonemes)
+-        if strict and "model_span_token_count" in token and token.get("model_span_token_count") is None:
++        if (
++            strict
++            and "model_span_token_count" in token
++            and token.get("model_span_token_count") is None
++        ):
+             complete = False
+             break
+         model_span_count = _model_span_token_count(token)
+@@ -1961,6 +1969,7 @@ def _record_short_sentence_timing_alignment(
+         metadata.setdefault("failure_stage", "timing-alignment")
+         metadata.setdefault("cut_failure_reason", "timing-model-position-mismatch")
+
++
+ def populate_short_sentence_boundary_metadata(
+     metadata: dict[str, object],
+     timestamped: list[dict[str, object]],
+@@ -2110,6 +2119,7 @@ def _log_short_sentence_cut_success(
+         metadata.get("phrase_language"),
+     )
+
++
+ def _record_short_sentence_cut_failure(
+     metadata: dict[str, object],
+     trace: Trace | None,
+@@ -2133,11 +2143,13 @@ def _record_short_sentence_cut_failure(
+             trace.increment_counter(counter)
+     _ = reason
+
++
+ def _clear_short_sentence_failure(metadata: dict[str, object]) -> None:
+     """Remove outcome fields from an attempt that ultimately succeeded."""
+     for key in ("cut_failure_reason", "timing_failure_reason", "failure_stage"):
+         metadata.pop(key, None)
+
++
+ def _record_short_sentence_attempt(
+     metadata: dict[str, object],
+     *,
+diff --git a/pykokoro/stages/g2p/kokorog2p.py b/pykokoro/stages/g2p/kokorog2p.py
+index 9cc8fce..8d04b5d 100644
+--- a/pykokoro/stages/g2p/kokorog2p.py
++++ b/pykokoro/stages/g2p/kokorog2p.py
+@@ -827,7 +827,9 @@ class KokoroG2PAdapter(G2PAdapter):
+     ) -> list[int | None]:
+         """Reconcile alignment items against the exact phrase tokenizer output."""
+         explicit = [token.model_span_token_count for token in tokens]
+-        if all(isinstance(span, int) and not isinstance(span, bool) and span > 0 for span in explicit) and sum(cast(list[int], explicit)) == len(ids):
++        if all(
++            isinstance(span, int) and not isinstance(span, bool) and span > 0 for span in explicit
++        ) and sum(cast(list[int], explicit)) == len(ids):
+             return cast(list[int | None], explicit)
+         tokenizer = getattr(g2p_module, "phonemes_to_ids", None)
+         if not callable(tokenizer) or not tokens:
+@@ -849,6 +851,7 @@ class KokoroG2PAdapter(G2PAdapter):
+         if previous_count != len(ids):
+             return [None for _ in tokens]
+         return spans
++
+     @staticmethod
+     def _normalize_context_result(
+         result: Any,
+@@ -903,6 +906,7 @@ class KokoroG2PAdapter(G2PAdapter):
+             ids=ids_tuple,
+             tokens=tuple(normalized_tokens),
+         )
++
+     def _record_selection(
+         self, doc: DocumentResult, lang: str, cfg: PipelineConfig, g2p_instance: G2PBase
+     ) -> None:
+diff --git a/tests/test_short_sentence_benchmark_reporting.py b/tests/test_short_sentence_benchmark_reporting.py
+index b6cc135..1ba7cde 100644
+--- a/tests/test_short_sentence_benchmark_reporting.py
++++ b/tests/test_short_sentence_benchmark_reporting.py
+@@ -108,6 +108,7 @@ def test_summary_and_table_include_run_metadata_and_sections() -> None:
+     assert "Phrase attempt accounting" in table
+     assert "Failure reasons" in table
+
++
+ def test_attempt_history_reports_success_ordinal_strategy_template_and_stages() -> None:
+     rows = [
+         {
+@@ -118,8 +119,21 @@ def test_attempt_history_reports_success_ordinal_strategy_template_and_stages()
+                 "cut_strategy": "timestamp-smooth",
+                 "fallback_used": "phrase",
+                 "short_sentence_attempts": [
+-                    {"attempt": 0, "ordinal": 1, "succeeded": False, "failure_stage": "timing-alignment", "failure_reason": "timing-model-position-mismatch", "phrase_template": "A {segment}"},
+-                    {"attempt": 1, "ordinal": 2, "succeeded": True, "actual_cut_strategy": "timestamp-smooth", "phrase_template": "B {segment}"},
++                    {
++                        "attempt": 0,
++                        "ordinal": 1,
++                        "succeeded": False,
++                        "failure_stage": "timing-alignment",
++                        "failure_reason": "timing-model-position-mismatch",
++                        "phrase_template": "A {segment}",
++                    },
++                    {
++                        "attempt": 1,
++                        "ordinal": 2,
++                        "succeeded": True,
++                        "actual_cut_strategy": "timestamp-smooth",
++                        "phrase_template": "B {segment}",
++                    },
+                 ],
+             },
+         }
+diff --git a/tests/test_short_sentence_handler.py b/tests/test_short_sentence_handler.py
+index 0377b0e..1c7dde3 100644
+--- a/tests/test_short_sentence_handler.py
++++ b/tests/test_short_sentence_handler.py
+@@ -232,10 +232,10 @@ def test_unsupported_phrase_language_uses_wrap_without_english_context() -> None
+     assert result.metadata["cut_failure_reason"] == "no-localized-phrase-catalog"
+     assert calls == []
+
++
+ def test_cutter_override_keeps_german_builtin_carrier_localized() -> None:
+     from pykokoro.short_sentence_phrases import GERMAN_SHORT_SENTENCE_PHRASES
++
+     mode = PhraseResolveMode(cutter="energy-valley")
+-    template = _select_phrase_template(
+-        "zwölf.", mode, phrase_set=GERMAN_SHORT_SENTENCE_PHRASES
+-    )
++    template = _select_phrase_template("zwölf.", mode, phrase_set=GERMAN_SHORT_SENTENCE_PHRASES)
+     assert template == GERMAN_SHORT_SENTENCE_PHRASES.declarative[0]
+diff --git a/tests/test_short_sentence_parameter_sweep.py b/tests/test_short_sentence_parameter_sweep.py
+index 94e6e6c..ce1a6f6 100644
+--- a/tests/test_short_sentence_parameter_sweep.py
++++ b/tests/test_short_sentence_parameter_sweep.py
+@@ -130,22 +130,36 @@ def test_parameter_sweep_dry_run_does_not_load_models() -> None:
+     assert "Retries: 0" in result.stdout
+     assert "3  energy-threshold=0.08" in result.stdout
+
++
+ def test_parameter_sweep_rejects_pre_cutter_timing_failure_by_default() -> None:
+     calls: list[str] = []
++
+     def render_text(text: str, config) -> RenderedAudio:
+         _ = config
+         calls.append(text)
+         if text == "Why?":
+             return RenderedAudio(
+-                np.ones(2, dtype=np.float32), 10,
+-                {"failure_stage": "timing-alignment", "timing_failure_reason": "timing-model-position-mismatch", "cutter_reached": False},
++                np.ones(2, dtype=np.float32),
++                10,
++                {
++                    "failure_stage": "timing-alignment",
++                    "timing_failure_reason": "timing-model-position-mismatch",
++                    "cutter_reached": False,
++                },
+             )
+         return RenderedAudio(np.ones(2, dtype=np.float32), 10, {})
++
+     with pytest.raises(ValueError, match="not affect the observed failure"):
+         run_parameter_sweep(
+-            text="Why?", cutter="timestamp-adaptive", parameter="search-radius-ms",
+-            values=[15.0, 25.0], phrase_template="Fixed {segment}", voice="af_sarah",
+-            language="en-us", model_source="github", model_variant="v1.0",
++            text="Why?",
++            cutter="timestamp-adaptive",
++            parameter="search-radius-ms",
++            values=[15.0, 25.0],
++            phrase_template="Fixed {segment}",
++            voice="af_sarah",
++            language="en-us",
++            model_source="github",
++            model_variant="v1.0",
+             render_text=render_text,
+         )
+     assert calls == ["Short sentence parameter sweep.", "Search radius ms is 15.", "Why?"]
+diff --git a/tests/test_word_timings.py b/tests/test_word_timings.py
+index 05ed23a..a336369 100644
+--- a/tests/test_word_timings.py
++++ b/tests/test_word_timings.py
+@@ -257,6 +257,7 @@ def test_strict_timestamp_join_rejects_incomplete_duration_mapping() -> None:
+
+     assert _join_timestamps(tokens, durations, strict=True) == []
+
++
+ def test_explicit_model_span_overrides_compatibility_whitespace_rule() -> None:
+     token = G2PAlignmentToken(
+         "word", "phonemes", " ", model_token_count=2, model_span_token_count=7
+@@ -285,4 +286,6 @@ def test_context_normalization_reconciles_prefix_spans_with_whole_phrase_ids() -
+         result, g2p_module=FakeG2P(), model_version="1.0"
+     )
+     assert [token.model_span_token_count for token in normalized.tokens] == [2, 1]
+-    assert sum(token.model_span_token_count or 0 for token in normalized.tokens) == len(normalized.ids)
++    assert sum(token.model_span_token_count or 0 for token in normalized.tokens) == len(
++        normalized.ids
++    )
