@@ -1568,3 +1568,17 @@ def test_prepare_phrase_audio_replaces_stale_timings_with_cropped_retry_timings(
     assert len(segment.word_timings) == 1
     assert segment.word_timings[0].start_sample == 0
     assert segment.word_timings[0].end_sample == 90
+
+def test_strict_join_consumes_empty_and_separator_spans_exactly() -> None:
+    tokens = [
+        {"phonemes": "a", "model_token_count": 1, "model_span_token_count": 1},
+        {
+            "phonemes": "",
+            "whitespace": " ",
+            "model_token_count": 0,
+            "model_span_token_count": 2,
+        },
+        {"phonemes": "b", "model_token_count": 1, "model_span_token_count": 1},
+    ]
+    assert _join_timestamps(tokens, np.ones(6, dtype=np.float32), strict=True)
+    assert _join_timestamps(tokens, np.ones(7, dtype=np.float32), strict=True) == []

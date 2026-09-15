@@ -112,6 +112,33 @@ class G2PAlignmentToken:
         return result
 
 
+def _exact_timing_geometry(token: G2PAlignmentToken | dict[str, Any]) -> tuple[int, int] | None:
+    """Return exact speech and total-span model positions for one item."""
+    if isinstance(token, G2PAlignmentToken):
+        model_token_count = token.model_token_count
+        explicit_span = token.model_span_token_count
+        whitespace = token.whitespace
+    else:
+        model_token_count = token.get("model_token_count")
+        explicit_span = token.get("model_span_token_count")
+        whitespace = token.get("whitespace") or ""
+    if (
+        not isinstance(model_token_count, int)
+        or isinstance(model_token_count, bool)
+        or model_token_count < 0
+    ):
+        return None
+    if explicit_span is not None:
+        if (
+            not isinstance(explicit_span, int)
+            or isinstance(explicit_span, bool)
+            or explicit_span < model_token_count
+        ):
+            return None
+        return model_token_count, explicit_span
+    return model_token_count, model_token_count + (1 if whitespace else 0)
+
+
 def _model_span_token_count(token: G2PAlignmentToken | dict[str, Any]) -> int | None:
     """Return model input positions consumed by an alignment item, including whitespace."""
     if isinstance(token, G2PAlignmentToken):
@@ -122,14 +149,21 @@ def _model_span_token_count(token: G2PAlignmentToken | dict[str, Any]) -> int | 
         model_token_count = token.get("model_token_count")
         explicit_span = token.get("model_span_token_count")
         whitespace = token.get("whitespace") or ""
-    if isinstance(explicit_span, int) and not isinstance(explicit_span, bool) and explicit_span > 0:
+    if explicit_span is not None:
+        if (
+            not isinstance(explicit_span, int)
+            or isinstance(explicit_span, bool)
+            or explicit_span < 0
+        ):
+            return None
         return explicit_span
-    if not isinstance(model_token_count, int) or isinstance(model_token_count, bool):
-        return None
-    if model_token_count <= 0:
+    if (
+        not isinstance(model_token_count, int)
+        or isinstance(model_token_count, bool)
+        or model_token_count < 0
+    ):
         return None
     return model_token_count + (1 if whitespace else 0)
-
 
 @dataclass
 class PhonemeSegment:

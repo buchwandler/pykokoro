@@ -33,6 +33,8 @@ def find_timestamp_adaptive_cut_bounds(
     windows = boundary_windows_from_metadata(len(audio), metadata)
     if windows is None:
         return None
+    metadata["cut_search_reached"] = True
+    metadata["cutter_reached"] = True
 
     strict_bounds = find_energy_valley_cut_bounds(audio, metadata)
     if strict_bounds is not None:

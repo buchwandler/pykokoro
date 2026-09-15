@@ -35,6 +35,8 @@ def find_energy_valley_cut_bounds(
     windows = boundary_windows_from_metadata(len(audio), metadata)
     if windows is None:
         return None
+    metadata["cut_search_reached"] = True
+    metadata["cutter_reached"] = True
 
     frame_duration_ms = int(cast(Any, metadata.get("frame_duration_ms", 5)))
     frame_length = max(1, int(SAMPLE_RATE * frame_duration_ms / 1000))

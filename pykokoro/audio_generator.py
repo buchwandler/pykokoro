@@ -26,7 +26,7 @@ from .short_sentence_handler import (
     cut_short_sentence_phrase_audio,
 )
 from .tokenizer import Tokenizer
-from .types import G2PAlignmentToken, PhonemeSegment, WordTiming, _model_span_token_count
+from .types import G2PAlignmentToken, PhonemeSegment, WordTiming, _exact_timing_geometry
 from .utils import generate_silence
 from .voice_manager import normalize_voice_style
 
@@ -1094,7 +1094,12 @@ class AudioGenerator:
                 token["char_start"] = segment.char_start + char_start
                 token["char_end"] = segment.char_start + char_end
             valid_tokens.append(token)
-        timestamped = _join_timestamps(cast(list[object], valid_tokens), durations, strict=True)
+        timestamped = _join_timestamps(
+            cast(list[object], valid_tokens),
+            durations,
+            strict=True,
+            require_final_cursor=False,
+        )
         if not timestamped:
             return []
         grouped: dict[tuple[int, int], WordTiming] = {}
@@ -1161,8 +1166,30 @@ class AudioGenerator:
             short_sentence_metadata.setdefault("failure_stage", "timing-token-build")
             short_sentence_metadata.setdefault("cut_failure_reason", "missing-duration-output")
             return
+        if not short_sentence_metadata.get("timing_alignment_complete", False):
+            short_sentence_metadata["timestamp_join_complete"] = False
+            return
+        expected_duration_count = short_sentence_metadata.get("expected_pred_duration_count")
+        actual_duration_count = short_sentence_metadata.get("pred_duration_count")
+        if (
+            isinstance(expected_duration_count, int)
+            and isinstance(actual_duration_count, int)
+            and actual_duration_count != expected_duration_count
+        ):
+            short_sentence_metadata["timing_failure_detail"] = "duration-position-count-mismatch"
+            short_sentence_metadata["timing_failure_reason"] = "timing-model-position-mismatch"
+            short_sentence_metadata["failure_stage"] = "timing-alignment"
+            short_sentence_metadata["cut_failure_reason"] = "timing-model-position-mismatch"
+            short_sentence_metadata["timestamp_join_complete"] = False
+            short_sentence_metadata["cutter_reached"] = False
+            return
         strict_join = "generated_token_count" in short_sentence_metadata
-        timestamped = _join_timestamps(timing_tokens, pred_dur, strict=strict_join)
+        timestamped = _join_timestamps(
+            timing_tokens,
+            pred_dur,
+            strict=strict_join,
+            metadata=short_sentence_metadata,
+        )
         short_sentence_metadata["timestamp_join_complete"] = bool(timestamped)
         if not timestamped:
             short_sentence_metadata.setdefault("timing_failure_reason", "timestamp-join-incomplete")
@@ -1335,6 +1362,16 @@ class AudioGenerator:
         if not isinstance(templates, list):
             return None
 
+        non_retryable_details = {
+            "missing-duration-output",
+            "duration-position-count-mismatch",
+            "unresolved-model-span",
+            "alignment-position-count-mismatch",
+        }
+        if short_sentence_metadata.get("timing_failure_detail") in non_retryable_details:
+            short_sentence_metadata["retry_attempts"] = 0
+            short_sentence_metadata["retry_skipped_reason"] = "non-retryable-timing-failure"
+            return None
         max_attempts = _short_sentence_phrase_fallback_limit(
             short_sentence_metadata,
             default=len(templates),
@@ -1432,7 +1469,26 @@ class AudioGenerator:
                     timing_tokens,
                     pred_duration_count=int(np.asarray(pred_dur).reshape(-1).size),
                 )
-                timestamped = _join_timestamps(timing_tokens, pred_dur, strict=True)
+                expected_duration_count = retry.metadata.get("expected_pred_duration_count")
+                actual_duration_count = retry.metadata.get("pred_duration_count")
+                if (
+                    not retry.metadata.get("timing_alignment_complete", False)
+                    or (
+                        isinstance(expected_duration_count, int)
+                        and actual_duration_count != expected_duration_count
+                    )
+                ):
+                    timestamped = []
+                    if retry.metadata.get("timing_alignment_complete", False):
+                        retry.metadata["timing_failure_detail"] = "duration-position-count-mismatch"
+                    retry.metadata["timestamp_join_complete"] = False
+                else:
+                    timestamped = _join_timestamps(
+                        timing_tokens,
+                        pred_dur,
+                        strict=True,
+                        metadata=retry.metadata,
+                    )
                 populate_short_sentence_boundary_metadata(retry.metadata, timestamped)
             cut_audio = cut_short_sentence_phrase_audio(retry_audio, retry.metadata)
             if cut_audio is None:
@@ -1819,79 +1875,66 @@ def _join_timestamps(
     pred_dur: np.ndarray,
     *,
     strict: bool = False,
+    require_final_cursor: bool = True,
+    metadata: dict[str, object] | None = None,
 ) -> list[dict[str, object]]:
-    """Map model durations to G2P tokens, optionally rejecting partial mappings."""
+    """Map model durations to G2P tokens using declared model geometry."""
     durations = np.asarray(pred_dur).reshape(-1)
     if not tokens or len(durations) < 3:
         return []
-
     timestamped: list[dict[str, object]] = []
     divisor = 80
     left = right = 2 * max(0.0, float(durations[0].item()) - 3)
-    i = 1
+    cursor = 1
+    eos_index = len(durations) - 1
     complete = True
-
     for raw_token in tokens:
-        if i >= len(durations) - 1:
-            complete = False
-            break
         token = dict(raw_token) if isinstance(raw_token, dict) else {}
         phonemes = str(token.get("phonemes") or "")
         whitespace = str(token.get("whitespace") or "")
-
-        if not phonemes:
-            if whitespace and i < len(durations):
-                i += 1
-                if i < len(durations):
-                    left = right + float(durations[i].item())
-                    right = left + float(durations[i].item())
-                    i += 1
-                else:
-                    complete = False
-            timestamped.append(token)
-            continue
-
-        token_count = token.get("model_token_count")
-        if not isinstance(token_count, int) or isinstance(token_count, bool) or token_count <= 0:
+        geometry = _exact_timing_geometry(token)
+        if geometry is None:
             if strict:
                 complete = False
                 break
-            token_count = len(phonemes)
-        if (
-            strict
-            and "model_span_token_count" in token
-            and token.get("model_span_token_count") is None
-        ):
+            speech_count = len(phonemes)
+            span_count = speech_count + (1 if whitespace else 0)
+        else:
+            speech_count, span_count = geometry
+        if speech_count < 0 or span_count < speech_count:
             complete = False
             break
-        model_span_count = _model_span_token_count(token)
-        if model_span_count is None:
-            if strict:
-                complete = False
-                break
-            model_span_count = token_count + (1 if whitespace else 0)
-        speech_end_index = i + token_count
-        if speech_end_index >= len(durations):
+        end_cursor = cursor + span_count
+        if end_cursor > eos_index:
             complete = False
             break
-        space_dur = 0.0
-        if whitespace:
-            if speech_end_index >= len(durations) - 1:
-                complete = False
-                break
-            space_dur = float(durations[speech_end_index].item())
-        token["start_ts"] = left / divisor
-        token_dur = float(durations[i:speech_end_index].sum().item())
-        speech_end = right + (2 * token_dur)
-        token["speech_end_ts"] = speech_end / divisor
-        left = speech_end + space_dur
-        token["end_ts"] = left / divisor
-        right = left + space_dur
-        i += model_span_count
+        speech_end_cursor = cursor + speech_count
+        gap_dur = float(durations[speech_end_cursor:end_cursor].sum().item())
+        if speech_count:
+            token["start_ts"] = left / divisor
+            token_dur = float(durations[cursor:speech_end_cursor].sum().item())
+            speech_end = right + (2 * token_dur)
+            token["speech_end_ts"] = speech_end / divisor
+            left = speech_end + gap_dur
+            token["end_ts"] = left / divisor
+            right = left + gap_dur
+        elif span_count:
+            left = right + gap_dur
+            right = left + gap_dur
+        cursor = end_cursor
         timestamped.append(token)
-
-    if strict and not complete:
+    if strict and (
+        not complete or (require_final_cursor and cursor != eos_index)
+    ):
+        if metadata is not None:
+            metadata["timing_final_duration_cursor"] = cursor
+            metadata["timing_expected_final_duration_cursor"] = eos_index
+            metadata["timing_duration_cursor_delta"] = cursor - eos_index
         return []
+    if metadata is not None:
+        metadata["timing_final_duration_cursor"] = cursor
+        metadata["timing_expected_final_duration_cursor"] = eos_index
+        metadata["timing_duration_cursor_delta"] = cursor - eos_index
     return timestamped
 
 
@@ -1912,30 +1955,14 @@ def _record_short_sentence_timing_alignment(
         token = dict(raw_token) if isinstance(raw_token, dict) else {}
         if token.get("is_target"):
             target_token_count += 1
-        phonemes = str(token.get("phonemes") or "")
-        if not phonemes:
-            if token.get("whitespace"):
-                model_position_count += 1
-            continue
-        requires_exact_span = isinstance(metadata.get("generated_token_count"), int)
-        if (
-            requires_exact_span
-            and "model_span_token_count" in token
-            and token.get("model_span_token_count") is None
-        ):
+        geometry = _exact_timing_geometry(token)
+        if geometry is None:
             complete = False
             if first_unresolved is None:
                 first_unresolved = (index, token)
             continue
-        model_span_count = _model_span_token_count(token)
-        if model_span_count is None and not requires_exact_span:
-            model_span_count = len(phonemes) + (1 if token.get("whitespace") else 0)
-        if model_span_count is None:
-            complete = False
-            if first_unresolved is None:
-                first_unresolved = (index, token)
-            continue
-        model_position_count += model_span_count
+        _, span_count = geometry
+        model_position_count += span_count
     generated_token_count = metadata.get("generated_token_count")
     metadata["timing_token_count"] = len(timing_tokens)
     metadata["timing_target_token_count"] = target_token_count
@@ -1945,14 +1972,31 @@ def _record_short_sentence_timing_alignment(
         if isinstance(generated_token_count, int) and not isinstance(generated_token_count, bool)
         else None
     )
+    expected_pred_duration_count = (
+        generated_token_count + 2
+        if isinstance(generated_token_count, int) and not isinstance(generated_token_count, bool)
+        else None
+    )
+    metadata["expected_pred_duration_count"] = expected_pred_duration_count
     if pred_duration_count is not None:
         metadata["pred_duration_count"] = pred_duration_count
+        metadata["pred_duration_count_delta"] = (
+            pred_duration_count - expected_pred_duration_count
+            if expected_pred_duration_count is not None
+            else None
+        )
     if first_unresolved is not None:
         index, token = first_unresolved
         metadata["timing_first_unresolved_token_index"] = index
         metadata["timing_first_unresolved_token_text"] = token.get("text")
         metadata["timing_first_unresolved_token_phonemes"] = token.get("phonemes")
         metadata["timing_first_unresolved_token_whitespace"] = token.get("whitespace")
+        metadata["timing_first_unresolved_token_model_token_count"] = token.get(
+            "model_token_count"
+        )
+        metadata["timing_first_unresolved_token_model_span_token_count"] = token.get(
+            "model_span_token_count"
+        )
     metadata["timing_alignment_complete"] = (
         complete
         and isinstance(generated_token_count, int)
@@ -1964,11 +2008,14 @@ def _record_short_sentence_timing_alignment(
     if target_timestamp_count is not None:
         metadata["target_timestamp_count"] = target_timestamp_count
     if not metadata["timing_alignment_complete"]:
+        metadata["timing_failure_detail"] = (
+            "unresolved-model-span" if first_unresolved is not None
+            else "alignment-position-count-mismatch"
+        )
         metadata["cutter_reached"] = False
         metadata.setdefault("timing_failure_reason", "timing-model-position-mismatch")
         metadata.setdefault("failure_stage", "timing-alignment")
         metadata.setdefault("cut_failure_reason", "timing-model-position-mismatch")
-
 
 def populate_short_sentence_boundary_metadata(
     metadata: dict[str, object],

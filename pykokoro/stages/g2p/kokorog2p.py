@@ -51,6 +51,11 @@ class _CachedContextToken:
     model_token_count: int | None
     model_span_token_count: int | None
 
+@dataclass(frozen=True)
+class _ContextModelGeometry:
+    speech_count: int
+    span_count: int
+
 
 @dataclass(frozen=True)
 class _CachedContextResult:
@@ -819,38 +824,80 @@ class KokoroG2PAdapter(G2PAdapter):
         )
 
     @staticmethod
+    def _explicit_context_model_geometry(
+        tokens: list[_CachedContextToken],
+        ids: tuple[int, ...],
+    ) -> list[_ContextModelGeometry] | None:
+        geometry: list[_ContextModelGeometry] = []
+        for token in tokens:
+            speech_count = getattr(token, "model_token_count", None)
+            span_count = getattr(token, "model_span_token_count", None)
+            if (
+                not isinstance(speech_count, int)
+                or isinstance(speech_count, bool)
+                or speech_count < 0
+                or not isinstance(span_count, int)
+                or isinstance(span_count, bool)
+                or span_count < speech_count
+            ):
+                return None
+            geometry.append(_ContextModelGeometry(speech_count, span_count))
+        if sum(item.span_count for item in geometry) != len(ids):
+            return None
+        return geometry
+
+    @staticmethod
+    def _derive_context_model_geometry(
+        tokens: list[_CachedContextToken],
+        ids: tuple[int, ...],
+        g2p_module: Any | None,
+        model_version: str | None,
+    ) -> list[_ContextModelGeometry | None]:
+        """Derive exact speech and span positions in one phrase-wide coordinate system."""
+        tokenizer = getattr(g2p_module, "phonemes_to_ids", None)
+        if callable(tokenizer) and tokens:
+            prefix = ""
+            previous_count = 0
+            geometry: list[_ContextModelGeometry] = []
+            try:
+                for token in tokens:
+                    speech_prefix = prefix + token.phonemes
+                    speech_end_count = len(
+                        tokenizer(speech_prefix, model=model_version)
+                    )
+                    full_prefix = speech_prefix + token.whitespace
+                    full_end_count = len(
+                        tokenizer(full_prefix, model=model_version)
+                    )
+                    speech_count = speech_end_count - previous_count
+                    span_count = full_end_count - previous_count
+                    if speech_count < 0 or span_count < speech_count:
+                        raise ValueError("non-monotonic contextual model geometry")
+                    geometry.append(_ContextModelGeometry(speech_count, span_count))
+                    prefix = full_prefix
+                    previous_count = full_end_count
+            except (AttributeError, TypeError, ValueError, RuntimeError):
+                geometry = []
+            else:
+                if previous_count == len(ids):
+                    return cast(list[_ContextModelGeometry | None], geometry)
+        explicit = KokoroG2PAdapter._explicit_context_model_geometry(tokens, ids)
+        if explicit is not None:
+            return cast(list[_ContextModelGeometry | None], explicit)
+        return [None for _ in tokens]
+
+    @staticmethod
     def _derive_context_model_spans(
         tokens: list[_CachedContextToken],
         ids: tuple[int, ...],
         g2p_module: Any | None,
         model_version: str | None,
     ) -> list[int | None]:
-        """Reconcile alignment items against the exact phrase tokenizer output."""
-        explicit = [token.model_span_token_count for token in tokens]
-        if all(
-            isinstance(span, int) and not isinstance(span, bool) and span > 0 for span in explicit
-        ) and sum(cast(list[int], explicit)) == len(ids):
-            return cast(list[int | None], explicit)
-        tokenizer = getattr(g2p_module, "phonemes_to_ids", None)
-        if not callable(tokenizer) or not tokens:
-            return [None for _ in tokens]
-        prefix = ""
-        previous_count = 0
-        spans: list[int | None] = []
-        try:
-            for token in tokens:
-                prefix += token.phonemes + token.whitespace
-                current_count = len(tokenizer(prefix, model=model_version))
-                span = current_count - previous_count
-                if span <= 0:
-                    return [None for _ in tokens]
-                spans.append(span)
-                previous_count = current_count
-        except (AttributeError, TypeError, ValueError, RuntimeError):
-            return [None for _ in tokens]
-        if previous_count != len(ids):
-            return [None for _ in tokens]
-        return spans
+        """Compatibility wrapper returning only contextual total-span counts."""
+        geometry = KokoroG2PAdapter._derive_context_model_geometry(
+            tokens, ids, g2p_module, model_version
+        )
+        return [item.span_count if item is not None else None for item in geometry]
 
     @staticmethod
     def _normalize_context_result(
@@ -870,10 +917,10 @@ class KokoroG2PAdapter(G2PAdapter):
                 or _context_token_value(token, "phoneme", "")
             )
             model_token_count = _context_token_int(token, "model_token_count")
-            if model_token_count is not None and model_token_count <= 0:
+            if model_token_count is not None and model_token_count < 0:
                 model_token_count = None
             explicit_span = _context_token_int(token, "model_span_token_count")
-            if explicit_span is not None and explicit_span <= 0:
+            if explicit_span is not None and explicit_span < 0:
                 explicit_span = None
             if model_token_count is None and token_phonemes and g2p_module is not None:
                 try:
@@ -894,12 +941,16 @@ class KokoroG2PAdapter(G2PAdapter):
                 )
             )
         ids_tuple = tuple(int(token_id) for token_id in (ids or ()))
-        spans = KokoroG2PAdapter._derive_context_model_spans(
+        geometry = KokoroG2PAdapter._derive_context_model_geometry(
             normalized_tokens, ids_tuple, g2p_module, model_version
         )
         normalized_tokens = [
-            replace(token, model_span_token_count=span)
-            for token, span in zip(normalized_tokens, spans, strict=True)
+            replace(
+                token,
+                model_token_count=item.speech_count if item is not None else None,
+                model_span_token_count=item.span_count if item is not None else None,
+            )
+            for token, item in zip(normalized_tokens, geometry, strict=True)
         ]
         return _CachedContextResult(
             phonemes=str(phonemes),

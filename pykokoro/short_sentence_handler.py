@@ -641,8 +641,11 @@ def cut_short_sentence_phrase_audio(
         return audio
     if audio.size == 0:
         return audio
-    metadata["cutter_reached"] = True
-    return cut_phrase_audio(audio, metadata)
+    metadata["cutter_invoked"] = True
+    result = cut_phrase_audio(audio, metadata)
+    if result is not None:
+        metadata["cutter_reached"] = True
+    return result
 
 
 def build_short_sentence_phrase_retry(
@@ -1033,7 +1036,7 @@ def _build_timing_tokens(
             raw_model_token_count
             if isinstance(raw_model_token_count, int)
             and not isinstance(raw_model_token_count, bool)
-            and raw_model_token_count > 0
+            and raw_model_token_count >= 0
             else None
         )
         raw_model_span_count = _token_attr(token, "model_span_token_count")
@@ -1041,7 +1044,7 @@ def _build_timing_tokens(
             raw_model_span_count
             if isinstance(raw_model_span_count, int)
             and not isinstance(raw_model_span_count, bool)
-            and raw_model_span_count > 0
+            and raw_model_span_count >= 0
             else None
         )
         timing_tokens.append(

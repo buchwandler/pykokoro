@@ -9,8 +9,10 @@ from pykokoro.audio_generator import (
     AudioGenerator,
     _crop_word_timings,
     _join_timestamps,
+    _record_short_sentence_timing_alignment,
     _scale_word_timings,
     _translate_word_timings,
+    populate_short_sentence_boundary_metadata,
 )
 from pykokoro.constants import MAX_PHONEME_LENGTH
 from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
@@ -19,6 +21,7 @@ from pykokoro.types import (
     PhonemeSegment,
     Segment,
     WordTiming,
+    _exact_timing_geometry,
     _model_span_token_count,
 )
 
@@ -289,3 +292,140 @@ def test_context_normalization_reconciles_prefix_spans_with_whole_phrase_ids() -
     assert sum(token.model_span_token_count or 0 for token in normalized.tokens) == len(
         normalized.ids
     )
+
+def test_context_geometry_preserves_zero_width_items_and_uses_contextual_deltas() -> None:
+    class FakeG2P:
+        @staticmethod
+        def phonemes_to_ids(phonemes: str, *, model: str) -> list[int]:
+            _ = model
+            return list(range(len(phonemes.replace(".", ""))))
+
+    tokens = [
+        SimpleNamespace(phonemes="a", whitespace=""),
+        SimpleNamespace(phonemes="", whitespace="."),
+        SimpleNamespace(phonemes="b", whitespace=""),
+    ]
+    geometry = KokoroG2PAdapter._derive_context_model_geometry(
+        tokens, (1, 2), FakeG2P(), "1.0"
+    )
+    assert [(item.speech_count, item.span_count) for item in geometry] == [(1, 1), (0, 0), (1, 1)]
+
+def test_context_geometry_allows_empty_phoneme_positive_span() -> None:
+    class FakeG2P:
+        @staticmethod
+        def phonemes_to_ids(phonemes: str, *, model: str) -> list[int]:
+            _ = model
+            return list(range(len(phonemes)))
+
+    tokens = [
+        SimpleNamespace(phonemes="a", whitespace=""),
+        SimpleNamespace(phonemes="", whitespace="  "),
+    ]
+    geometry = KokoroG2PAdapter._derive_context_model_geometry(
+        tokens, (1, 2, 3), FakeG2P(), "1.0"
+    )
+    assert [(item.speech_count, item.span_count) for item in geometry] == [(1, 1), (0, 2)]
+
+def test_context_geometry_rejects_non_monotonic_and_final_sum_mismatch() -> None:
+    class NonMonotonicG2P:
+        @staticmethod
+        def phonemes_to_ids(phonemes: str, *, model: str) -> list[int]:
+            _ = model
+            return list(range(1 if phonemes == "a" else 0))
+
+    tokens = [
+        SimpleNamespace(phonemes="a", whitespace=""),
+        SimpleNamespace(phonemes="b", whitespace=""),
+    ]
+    assert KokoroG2PAdapter._derive_context_model_geometry(
+        tokens, (1,), NonMonotonicG2P(), "1.0"
+    ) == [None, None]
+
+def test_record_alignment_uses_explicit_zero_span_without_whitespace_plus_one() -> None:
+    for span in (0, 1, 2):
+        metadata: dict[str, object] = {"generated_token_count": span}
+        _record_short_sentence_timing_alignment(
+            metadata,
+            [{
+                "phonemes": "",
+                "whitespace": " ",
+                "model_token_count": 0,
+                "model_span_token_count": span,
+            }],
+        )
+        assert metadata["timing_model_position_count"] == span
+        assert metadata["timing_alignment_complete"] is True
+
+def test_exact_timing_geometry_accepts_zero_and_rejects_invalid_counts() -> None:
+    assert _exact_timing_geometry({"model_token_count": 0, "model_span_token_count": 0}) == (0, 0)
+    assert _exact_timing_geometry({"model_token_count": 1, "model_span_token_count": 0}) is None
+    assert _exact_timing_geometry({"model_token_count": -1, "model_span_token_count": 0}) is None
+
+def test_alignment_metadata_records_duration_and_unresolved_geometry_diagnostics() -> None:
+    metadata: dict[str, object] = {"generated_token_count": 2}
+    _record_short_sentence_timing_alignment(
+        metadata,
+        [{
+            "text": ".",
+            "phonemes": "",
+            "whitespace": "",
+            "model_token_count": None,
+            "model_span_token_count": None,
+        }],
+        pred_duration_count=5,
+    )
+    assert metadata["expected_pred_duration_count"] == 4
+    assert metadata["pred_duration_count_delta"] == 1
+    assert metadata["timing_failure_detail"] == "unresolved-model-span"
+    assert metadata["timing_first_unresolved_token_model_token_count"] is None
+    assert metadata["timing_first_unresolved_token_model_span_token_count"] is None
+
+def test_model_free_phrase_timing_produces_target_boundaries() -> None:
+    timing_tokens = [
+        {
+            "text": "Before",
+            "phonemes": "ab",
+            "whitespace": "",
+            "model_token_count": 2,
+            "model_span_token_count": 2,
+            "is_target": False,
+        },
+        {
+            "text": ".",
+            "phonemes": "",
+            "whitespace": ".",
+            "model_token_count": 0,
+            "model_span_token_count": 0,
+            "is_target": False,
+        },
+        {
+            "text": "Go",
+            "phonemes": "g",
+            "whitespace": "",
+            "model_token_count": 1,
+            "model_span_token_count": 1,
+            "is_target": True,
+        },
+        {
+            "text": "!",
+            "phonemes": "",
+            "whitespace": " ",
+            "model_token_count": 0,
+            "model_span_token_count": 1,
+            "is_target": False,
+        },
+    ]
+    metadata: dict[str, object] = {"generated_token_count": 4}
+    _record_short_sentence_timing_alignment(
+        metadata, timing_tokens, pred_duration_count=6
+    )
+    joined = _join_timestamps(
+        timing_tokens, np.ones(6, dtype=np.float32), strict=True, metadata=metadata
+    )
+    populate_short_sentence_boundary_metadata(metadata, joined)
+    assert metadata["timing_alignment_complete"] is True
+    assert joined
+    assert metadata["timing_model_position_count"] == 4
+    assert metadata["pred_duration_count"] == 6
+    assert metadata["target_start_ts"] is not None
+    assert metadata["target_end_ts"] is not None
