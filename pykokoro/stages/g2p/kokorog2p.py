@@ -33,8 +33,13 @@ if TYPE_CHECKING:
 def _context_token_value(token: Any, name: str, default: object) -> object:
     if isinstance(token, dict):
         return token.get(name, default)
-    return getattr(token, name, default)
-
+    value = getattr(token, name, None)
+    if value is not None:
+        return value
+    metadata = getattr(token, "meta", None)
+    if isinstance(metadata, dict) and name in metadata:
+        return metadata[name]
+    return default
 
 def _context_token_int(token: Any, name: str) -> int | None:
     value = _context_token_value(token, name, None)

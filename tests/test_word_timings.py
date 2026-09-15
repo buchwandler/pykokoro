@@ -269,6 +269,54 @@ def test_explicit_model_span_overrides_compatibility_whitespace_rule() -> None:
     assert token.to_dict()["model_span_token_count"] == 7
 
 
+def test_context_normalization_reads_kokorog2p_tokenspan_meta() -> None:
+    from kokorog2p.types import TokenSpan
+
+    class FakeG2P:
+        @staticmethod
+        def phonemes_to_ids(phonemes: str, *, model: str) -> list[int]:
+            _ = model
+            return list(range(len(phonemes)))
+
+    raw_tokens = [
+        TokenSpan(
+            text="The",
+            char_start=0,
+            char_end=3,
+            meta={"phonemes": "abc", "whitespace": " "},
+        ),
+        TokenSpan(
+            text="who",
+            char_start=4,
+            char_end=7,
+            meta={"phonemes": "de", "whitespace": ""},
+        ),
+    ]
+    phrase_phonemes = "abc de"
+    result = SimpleNamespace(
+        phonemes=phrase_phonemes,
+        token_ids=FakeG2P.phonemes_to_ids(phrase_phonemes, model="1.0"),
+        tokens=raw_tokens,
+    )
+
+    normalized = KokoroG2PAdapter._normalize_context_result(
+        result,
+        g2p_module=FakeG2P(),
+        model_version="1.0",
+    )
+
+    assert [token.text for token in normalized.tokens] == ["The", "who"]
+    assert [token.phonemes for token in normalized.tokens] == ["abc", "de"]
+    assert [token.whitespace for token in normalized.tokens] == [" ", ""]
+    assert [token.char_start for token in normalized.tokens] == [0, 4]
+    assert [token.char_end for token in normalized.tokens] == [3, 7]
+    assert [token.model_token_count for token in normalized.tokens] == [3, 2]
+    assert [token.model_span_token_count for token in normalized.tokens] == [4, 2]
+    assert sum(
+        token.model_span_token_count or 0
+        for token in normalized.tokens
+    ) == len(normalized.ids)
+
 def test_context_normalization_reconciles_prefix_spans_with_whole_phrase_ids() -> None:
     class FakeG2P:
         @staticmethod
