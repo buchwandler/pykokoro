@@ -1471,12 +1471,9 @@ class AudioGenerator:
                 )
                 expected_duration_count = retry.metadata.get("expected_pred_duration_count")
                 actual_duration_count = retry.metadata.get("pred_duration_count")
-                if (
-                    not retry.metadata.get("timing_alignment_complete", False)
-                    or (
-                        isinstance(expected_duration_count, int)
-                        and actual_duration_count != expected_duration_count
-                    )
+                if not retry.metadata.get("timing_alignment_complete", False) or (
+                    isinstance(expected_duration_count, int)
+                    and actual_duration_count != expected_duration_count
                 ):
                     timestamped = []
                     if retry.metadata.get("timing_alignment_complete", False):
@@ -1923,9 +1920,7 @@ def _join_timestamps(
             right = left + gap_dur
         cursor = end_cursor
         timestamped.append(token)
-    if strict and (
-        not complete or (require_final_cursor and cursor != eos_index)
-    ):
+    if strict and (not complete or (require_final_cursor and cursor != eos_index)):
         if metadata is not None:
             metadata["timing_final_duration_cursor"] = cursor
             metadata["timing_expected_final_duration_cursor"] = eos_index
@@ -1991,9 +1986,7 @@ def _record_short_sentence_timing_alignment(
         metadata["timing_first_unresolved_token_text"] = token.get("text")
         metadata["timing_first_unresolved_token_phonemes"] = token.get("phonemes")
         metadata["timing_first_unresolved_token_whitespace"] = token.get("whitespace")
-        metadata["timing_first_unresolved_token_model_token_count"] = token.get(
-            "model_token_count"
-        )
+        metadata["timing_first_unresolved_token_model_token_count"] = token.get("model_token_count")
         metadata["timing_first_unresolved_token_model_span_token_count"] = token.get(
             "model_span_token_count"
         )
@@ -2009,13 +2002,15 @@ def _record_short_sentence_timing_alignment(
         metadata["target_timestamp_count"] = target_timestamp_count
     if not metadata["timing_alignment_complete"]:
         metadata["timing_failure_detail"] = (
-            "unresolved-model-span" if first_unresolved is not None
+            "unresolved-model-span"
+            if first_unresolved is not None
             else "alignment-position-count-mismatch"
         )
         metadata["cutter_reached"] = False
         metadata.setdefault("timing_failure_reason", "timing-model-position-mismatch")
         metadata.setdefault("failure_stage", "timing-alignment")
         metadata.setdefault("cut_failure_reason", "timing-model-position-mismatch")
+
 
 def populate_short_sentence_boundary_metadata(
     metadata: dict[str, object],
@@ -2134,7 +2129,8 @@ def _log_short_sentence_cut_failure(
     logger.info(
         "short_sentence.phrase_attempt.failure segment=%r attempt=%d/%d stage=%s "
         "reason=%s configured_cutter=%s cutter_reached=%s generated_positions=%s "
-        "timing_positions=%s delta=%s template=%r audio_samples=%d",
+        "timing_tokens=%s timing_positions=%s pred_durations=%s expected_pred_durations=%s "
+        "delta=%s timing_detail=%s retry_skipped_reason=%s template=%r audio_samples=%d",
         segment.text,
         attempt_number,
         max_attempts,
@@ -2143,8 +2139,18 @@ def _log_short_sentence_cut_failure(
         metadata.get("cutter"),
         metadata.get("cutter_reached", stage not in {"timing-alignment", "timestamp-join"}),
         metadata.get("generated_token_count"),
+        metadata.get(
+            "timing_token_count",
+            len(metadata.get("timing_tokens", []))
+            if isinstance(metadata.get("timing_tokens"), list)
+            else 0,
+        ),
         metadata.get("timing_model_position_count"),
+        metadata.get("pred_duration_count", 0),
+        metadata.get("expected_pred_duration_count"),
         metadata.get("timing_model_position_delta"),
+        metadata.get("timing_failure_detail"),
+        metadata.get("retry_skipped_reason", "-"),
         metadata.get("phrase_template"),
         audio_length,
     )

@@ -165,6 +165,7 @@ def _model_span_token_count(token: G2PAlignmentToken | dict[str, Any]) -> int | 
         return None
     return model_token_count + (1 if whitespace else 0)
 
+
 @dataclass
 class PhonemeSegment:
     """A segment of text with its phoneme representation.

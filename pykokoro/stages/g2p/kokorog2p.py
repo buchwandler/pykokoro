@@ -51,6 +51,7 @@ class _CachedContextToken:
     model_token_count: int | None
     model_span_token_count: int | None
 
+
 @dataclass(frozen=True)
 class _ContextModelGeometry:
     speech_count: int
@@ -862,13 +863,9 @@ class KokoroG2PAdapter(G2PAdapter):
             try:
                 for token in tokens:
                     speech_prefix = prefix + token.phonemes
-                    speech_end_count = len(
-                        tokenizer(speech_prefix, model=model_version)
-                    )
+                    speech_end_count = len(tokenizer(speech_prefix, model=model_version))
                     full_prefix = speech_prefix + token.whitespace
-                    full_end_count = len(
-                        tokenizer(full_prefix, model=model_version)
-                    )
+                    full_end_count = len(tokenizer(full_prefix, model=model_version))
                     speech_count = speech_end_count - previous_count
                     span_count = full_end_count - previous_count
                     if speech_count < 0 or span_count < speech_count:

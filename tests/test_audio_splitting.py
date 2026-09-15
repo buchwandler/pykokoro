@@ -995,9 +995,11 @@ def test_generate_logs_randomized_phrase_target_timestamps(caplog, capsys):
         ssmd_metadata={
             SHORT_SENTENCE_META_KEY: {
                 "kind": "randomized-phrase",
+                "generated_token_count": 5,
                 "timing_tokens": [
                     {
                         "text": "The",
+                        "model_token_count": 2,
                         "phonemes": "th",
                         "whitespace": " ",
                         "is_target": False,
@@ -1005,6 +1007,7 @@ def test_generate_logs_randomized_phrase_target_timestamps(caplog, capsys):
                     {
                         "text": "Go",
                         "phonemes": "go",
+                        "model_token_count": 2,
                         "whitespace": "",
                         "is_target": True,
                     },
@@ -1568,6 +1571,7 @@ def test_prepare_phrase_audio_replaces_stale_timings_with_cropped_retry_timings(
     assert len(segment.word_timings) == 1
     assert segment.word_timings[0].start_sample == 0
     assert segment.word_timings[0].end_sample == 90
+
 
 def test_strict_join_consumes_empty_and_separator_spans_exactly() -> None:
     tokens = [
