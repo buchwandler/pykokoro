@@ -12,17 +12,13 @@ A Python library for Kokoro TTS (Text-to-Speech) using ONNX runtime.
 - **ONNX-based TTS**: Fast, efficient text-to-speech using the Kokoro-82M model
 - **Multiple Languages**: Support for English, Spanish, French, German, Italian,
   Portuguese, and more
-- **Multiple Voices**: 54+ built-in voices (or 103 voices with v1.1-zh model)
 - **Voice Blending**: Create custom voices by blending multiple voices
-- **Multiple Model Sources**: Download models from HuggingFace or GitHub (v1.0/v1.1-zh)
-- **Model Quality Options**: Choose from fp32, fp16, q8, q4, and uint8 quantization
-  levels
-- **ONNX Execution Providers**: Capability-driven CUDA, NNAPI, XNNPACK, CoreML,
-  DirectML, and other runtime-reported providers
-- **Phoneme Support**: Advanced phoneme-based generation with kokorog2p
-- **Language-Aware spaCy Models**: Shared pipeline-owned Pass-A and Pass-B resources
-  with disabled, local fallback, and strict policies
-- **Hugging Face Integration**: Automatic model downloading from Hugging Face Hub
+- **Registry-backed model discovery**: Inspect runnable models, voices, languages,
+  qualities, frontends, layouts, and distribution provenance with `discover_models()`
+- **Multiple languages and model families**: Supports standard Kokoro families plus
+  dedicated language/model checkpoints exposed by the canonical registry
+- **Explicit runtime source selection**: Choose supported GitHub or Hugging Face
+  distributions where applicable; registry metadata remains the source of truth
 - **Explicit Language Planning**: The document language is required before parsing; SSMD
   `lang` spans provide explicit mixed-language runs
 - **Text Normalization**: Spokenform owns generic written-to-spoken preparation,
@@ -57,17 +53,20 @@ Runtime model selection uses the canonical `catalog/models.json` registry. Model
 metadata, voices, frontend IDs, runtime layouts, artifact hashes, provider, and
 redistribution policy are not inferred from GitHub release names.
 
-| Status                      | Meaning                                                                 | Examples                                                                                                                             |
-| --------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| ready                       | Registry distribution and PyKokoro frontend/layout are usable           | `v1.0`, `v1.1-zh`, `v1.2-de-martin`, `de-crane`, `de-thorsten`, `th-wayu`, `sv-joakim`, `kk-anuarsv`, `vi-anphunl`, Zaakirio Russian |
-| experimental                | Usable only when explicitly enabled for an experimental frontend        | Profiles marked experimental by the local compatibility policy                                                                       |
-| restricted                  | Runtime is visible but redistribution policy is not ordinary            | `he-hebrew-nc`                                                                                                                       |
-| unsupported-layout/frontend | Registry metadata is valid but the local implementation cannot serve it | A future registry layout or frontend                                                                                                 |
+| Status                 | Meaning                                                                |
+| ---------------------- | ---------------------------------------------------------------------- |
+| `ready`                | Registry distribution and local frontend/layout are supported          |
+| `experimental`         | Requires explicit experimental frontend enablement                     |
+| `restricted`           | Visible metadata but ordinary redistribution/runtime use is restricted |
+| `registry-unavailable` | Profile exists locally but registry has no runtime-ready distribution  |
+| `unsupported-layout`   | Registry layout is newer or unsupported locally                        |
+| `unsupported-frontend` | Registry frontend is not implemented locally                           |
 
-Thai Wayu uses the registry's `split-onnx-v1` layout and selects its prosody, curves,
-and decoder components as one distribution. Russian Zaakirio uses pinned upstream-only
-distributions and validates raw float32 voice artifacts locally; those bytes are not
-mirrored to GitHub.
+Run `python examples/models_and_languages.py` or call `discover_models()` for the
+current inventory and exact status of every model. Thai Wayu uses the registry's
+`split-onnx-v1` layout and selects its prosody, curves, and decoder components as one
+distribution. Russian Zaakirio uses pinned upstream-only distributions and validates raw
+float32 voice artifacts locally; those bytes are not mirrored to GitHub.
 
 Use `python examples/models_and_languages.py` to inspect every registry model, language,
 provider, voice, quality, frontend, layout, and support status without downloading model
@@ -229,7 +228,7 @@ The older `pykokoro[sounddevice]` extra remains valid.
 To find the best provider for your system, run the benchmark:
 
 ```bash
-python examples/gpu_benchmark.py
+python examples/cpu_benchmark.py
 ```
 
 ## Quick Start
@@ -335,8 +334,8 @@ the whole flow:
 
 `doc_parser (SSMD structure) -> text_preparer (Spokenform) -> sentence_segmenter (Phrasplit) -> g2p (prepared mode) -> phoneme_processing -> audio_generation -> audio_postprocessing`
 
-Stages can be replaced with no-op adapters when you want to disable behavior. See
-`examples/pipeline_stage_showcase.py` for a full wiring example.
+Stages can be replaced with no-op adapters when you want to disable behavior. The
+snippet below shows a small stage-injection example.
 
 ```python
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
@@ -414,7 +413,7 @@ pipe = KokoroPipeline(PipelineConfig(provider="cpu", voice="af_sarah"))  # CPU o
 python examples/provider_info.py
 
 # Benchmark all providers
-python examples/gpu_benchmark.py
+python examples/cpu_benchmark.py
 ```
 
 ### Environment Variable Override
@@ -722,8 +721,9 @@ res = pipe.run(text)
 audio = res.audio
 ```
 
-See `examples/pauses_demo.py`, `examples/pauses_with_splitting.py`, and
-`examples/automatic_pauses_demo.py` for complete examples.
+See `examples/pauses_demo.py`, `examples/automatic_pauses_demo.py`,
+`examples/english_clausal_comma_pause.py`, and `examples/english_parenthetical_pause.py`
+for examples.
 
 ### SSMD emphasis policy
 
@@ -1149,33 +1149,73 @@ short_sentence_config = ShortSentenceConfig(
 )
 ```
 
-## Available Voices
+## Discovering Models, Voices, and Lexicons
 
-The library includes voices across different languages and accents. The number of
-available voices depends on the model source:
-
-### HuggingFace & GitHub v1.0 (54 voices)
-
-- **American English**: af_alloy, af_bella, af_sarah, am_adam, am_michael, etc.
-- **British English**: bf_alice, bf_emma, bm_george, bm_lewis
-- **Spanish**: ef_dora, em_alex
-- **French**: ff_siwis
-- **Japanese**: jf_alpha, jm_kumo
-- **Chinese**: zf_xiaobei, zm_yunxi
-- And many more...
-
-### GitHub v1.1-zh (103 voices)
-
-Includes all voices from v1.0 plus additional Chinese voices:
-
-- **English voices**: af_maple, af_sol, bf_vale (confirmed working)
-- **Chinese voices**: zf_001 through zf_099, zm_009 through zm_100
-
-**Example - Using v1.1-zh with English:**
+The canonical registry is the authoritative inventory for current runtime capabilities.
+Use `discover_models()` instead of maintaining a hard-coded list of model-specific
+voices:
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
-from pykokoro.generation_config import GenerationConfig
+from pykokoro import discover_models
+
+inventory = discover_models()
+for model in inventory.models:
+    print(
+        model.model_id,
+        model.status,
+        model.languages,
+        model.default_voice,
+        len(model.voices),
+    )
+    for voice in model.voice_details:
+        print(" ", voice.name, voice.language_label, voice.gender)
+```
+
+The inventory includes model IDs, statuses, languages, voices, qualities, frontends,
+layouts, distribution provenance, and voice metadata when available. Use
+`python examples/models_and_languages.py` or `python examples/all_voices.py --help` for
+ready-made inventory and showcase commands. The v1.0 and v1.1-zh profiles below are
+illustrative model families, not the complete PyKokoro catalog.
+
+### Discover named lexicons
+
+```python
+from pykokoro import discover_lexicons
+
+result = discover_lexicons(language="de")
+for item in result.lexicons:
+    print(item.selector, item.locale, item.installed, item.phoneme_encoding)
+```
+
+`discover_lexicons()` is metadata-only. It does not install model or lexicon assets. Use
+`model_variant=...` to narrow the result when the model advertises a known named lexicon
+capability.
+
+### Runtime capabilities versus published releases
+
+- `discover_models()` answers what this PyKokoro runtime can use.
+- `available_model_releases()` answers which compatible release artifacts are published.
+- `resolve_model_release()` selects one compatible published release.
+- `download_model_release()` explicitly downloads and verifies one selected release.
+
+For example, inspect published releases without downloading them:
+
+```python
+from pykokoro import available_model_releases
+
+for release in available_model_releases(offline=True):
+    print(release.profile, release.release_tag, release.model_version)
+```
+
+### v1.0 and v1.1-zh examples
+
+The classic v1.0 profile provides a multilingual Kokoro voice inventory. The v1.1-zh
+checkpoint has its own voice inventory: three English voices (`af_maple`, `af_sol`, and
+`bf_vale`) plus its numbered Chinese voice set. It is not a superset of the v1.0
+archive. Enumerate the exact current inventories with `discover_models()`.
+
+```python
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 
 config = PipelineConfig(
     voice="af_maple",
@@ -1183,112 +1223,80 @@ config = PipelineConfig(
     model_variant="v1.1-zh",
     generation=GenerationConfig(lang="en-us"),
 )
-pipe = KokoroPipeline(config)
-res = pipe.run("Hello world!")
-audio = res.audio
+with KokoroPipeline(config) as pipe:
+    result = pipe.run("Hello world!")
 ```
 
-List all available voices:
+To select the standard v1.0 profile explicitly, set `model_variant="v1.0"` and choose a
+voice and quality advertised by `discover_models()`.
+
+### Model discovery and selection
+
+PyKokoro resolves model capabilities from the canonical registry. For the standard
+Kokoro profiles, explicit `model_source="github"` and `model_source="huggingface"`
+remain available where supported. The built-in default source is GitHub.
+
+Use discovery before selecting a model, voice, or quality:
 
 ```python
-from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
+from pykokoro import discover_models
 
-pipe = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_sarah"))
-pipe.run("Hello")
-# Voices are loaded lazily by the backend after the first run.
-voices = pipe.synth._kokoro.get_voices()
-print(voices)
+for model in discover_models().models:
+    print(model.model_id, model.qualities)
 ```
 
-## Model Sources
+### Explicit model source selection
 
-PyKokoro supports downloading models from multiple sources:
-
-### HuggingFace (Default)
-
-HuggingFace is the default source with 54 multi-language voices. It downloads the model,
-voice archive, and the vocabulary config required by the HuggingFace profile:
+Hugging Face is an available alternative when the selected registry distribution
+supports it:
 
 ```python
-from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, PipelineConfig
 
-pipe = KokoroPipeline(
-    PipelineConfig(
-        generation=GenerationConfig(lang="en-us"),
-        voice="af_sarah",
-        model_source="huggingface",
-        model_quality="fp32",  # fp32, fp16, q8, q8f16, q4, q4f16, uint8, uint8f16
-    )
+config = PipelineConfig(
+    generation=GenerationConfig(lang="en-us"),
+    model_source="huggingface",
+    model_variant="v1.0",
+    voice="af_sarah",
 )
-res = pipe.run("Hello world")
 ```
 
-### GitHub v1.0
-
-54 voices with additional `fp16-gpu` optimized quality:
+The GitHub v1.0 distribution can be selected explicitly, including on Termux or Android:
 
 ```python
-from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
-
-pipe = KokoroPipeline(
-    PipelineConfig(
-        generation=GenerationConfig(lang="en-us"),
-        voice="af_sarah",
-        model_source="github",
-        model_variant="v1.0",
-        model_quality="fp16-gpu",  # fp32, fp16, fp16-gpu, q8
-    )
-)
-res = pipe.run("Hello world")
-```
-
-### Termux/Android: GitHub v1.0
-
-When HuggingFace downloads are unavailable, select the GitHub `v1.0` source explicitly.
-GitHub v1.0 downloads only its ONNX model and voice archive and uses the embedded
-standard v1.0 vocabulary, so it does not require a HuggingFace `config.json`:
-
-```python
-from pykokoro import KokoroPipeline, PipelineConfig
-
-pipe = KokoroPipeline(
-    PipelineConfig(
-        voice="af_heart",
-        model_source="github",
-        model_variant="v1.0",
-        model_quality="fp32",
-    )
+config = PipelineConfig(
+    generation=GenerationConfig(lang="en-us"),
+    model_source="github",
+    model_variant="v1.0",
+    voice="af_heart",
 )
 ```
 
 PyKokoro never silently switches between model sources. Explicit `model_path` and
 `voices_path` files are validated in place and are never replaced with managed cache
-files. A Termux/Android ONNX Runtime warning is a separate runtime-provider issue; it
-does not change model-download or source-selection behavior.
+files. A Termux/Android ONNX Runtime warning is a separate provider issue.
 
-### GitHub v1.1-zh (English + Chinese)
+### Choosing model quality
 
-103 voices including English and Chinese speakers:
+Qualities belong to the selected registry distribution and model. Not every model
+provides every quality. `model_quality=None` lets PyKokoro resolve the model/profile
+default; an explicit unsupported quality fails clearly. Select only a quality advertised
+by `discover_models()`, for example:
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
-from pykokoro.generation_config import GenerationConfig
-
-pipe = KokoroPipeline(
-    PipelineConfig(
-        voice="af_maple",
-        model_source="github",
-        model_variant="v1.1-zh",
-        model_quality="fp32",  # Only fp32 available
-        generation=GenerationConfig(lang="en-us"),
-    )
-)
-res = pipe.run("Hello world")
-audio = res.audio
+config = PipelineConfig(
+    generation=GenerationConfig(lang="en-us"),
+    model_variant="v1.0",
+    voice="af_sarah",
+    model_quality="q8",
+    model_source="github",
+ )
 ```
 
-**Note:** Chinese text generation requires proper phonemization support (currently in
-development).
+### Chinese text
+
+For Mandarin text, select a Chinese-capable model such as `v1.1-zh`, use
+`GenerationConfig(lang="zh")`, and choose a voice from that model's registry inventory.
 
 ### German Martin v1.2
 
@@ -1322,58 +1330,43 @@ config = PipelineConfig(
 ```
 
 Martin uses the built-in Kokoro v1.0 vocabulary and does not download a Tundragoon
-config. `martin` alone also infers German; custom voice archives may expose additional
-voice names when selected explicitly. The profile's suggested speed of `1.125` is
-advisory, so applications must set it explicitly when they want it. German
-Language-specific automatic spoken-form normalization belongs to the compatible
-kokorog2p release. PyKokoro keeps source offsets and segments tied to the original input
-text, consumes kokorog2p's prepared G2P result, and owns synthesis.
+config. `martin` selects the corresponding model profile, but it does not replace the
+required document language. Use `GenerationConfig(lang="de")` (or an appropriate German
+locale) explicitly. Custom voice archives may expose additional voice names when
+selected explicitly. The profile's suggested speed of `1.125` is advisory, so
+applications must set it explicitly when they want it. Language-specific automatic
+spoken-form normalization for German text belongs to the compatible kokorog2p release.
+PyKokoro keeps source offsets and segments tied to the original input text, consumes
+kokorog2p's prepared G2P result, and owns synthesis.
 
-## Model Quality Options
+### Model Quality Options
 
-Available quality options vary by source:
-
-**HuggingFace Models:**
-
-- `fp32`: Full precision (highest quality, largest size)
-- `fp16`: Half precision (good quality, smaller size)
-- `q8`: 8-bit quantized (fast, small)
-- `q8f16`: 8-bit with fp16 (balanced)
-- `q4`: 4-bit quantized (fastest, smallest)
-- `q4f16`: 4-bit with fp16 (compact)
-- `uint8`: Unsigned 8-bit (compatible)
-- `uint8f16`: Unsigned 8-bit with fp16
-
-**GitHub v1.0 Models:**
-
-- `fp32`: Full precision
-- `fp16`: Half precision
-- `fp16-gpu`: GPU-optimized fp16
-- `q8`: 8-bit quantized
-
-**GitHub v1.1-zh Models:**
-
-- `fp32`: Full precision only
-
-**GitHub v1.2-de-martin:**
-
-- `fp32`: Full precision only; no fp16 or quantized Martin artifacts are published
+Quality options are selected from the registry distribution for the chosen model.
+Discover the current options instead of relying on a manually maintained source/model
+matrix:
 
 ```python
-from pykokoro import KokoroPipeline, PipelineConfig
+from pykokoro import discover_models
 
-# HuggingFace with q8
-pipe = KokoroPipeline(
-    PipelineConfig(voice="af_sarah", model_source="huggingface", model_quality="q8")
-)
+for model in discover_models().models:
+    print(model.model_id, model.qualities)
+```
 
-# GitHub v1.0 with GPU-optimized fp16
+Qualities belong to the selected model and distribution. Not every model provides every
+quality. `model_quality=None` allows PyKokoro to resolve the model/profile default,
+while an explicit unsupported quality fails clearly. For a model that advertises `q8`,
+select it with:
+
+```python
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
+
 pipe = KokoroPipeline(
     PipelineConfig(
-        voice="af_sarah",
-        model_source="github",
+        generation=GenerationConfig(lang="en-us"),
         model_variant="v1.0",
-        model_quality="fp16-gpu",
+        model_source="github",
+        model_quality="q8",
+        voice="af_sarah",
     )
 )
 ```
@@ -1417,27 +1410,27 @@ Offline mode reads and validates the cached registry and artifacts without netwo
 access. Missing or invalid offline assets fail clearly. Users do not need to delete
 `models.json` or an entire model directory after a catalog or model update.
 
-## Configuration
+## Pipeline configuration
 
-Configuration is stored in a platform-specific directory:
-
-- Linux: `~/.config/pykokoro/config.json`
-- macOS: `~/Library/Application Support/pykokoro/config.json`
-- Windows: `%APPDATA%\pykokoro\config.json`
+Configure synthesis through the immutable `PipelineConfig` passed to the pipeline. Set
+the document language explicitly and select a provider through `provider` when needed:
 
 ```python
-from pykokoro.utils import load_config, save_config
+from pykokoro import GenerationConfig, PipelineConfig
 
-# Load config
-config = load_config()
-
-# Modify config
-config["model_quality"] = "fp16"
-config["use_gpu"] = True
-
-# Save config
-save_config(config)
+config = PipelineConfig(
+    generation=GenerationConfig(lang="en-us"),
+    voice="af_sarah",
+    provider="auto",
+    model_quality="fp16",
+)
 ```
+
+`provider="auto"` selects the best available execution provider according to the
+documented priority. Use `resolve_pipeline_config()` to inspect effective model settings
+before constructing a backend. The older `load_config()` and `save_config()` utilities
+remain available as legacy backend configuration helpers, but they are not the primary
+pipeline configuration interface.
 
 ## Advanced Features
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .generation_config import GenerationConfig
 from .language_detection import LanguageDetectionConfig
@@ -14,6 +14,32 @@ try:
 except ImportError:
     __version__ = "0.9.2"
     __version_tuple__ = (0, 9, 2)
+
+
+if TYPE_CHECKING:
+    from .asset_progress import AssetProgressCallback, AssetProgressEvent, ConsoleAssetProgress
+    from .discovery import (
+        ModelCapabilities,
+        ModelDiscoveryResult,
+        VoiceCapabilities,
+        discover_models,
+    )
+    from .lexicon_discovery import LexiconCapabilities, LexiconDiscoveryResult, discover_lexicons
+    from .pipeline import (
+        KokoroPipeline,
+        PreparedAudioUnits,
+        PreparedFrontend,
+        build_pipeline,
+        with_spacy_model,
+        with_spacy_model_size,
+    )
+    from .pipeline_config import PipelineConfig, resolve_pipeline_config
+    from .release_catalog import (
+        available_model_releases,
+        download_model_release,
+        resolve_model_release,
+    )
+    from .types import AudioUnitDescriptor, AudioUnitKind, AudioUnitResult, WordTiming
 
 
 def __getattr__(name: str) -> Any:

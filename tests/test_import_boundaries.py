@@ -101,3 +101,22 @@ def test_missing_kokorog2p_has_distinct_diagnostic(
     monkeypatch.setattr("builtins.__import__", blocked_import)
     with pytest.raises(RuntimeError, match="not installed"):
         adapter._load()
+
+
+def test_top_level_public_api_keeps_lazy_pipeline_import() -> None:
+    code = (
+        "import sys\n"
+        "import pykokoro\n"
+        "assert 'pykokoro.pipeline' not in sys.modules\n"
+        "assert 'onnxruntime' not in sys.modules\n"
+        "assert 'PipelineConfig' in pykokoro.__all__\n"
+        "print('ok')\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "ok"
