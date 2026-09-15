@@ -41,6 +41,7 @@ def _context_token_value(token: Any, name: str, default: object) -> object:
         return metadata[name]
     return default
 
+
 def _context_token_int(token: Any, name: str) -> int | None:
     value = _context_token_value(token, name, None)
     return value if isinstance(value, int) and not isinstance(value, bool) else None

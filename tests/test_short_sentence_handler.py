@@ -1,5 +1,7 @@
 """Tests for pykokoro.short_sentence_handler module."""
 
+import pytest
+
 from pykokoro.short_sentence_handler import (
     PhraseResolveMode,
     RandomizedPhraseResolveMode,
@@ -217,7 +219,7 @@ def test_custom_phrase_catalog_is_selected_for_segment_language() -> None:
 def test_unsupported_phrase_language_uses_wrap_without_english_context() -> None:
     config = ShortSentenceConfig(resolve_mode="phrase")
     segment = make_segment("word", "abc")
-    segment.lang = "sv"
+    segment.lang = "xx"
     calls: list[tuple[str, str]] = []
     result = apply_short_sentence_mode(
         segment,
@@ -231,6 +233,51 @@ def test_unsupported_phrase_language_uses_wrap_without_english_context() -> None
     assert result.metadata["kind"] == "wrap"
     assert result.metadata["cut_failure_reason"] == "no-localized-phrase-catalog"
     assert calls == []
+
+
+def test_swedish_builtin_phrase_catalog_is_used() -> None:
+    config = ShortSentenceConfig(resolve_mode="phrase")
+    segment = make_segment("Ja.", "abc")
+    segment.lang = "sv"
+    calls: list[tuple[str, str]] = []
+
+    def context_phonemizer(text: str, language: str):
+        calls.append((text, language))
+        return type(
+            "Result",
+            (),
+            {"phonemes": "context", "ids": [1], "tokens": []},
+        )()
+
+    result = apply_short_sentence_mode(
+        segment,
+        segment.phonemes,
+        [1],
+        config,
+        lambda text: [1 for _ in text],
+        context_phonemizer=context_phonemizer,
+    )
+
+    assert result.metadata is not None
+    assert result.metadata["kind"] == "phrase"
+    assert result.metadata["phrase_language"] == "sv"
+    assert "Ja." in calls[0][0]
+    assert calls[0][1] == "sv"
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("はい。", "declarative"),
+        ("为什么？", "question"),
+        ("لماذا؟", "question"),
+        ("止まれ！", "exclamation"),
+        ("हाँ।", "declarative"),
+        ("等等……", "ellipsis"),
+    ],
+)
+def test_terminal_form_supports_native_punctuation(text: str, expected: str) -> None:
+    assert _terminal_form(text) == expected
 
 
 def test_cutter_override_keeps_german_builtin_carrier_localized() -> None:

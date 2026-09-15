@@ -14,7 +14,6 @@ from pykokoro.model_profiles import get_model_profile
         ("vi-contextbox", "vig2p-v1", "espeak"),
         ("vi-anphunl", "vig2p-v1", "espeak"),
         ("vi-ngoc-huyen", "vig2p-v1", "espeak"),
-        ("de-crane", "german-ipa-v1", "kokorog2p"),
         ("he-hebrew-nc", "hebrew-g2p-v1", "espeak"),
     ],
 )
@@ -30,6 +29,17 @@ def test_experimental_frontend_contracts_are_explicit(variant, frontend, g2p_bac
     with pytest.raises(ValueError, match="requires"):
         require_frontend(variant, allow_experimental=False)
     assert require_frontend(variant, allow_experimental=True) == frontend
+
+
+def test_crane_german_ipa_frontend_is_release_ready() -> None:
+    profile = get_model_profile("de-crane", "github")
+    fixture = FRONTEND_FIXTURES["de-crane"]
+
+    assert profile.frontend == "german-ipa-v1"
+    assert profile.g2p_backend == "kokorog2p"
+    assert profile.frontend_experimental is False
+    assert fixture.release_ready is True
+    assert require_frontend("de-crane", allow_experimental=False) == profile.frontend
 
 
 def test_nabra_frontend_is_release_ready():

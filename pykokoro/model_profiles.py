@@ -131,6 +131,7 @@ MODEL_PROFILES: dict[tuple[ModelSource, ModelVariant], RuntimeProfile] = {
         "german-ipa-v1",
         {"input_ids": "int64", "style": "float32", "speed": "float32"},
         g2p_backend="kokorog2p",
+        frontend_experimental=False,
     ),
     ("github", "he-hebrew-nc"): _github_profile(
         "he-hebrew-nc",

@@ -61,6 +61,25 @@ def test_matrix_is_deterministic_and_covers_axes() -> None:
     assert len(first) == 54
 
 
+def test_catalog_mode_uses_localized_templates_for_terminal_form() -> None:
+    cases = build_diagnostic_cases(
+        catalog=True,
+        language="es",
+        terminal_form="fragment",
+    )
+
+    assert len(cases) == 2
+    assert all(case.axis == "phrase-template" for case in cases)
+    assert all(case.settings.phrase_language == "es" for case in cases)
+    assert [case.settings.neutral_phrase for case in cases] == [
+        "La nota decía: {segment}",
+        "El mensaje corto decía: {segment}",
+    ]
+    assert all(
+        case.settings.neutral_phrase != "The short message read: {segment}" for case in cases
+    )
+
+
 def test_geometry_rows_keep_unresolved_counts_visible() -> None:
     rows = compute_geometry_rows(
         [

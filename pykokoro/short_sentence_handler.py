@@ -854,11 +854,11 @@ def _terminal_form(
     text = segment_text.rstrip()
     if text.endswith(("…", "...")):
         return "ellipsis"
-    if text.endswith("?"):
+    if text.endswith(("?", "？", "؟")):
         return "question"
-    if text.endswith("!"):
+    if text.endswith(("!", "！")):
         return "exclamation"
-    if text.endswith("."):
+    if text.endswith((".", "。", "।")):
         return "declarative"
     return "fragment"
 

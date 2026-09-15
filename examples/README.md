@@ -9,8 +9,8 @@ scripts below use the current pipeline-first API.
   requires ONNX Runtime/model assets.
 - `english_7m.py` — English TTS with the explicitly selected `en-oddadmix-7m-distill` 7M
   model and `af_msa` voice.
-- `german2.py` — German Kerstin/Crane; explicitly selects `de-crane`, opts into its
-  experimental readiness status, and uses the shared native German G2P path.
+- `german2.py` — German Kerstin/Crane; explicitly selects the ready `de-crane` model and
+  uses the shared native German G2P path.
 - `german3.py` — German Thorsten; explicitly selects the ready `de-thorsten` model.
 - `models_and_languages.py` — inspect the canonical runtime registry and display models,
   languages, providers, voices, qualities, frontend/layout status, and optionally

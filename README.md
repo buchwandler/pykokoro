@@ -57,12 +57,12 @@ Runtime model selection uses the canonical `catalog/models.json` registry. Model
 metadata, voices, frontend IDs, runtime layouts, artifact hashes, provider, and
 redistribution policy are not inferred from GitHub release names.
 
-| Status                      | Meaning                                                                 | Examples                                                                                                                 |
-| --------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| ready                       | Registry distribution and PyKokoro frontend/layout are usable           | `v1.0`, `v1.1-zh`, `v1.2-de-martin`, `de-thorsten`, `th-wayu`, `sv-joakim`, `kk-anuarsv`, `vi-anphunl`, Zaakirio Russian |
-| experimental                | Usable only when explicitly enabled for an experimental frontend        | Profiles marked experimental by the local compatibility policy                                                           |
-| restricted                  | Runtime is visible but redistribution policy is not ordinary            | `he-hebrew-nc`                                                                                                           |
-| unsupported-layout/frontend | Registry metadata is valid but the local implementation cannot serve it | A future registry layout or frontend                                                                                     |
+| Status                      | Meaning                                                                 | Examples                                                                                                                             |
+| --------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| ready                       | Registry distribution and PyKokoro frontend/layout are usable           | `v1.0`, `v1.1-zh`, `v1.2-de-martin`, `de-crane`, `de-thorsten`, `th-wayu`, `sv-joakim`, `kk-anuarsv`, `vi-anphunl`, Zaakirio Russian |
+| experimental                | Usable only when explicitly enabled for an experimental frontend        | Profiles marked experimental by the local compatibility policy                                                                       |
+| restricted                  | Runtime is visible but redistribution policy is not ordinary            | `he-hebrew-nc`                                                                                                                       |
+| unsupported-layout/frontend | Registry metadata is valid but the local implementation cannot serve it | A future registry layout or frontend                                                                                                 |
 
 Thai Wayu uses the registry's `split-onnx-v1` layout and selects its prosody, curves,
 and decoder components as one distribution. Russian Zaakirio uses pinned upstream-only
@@ -1014,10 +1014,15 @@ This happens automatically during `pipe.run()` - no configuration needed! Phrase
 modes require a model duration/timestamp output. When no explicit short-sentence
 configuration is supplied, PyKokoro automatically uses `wrap` for models without that
 output. If a phrase mode is explicitly requested for such a model, PyKokoro logs a
-warning and falls back to `wrap`. Multilingual showcase code should use `wrap` until
-localized phrase templates exist.
+warning and falls back to `wrap`. Phrase-based short-sentence handling uses
+language-localized carrier catalogs for English, German, Spanish, French, Italian,
+Portuguese, European Portuguese, Korean, Japanese, Chinese/Mandarin, Arabic, Hebrew,
+Kazakh, Swedish, Thai, Vietnamese, Russian, Hindi, Polish, and Turkish. Unknown
+languages never fall back to English carrier phrases. They use `wrap` unless a
+user-provided `ShortSentencePhraseSet` is supplied.
 
-NOTE: Phrase and randomized-phrase templates currently support ENGLISH text only.
+NOTE: Carrier quality remains voice and model dependent. Benchmark localized phrases
+before relying on them in production.
 
 **Customizing the Behavior:**
 
@@ -1104,8 +1109,8 @@ See `examples/optimal_phoneme_length_demo.py` for a demonstration.
 **Advanced customization of short-sentence handling**
 
 You can add custom template phrases used to add context in phrase mode, but THIS IS NOT
-RECOMMENDED for most users! However, you can use it to add support for more languages
-than just english.
+RECOMMENDED for most users! You can supply a `ShortSentencePhraseSet` when you need
+custom carrier wording or language coverage beyond the built-in catalogs.
 
 WARNING: The quality of the phrase makes a huge difference. If possible, test the
 phrases first, e.g. by using the various short-sentence py scripts in metrics/. All

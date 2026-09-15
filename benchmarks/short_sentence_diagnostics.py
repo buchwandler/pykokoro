@@ -15,6 +15,8 @@ from typing import Any
 
 import numpy as np
 
+from pykokoro.short_sentence_phrases import resolve_short_sentence_phrase_set
+
 SAMPLE_RATE = 24000
 SCHEMA = "pykokoro.short-sentence-diagnostics.v1"
 DEFAULT_TEMPLATE = "The short message read: {segment}"
@@ -73,6 +75,8 @@ class DiagnosticSettings:
     enabled: bool = True
     resolve_mode: str = "phrase"
     phrase_fallback_tries: int = 0
+
+    phrase_language: str | None = None
 
     def as_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -148,6 +152,9 @@ def build_diagnostic_cases(
     matrix: str = "all",
     speed: float = 1.0,
     random_seed: int = 0,
+    catalog: bool = False,
+    language: str = "en-us",
+    terminal_form: str = "fragment",
 ) -> list[DiagnosticCase]:
     """Build the deterministic baseline plus the requested OFAT matrix."""
     if matrix not in {"default", "alignment", "cutter", "all"}:
@@ -157,6 +164,34 @@ def build_diagnostic_cases(
 
     def add(axis: str, value: object, settings: DiagnosticSettings) -> None:
         cases.append(DiagnosticCase(f"{len(cases) + 1:03d}", axis, value, settings))
+
+    if catalog:
+        if terminal_form not in {
+            "fragment",
+            "declarative",
+            "question",
+            "exclamation",
+            "ellipsis",
+        }:
+            raise ValueError(f"unknown terminal form {terminal_form!r}")
+        phrase_set, phrase_language, _ = resolve_short_sentence_phrase_set(language)
+        if phrase_set is None or phrase_language is None:
+            raise ValueError(f"no built-in phrase catalog for language {language!r}")
+        templates = getattr(phrase_set, terminal_form)
+        for template in templates:
+            add(
+                "phrase-template",
+                _slug(template.removesuffix(" {segment}")),
+                _case_settings(
+                    base,
+                    neutral_phrase=template,
+                    end_phrase=template,
+                    phrase_selection="auto",
+                    phrase_language=phrase_language,
+                ),
+            )
+        _ = text
+        return cases
 
     add("baseline", "default", base)
     if matrix in {"default", "alignment", "all"}:
@@ -197,6 +232,7 @@ def _settings_lines(settings: dict[str, object]) -> list[str]:
         "neutral_phrase": "phrase.neutral_phrase",
         "end_phrase": "phrase.end_phrase",
         "frame_duration_ms": "phrase.frame_duration_ms",
+        "phrase_language": "phrase.language",
         "energy_threshold": "phrase.energy_threshold",
         "silence_threshold": "phrase.silence_threshold",
         "min_silence_seconds": "phrase.min_silence_seconds",
@@ -226,6 +262,8 @@ def format_header(
         f"voice: {args.voice}",
         f"language: {args.lang}",
         f"model_source: {args.model_source}",
+        f"catalog: {getattr(args, 'catalog', False)}",
+        f"terminal_form: {getattr(args, 'terminal_form', '-')}",
         f"model_variant: {args.model_variant}",
         f"model_path: {metadata.get('model_path', args.model_path or '-')}",
         f"voices_path: {metadata.get('voices_path', args.voices_path or '-')}",
@@ -510,12 +548,21 @@ def run_phrase_probe(
         context_guard_ms=settings.context_guard_ms,
         analysis_window_ms=settings.analysis_window_ms,
     )
+    phrase_catalog = None
+    if settings.phrase_language is not None:
+        phrase_set, resolved_language, _ = resolve_short_sentence_phrase_set(
+            settings.phrase_language
+        )
+        if phrase_set is None or resolved_language is None:
+            raise ValueError(f"no built-in phrase catalog for {settings.phrase_language!r}")
+        phrase_catalog = {resolved_language: phrase_set}
     config = ShortSentenceConfig(
         min_phoneme_length=settings.min_phoneme_length,
         phoneme_pretext=settings.phoneme_pretext,
         enabled=True,
         resolve_mode="phrase",
         resolve_modes={"phrase": mode},
+        phrase_catalog=phrase_catalog,
         phrase_fallback_tries=0,
     )
     tokenizer = backend.tokenizer
@@ -698,6 +745,7 @@ def format_case_report(result: ShortSentenceDiagnosticCase) -> str:
         "PHRASE",
         f"  template: {result.settings.get('neutral_phrase')!r}",
         f"  text: {result.phrase_text!r}",
+        f"  phrase_language: {result.settings.get('phrase_language', '-')!r}",
         f"  phonemes: {result.phonemes!r}",
         f"  phoneme_char_count: {len(result.phonemes)}",
         f"  generated_token_count: {len(result.token_ids)}",
@@ -859,6 +907,12 @@ def _add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--text", default="who")
     parser.add_argument("--voice", default="af_sarah")
     parser.add_argument("--lang", default="en-us")
+    parser.add_argument("--catalog", action="store_true")
+    parser.add_argument(
+        "--terminal-form",
+        choices=("fragment", "declarative", "question", "exclamation", "ellipsis"),
+        default="fragment",
+    )
     parser.add_argument("--model-source", choices=("github", "huggingface"), default="huggingface")
     parser.add_argument("--model-variant", default="v1.0")
     parser.add_argument("--model-path", type=Path)
@@ -884,7 +938,13 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=getattr(logging, str(args.log_level).upper(), logging.WARNING))
     try:
         cases = build_diagnostic_cases(
-            text=args.text, matrix=args.matrix, speed=args.speed, random_seed=args.random_seed
+            text=args.text,
+            matrix=args.matrix,
+            speed=args.speed,
+            random_seed=args.random_seed,
+            catalog=args.catalog,
+            language=args.lang,
+            terminal_form=args.terminal_form,
         )
         if args.case is not None:
             cases = [case for case in cases if case.case_id == args.case]

@@ -33,7 +33,7 @@ FRONTEND_FIXTURES: dict[ModelVariant, FrontendFixture] = {
         "sˈi1n tʃˈaː2w",
     ),
     "ar-nabra": FrontendFixture("ar-nabra", "ar", "مَرْحَبًا", "espeak", "mˈarħabˌan"),
-    "de-crane": FrontendFixture("de-crane", "de", "Hallo", "espeak", "hˈaloː"),
+    "de-crane": FrontendFixture("de-crane", "de", "Hallo", "espeak", "hˈaloː", release_ready=True),
     "he-hebrew-nc": FrontendFixture("he-hebrew-nc", "he", "שלום", "espeak", "ʃalˈom"),
     "de-anna": FrontendFixture(
         "de-anna",

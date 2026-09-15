@@ -312,10 +312,10 @@ def test_context_normalization_reads_kokorog2p_tokenspan_meta() -> None:
     assert [token.char_end for token in normalized.tokens] == [3, 7]
     assert [token.model_token_count for token in normalized.tokens] == [3, 2]
     assert [token.model_span_token_count for token in normalized.tokens] == [4, 2]
-    assert sum(
-        token.model_span_token_count or 0
-        for token in normalized.tokens
-    ) == len(normalized.ids)
+    assert sum(token.model_span_token_count or 0 for token in normalized.tokens) == len(
+        normalized.ids
+    )
+
 
 def test_context_normalization_reconciles_prefix_spans_with_whole_phrase_ids() -> None:
     class FakeG2P:

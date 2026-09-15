@@ -39,7 +39,7 @@ def make_config(*, lexicons: str | tuple[str, ...] | None = None) -> PipelineCon
         model_source="github",
         model_variant="de-crane",
         model_quality="fp32",
-        allow_experimental_frontend=True,
+        allow_experimental_frontend=False,
         generation=GenerationConfig(lang="de", speed=1.0),
         tokenizer_config=TokenizerConfig(lexicons=lexicons),
         return_trace=True,

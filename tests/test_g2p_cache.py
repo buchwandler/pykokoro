@@ -90,7 +90,7 @@ def test_german_short_u_cleanup_retokenizes_uncached_and_cached_results(
     cache_files = list(tmp_path.glob("*.json"))
     assert len(cache_files) == 1
     payload = DiskCache(tmp_path).get(cache_files[0].stem)
-    assert payload["schema"] == 10
+    assert payload["schema"] == 11
     assert payload["phonemes"] == "bykə"
     assert payload["tokens"] == [ord(char) for char in "bykə"]
 
@@ -164,7 +164,7 @@ def test_previous_g2p_cache_schema_is_recomputed_with_cleaned_payload(
 
     assert calls["phonemize"] == 1
     assert result[0].phonemes == "bykə"
-    assert payload["schema"] == 10
+    assert payload["schema"] == 11
     assert payload["phonemes"] == "bykə"
     assert payload["tokens"] == [ord(char) for char in "bykə"]
 

@@ -92,7 +92,7 @@ def test_invalid_choices_fail_in_argparse(arguments: list[str]) -> None:
     ("model_id", "voice", "experimental"),
     [
         ("v1.2-de-martin", "martin", False),
-        ("de-crane", "default", True),
+        ("de-crane", "default", False),
         ("de-thorsten", "thorsten", False),
         ("de-anna", "df_anna", False),
     ],

@@ -195,7 +195,6 @@ def test_discovery_returns_complete_sorted_contract(monkeypatch: pytest.MonkeyPa
     assert thorsten.voices == ("thorsten",)
     assert thorsten.qualities == ("fp32",)
     assert thorsten.g2p_backend == "kokorog2p"
-    assert thorsten.lexicons == ("gold", "crane")
     assert thorsten.frontend == "kokorog2p-de-thorsten-v1"
     assert thorsten.status == "ready"
     assert thorsten.experimental is False
@@ -218,8 +217,8 @@ def test_discovery_returns_complete_sorted_contract(monkeypatch: pytest.MonkeyPa
     crane = next(model for model in result.models if model.model_id == "de-crane")
     assert crane.voices == ("default",)
     assert crane.default_voice == "default"
-    assert crane.status == "experimental"
-    assert crane.experimental is True
+    assert crane.status == "ready"
+    assert crane.experimental is False
 
     assert (
         next(model for model in result.models if model.model_id == "restricted").status

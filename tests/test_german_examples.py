@@ -24,7 +24,7 @@ def test_german_model_configurations() -> None:
     assert crane.voice == "default"
     assert crane.generation.lang == "de"
     assert crane.generation.speed == 1.0
-    assert crane.allow_experimental_frontend is True
+    assert crane.allow_experimental_frontend is False
     assert german2.OUTPUT_FILE == "german_kerstin_crane.wav"
 
     assert thorsten.model_source == "github"
