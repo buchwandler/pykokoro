@@ -179,7 +179,6 @@ MODEL_PROFILES.update(
             False,
             voice_names=("thorsten",),
             g2p_backend="kokorog2p",
-            named_lexicons=("gold", "crane"),
         ),
         ("github", "kk-anuarsv"): RuntimeProfile(
             "github",

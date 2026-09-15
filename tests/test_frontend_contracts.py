@@ -99,6 +99,5 @@ def test_native_profiles_are_not_marked_experimental():
 
 
 def test_named_lexicon_inventory_has_explicit_unknown_and_empty_states() -> None:
-    assert named_lexicons_for_frontend("kokorog2p-de-thorsten-v1") == ("gold", "crane")
     assert named_lexicons_for_frontend("nabra-arabic-v1") == ()
     assert named_lexicons_for_frontend("unclassified-frontend") is None
