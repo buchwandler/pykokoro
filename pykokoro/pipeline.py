@@ -16,8 +16,11 @@ from typing_extensions import Self
 
 from .constants import SAMPLE_RATE
 from .emphasis import apply_emphasis_policy
+from .exceptions import ConfigurationError
 from .generation_config import GenerationConfig
 from .language_detection import LanguageDetectionConfig
+from .loudness_config import LoudnessConfig
+from .output_loudness import apply_complete_output_loudness
 from .pipeline_config import PipelineConfig, require_document_language, resolve_model_defaults
 from .runtime.language_plan import build_language_plan
 from .runtime.linguistics import (
@@ -319,6 +322,16 @@ def _coerce_generation(base: GenerationConfig, value: Any) -> GenerationConfig:
     raise TypeError(f"generation must be GenerationConfig | Mapping | None, got {type(value)!r}")
 
 
+def _coerce_loudness(base: LoudnessConfig, value: Any) -> LoudnessConfig:
+    if value is None:
+        return base
+    if isinstance(value, LoudnessConfig):
+        return value
+    if isinstance(value, Mapping):
+        return replace(base, **dict(value))
+    raise TypeError(f"loudness must be LoudnessConfig | Mapping | None, got {type(value)!r}")
+
+
 def _coerce_ssmd(base: SSMDRenderConfig, value: Any) -> SSMDRenderConfig:
     if value is None:
         return base
@@ -387,6 +400,7 @@ def _coerce_pipeline_config(
     if isinstance(value, Mapping):
         data = dict(value)
         gen_value = data.pop("generation", None)
+        loudness_value = data.pop("loudness", None)
         ssmd_value = data.pop("ssmd", None)
         tokenizer_value = data.pop("tokenizer_config", None)
         language_detection_value = data.pop("language_detection", None)
@@ -396,6 +410,8 @@ def _coerce_pipeline_config(
 
         if gen_value is not None:
             cfg = replace(cfg, generation=_coerce_generation(cfg.generation, gen_value))
+        if loudness_value is not None:
+            cfg = replace(cfg, loudness=_coerce_loudness(cfg.loudness, loudness_value))
         if ssmd_value is not None:
             cfg = replace(cfg, ssmd=_coerce_ssmd(cfg.ssmd, ssmd_value))
         if tokenizer_value is not None:
@@ -424,6 +440,7 @@ def _merge_config(
 
     data = dict(overrides)
     gen_value = data.pop("generation", None)
+    loudness_value = data.pop("loudness", None)
     ssmd_value = data.pop("ssmd", None)
     tokenizer_value = data.pop("tokenizer_config", None)
     language_detection_value = data.pop("language_detection", None)
@@ -433,6 +450,8 @@ def _merge_config(
 
     if gen_value is not None:
         cfg = replace(cfg, generation=_coerce_generation(cfg.generation, gen_value))
+    if loudness_value is not None:
+        cfg = replace(cfg, loudness=_coerce_loudness(cfg.loudness, loudness_value))
     if ssmd_value is not None:
         cfg = replace(cfg, ssmd=_coerce_ssmd(cfg.ssmd, ssmd_value))
     if tokenizer_value is not None:
@@ -896,6 +915,7 @@ class KokoroPipeline:
         lang = overrides.pop("lang", None)
         has_generation_override = "generation" in overrides
         ssmd_value = overrides.pop("ssmd", None)
+        loudness_value = overrides.pop("loudness", None)
         generation = _coerce_generation(
             self.config.generation,
             overrides.pop("generation", None),
@@ -906,6 +926,8 @@ class KokoroPipeline:
             overrides["generation"] = generation
         if ssmd_value is not None:
             overrides["ssmd"] = _coerce_ssmd(self.config.ssmd, ssmd_value)
+        if loudness_value is not None:
+            overrides["loudness"] = _coerce_loudness(self.config.loudness, loudness_value)
         return resolve_model_defaults(replace(self.config, **overrides))
 
     def prepare_units(
@@ -919,6 +941,11 @@ class KokoroPipeline:
         if unit not in ("paragraph", "sentence"):
             raise ValueError(f"Unsupported audio unit kind: {unit!r}")
         cfg = _copy_config_for_preparation(self._resolve_run_config(overrides))
+        if cfg.loudness.target_lufs is not None and unit != "paragraph":
+            raise ConfigurationError(
+                "Complete-output loudness normalization requires a complete paragraph result; "
+                "it cannot be applied to isolated streaming units."
+            )
         prepared = self._prepare_document(text, cfg, unit)
         result = PreparedAudioUnits(self, prepared)
         self._prepared_objects.append(result)
@@ -1636,6 +1663,7 @@ class KokoroPipeline:
             )
             audio = np.concatenate(final_audio) if final_audio else np.array([], dtype=np.float32)
             metadata = dict(prepared_units.document_metadata)
+            audio = apply_complete_output_loudness(audio, SAMPLE_RATE, cfg.loudness, prepared.trace)
             return AudioResult(
                 audio=audio,
                 sample_rate=SAMPLE_RATE,
@@ -1692,6 +1720,12 @@ class KokoroPipeline:
                 else []
             )
             audio = np.concatenate(final_audio) if final_audio else np.array([], dtype=np.float32)
+            audio = apply_complete_output_loudness(
+                audio,
+                SAMPLE_RATE,
+                cfg.loudness,
+                prepared._prepared.trace if prepared._prepared is not None else None,
+            )
             trace = prepared._prepared.trace if prepared._prepared is not None else None
             metadata = dict(prepared.document_metadata)
         return AudioResult(
@@ -1717,6 +1751,12 @@ class KokoroPipeline:
         **overrides: Any,
     ) -> None:
         """Generate and play selected units through one persistent output stream."""
+        config = self._resolve_run_config(dict(overrides))
+        if config.loudness.target_lufs is not None:
+            raise ConfigurationError(
+                "Complete-output loudness normalization requires the complete waveform and "
+                "cannot be used with play_streaming(). Render the complete AudioResult first."
+            )
         from .playback import play_prepared_units
 
         with self.prepare_units(text, unit=unit, **overrides) as prepared:
@@ -1862,6 +1902,7 @@ def _audio_identity_config(cfg: PipelineConfig) -> dict[str, object]:
         "generation": _freeze_config_value(cfg.generation),
         "ssmd": _freeze_config_value(cfg.ssmd),
         "prosody": _freeze_config_value(cfg.prosody),
+        "loudness": _freeze_config_value(cfg.loudness),
         "model_quality": cfg.model_quality,
         "model_source": cfg.model_source,
         "model_variant": cfg.model_variant,

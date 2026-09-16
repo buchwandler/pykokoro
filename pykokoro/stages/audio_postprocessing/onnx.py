@@ -35,10 +35,18 @@ class OnnxAudioPostprocessingAdapter:
             for segment in phoneme_segments
         )
         postprocess = cast(Any, self._kokoro.postprocess_audio_segments)
-        arguments: list[Any] = [phoneme_segments, trim_silence, getattr(cfg, "prosody", None)]
-        if "trace" in inspect.signature(postprocess).parameters:
-            arguments.append(trace)
-        processed = postprocess(*arguments)
+        arguments: list[Any] = [
+            phoneme_segments,
+            trim_silence,
+            getattr(cfg, "prosody", None),
+        ]
+        parameters = inspect.signature(postprocess).parameters
+        kwargs: dict[str, Any] = {}
+        if "loudness_config" in parameters:
+            kwargs["loudness_config"] = getattr(cfg, "loudness", None)
+        if "trace" in parameters:
+            kwargs["trace"] = trace
+        processed = postprocess(*arguments, **kwargs)
         resolver = cfg.ssmd.audio_source_resolver
         for segment in processed:
             metadata = segment.ssmd_metadata or {}

@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "method": "bs1770",
+  "corpus": "pykokoro-neutral-v1",
+  "reference_lufs": -18.0,
+  "generated_with": {
+    "pykokoro": null,
+    "audiosig": "0.1.4",
+    "status": "no-reviewed-measurements"
+  },
+  "voices": {}
+}

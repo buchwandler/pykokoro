@@ -4,14 +4,17 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
+from audiosig import measure_loudness
 
 from pykokoro import (
     AudioUnitDescriptor,
     AudioUnitResult,
     KokoroPipeline,
+    LoudnessConfig,
     PipelineConfig,
     PreparedAudioUnits,
 )
+from pykokoro.exceptions import ConfigurationError
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline import _unit_text_hash
 from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
@@ -63,6 +66,19 @@ class CountingGenerator(NoopAudioGenerationAdapter):
     def generate(self, phoneme_segments, cfg, trace):
         self.calls += 1
         return super().generate(phoneme_segments, cfg, trace)
+
+
+class ConstantGenerator(CountingGenerator):
+    def __init__(self) -> None:
+        super().__init__()
+        self.seconds_per_segment = 0.2
+
+    def generate(self, phoneme_segments, cfg, trace):
+        generated = super().generate(phoneme_segments, cfg, trace)
+        for segment in generated:
+            if segment.raw_audio is not None:
+                segment.raw_audio.fill(0.1)
+        return generated
 
 
 def build_pipeline(
@@ -414,3 +430,32 @@ def test_play_streaming_uses_sentence_units_and_forwards_playback_options(
     pipeline.play_streaming("One. Two.", device="test-device", queue_size=3)
 
     assert calls == [("sentence", 3, "test-device")]
+
+
+def test_target_lufs_rejects_isolated_and_streaming_units() -> None:
+    pipeline = build_pipeline(
+        config=PipelineConfig(
+            generation=GenerationConfig(lang="en-us"),
+            loudness=LoudnessConfig(target_lufs=-18.0),
+        )
+    )
+    with pytest.raises(ConfigurationError, match="complete paragraph result"):
+        pipeline.prepare_units("One. Two.", unit="sentence")
+    with pytest.raises(ConfigurationError, match="complete waveform"):
+        pipeline.play_streaming("One. Two.")
+
+
+def test_run_applies_complete_target_after_unit_concatenation() -> None:
+    pipeline = build_pipeline(
+        generator=ConstantGenerator(),
+        config=PipelineConfig(
+            generation=GenerationConfig(lang="en-us"),
+            loudness=LoudnessConfig(target_lufs=-42.0),
+            return_trace=True,
+        ),
+    )
+    result = pipeline.run("One. Two.")
+    metrics = measure_loudness(result.audio, sample_rate=result.sample_rate)
+    assert metrics.integrated_lufs == pytest.approx(-42.0, abs=0.1)
+    assert result.trace is not None
+    assert result.trace.model["output_loudness"]["applied_gain_db"] != 0.0

@@ -9,7 +9,7 @@ include = [
 ]
 
 [tool.setuptools.package-data]
-pykokoro = ["py.typed"]
+pykokoro = ["py.typed", "data/*.json"]
 
 [project]
 name = "pykokoro"
@@ -26,7 +26,7 @@ dependencies = [
     "lexphon>=0.2.3,<0.3",
     "phrasplit>=0.3.9,<0.4",
     "numpy",
-    "audiosig>=0.1.3,<0.2",
+    "audiosig>=0.1.4,<0.2",
     "platformdirs",
     "chardet",
     "charset-normalizer",

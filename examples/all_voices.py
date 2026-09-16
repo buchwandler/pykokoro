@@ -10,12 +10,14 @@ from pathlib import Path
 
 import numpy as np
 import soundfile as sf
+from audiosig import measure_loudness
 
 try:
     from ._output import artifact_path
 except ImportError:
     from _output import artifact_path
 
+from pykokoro import LoudnessConfig
 from pykokoro.discovery import (
     ModelCapabilities,
     ModelDiscoveryResult,
@@ -26,6 +28,7 @@ from pykokoro.discovery import (
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline_config import PipelineConfig
 from pykokoro.short_sentence_handler import ShortSentenceConfig
+from pykokoro.voice_level import VoiceCalibrationKey, default_voice_calibration
 
 RUNNABLE_STATUSES = {"ready", "experimental"}
 MODEL_PRIORITY = {"v1.0": 0, "v1.1-zh": 1}
@@ -345,7 +348,14 @@ def _progress(entry: VoiceShowcaseEntry, total: int) -> None:
     )
 
 
-def synthesize_catalog(catalog: ShowcaseCatalog, *, output: Path, pause: float) -> float:
+def synthesize_catalog(
+    catalog: ShowcaseCatalog,
+    *,
+    output: Path,
+    pause: float,
+    voice_leveling: str = "off",
+    print_levels: bool = False,
+) -> float:
     """Render the catalog with one reusable pipeline into an atomic WAV."""
     if not catalog.entries:
         raise ShowcaseError("No runnable voices discovered")
@@ -367,6 +377,7 @@ def synthesize_catalog(catalog: ShowcaseCatalog, *, output: Path, pause: float) 
         allow_experimental_frontend=first.experimental,
         generation=GenerationConfig(lang=first.locale, speed=1.0),
         short_sentence_config=ShortSentenceConfig(resolve_mode="wrap"),
+        loudness=LoudnessConfig(voice_leveling=voice_leveling),
     )
     frames = 0
     try:
@@ -394,6 +405,18 @@ def synthesize_catalog(catalog: ShowcaseCatalog, *, output: Path, pause: float) 
                         allow_experimental_frontend=entry.experimental,
                     )
                     audio = _validate_audio(result, entry, sample_rate)
+                    if print_levels:
+                        metrics = measure_loudness(audio, sample_rate=sample_rate)
+                        key = VoiceCalibrationKey(
+                            entry.model_source, entry.model_id, entry.quality, entry.voice
+                        )
+                        calibration = default_voice_calibration().voices.get(key)
+                        gain_db = 0.0 if calibration is None else calibration.gain_db
+                        reference = None if calibration is None else calibration.reference_lufs
+                        print(
+                            f"          measured={metrics.integrated_lufs:.2f} LUFS "
+                            f"calibration={gain_db:+.2f} dB reference={reference!s}"
+                        )
                 except Exception as exc:
                     raise ShowcaseError(
                         f"Failed at voice {entry.number}/{len(catalog.entries)}:\n"
@@ -422,6 +445,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--preference", choices=("auto", "github", "huggingface", "upstream"), default="auto"
     )
+    parser.add_argument("--voice-leveling", choices=("off", "calibrated"), default="off")
+    parser.add_argument("--print-levels", action="store_true")
+    parser.add_argument("--compare-leveling", action="store_true")
     parser.add_argument("--include-experimental", dest="include_experimental", action="store_true")
     parser.add_argument("--no-experimental", dest="include_experimental", action="store_false")
     parser.set_defaults(include_experimental=True)
@@ -446,10 +472,37 @@ def main(argv: Sequence[str] | None = None) -> int:
         print_skipped_models(catalog.skipped)
         if args.list_only:
             return 0
-        duration = synthesize_catalog(catalog, output=output, pause=args.pause)
+        reported_output = output
+        if args.compare_leveling:
+            raw_output = output.with_name(f"{output.stem}_raw{output.suffix}")
+            calibrated_output = output.with_name(f"{output.stem}_calibrated{output.suffix}")
+            synthesize_catalog(
+                catalog,
+                output=raw_output,
+                pause=args.pause,
+                voice_leveling="off",
+                print_levels=args.print_levels,
+            )
+            duration = synthesize_catalog(
+                catalog,
+                output=calibrated_output,
+                pause=args.pause,
+                voice_leveling="calibrated",
+                print_levels=args.print_levels,
+            )
+            reported_output = calibrated_output
+            print(f"Comparison outputs: {raw_output}, {calibrated_output}")
+        else:
+            duration = synthesize_catalog(
+                catalog,
+                output=output,
+                pause=args.pause,
+                voice_leveling=args.voice_leveling,
+                print_levels=args.print_levels,
+            )
         print(f"\nRendered voices: {len(catalog.entries)}")
         print(f"Duration: {duration:.2f} seconds")
-        print(f"Output: {output}")
+        print(f"Output: {reported_output}")
         return 0
     except Exception as exc:
         print(f"all_voices: {exc}", file=sys.stderr)

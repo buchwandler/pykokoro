@@ -808,6 +808,29 @@ config = PipelineConfig(generation=GenerationConfig(lang="en-us"), ssmd=SSMDRend
 result = KokoroPipeline(config).run("This is *moderate emphasis*.")
 ```
 
+### Audio level and loudness
+
+Kokoro voices are not guaranteed to have identical perceived loudness. Keep the default
+behavior unchanged, or enable the fixed, benchmarked neutral correction for known
+voices:
+
+```python
+from pykokoro import KokoroPipeline, LoudnessConfig, PipelineConfig
+
+pipeline = KokoroPipeline(
+    PipelineConfig(
+        voice="af_bella",
+        loudness=LoudnessConfig(voice_leveling="calibrated"),
+    )
+)
+```
+
+`voice_leveling="calibrated"` applies one fixed voice/model gain and preserves
+intentional relative `volume` and emphasis effects. An optional `target_lufs` applies
+one gain to the complete returned result, not to each sentence. It requires buffering
+and is not available for true streaming. Peak normalization and loudness normalization
+are different operations; PyKokoro does not impose a universal LUFS target.
+
 ### Voice Switching (SSMD)
 
 You can switch voices per segment using SSMD directives. Block directives use

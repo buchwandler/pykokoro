@@ -10,6 +10,7 @@ from pykokoro import (
 )
 
 config = PipelineConfig()
+assert callable(discover_models)
 resolved = resolve_pipeline_config(config)
 assert_type(PipelineConfig, type[PipelineConfig])
 assert_type(KokoroPipeline, type[KokoroPipeline])

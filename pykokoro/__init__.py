@@ -6,8 +6,10 @@ from typing import TYPE_CHECKING, Any
 
 from .generation_config import GenerationConfig
 from .language_detection import LanguageDetectionConfig
+from .loudness_config import LoudnessConfig
 from .prosody_config import ProsodyConfig, ProsodyMethod
 from .ssmd_config import SSMDPauseOverrides, SSMDRenderConfig
+from .voice_level import VoiceCalibrationKey, VoiceLevelCalibration
 
 try:
     from ._version import __version__, __version_tuple__
@@ -160,6 +162,9 @@ __all__ = [
     "LexiconDiscoveryResult",
     "discover_lexicons",
     "GenerationConfig",
+    "LoudnessConfig",
+    "VoiceCalibrationKey",
+    "VoiceLevelCalibration",
     "LanguageDetectionConfig",
     "ProsodyConfig",
     "ProsodyMethod",

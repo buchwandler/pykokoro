@@ -1,0 +1,58 @@
+{
+  "schema": 1,
+  "name": "pykokoro-neutral-v1",
+  "locales": {
+    "en-US": [
+      {
+        "id": "en-us-01",
+        "text": "The quiet river moved steadily beneath the wooden bridge."
+      },
+      {
+        "id": "en-us-02",
+        "text": "Several neighbors gathered early to discuss the new library."
+      },
+      {
+        "id": "en-us-03",
+        "text": "A careful plan makes ordinary work easier to complete."
+      },
+      {
+        "id": "en-us-04",
+        "text": "Morning sunlight filled the room and warmed the empty chairs."
+      },
+      {
+        "id": "en-us-05",
+        "text": "The small workshop opened its doors after the winter rain."
+      },
+      {
+        "id": "en-us-06",
+        "text": "Every useful result depends on clear and repeatable measurements."
+      }
+    ],
+    "de": [
+      {
+        "id": "de-01",
+        "text": "Der ruhige Fluss floss langsam unter der alten Brücke hindurch."
+      },
+      {
+        "id": "de-02",
+        "text": "Mehrere Nachbarn trafen sich früh in der neuen Bibliothek."
+      },
+      {
+        "id": "de-03",
+        "text": "Ein guter Plan macht die tägliche Arbeit deutlich einfacher."
+      },
+      {
+        "id": "de-04",
+        "text": "Das Morgenlicht erfüllte den Raum und wärmte die leeren Stühle."
+      },
+      {
+        "id": "de-05",
+        "text": "Die kleine Werkstatt öffnete nach dem Winterregen ihre Türen."
+      },
+      {
+        "id": "de-06",
+        "text": "Jedes zuverlässige Ergebnis braucht klare und wiederholbare Messungen."
+      }
+    ]
+  }
+}

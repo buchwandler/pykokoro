@@ -14,6 +14,7 @@ from .config_types import (
 )
 from .generation_config import GenerationConfig
 from .language_detection import LanguageDetectionConfig
+from .loudness_config import LoudnessConfig
 from .prosody_config import ProsodyConfig
 from .short_sentence_handler import ShortSentenceConfig
 from .ssmd_config import SSMDRenderConfig
@@ -30,7 +31,7 @@ class PipelineConfig:
     language_detection: LanguageDetectionConfig | None = None
     ssmd: SSMDRenderConfig = field(default_factory=SSMDRenderConfig)
     prosody: ProsodyConfig = field(default_factory=ProsodyConfig)
-
+    loudness: LoudnessConfig = field(default_factory=LoudnessConfig)
     # Model + provider configuration
     model_quality: ModelQuality | None = None
     model_source: ModelSource | None = None

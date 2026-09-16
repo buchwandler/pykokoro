@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from ...exceptions import ConfigurationError
 from ...types import PhonemeSegment, Trace
+from ...voice_level import VoiceCalibrationKey
 
 if TYPE_CHECKING:
     import numpy as np
@@ -48,8 +49,20 @@ class OnnxAudioGenerationAdapter:
                     ) from exc
                 metadata.pop("voice_name", None)
                 metadata.pop("voice", None)
+                segment.voice_name = None
                 trace.warnings.append(
                     f"ssmd.missing_voice: using default voice for unavailable target '{voice_name}'"
+                )
+        for segment in phoneme_segments:
+            voice_name = segment.voice_name if isinstance(segment.voice_name, str) else None
+            if voice_name is None and isinstance(cfg.voice, str):
+                voice_name = cfg.voice
+            if voice_name is not None:
+                segment.render_voice_key = VoiceCalibrationKey(
+                    str(cfg.model_source),
+                    str(cfg.model_variant),
+                    str(cfg.model_quality),
+                    voice_name,
                 )
         voice_style = self._kokoro.resolve_voice_style(cfg.voice)
 

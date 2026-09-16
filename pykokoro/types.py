@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 import numpy as np
 
+from .voice_level import VoiceCalibrationKey
+
 
 @dataclass(frozen=True)
 class AnnotationSpan:
@@ -193,6 +195,7 @@ class PhonemeSegment:
     voice_language: str | None = None
     voice_gender: str | None = None
     voice_variant: str | None = None
+    render_voice_key: VoiceCalibrationKey | None = field(default=None, kw_only=True)
     raw_audio: np.ndarray | None = field(default=None, repr=False)
     processed_audio: np.ndarray | None = field(default=None, repr=False)
     alignment_tokens: list[G2PAlignmentToken] = field(
@@ -222,6 +225,8 @@ class PhonemeSegment:
         }
         if self.ssmd_metadata is not None:
             result["ssmd_metadata"] = self.ssmd_metadata
+        if self.render_voice_key is not None:
+            result["render_voice_key"] = str(self.render_voice_key)
         return result
 
     @classmethod
@@ -243,6 +248,11 @@ class PhonemeSegment:
             pause_before=data.get("pause_before", 0.0),
             pause_after=data.get("pause_after", 0.0),
             ssmd_metadata=data.get("ssmd_metadata"),
+            render_voice_key=(
+                None
+                if data.get("render_voice_key") is None
+                else VoiceCalibrationKey.parse(data["render_voice_key"])
+            ),
         )
 
     def format_readable(self) -> str:

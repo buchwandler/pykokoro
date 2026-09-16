@@ -18,6 +18,7 @@ from audiosig import trim as trim_audio
 
 from .constants import MAX_PHONEME_LENGTH, SAMPLE_RATE
 from .exceptions import ConfigurationError
+from .loudness_config import LoudnessConfig
 from .prosody import apply_prosody, parse_pitch, parse_rate, parse_volume
 from .short_sentence_handler import (
     SHORT_SENTENCE_META_KEY,
@@ -28,6 +29,7 @@ from .short_sentence_handler import (
 from .tokenizer import Tokenizer
 from .types import G2PAlignmentToken, PhonemeSegment, WordTiming, _exact_timing_geometry
 from .utils import generate_silence
+from .voice_level import apply_voice_level_calibration
 from .voice_manager import normalize_voice_style
 
 if TYPE_CHECKING:
@@ -1543,6 +1545,7 @@ class AudioGenerator:
         trim_silence: bool,
         prosody_config: ProsodyConfig | None = None,
         trace: Trace | None = None,
+        loudness_config: LoudnessConfig | None = None,
     ) -> list[PhonemeSegment]:
         for segment in segments:
             if segment.raw_audio is None:
@@ -1550,7 +1553,13 @@ class AudioGenerator:
                 continue
 
             if not trim_silence and not segment.ssmd_metadata:
-                segment.processed_audio = segment.raw_audio
+                segment.processed_audio = apply_voice_level_calibration(
+                    segment.raw_audio,
+                    loudness_config or LoudnessConfig(),
+                    segment.render_voice_key,
+                    trace=trace,
+                    segment_id=segment.id,
+                )
                 continue
 
             audio = segment.raw_audio
@@ -1580,6 +1589,14 @@ class AudioGenerator:
                 else:
                     audio = trim_result
             old_length = len(audio)
+            audio = apply_voice_level_calibration(
+                audio,
+                loudness_config or LoudnessConfig(),
+                segment.render_voice_key,
+                external_audio=bool((segment.ssmd_metadata or {}).get("audio_src")),
+                trace=trace,
+                segment_id=segment.id,
+            )
             processed_audio = self._apply_segment_prosody(
                 audio,
                 segment,

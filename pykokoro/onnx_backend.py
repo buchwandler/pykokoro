@@ -78,9 +78,11 @@ from .runtime.model_assets import (
 )
 from .tokenizer import EspeakConfig, Tokenizer, TokenizerConfig
 from .utils import get_user_cache_path
+from .voice_level import VoiceCalibrationKey, apply_voice_level_calibration
 from .voice_manager import VoiceBlend, VoiceManager, normalize_voice_style
 
 if TYPE_CHECKING:
+    from .loudness_config import LoudnessConfig
     from .prosody_config import ProsodyConfig
     from .short_sentence_handler import ShortSentenceConfig
     from .types import PhonemeSegment, Trace
@@ -2387,8 +2389,34 @@ class Kokoro:
             default_voice = default_voice_name or next(iter(self._runtime.voices))
             for segment in segments:
                 voice_name = segment.voice_name or default_voice
+                if (
+                    getattr(self, "_model_source", None) is not None
+                    and getattr(self, "_model_variant", None) is not None
+                    and getattr(self, "_model_quality", None) is not None
+                ):
+                    segment.render_voice_key = VoiceCalibrationKey(
+                        str(self._model_source),
+                        str(self._model_variant),
+                        str(self._model_quality),
+                        voice_name,
+                    )
                 segment.raw_audio = self._runtime.synthesize(segment.text, voice_name, speed=speed)
             return segments
+        for segment in segments:
+            voice_name = segment.voice_name or default_voice_name
+            if (
+                voice_name
+                and segment.render_voice_key is None
+                and getattr(self, "_model_source", None) is not None
+                and getattr(self, "_model_variant", None) is not None
+                and getattr(self, "_model_quality", None) is not None
+            ):
+                segment.render_voice_key = VoiceCalibrationKey(
+                    str(self._model_source),
+                    str(self._model_variant),
+                    str(self._model_quality),
+                    voice_name,
+                )
         assert self._audio_generator is not None
         return self._audio_generator._generate_raw_audio_segments(
             segments, voice_style, speed, voice_resolver, trace
@@ -2400,10 +2428,28 @@ class Kokoro:
         trim_silence: bool,
         prosody_config: "ProsodyConfig | None" = None,
         trace: "Trace | None" = None,
+        loudness_config: "LoudnessConfig | None" = None,
     ) -> list["PhonemeSegment"]:
         """Trim/prosody-process raw audio segments."""
         self._init_kokoro()
         if self._runtime is not None:
+            config = loudness_config or LoudnessConfig()
+            for segment in segments:
+                audio = (
+                    segment.processed_audio
+                    if segment.processed_audio is not None
+                    else segment.raw_audio
+                )
+                if audio is None:
+                    continue
+                segment.processed_audio = apply_voice_level_calibration(
+                    audio,
+                    config,
+                    segment.render_voice_key,
+                    external_audio=bool((segment.ssmd_metadata or {}).get("audio_src")),
+                    trace=trace,
+                    segment_id=segment.id,
+                )
             return segments
         assert self._audio_generator is not None
         return self._audio_generator._postprocess_audio_segments(
@@ -2411,6 +2457,7 @@ class Kokoro:
             trim_silence,
             prosody_config,
             trace,
+            loudness_config,
         )
 
     def concatenate_audio_segments(
