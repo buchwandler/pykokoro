@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "stimulus": "count-1-to-10",
+  "locales": {
+    "hi": {
+      "text": "एक, दो, तीन, चार, पाँच, छह, सात, आठ, नौ, दस.",
+      "reason": "spokenform-plain-cardinals-not-owned"
+    }
+  }
+}

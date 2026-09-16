@@ -212,6 +212,7 @@ example-artifacts/*
 !example-artifacts/.gitkeep
 TASKS.md
 context_pykokoro.*
+/artifacts/
 .benchmarks/
 benchmarks/results/
 

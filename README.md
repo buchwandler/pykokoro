@@ -810,9 +810,18 @@ result = KokoroPipeline(config).run("This is *moderate emphasis*.")
 
 ### Audio level and loudness
 
-Kokoro voices are not guaranteed to have identical perceived loudness. Keep the default
-behavior unchanged, or enable the fixed, benchmarked neutral correction for known
-voices:
+Kokoro voices are not guaranteed to have identical perceived loudness. PyKokoro keeps
+three separate mechanisms:
+
+#### Raw model level
+
+Different voice embeddings and checkpoints naturally produce different output levels.
+This is the unmodified audio level from the selected model and voice.
+
+#### Voice leveling
+
+Use a reviewed, static per-voice correction when switching voices should be less
+jarring:
 
 ```python
 from pykokoro import KokoroPipeline, LoudnessConfig, PipelineConfig
@@ -825,11 +834,31 @@ pipeline = KokoroPipeline(
 )
 ```
 
-`voice_leveling="calibrated"` applies one fixed voice/model gain and preserves
-intentional relative `volume` and emphasis effects. An optional `target_lufs` applies
-one gain to the complete returned result, not to each sentence. It requires buffering
-and is not available for true streaming. Peak normalization and loudness normalization
-are different operations; PyKokoro does not impose a universal LUFS target.
+`voice_leveling="calibrated"` applies one fixed gain for the model source, model,
+quality, and voice. It preserves intentional relative `volume` and emphasis effects. It
+is an offline equalization aid, not a final delivery loudness or peak guarantee for
+arbitrary content.
+
+The calibration catalog is generated offline from the versioned Spokenform count-to-ten
+stimulus. The benchmark verbalizes 1 through 10 independently, repeats the stimulus,
+measures integrated loudness and true peak, and produces a candidate for explicit
+review. It does not download model assets or overwrite the packaged catalog.
+
+#### Complete-output normalization
+
+To normalize the complete returned waveform, configure a target explicitly:
+
+```python
+LoudnessConfig(
+    voice_leveling="calibrated",
+    target_lufs=-24.0,
+    true_peak_ceiling_dbtp=-1.0,
+)
+```
+
+This measures the completed waveform and applies one final gain subject to the true-peak
+policy. It is deliberately separate from static voice leveling and is not available for
+true streaming because streaming does not have the complete waveform.
 
 ### Voice Switching (SSMD)
 
