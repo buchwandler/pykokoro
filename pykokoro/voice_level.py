@@ -206,20 +206,24 @@ def apply_voice_level_calibration(
     """Apply one static voice gain without measuring the runtime waveform."""
     mode = config.voice_leveling
     source = "none"
+    reason = "disabled" if mode == "off" else None
     calibration = None
     if not external_audio:
         if config.voice_gain_db is not None:
             gain_db = config.voice_gain_db
             source = "override"
-        elif mode == "calibrated" and key is not None:
+            reason = "override"
+        elif mode == "calibrated":
             calibration = resolve_voice_calibration(catalog or default_voice_calibration(), key)
             gain_db = calibration.gain_db if calibration is not None else 0.0
             source = "registry" if calibration is not None else "none"
+            reason = "calibrated" if calibration is not None else "calibration_not_found"
         else:
             gain_db = 0.0
     else:
         gain_db = 0.0
         source = "external_audio"
+        reason = "external_audio"
     if trace is not None:
         trace.model.setdefault("voice_leveling", []).append(
             {
@@ -228,6 +232,7 @@ def apply_voice_level_calibration(
                 "voice_key": None if key is None else str(key),
                 "gain_db": gain_db,
                 "source": source,
+                "reason": reason,
                 "method": None if calibration is None else calibration.method,
                 "corpus": None if calibration is None else calibration.corpus_version,
             }

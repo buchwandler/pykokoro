@@ -167,6 +167,30 @@ def test_headroom_limiting_attenuates_known_peak_violation() -> None:
     assert row["gain_db"] == -2.0
 
 
+def test_gain_review_separates_large_attenuation_from_boost() -> None:
+    attenuation = benchmark._calibration_candidate(
+        {"status": "eligible", "median_lufs": -37.0, "max_true_peak_dbtp": 0.0},
+        max_boost_db=8.0,
+        max_attenuation_db=12.0,
+    )
+    assert attenuation["requested_gain_db"] == 13.0
+    assert attenuation["status"] in {"review_large_boost", "headroom_limited"}
+    attenuation = benchmark._calibration_candidate(
+        {"status": "eligible", "median_lufs": -12.5, "max_true_peak_dbtp": 0.0},
+        max_boost_db=8.0,
+        max_attenuation_db=12.0,
+    )
+    assert attenuation["requested_gain_db"] == -11.5
+    assert attenuation["status"] == "eligible"
+    large_attenuation = benchmark._calibration_candidate(
+        {"status": "eligible", "median_lufs": -11.0, "max_true_peak_dbtp": 0.0},
+        max_boost_db=8.0,
+        max_attenuation_db=10.0,
+    )
+    assert large_attenuation["status"] == "review_large_attenuation"
+    assert large_attenuation["gain_db"] == -13.0
+
+
 def test_candidate_writer_protects_production_catalog(tmp_path: Path) -> None:
     policy = benchmark.BenchmarkPolicy(1, "test", 1, 10, 3, -24.0, -1.0, 8.0, 0.75)
     with pytest.raises(ValueError, match="refusing"):
@@ -178,3 +202,47 @@ def test_candidate_writer_protects_production_catalog(tmp_path: Path) -> None:
 def test_policy_and_fallback_files_are_versioned() -> None:
     assert benchmark._load_policy().name == "pykokoro-count-1-to-10-v2"
     assert "hi" in benchmark._load_fallbacks()
+
+
+def test_coverage_counts_unique_voice_failures_and_utterances() -> None:
+    entry = {
+        "model_source": "github",
+        "model_id": "model",
+        "quality": "fp32",
+        "voice": "voice",
+    }
+    failures = [dict(entry, repeat=index) for index in range(3)]
+    policy = benchmark.BenchmarkPolicy(1, "test", 1, 10, 3, -24.0, -1.0, 8.0, 0.75)
+    coverage = benchmark._coverage([entry], [], failures, [], policy)
+    assert coverage["voices_attempted"] == 1
+    assert coverage["voices_succeeded"] == 0
+    assert coverage["voices_failed"] == 1
+    assert coverage["utterances_failed"] == 3
+
+
+def test_summary_uses_identity_counts_not_failure_events(tmp_path: Path) -> None:
+    policy = benchmark.BenchmarkPolicy(1, "test", 1, 10, 3, -24.0, -1.0, 8.0, 0.75)
+    aggregate = benchmark._aggregate([_measurement(-24.0, repeat=index) for index in range(3)])[0]
+    output = tmp_path / "benchmark"
+    benchmark._write_outputs(
+        output,
+        [],
+        [{} for _ in range(3)],
+        [aggregate],
+        policy,
+        coverage={
+            "voices_attempted": 2,
+            "voices_succeeded": 1,
+            "voices_eligible": 1,
+            "voices_review_required": 0,
+            "voices_failed": 1,
+            "utterances_succeeded": 3,
+            "utterances_failed": 3,
+        },
+    )
+    summary = (output / "summary.md").read_text(encoding="utf-8")
+    assert "Complete measured voices: 1" in summary
+    assert "Automatically eligible voices: 1" in summary
+    assert "Unmeasured/failed voices: 1" in summary
+    assert "Failed utterance attempts: 3" in summary
+    assert "Failed/incomplete voices:" not in summary

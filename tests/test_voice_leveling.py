@@ -16,6 +16,7 @@ from pykokoro.voice_level import (
     VoiceCalibrationKey,
     VoiceLevelCalibration,
     apply_voice_level_calibration,
+    default_voice_calibration,
     load_voice_calibrations,
 )
 
@@ -89,6 +90,24 @@ def test_calibration_trace_is_static_metadata() -> None:
     assert trace.model["voice_leveling"][0]["gain_db"] == -2.0
     assert trace.model["voice_leveling"][0]["segment_id"] == "s1"
 
+    assert trace.model["voice_leveling"][0]["reason"] == "calibrated"
+
+
+def test_calibration_trace_distinguishes_disabled_and_missing() -> None:
+    audio = np.ones(4, dtype=np.float32)
+    disabled_trace = Trace()
+    apply_voice_level_calibration(audio, LoudnessConfig(), _key(), trace=disabled_trace)
+    assert disabled_trace.model["voice_leveling"][0]["reason"] == "disabled"
+    missing_trace = Trace()
+    apply_voice_level_calibration(
+        audio,
+        LoudnessConfig(voice_leveling="calibrated"),
+        VoiceCalibrationKey("github", "v1.0", "fp16", "af_bella"),
+        catalog=_catalog(),
+        trace=missing_trace,
+    )
+    assert missing_trace.model["voice_leveling"][0]["reason"] == "calibration_not_found"
+
 
 def test_calibration_schema_validation(tmp_path) -> None:
     path = tmp_path / "calibration.json"
@@ -148,3 +167,33 @@ def test_generation_adapter_records_default_render_identity() -> None:
     )
     OnnxAudioGenerationAdapter(_GenerationBackend()).generate([segment], config, Trace())
     assert segment.render_voice_key == _key()
+
+
+def test_packaged_calibration_catalog_has_reviewed_fp32_records() -> None:
+    catalog = default_voice_calibration()
+    assert catalog.schema == 1
+    assert catalog.method == "bs1770"
+    assert catalog.corpus == "pykokoro-count-1-to-10-v2"
+    assert catalog.reference_lufs == -24.0
+    assert len(catalog.voices) == 216
+    assert all(key.quality == "fp32" for key in catalog.voices)
+    assert all(record.samples == 3 for record in catalog.voices.values())
+    assert all(record.method == "bs1770" for record in catalog.voices.values())
+    assert all(
+        record.corpus_version == "pykokoro-count-1-to-10-v2" for record in catalog.voices.values()
+    )
+
+
+def test_packaged_calibration_has_exact_values_and_identity_boundaries() -> None:
+    catalog = default_voice_calibration()
+    examples = {
+        "github:v1.0:fp32:af_bella": (-22.35060810577404, -1.6493918942259604),
+        "github:ru-zaakirio-base:fp32:sveta": (-30.08524955204526, 6.0852495520452585),
+        "github:vi-anphunl:fp32:ngoc_huyen": (-12.768391563685354, -11.231608436314646),
+    }
+    for raw_key, (measured_lufs, gain_db) in examples.items():
+        record = catalog.voices[VoiceCalibrationKey.parse(raw_key)]
+        assert record.measured_lufs == measured_lufs
+        assert record.gain_db == gain_db
+    assert VoiceCalibrationKey.parse("github:sv-joakim:fp32:Alice") not in catalog.voices
+    assert VoiceCalibrationKey.parse("github:v1.0:fp16:af_bella") not in catalog.voices

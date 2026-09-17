@@ -7,6 +7,12 @@ from audiosig import measure_loudness
 from pykokoro import LoudnessConfig
 from pykokoro.output_loudness import LoudnessNormalizationError, apply_complete_output_loudness
 from pykokoro.types import Trace
+from pykokoro.voice_level import (
+    VoiceCalibrationCatalog,
+    VoiceCalibrationKey,
+    VoiceLevelCalibration,
+    apply_voice_level_calibration,
+)
 
 SAMPLE_RATE = 24_000
 
@@ -64,3 +70,29 @@ def test_attenuation_is_not_blocked_by_peak_ceiling() -> None:
 def test_disabled_target_returns_same_object() -> None:
     audio = _audio()
     assert apply_complete_output_loudness(audio, SAMPLE_RATE, LoudnessConfig()) is audio
+
+
+def test_static_voice_leveling_composes_with_complete_output_normalization() -> None:
+    key = VoiceCalibrationKey("github", "v1.0", "fp32", "voice")
+    catalog = VoiceCalibrationCatalog(
+        schema=1,
+        method="bs1770",
+        corpus="test",
+        reference_lufs=-24.0,
+        generated_with={},
+        voices={key: VoiceLevelCalibration(gain_db=-3.0, samples=3)},
+    )
+    statically_leveled = apply_voice_level_calibration(
+        _audio(),
+        LoudnessConfig(voice_leveling="calibrated"),
+        key,
+        catalog=catalog,
+    )
+    result = apply_complete_output_loudness(
+        statically_leveled,
+        SAMPLE_RATE,
+        LoudnessConfig(target_lufs=-24.0),
+    )
+    assert measure_loudness(result, sample_rate=SAMPLE_RATE).integrated_lufs == pytest.approx(
+        -24.0, abs=0.1
+    )

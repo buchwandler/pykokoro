@@ -60,27 +60,68 @@ class BenchmarkPolicy:
     calibration_peak_ceiling_dbtp: float
     max_abs_requested_gain_db: float
     max_mad_lu: float
+    max_boost_db: float | None = None
+    max_attenuation_db: float | None = None
+
+    @property
+    def boost_limit_db(self) -> float:
+        return (
+            self.max_boost_db if self.max_boost_db is not None else self.max_abs_requested_gain_db
+        )
+
+    @property
+    def attenuation_limit_db(self) -> float:
+        return (
+            self.max_attenuation_db
+            if self.max_attenuation_db is not None
+            else self.max_abs_requested_gain_db
+        )
 
 
 def _load_policy(path: Path = POLICY_PATH) -> BenchmarkPolicy:
     data = json.loads(path.read_text(encoding="utf-8"))
     stimulus = data.get("stimulus", {})
-    if data.get("schema") != 1 or not isinstance(data.get("name"), str):
-        raise ValueError("voice loudness policy must use schema 1 and have a name")
+    schema = data.get("schema")
+    if schema not in {1, 2} or not isinstance(data.get("name"), str):
+        raise ValueError("voice loudness policy must use schema 1 or 2 and have a name")
+    if schema == 1:
+        max_abs = float(data["max_abs_requested_gain_db"])
+        max_boost = None
+        max_attenuation = None
+    else:
+        max_boost = float(data["max_boost_db"])
+        max_attenuation = float(data["max_attenuation_db"])
+        max_abs = max(max_boost, max_attenuation)
     policy = BenchmarkPolicy(
-        schema=1,
+        schema=schema,
         name=data["name"],
         first=int(stimulus.get("first", 0)),
         last=int(stimulus.get("last", 0)),
         repeats=int(data.get("repeats", 0)),
         reference_lufs=float(data["reference_lufs"]),
         calibration_peak_ceiling_dbtp=float(data["calibration_peak_ceiling_dbtp"]),
-        max_abs_requested_gain_db=float(data["max_abs_requested_gain_db"]),
+        max_abs_requested_gain_db=max_abs,
         max_mad_lu=float(data["max_mad_lu"]),
+        max_boost_db=max_boost,
+        max_attenuation_db=max_attenuation,
     )
     if (policy.first, policy.last) != (1, 10) or policy.repeats < 1:
         raise ValueError("voice loudness policy must define the count stimulus from 1 through 10")
     return policy
+
+
+def _policy_dict(policy: BenchmarkPolicy) -> dict[str, Any]:
+    return {
+        "schema": 2,
+        "name": policy.name,
+        "stimulus": {"kind": "count", "first": policy.first, "last": policy.last},
+        "repeats": policy.repeats,
+        "reference_lufs": policy.reference_lufs,
+        "calibration_peak_ceiling_dbtp": policy.calibration_peak_ceiling_dbtp,
+        "max_boost_db": policy.boost_limit_db,
+        "max_attenuation_db": policy.attenuation_limit_db,
+        "max_mad_lu": policy.max_mad_lu,
+    }
 
 
 def _load_fallbacks(path: Path = FALLBACKS_PATH) -> dict[str, dict[str, Any]]:
@@ -381,20 +422,27 @@ def _calibration_candidate(
     aggregate: dict[str, Any],
     reference_lufs: float = -24.0,
     peak_ceiling_dbtp: float = -1.0,
-    max_abs_requested_gain_db: float = 8.0,
+    max_abs_requested_gain_db: float | None = None,
+    max_boost_db: float = 8.0,
+    max_attenuation_db: float = 12.0,
 ) -> dict[str, Any]:
+    if max_abs_requested_gain_db is not None:
+        max_boost_db = max_abs_requested_gain_db
+        max_attenuation_db = max_abs_requested_gain_db
     measured_lufs = float(aggregate["median_lufs"])
     max_true_peak = float(aggregate["max_true_peak_dbtp"])
     requested_gain = reference_lufs - measured_lufs
     max_safe_gain = peak_ceiling_dbtp - max_true_peak
-    gain = min(requested_gain, max_safe_gain)
+    gain = min(requested_gain, max_safe_gain) if requested_gain > 0 else requested_gain
     headroom_limited = gain < requested_gain
     status = aggregate["status"]
-    if status == "eligible" or status == "headroom_limited":
-        if abs(requested_gain) > max_abs_requested_gain_db:
-            status = "extreme_gain"
-        elif headroom_limited:
+    if status == "eligible":
+        if headroom_limited:
             status = "headroom_limited"
+        elif requested_gain > max_boost_db:
+            status = "review_large_boost"
+        elif requested_gain < -max_attenuation_db:
+            status = "review_large_attenuation"
     return {
         **aggregate,
         "measured_lufs": measured_lufs,
@@ -417,10 +465,49 @@ def _candidate_rows(
             row,
             reference_lufs=policy.reference_lufs,
             peak_ceiling_dbtp=policy.calibration_peak_ceiling_dbtp,
-            max_abs_requested_gain_db=policy.max_abs_requested_gain_db,
+            max_boost_db=policy.boost_limit_db,
+            max_attenuation_db=policy.attenuation_limit_db,
         )
         for row in aggregates
     ]
+
+
+def _coverage(
+    entries: list[dict[str, Any]],
+    aggregates: list[dict[str, Any]],
+    failures: list[dict[str, Any]],
+    measurements: list[dict[str, Any]],
+    policy: BenchmarkPolicy,
+) -> dict[str, int | str]:
+    attempted_keys = {
+        (entry["model_source"], entry["model_id"], entry["quality"], entry["voice"])
+        for entry in entries
+    }
+    complete_keys = {
+        (row["model_source"], row["model_id"], row["quality"], row["voice"])
+        for row in aggregates
+        if row["repeat_count"] == policy.repeats
+    }
+    complete_candidates = [
+        row for row in _candidate_rows(aggregates, policy) if row["repeat_count"] == policy.repeats
+    ]
+    eligible_keys = {
+        (row["model_source"], row["model_id"], row["quality"], row["voice"])
+        for row in complete_candidates
+        if row["status"] == "eligible"
+    }
+    return {
+        "models_discovered": len({(entry["model_source"], entry["model_id"]) for entry in entries}),
+        "voices_discovered": len(attempted_keys),
+        "voices_attempted": len(attempted_keys),
+        "voices_succeeded": len(complete_keys),
+        "voices_eligible": len(eligible_keys),
+        "voices_review_required": len(complete_keys - eligible_keys),
+        "voices_failed": len(attempted_keys - complete_keys),
+        "utterances_succeeded": len(measurements),
+        "utterances_failed": len(failures),
+        "registry_source": "discovery",
+    }
 
 
 def _write_calibration_candidate(
@@ -450,7 +537,7 @@ def _write_calibration_candidate(
             "target_reached": row["target_reached"],
         }
         for row in candidates
-        if row["status"] in {"eligible", "headroom_limited"}
+        if row["repeat_count"] == policy.repeats
     }
     path.write_text(
         json.dumps(
@@ -458,7 +545,7 @@ def _write_calibration_candidate(
                 "schema": 2,
                 "method": "bs1770",
                 "corpus": policy.name,
-                "policy": asdict(policy),
+                "policy": _policy_dict(policy),
                 "generated_with": _generated_with(),
                 "coverage": coverage,
                 "voices": voices,
@@ -500,7 +587,7 @@ def _write_outputs(
     payload = {
         "schema": 2,
         "corpus": policy.name,
-        "policy": asdict(policy),
+        "policy": _policy_dict(policy),
         "generated_with": _generated_with(),
         "coverage": coverage or {},
         "stimuli": {locale: _stimulus_record(item) for locale, item in (stimuli or {}).items()},
@@ -540,8 +627,12 @@ def _write_outputs(
         f"- Runnable models discovered: {coverage.get('models_discovered', 0) if coverage else 0}",
         f"- Runnable voices discovered: {coverage.get('voices_discovered', 0) if coverage else 0}",
         f"- Voices attempted: {coverage.get('voices_attempted', 0) if coverage else 0}",
-        f"- Voices measured completely: {coverage.get('voices_succeeded', 0) if coverage else 0}",
-        f"- Voices failed: {coverage.get('voices_failed', 0) if coverage else 0}",
+        f"- Complete measured voices: {coverage.get('voices_succeeded', 0) if coverage else 0}",
+        f"- Automatically eligible voices: {coverage.get('voices_eligible', 0) if coverage else 0}",
+        f"- Review-required complete voices: {coverage.get('voices_review_required', 0) if coverage else 0}",
+        f"- Unmeasured/failed voices: {coverage.get('voices_failed', 0) if coverage else 0}",
+        f"- Failed utterance attempts: {coverage.get('utterances_failed', 0) if coverage else 0}",
+        f"- Successful utterance attempts: {coverage.get('utterances_succeeded', 0) if coverage else 0}",
         f"- Distinct locales: {len(stimuli or {})}",
         f"- Fallback-stimulus locales: {sum(item.fallback_used for item in (stimuli or {}).values())}",
         "",
@@ -559,15 +650,18 @@ def _write_outputs(
         "## Candidate calibration",
         "",
     ]
-    complete = [row for row in candidates if row["status"] in {"eligible", "headroom_limited"}]
+    complete = [row for row in candidates if row["repeat_count"] == policy.repeats]
     if complete:
+        eligible = [row for row in complete if row["status"] == "eligible"]
+        review_required = [row for row in complete if row["status"] != "eligible"]
         lines.extend(
             [
                 f"- Maximum requested boost: {max(row['requested_gain_db'] for row in complete):+.2f} dB",
                 f"- Maximum requested attenuation: {min(row['requested_gain_db'] for row in complete):+.2f} dB",
+                f"- Automatically eligible voices: {len(eligible)}",
+                f"- Review-required complete voices: {len(review_required)}",
                 f"- Headroom-limited voices: {sum(row['headroom_limited'] for row in complete)}",
                 f"- High-variability voices: {sum(row['status'] == 'high_variability' for row in candidates)}",
-                f"- Failed/incomplete voices: {len(candidates) - len(complete) + len(failures)}",
             ]
         )
     else:
@@ -588,7 +682,7 @@ def _write_outputs(
         rows = by_locale.get(locale, [])
         lines.append(
             f"| {locale} | {len(rows)} | {stimulus.generator} | "
-            f"{sum(row['status'] in {'eligible', 'headroom_limited'} for row in rows)} | "
+            f"{sum(row['repeat_count'] == policy.repeats for row in rows)} | "
             f"{sum(item.get('locale') == locale for item in failures)} |"
         )
     lines.extend(
@@ -737,40 +831,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             measurements.extend(current)
             failures.extend(current_failures)
     aggregates = _aggregate(measurements, policy.repeats, policy.max_mad_lu)
-    keys = {
-        (entry["model_source"], entry["model_id"], entry["quality"], entry["voice"])
-        for entry in entries
-    }
-    measured_keys = {
-        (row["model_source"], row["model_id"], row["quality"], row["voice"]) for row in aggregates
-    }
-    failed_keys = keys - measured_keys
-    coverage = {
-        "models_discovered": len({(entry["model_source"], entry["model_id"]) for entry in entries}),
-        "voices_discovered": len(entries),
-        "voices_attempted": len(entries),
-        "voices_succeeded": sum(
-            row["repeat_count"] == policy.repeats
-            and row["status"] in {"eligible", "headroom_limited"}
-            for row in aggregates
-        ),
-        "voices_failed": len(failed_keys)
-        + len(
-            {
-                (
-                    item.get("model_source"),
-                    item.get("model_id"),
-                    item.get("quality"),
-                    item.get("voice"),
-                )
-                for item in failures
-            }
-        ),
-        "registry_source": "discovery",
-    }
+    coverage = _coverage(entries, aggregates, failures, measurements, policy)
     incomplete = (
         bool(failures)
-        or len(failed_keys) > 0
+        or coverage["voices_failed"] > 0
         or any(row["repeat_count"] != policy.repeats for row in aggregates)
     )
     candidate_path = args.write_calibration_candidate if not incomplete else None

@@ -839,6 +839,13 @@ quality, and voice. It preserves intentional relative `volume` and emphasis effe
 is an offline equalization aid, not a final delivery loudness or peak guarantee for
 arbitrary content.
 
+The packaged catalog contains 216 reviewed fp32 voice identities from the
+`pykokoro-count-1-to-10-v2` corpus at a reference of `-24 LUFS`. A calibration record
+requires the exact model source, model ID, model quality, and voice identity. Missing
+records are a safe no-op, so Swedish voices without measurements, non-fp32 qualities,
+custom identities, and voice blends are not silently substituted or aliased. Calibrated
+leveling remains opt-in and does not claim that every available voice is measured.
+
 The calibration catalog is generated offline from the versioned Spokenform count-to-ten
 stimulus. The benchmark verbalizes 1 through 10 independently, repeats the stimulus,
 measures integrated loudness and true peak, and produces a candidate for explicit

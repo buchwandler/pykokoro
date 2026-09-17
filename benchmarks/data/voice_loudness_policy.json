@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "name": "pykokoro-count-1-to-10-v2",
   "stimulus": {
     "kind": "count",
@@ -9,6 +9,7 @@
   "repeats": 3,
   "reference_lufs": -24.0,
   "calibration_peak_ceiling_dbtp": -1.0,
-  "max_abs_requested_gain_db": 8.0,
+  "max_boost_db": 8.0,
+  "max_attenuation_db": 12.0,
   "max_mad_lu": 0.75
 }
