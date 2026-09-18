@@ -47,6 +47,40 @@ request documents before returning results. Use `tokenizer_config.use_spacy=Fals
 disable NLP, leave it unset for local-only fallback, or set it to `True` for strict
 model availability.
 
+## UtterPlan debugging workflow
+
+The existing text API remains the simplest entry point:
+
+```python
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
+
+pipeline = KokoroPipeline(
+    PipelineConfig(generation=GenerationConfig(lang="en-us"))
+)
+result = pipeline.run("Hello world.")
+```
+
+For a reproducible planning boundary, build and save an immutable `UtterancePlan`, then
+render only that plan:
+
+```python
+from utterplan import PlannerConfig, UtterancePlan, UtterancePlanner
+from pykokoro import KokoroPipeline
+
+planner = UtterancePlanner(PlannerConfig(language="en-us"))
+plan = planner.plan("Hello world.")
+plan.save("hello.utterplan.json")
+
+loaded = UtterancePlan.load("hello.utterplan.json")
+result = pipeline.run_plan(loaded)
+```
+
+`run_plan()` does not reparse SSMD or rerun Spokenform, Phrasplit, or planning-time
+linguistic analysis. Inspect the UtterPlan when spoken text, segmentation, pauses,
+directives, or units are wrong. Inspect PyKokoro when the plan is correct but
+pronunciation, model timing, or audio is wrong. The supplied plan is never mutated
+during rendering.
+
 ## Runtime model support
 
 Runtime model selection uses the canonical `catalog/models.json` registry. Model

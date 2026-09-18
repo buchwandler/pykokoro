@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from kokorog2p.language_codes import normalize_language_code, supported_languages
 
@@ -51,6 +51,22 @@ def resolve_language_detection(
             languages=config.languages,
             source="pipeline",
         )
+    direct_hint = header.get("language_detection")
+    if "language_detection" in header and direct_hint is None:
+        return ResolvedLanguageDetection()
+    if isinstance(direct_hint, Mapping):
+        mode = direct_hint.get("mode", "off")
+        languages = direct_hint.get("languages", ())
+        if isinstance(mode, str) and isinstance(languages, (list, tuple)):
+            normalized = LanguageDetectionConfig(
+                mode=cast(LanguageDetectionMode, mode),
+                languages=tuple(languages),
+            )
+            return ResolvedLanguageDetection(
+                mode=normalized.mode,
+                languages=normalized.languages,
+                source="header",
+            )
     import ssmd
 
     hint = ssmd.language_detection_hint(header)

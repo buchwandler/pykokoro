@@ -6,6 +6,14 @@ class ConfigurationError(KokoroError):
     """Invalid or inconsistent configuration."""
 
 
+class PlanConsumptionError(KokoroError):
+    """An UtterPlan cannot be consumed by PyKokoro."""
+
+
+class PlanConfigurationConflict(PlanConsumptionError):
+    """A renderer request attempted to override frozen planning state."""
+
+
 class SSMDDocumentError(ConfigurationError):
     """Invalid SSMD 0.8 document metadata or renderer profile value."""
 

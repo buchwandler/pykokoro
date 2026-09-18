@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import OrderedDict
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, cast
@@ -13,6 +14,7 @@ from ...runtime.cache import cache_from_dir, make_g2p_key
 from ...runtime.language_plan import canonicalize_language
 from ...runtime.spans import slice_boundaries, slice_spans
 from ...spacy_models import SpacyModelSize, make_spacy_model_request, spacy_selection_metadata
+from ...ssmd_config import resolve_document_voice
 from ...types import (
     AnnotationSpan,
     G2PAlignmentToken,
@@ -149,11 +151,35 @@ class KokoroG2PAdapter(G2PAdapter):
                 span_warnings,
             )
             overrides = self._prepared_overrides(doc.annotation_spans, segment, span_warnings)
+            plan_directives = segment.meta.get("plan_directives")
+            if isinstance(plan_directives, dict):
+                plan_phonemes = plan_directives.get("ph")
+                if phoneme_override is None and isinstance(plan_phonemes, str):
+                    phoneme_override = plan_phonemes
+                    overrides = [
+                        AnnotationSpan(0, segment.char_end - segment.char_start, plan_directives)
+                    ]
             trace.warnings.extend(span_warnings)
             annotations = self._prepared_annotations(doc, segment)
 
             lang = segment.meta.get("language") or generation.lang
             ssmd_metadata: dict[str, str] = {}
+            if isinstance(plan_directives, dict):
+                self._apply_span_metadata(plan_directives, ssmd_metadata)
+            header_bindings = doc.header.get("voice_bindings", {})
+            if not isinstance(header_bindings, Mapping):
+                header_bindings = {}
+            voice_reference = ssmd_metadata.get("voice_reference") or ssmd_metadata.get("voice")
+            if voice_reference:
+                resolution = resolve_document_voice(
+                    voice_reference,
+                    provider=cfg.ssmd.provider,
+                    api_bindings=cfg.ssmd.voice_bindings,
+                    header_bindings=header_bindings,
+                )
+                ssmd_metadata["voice_reference"] = resolution.reference
+                ssmd_metadata["voice_name"] = resolution.target
+                ssmd_metadata["voice_source"] = resolution.source
             for span in span_list:
                 self._apply_span_metadata(span.attrs, ssmd_metadata)
             if not isinstance(lang, str) or not lang:
@@ -252,7 +278,11 @@ class KokoroG2PAdapter(G2PAdapter):
                 },
             )
 
-            pause_before, pause_after = self._resolve_pauses(seg_boundaries, generation)
+            plan_pauses = doc.metadata.get("utterplan_pauses", {})
+            if isinstance(plan_pauses, dict) and segment.id in plan_pauses:
+                pause_before, pause_after = plan_pauses[segment.id]
+            else:
+                pause_before, pause_after = self._resolve_pauses(seg_boundaries, generation)
             if any(
                 boundary.attrs.get("deterministic_pause_boundary") == "true"
                 for boundary in seg_boundaries
@@ -367,7 +397,34 @@ class KokoroG2PAdapter(G2PAdapter):
     def _prepared_annotations(doc: DocumentResult, segment: Segment) -> list[Any]:
         state = getattr(doc, "linguistic_state", None)
         if state is None:
-            return []
+            tokens = doc.metadata.get("utterplan_tokens")
+            indices = segment.meta.get("plan_token_indices")
+            if not isinstance(tokens, tuple) or not isinstance(indices, tuple):
+                return []
+            from ...runtime.linguistics import TokenAnnotation
+
+            plan_annotations: list[Any] = []
+            for index in indices:
+                if not isinstance(index, int) or index < 0 or index >= len(tokens):
+                    raise ValueError(
+                        f"Plan segment {segment.id!r} references invalid token {index!r}"
+                    )
+                item = tokens[index]
+                start = max(item.spoken_start, segment.char_start) - segment.char_start
+                end = min(item.spoken_end, segment.char_end) - segment.char_start
+                if start < end:
+                    plan_annotations.append(
+                        TokenAnnotation(
+                            start=start,
+                            end=end,
+                            text=item.text,
+                            pos=item.pos,
+                            tag=item.tag,
+                            lemma=item.lemma,
+                            language=item.language,
+                        )
+                    )
+            return plan_annotations
         annotations: list[Any] = []
         for analysis in getattr(state, "prepared_analysis", ()):
             analysis_language = canonicalize_language(analysis.run.language)
