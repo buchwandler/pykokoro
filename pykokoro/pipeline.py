@@ -37,19 +37,13 @@ from .runtime.linguistics import (
 from .runtime.tracing import trace_timing
 from .spacy_models import SpacyModelSize
 from .ssmd_config import SSMDRenderConfig
-from .stages.doc_parsers.ssmd import SsmdDocumentParser
 from .stages.g2p.kokorog2p import KokoroG2PAdapter
 from .stages.protocols import (
     AudioGeneratorStage,
     AudioPostprocessor,
-    DocumentParser,
     G2PAdapter,
     PhonemeProcessor,
-    SentenceSegmenter,
-    TextPreparer,
 )
-from .stages.segmentation.phrasplit import PhrasplitSentenceSegmenter
-from .stages.text_preparation.spokenform import SpokenformTextPreparer
 from .types import (
     AudioResult,
     AudioUnitDescriptor,
@@ -572,13 +566,11 @@ def build_pipeline(
     backend: Kokoro | None = None,
     eager: bool = False,
     # stage overrides for advanced usage/testing
-    doc_parser: DocumentParser | None = None,
-    text_preparer: TextPreparer | None = None,
-    sentence_segmenter: SentenceSegmenter | None = None,
     g2p: G2PAdapter | None = None,
     phoneme_processing: PhonemeProcessor | None = None,
     audio_generation: AudioGeneratorStage | None = None,
     audio_postprocessing: AudioPostprocessor | None = None,
+    planner: UtterancePlanner | None = None,
 ) -> KokoroPipeline:
     """
     Construct a :class:`KokoroPipeline` from a single,
@@ -684,15 +676,12 @@ def build_pipeline(
 
     pipeline = KokoroPipeline(
         cfg,
-        doc_parser=doc_parser or SsmdDocumentParser(),
-        text_preparer=text_preparer or SpokenformTextPreparer(),
-        sentence_segmenter=sentence_segmenter or PhrasplitSentenceSegmenter(),
         g2p=g2p or KokoroG2PAdapter(),
         phoneme_processing=phoneme_processing,
         audio_generation=audio_generation,
         audio_postprocessing=audio_postprocessing,
+        planner=planner,
     )
-
     # If backend injected: bind default stages to it
     # (unless user already provided stages)
     if backend is not None:
@@ -744,25 +733,18 @@ class KokoroPipeline:
         self,
         config: PipelineConfig,
         *,
-        doc_parser: DocumentParser | None = None,
-        text_preparer: TextPreparer | None = None,
-        sentence_segmenter: SentenceSegmenter | None = None,
         g2p: G2PAdapter | None = None,
         phoneme_processing: PhonemeProcessor | None = None,
         audio_generation: AudioGeneratorStage | None = None,
         audio_postprocessing: AudioPostprocessor | None = None,
+        planner: UtterancePlanner | None = None,
     ) -> None:
-        self._legacy_frontend_compat = any(
-            value is not None for value in (doc_parser, text_preparer, sentence_segmenter)
-        )
         self.config = config
-        self.doc_parser = doc_parser or SsmdDocumentParser()
-        self.text_preparer = text_preparer or SpokenformTextPreparer()
-        self.sentence_segmenter = sentence_segmenter or PhrasplitSentenceSegmenter()
         self.g2p = g2p or KokoroG2PAdapter()
         self.phoneme_processing = phoneme_processing
         self.audio_generation = audio_generation
         self.audio_postprocessing = audio_postprocessing
+        self.planner = planner
         self._kokoro: Kokoro | None = None
         self._kokoro_config_key: tuple[object, ...] | None = None
         self._owns_kokoro = False
@@ -771,7 +753,6 @@ class KokoroPipeline:
         self._owns_audio_postprocessing = False
         self._prepared_objects: list[PreparedAudioUnits] = []
         self.linguistic_resources = LinguisticResourcePool()
-
         self._backend_lock = threading.RLock()
 
     def __enter__(self) -> Self:
@@ -1133,70 +1114,14 @@ class KokoroPipeline:
             )
         return analyses
 
-    def _prepare_frontend_legacy(
-        self, text: str, cfg: PipelineConfig, unit: AudioUnitKind
-    ) -> PreparedFrontend:
-        language = require_document_language(cfg)
-        trace = Trace()
-        with trace_timing(trace, "doc", "parse"):
-            doc = self.doc_parser.parse(text, cfg, trace)
-        trace.warnings.extend(doc.warnings)
-        state = LinguisticRequestState()
-        doc.linguistic_state = state
-        try:
-            with trace_timing(trace, "language_plan", "source"):
-                state.source_plan = build_language_plan(
-                    doc.clean_text, doc.annotation_spans, default_language=language
-                )
-            with trace_timing(trace, "linguistics", "pass_a"):
-                state.source_analysis = self._analyze_runs(
-                    doc.clean_text, state.source_plan, cfg, trace, "pass_a"
-                )
-            with trace_timing(trace, "text_preparation", "prepare"):
-                doc = self.text_preparer.prepare(doc, cfg, trace)
-            doc.linguistic_state = state
-            trace.warnings.extend(doc.preparation.warnings if doc.preparation else ())
-            with trace_timing(trace, "language_plan", "prepared"):
-                state.prepared_plan = build_language_plan(
-                    doc.clean_text, doc.annotation_spans, default_language=language
-                )
-            with trace_timing(trace, "linguistics", "pass_b"):
-                state.prepared_analysis = self._analyze_runs(
-                    doc.clean_text, state.prepared_plan, cfg, trace, "pass_b"
-                )
-            state.release_source_docs()
-            with trace_timing(trace, "segmentation", "split"):
-                segments = self.sentence_segmenter.split(doc, cfg, trace)
-        except Exception:
-            state.release_docs()
-            doc.linguistic_state = None
-            raise
-        if not segments and doc.clean_text:
-            segments = [
-                Segment(
-                    id="p0_s0_c0_seg0",
-                    text=doc.clean_text,
-                    char_start=0,
-                    char_end=len(doc.clean_text),
-                    paragraph_idx=0,
-                    sentence_idx=0,
-                    clause_idx=0,
-                )
-            ]
-        doc.segments = segments
-        self._apply_post_segmentation_pauses(doc, segments, cfg)
-        return PreparedFrontend(self, cfg, trace, doc, segments, state, unit)
-
-    @staticmethod
-    def _compile_plan(text: str, cfg: PipelineConfig, unit: AudioUnitKind) -> UtterancePlan:
+    def _compile_plan(self, text: str, cfg: PipelineConfig, unit: AudioUnitKind) -> UtterancePlan:
         planner_config = planner_config_from_pipeline(cfg, unit=unit)
-        return UtterancePlanner(planner_config).plan(text, config=planner_config, unit=unit)
+        planner = self.planner or UtterancePlanner(planner_config)
+        return planner.plan(text, config=planner_config, unit=unit)
 
     def _prepare_frontend(
         self, text: str, cfg: PipelineConfig, unit: AudioUnitKind
     ) -> PreparedFrontend:
-        if self._legacy_frontend_compat:
-            return self._prepare_frontend_legacy(text, cfg, unit)
         plan = self._compile_plan(text, cfg, unit)
         adapted = adapt_plan(plan)
         trace = Trace()
@@ -1268,45 +1193,9 @@ class KokoroPipeline:
             audio_postprocessor=audio_postprocessor,
         )
 
-    def _prepare_document_legacy(
-        self, text: str, cfg: PipelineConfig, unit: AudioUnitKind
-    ) -> _PreparedDocument:
-        frontend = self._prepare_frontend_legacy(text, cfg, unit)
-        doc = frontend._doc
-        state = frontend._state
-        segments = list(frontend._segments)
-        assert doc is not None
-        try:
-            with trace_timing(frontend._trace, "g2p", "phonemize"):
-                phoneme_segments = self.g2p.phonemize(segments, doc, cfg, frontend._trace)
-        finally:
-            state.release_docs()
-            doc.linguistic_state = None
-        with trace_timing(frontend._trace, "runtime", "resolve_stages"):
-            phoneme_processor, audio_generator, audio_postprocessor = self._resolve_stages(cfg)
-        with trace_timing(frontend._trace, "phoneme_processing", "preprocess"):
-            phoneme_segments = phoneme_processor.process(phoneme_segments, cfg, frontend._trace)
-        apply_emphasis_policy(phoneme_segments, cfg, frontend._trace)
-        groups = self._build_unit_groups(doc, segments, phoneme_segments, cfg, unit)
-        frontend._closed = True
-        return _PreparedDocument(
-            cfg=cfg,
-            unit_kind=unit,
-            trace=frontend._trace,
-            doc=doc,
-            segments=segments,
-            phoneme_segments=phoneme_segments,
-            groups=groups,
-            phoneme_processor=phoneme_processor,
-            audio_generator=audio_generator,
-            audio_postprocessor=audio_postprocessor,
-        )
-
     def _prepare_document(
         self, text: str, cfg: PipelineConfig, unit: AudioUnitKind
     ) -> _PreparedDocument:
-        if self._legacy_frontend_compat:
-            return self._prepare_document_legacy(text, cfg, unit)
         plan = self._compile_plan(text, cfg, unit)
         return self._prepare_document_from_plan(plan, cfg, unit)
 

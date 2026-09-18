@@ -39,17 +39,6 @@ class DocumentResult:
     linguistic_state: LinguisticRequestState | None = field(default=None, repr=False, compare=False)
 
 
-class DocumentParser(Protocol):
-    def parse(self, text: str, cfg: PipelineConfig, trace: Trace) -> DocumentResult: ...
-
-
-class TextPreparer(Protocol):
-    def prepare(self, doc: DocumentResult, cfg: PipelineConfig, trace: Trace) -> DocumentResult: ...
-
-
-class SentenceSegmenter(Protocol):
-    def split(self, doc: DocumentResult, cfg: PipelineConfig, trace: Trace) -> list[Segment]: ...
-
 
 class G2PAdapter(Protocol):
     def phonemize(

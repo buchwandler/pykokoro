@@ -67,7 +67,6 @@ from .model_assets import (
 from .model_profiles import VOICE_ALIASES, get_model_profile
 from .model_registry import ModelRegistryError
 from .onnx_session import OnnxSessionManager  # compatibility symbol
-from .provider_config import ProviderConfigManager
 from .release_catalog import (
     MODEL_REPOSITORY,
     ReleaseAsset,
@@ -91,9 +90,6 @@ if TYPE_CHECKING:
 
 # Logger for debugging
 logger = logging.getLogger(__name__)
-_DEFAULT_SESSION_MANAGER = OnnxSessionManager
-_DEFAULT_HF_MODEL_SPEC = hf_model_spec
-_DEFAULT_RESOLVE_MODEL_RELEASE = resolve_model_release
 
 DOWNLOAD_CHUNK_SIZE = 1024 * 1024
 DOWNLOAD_RETRIES = 3
@@ -1239,8 +1235,6 @@ def download_model(
         - v1.0 from: onnx-community/Kokoro-82M-v1.0-ONNX
         - v1.1-zh from: onnx-community/Kokoro-82M-v1.1-zh-ONNX
     """
-    if hf_model_spec is not _DEFAULT_HF_MODEL_SPEC:
-        return _download_legacy_hf_model(variant, quality, force, revision, sha256, offline)
     del revision, sha256
     return _download_registry_artifact(
         variant,
@@ -1684,8 +1678,6 @@ def download_model_github(
     *,
     tag: str | None = None,
 ) -> Path:
-    if resolve_model_release is not _DEFAULT_RESOLVE_MODEL_RELEASE:
-        return _download_legacy_github_model(variant, quality, force, offline, tag)
     del tag
     return _download_registry_artifact(
         variant,
@@ -1704,8 +1696,6 @@ def download_voices_github(
     *,
     tag: str | None = None,
 ) -> Path:
-    if resolve_model_release is not _DEFAULT_RESOLVE_MODEL_RELEASE:
-        return _download_legacy_github_voices(variant, force, offline, tag)
     del tag
     try:
         resolved = resolve_runtime_assets(
@@ -1757,9 +1747,6 @@ def download_all_models_github(
         raise ArtifactValidationError(str(exc)) from exc
 
 
-_DEFAULT_DOWNLOAD_MODEL_GITHUB = download_model_github
-_DEFAULT_DOWNLOAD_VOICES_GITHUB = download_voices_github
-_DEFAULT_DOWNLOAD_MODEL = download_model
 
 
 class Kokoro:
@@ -1970,13 +1957,14 @@ class Kokoro:
 
         profile = get_model_profile(self._model_variant, self._model_source)
         vocabulary_path = getattr(self, "_model_config_path", None)
-        if profile.vocabulary_source == "downloaded-release" and vocabulary_path is None:
-            vocabulary_path = download_vocabulary_github(self._model_variant)
         if profile.vocabulary_source in {"downloaded-config", "downloaded-release"}:
+            if vocabulary_path is None:
+                raise ConfigurationError(
+                    f"Model config/vocabulary file required for {self._model_variant!r} but not resolved."
+                )
             return load_vocab_from_config(self._model_variant, vocabulary_path)
 
         return get_kokoro_vocab()
-
     def _resolve_model_variant(self, lang: str) -> ModelVariant:
         """Resolve the appropriate model variant based on language.
 
@@ -2030,182 +2018,9 @@ class Kokoro:
             )
         return self._tokenizer
 
-    def _ensure_models(self) -> None:
-        """Ensure all runtime assets come from one selected registry distribution."""
-        if not self._model_path_provided and not self._voices_path_provided:
-            if self._model_source == "github" and (
-                download_model_github is not _DEFAULT_DOWNLOAD_MODEL_GITHUB
-                or download_voices_github is not _DEFAULT_DOWNLOAD_VOICES_GITHUB
-            ):
-                self._model_path = download_model_github(
-                    variant=self._model_variant, quality=self._model_quality
-                )
-                self._voices_path = download_voices_github(variant=self._model_variant)
-                return
-            if (
-                self._model_source == "huggingface"
-                and download_model is not _DEFAULT_DOWNLOAD_MODEL
-            ):
-                self._model_path = download_model(
-                    variant=self._model_variant, quality=self._model_quality
-                )
-                download_all_voices()
-                self._voices_path = get_voices_archive_path("huggingface", self._model_variant)
-                return
-        if not self._model_path_provided or not self._voices_path_provided:
-            preference: Literal["github", "huggingface"] = (
-                "github" if self._model_source == "github" else "huggingface"
-            )
-            try:
-                self._resolved_runtime_assets = resolve_runtime_assets(
-                    model_id=self._model_variant,
-                    quality=self._model_quality,
-                    preference=preference,
-                    progress_callback=self._asset_progress,
-                )
-            except (ModelRegistryError, OSError, ArtifactValidationError) as exc:
-                raise ConfigurationError(
-                    f"Unable to resolve runtime assets for {self._model_variant!r}: {exc}"
-                ) from exc
-            resolved = self._resolved_runtime_assets
-            if self._model_path is None:
-                self._model_path = resolved.artifact_for_role("model", quality=self._model_quality)
-            if self._voices_path is None:
-                voice_role = "voices" if resolved.artifacts_for_role("voices") else "voice"
-                voice_paths = resolved.artifacts_for_role(voice_role)
-                if len(voice_paths) != 1:
-                    self._voices_path = resolved.materialize_raw_voices()
-                else:
-                    self._voices_path = next(iter(voice_paths.values()))
-            if self._model_config_path is None:
-                for role in ("vocab", "config"):
-                    if resolved.artifacts_for_role(role):
-                        self._model_config_path = resolved.artifact_for_role(role)
-                        break
-
-        if self._model_path is None or not _is_nonempty_file(self._model_path):
-            label = "Explicit model_path" if self._model_path_provided else "Model path"
-            raise ConfigurationError(
-                f"{label} does not point to a non-empty file: {self._model_path}"
-            )
-        if self._model_path_provided:
-            try:
-                _validate_onnx_file(self._model_path)
-            except (OSError, ArtifactValidationError) as exc:
-                raise ConfigurationError(
-                    f"Explicit model_path is not a valid ONNX model: {exc}"
-                ) from exc
-
-        if self._voices_path is None or not _is_nonempty_file(self._voices_path):
-            raise ConfigurationError(
-                f"Voices path does not point to a non-empty file: {self._voices_path}"
-            )
-        if self._voices_path_provided:
-            try:
-                _validate_voice_archive(self._voices_path)
-            except (OSError, ArtifactValidationError) as exc:
-                raise ConfigurationError(
-                    f"Explicit voices_path is not a valid voice archive: {exc}"
-                ) from exc
-
-        if (
-            self._model_config_path_provided
-            and self._model_config_path is not None
-            and not _is_nonempty_file(self._model_config_path)
-        ):
-            raise ConfigurationError(
-                f"Explicit model_config_path does not point to a non-empty file: "
-                f"{self._model_config_path}"
-            )
-
-    def _redownload_voices(self, force: bool = False) -> None:
-        if self._model_source == "github":
-            self._voices_path = download_voices_github(variant=self._model_variant, force=force)
-            return
-
-        self._voices_path = _download_hf_voice_archive(
             self._model_variant,
             force=force,
         )
-
-    def _get_default_provider_options(self, provider: str) -> dict[str, str]:
-        """
-        Get sensible default options for a provider.
-
-        Uses PyKokoro cache path and model quality for smart defaults.
-
-        Args:
-            provider: Provider name (e.g., "OpenVINOExecutionProvider")
-
-        Returns:
-            Dictionary of default provider options (string values)
-        """
-        cache_path = get_user_cache_path()
-        return ProviderConfigManager.get_default_provider_options(
-            provider=provider,
-            model_quality=self._model_quality,
-            cache_path=cache_path,
-        )
-
-    def _get_provider_specific_options(
-        self,
-        provider: str,
-        all_options: dict[str, Any],
-    ) -> dict[str, str]:
-        """
-        Extract provider-specific options for the given provider.
-
-        Filters out SessionOptions attributes and converts values to strings
-        as required by ONNX Runtime.
-
-        Args:
-            provider: Provider name (e.g., "OpenVINOExecutionProvider")
-            all_options: Dictionary of all options (mixed session and provider options)
-
-        Returns:
-            Dictionary of provider-specific options with string values
-        """
-        return ProviderConfigManager.get_provider_specific_options(
-            provider=provider,
-            all_options=all_options,
-        )
-
-    def _apply_provider_options(
-        self,
-        sess_opt: Any,
-        options: dict[str, Any],
-    ) -> None:
-        """
-        Apply provider options to SessionOptions.
-
-        Handles both SessionOptions attributes and provider-specific configs.
-
-        Args:
-            sess_opt: SessionOptions to modify
-            options: Dictionary of options to apply
-        """
-        # Map of common option names to SessionOptions attributes
-        session_option_attrs: dict[str, str] = {
-            "intra_op_num_threads": "intra_op_num_threads",
-            "inter_op_num_threads": "inter_op_num_threads",
-            "num_threads": "intra_op_num_threads",  # Alias
-            "threads": "intra_op_num_threads",  # Alias
-            "graph_optimization_level": "graph_optimization_level",
-            "execution_mode": "execution_mode",
-            "enable_profiling": "enable_profiling",
-            "enable_mem_pattern": "enable_mem_pattern",
-            "enable_cpu_mem_arena": "enable_cpu_mem_arena",
-            "enable_mem_reuse": "enable_mem_reuse",
-            "log_severity_level": "log_severity_level",
-            "log_verbosity_level": "log_verbosity_level",
-        }
-
-        # Apply SessionOptions attributes
-        for opt_name, value in options.items():
-            if opt_name in session_option_attrs:
-                attr_name = session_option_attrs[opt_name]
-                setattr(sess_opt, attr_name, value)
-                logger.debug(f"Set SessionOptions.{attr_name} = {value}")
 
     def _init_kokoro(self) -> None:
         """Initialize the ONNX session and load voices once, safely across threads."""
@@ -2231,29 +2046,6 @@ class Kokoro:
                 raise ConfigurationError(
                     "Explicit Kokoro local loading requires both model_path and voices_path"
                 )
-            if OnnxSessionManager is not _DEFAULT_SESSION_MANAGER:
-                manager = OnnxSessionManager(
-                    provider=self._provider,
-                    use_gpu=self._use_gpu,
-                    session_options=self._session_options,
-                    provider_options=self._provider_options,
-                    model_quality=self._model_quality,
-                )
-                self._session = manager.create_session(model_path=self._model_path)
-                voice_manager = VoiceManager(model_source=self._model_source)
-                voice_manager.load_voices(voices_path=self._voices_path)
-                self._voice_manager = voice_manager
-                self._audio_generator = AudioGenerator(
-                    session=self._session,
-                    tokenizer=self.tokenizer,
-                    model_source=self._model_source,
-                    short_sentence_config=self._short_sentence_config,
-                    waveform_validation=self._waveform_validation,
-                    inference_audio_diagnostics=self._inference_audio_diagnostics,
-                    inference_cache_enabled=self._inference_cache_enabled,
-                    inference_cache_max_bytes=self._inference_cache_max_bytes,
-                )
-                return
             runtime = open_local_kokoro(
                 model=self._model_path,
                 voices=self._voices_path,

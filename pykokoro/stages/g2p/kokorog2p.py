@@ -7,11 +7,10 @@ from dataclasses import asdict, dataclass, replace
 from types import ModuleType
 from typing import TYPE_CHECKING, Any, cast
 
-from ...constants import MAX_PHONEME_LENGTH, SUPPORTED_LANGUAGES
+from ...constants import ESPEAK_ONLY_LANGUAGES, MAX_PHONEME_LENGTH, SUPPORTED_LANGUAGES
 from ...language_detection import ResolvedLanguageDetection, resolve_language_detection
 from ...lexicon_data import create_g2p_with_lexphon_retry
 from ...runtime.cache import cache_from_dir, make_g2p_key
-from ...runtime.language_plan import canonicalize_language
 from ...runtime.spans import slice_boundaries, slice_spans
 from ...spacy_models import SpacyModelSize, make_spacy_model_request, spacy_selection_metadata
 from ...ssmd_config import resolve_document_voice
@@ -31,6 +30,32 @@ if TYPE_CHECKING:
     from ...pipeline_config import PipelineConfig
     from ...types import Segment, Trace
 
+
+
+_LANGUAGE_ALIASES = {
+    "en": "en-us",
+    "fr": "fr-fr",
+    "cmn": "zh",
+}
+
+
+def canonicalize_g2p_language(language: str) -> str:
+    """Normalize and validate one document or span language for G2P.
+
+    This is the renderer-local equivalent of language_plan.canonicalize_language.
+    Use this for G2P-layer language normalization, not plan-level normalization.
+    """
+    if not isinstance(language, str):
+        raise TypeError(f"language must be a string, got {type(language)!r}")
+    normalized = language.strip().lower().replace("_", "-")
+    if not normalized:
+        raise ValueError("language must not be empty")
+    normalized = _LANGUAGE_ALIASES.get(normalized, normalized)
+    supported = set(SUPPORTED_LANGUAGES) | set(ESPEAK_ONLY_LANGUAGES)
+    base_language = normalized.split("-", 1)[0]
+    if normalized not in supported and base_language not in supported:
+        raise ValueError(f"Unsupported language {language!r}")
+    return normalized
 
 def _context_token_value(token: Any, name: str, default: object) -> object:
     if isinstance(token, dict):
@@ -72,6 +97,25 @@ class _CachedContextResult:
     ids: tuple[int, ...]
     tokens: tuple[_CachedContextToken, ...]
 
+
+
+
+@dataclass(frozen=True, slots=True)
+class _G2PTokenAnnotation:
+    """Segment-local token annotation for G2P processing.
+
+    Coordinates are relative to the segment's start, not the full document.
+    These are "sliced" coordinates after subtracting segment.char_start.
+    Do not confuse with UtterPlan's plan-spoken coordinates.
+    """
+
+    start: int
+    end: int
+    text: str | None = None
+    pos: str | None = None
+    tag: str | None = None
+    lemma: str | None = None
+    language: str | None = None
 
 class KokoroG2PAdapter(G2PAdapter):
     _cache_schema = 11
@@ -354,7 +398,7 @@ class KokoroG2PAdapter(G2PAdapter):
         overrides: list[AnnotationSpan] = []
         segment_language = segment.meta.get("language")
         canonical_segment_language = (
-            canonicalize_language(segment_language)
+            canonicalize_g2p_language(segment_language)
             if isinstance(segment_language, str) and segment_language
             else None
         )
@@ -373,7 +417,7 @@ class KokoroG2PAdapter(G2PAdapter):
                 and span.char_start == segment.char_start
                 and span.char_end == segment.char_end
                 and "lang" in attrs
-                and canonicalize_language(attrs["lang"]) == canonical_segment_language
+                and canonicalize_g2p_language(attrs["lang"]) == canonical_segment_language
             ):
                 continue
             if (
@@ -401,7 +445,6 @@ class KokoroG2PAdapter(G2PAdapter):
             indices = segment.meta.get("plan_token_indices")
             if not isinstance(tokens, tuple) or not isinstance(indices, tuple):
                 return []
-            from ...runtime.linguistics import TokenAnnotation
 
             plan_annotations: list[Any] = []
             for index in indices:
@@ -414,7 +457,7 @@ class KokoroG2PAdapter(G2PAdapter):
                 end = min(item.spoken_end, segment.char_end) - segment.char_start
                 if start < end:
                     plan_annotations.append(
-                        TokenAnnotation(
+                        _G2PTokenAnnotation(
                             start=start,
                             end=end,
                             text=item.text,
@@ -427,25 +470,24 @@ class KokoroG2PAdapter(G2PAdapter):
             return plan_annotations
         annotations: list[Any] = []
         for analysis in getattr(state, "prepared_analysis", ()):
-            analysis_language = canonicalize_language(analysis.run.language)
+            analysis_language = canonicalize_g2p_language(analysis.run.language)
             run = analysis.run
             if run.char_start > segment.char_start or run.char_end < segment.char_end:
                 continue
             for item in analysis.annotations:
                 if item.end <= segment.char_start or item.start >= segment.char_end:
                     continue
-                from ...runtime.linguistics import TokenAnnotation
 
                 start = max(item.start, segment.char_start) - segment.char_start
                 end = min(item.end, segment.char_end) - segment.char_start
-                item_language = canonicalize_language(item.language) if item.language else None
+                item_language = canonicalize_g2p_language(item.language) if item.language else None
                 forwarded_language = (
                     item.language
                     if item_language is not None and item_language != analysis_language
                     else None
                 )
                 annotations.append(
-                    TokenAnnotation(
+                    _G2PTokenAnnotation(
                         start=start,
                         end=end,
                         text=item.text,

@@ -154,3 +154,26 @@ def test_plan_trace_contains_identity() -> None:
         if event.stage == "planning" and event.name == "consume"
     ]
     assert consume and consume[0].details["plan_id"] == plan.plan_id
+
+
+
+def test_default_pipeline_does_not_use_legacy_frontend() -> None:
+    pipeline = KokoroPipeline(
+        PipelineConfig(generation=GenerationConfig(lang="en-us")),
+        g2p=NoopG2PAdapter(),
+        phoneme_processing=NoopPhonemeProcessorAdapter(),
+        audio_generation=NoopAudioGenerationAdapter(),
+        audio_postprocessing=NoopAudioPostprocessingAdapter(),
+    )
+    # Pipeline should not have legacy frontend stages
+    assert not hasattr(pipeline, '_legacy_frontend_compat') or not pipeline._legacy_frontend_compat
+
+
+def test_build_pipeline_does_not_use_legacy_frontend() -> None:
+    from pykokoro.pipeline import build_pipeline
+
+    pipeline = build_pipeline(
+        config={"generation": {"lang": "en-us"}},
+    )
+    # Pipeline should not have legacy frontend stages
+    assert not hasattr(pipeline, '_legacy_frontend_compat') or not pipeline._legacy_frontend_compat

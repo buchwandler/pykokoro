@@ -163,3 +163,32 @@ def test_audio_job_accepts_mixed_engine_clips() -> None:
     )
     result = Composer().compose(job)
     assert result.audio.size == 5
+
+
+def test_loudness_config_maps_to_audio_job() -> None:
+    from pykokoro.loudness_config import LoudnessConfig
+
+    segment = PhonemeSegment(
+        id="seg-1",
+        segment_id="seg-1",
+        phoneme_id=0,
+        text="hello",
+        phonemes="həloʊ",
+        tokens=[1],
+        char_start=0,
+        char_end=5,
+        processed_audio=np.ones(3, dtype=np.float32),
+    )
+    config = LoudnessConfig(
+        target_lufs=-16.0,
+        true_peak_ceiling_dbtp=-1.0,
+    )
+    job = rendered_segments_to_audio_job(
+        [segment],
+        loudness=config,
+    )
+    # Verify loudness config is mapped to AudioJob
+    assert job.output is not None
+    assert job.output.loudness is not None
+    assert job.output.loudness.target_lufs == -16.0
+    assert job.output.loudness.true_peak_ceiling_dbtp == -1.0

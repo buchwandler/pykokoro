@@ -151,73 +151,6 @@ def _validate_bindings(value: Mapping[str, Mapping[str, str]], *, field_name: st
                 )
 
 
-def _parse_pause_value(value: object, *, field_name: str) -> float:
-    if not isinstance(value, (str, int, float)) or isinstance(value, bool):
-        raise SSMDDocumentError(
-            f"pause_defaults.{field_name} must use NUMBERms or NUMBERs",
-            code="header.pause_duration_invalid",
-        )
-    try:
-        from ssmd.durations import duration_milliseconds
-
-        milliseconds = duration_milliseconds(value)
-    except (TypeError, ValueError) as exc:
-        raise SSMDDocumentError(
-            f"pause_defaults.{field_name} must use NUMBERms or NUMBERs",
-            code="header.pause_duration_invalid",
-        ) from exc
-    return milliseconds / 1000.0
-
-
-def resolve_pause_defaults(
-    header_value: Mapping[str, Any] | None,
-    override: SSMDPauseOverrides | None = None,
-) -> ResolvedPauseDefaults | None:
-    """Validate and merge header pause defaults with API overrides."""
-
-    if not header_value and override is None:
-        return None
-    if header_value is not None and not isinstance(header_value, Mapping):
-        raise SSMDDocumentError(
-            "pause_defaults must be a mapping",
-            code="header.pause_defaults_invalid",
-        )
-    data = dict(header_value or {})
-    unknown = set(data) - {"enabled", "sentence", "paragraph", "voice_change"}
-    if unknown:
-        raise SSMDDocumentError(
-            f"Unsupported pause_defaults fields: {', '.join(sorted(unknown))}",
-            code="header.pause_defaults_invalid",
-        )
-
-    enabled = data.get("enabled", True)
-    if not isinstance(enabled, bool):
-        raise SSMDDocumentError(
-            "pause_defaults.enabled must be a boolean",
-            code="header.pause_enabled_invalid",
-        )
-    if override is not None and override.enabled is not None:
-        enabled = override.enabled
-
-    values: dict[str, float | None] = {}
-    for name in ("sentence", "paragraph", "voice_change"):
-        value = data.get(name)
-        if override is not None:
-            override_value = getattr(override, name)
-            if override_value is not None:
-                value = override_value
-        values[name] = None if value is None else _parse_pause_value(value, field_name=name)
-
-    if not enabled:
-        return ResolvedPauseDefaults(enabled=False)
-    if not any(value is not None for value in values.values()):
-        raise SSMDDocumentError(
-            "enabled pause_defaults require at least one timing field",
-            code="header.pause_defaults_empty",
-        )
-    return ResolvedPauseDefaults(enabled=True, **values)
-
-
 def resolve_document_voice(
     reference: str,
     *,
@@ -236,21 +169,6 @@ def resolve_document_voice(
     return VoiceResolution(reference, reference, "direct")
 
 
-def copy_public_header(header: Mapping[str, Any]) -> dict[str, Any]:
-    """Return a recursively copied header suitable for result metadata."""
-
-    def copy(value: Any) -> Any:
-        if isinstance(value, Mapping):
-            return {str(key): copy(item) for key, item in value.items()}
-        if isinstance(value, list):
-            return [copy(item) for item in value]
-        if isinstance(value, tuple):
-            return [copy(item) for item in value]
-        return value
-
-    return copy(dict(header))
-
-
 __all__ = [
     "PauseCandidate",
     "ResolvedPauseDefaults",
@@ -258,7 +176,5 @@ __all__ = [
     "SSMDPauseOverrides",
     "SSMDRenderConfig",
     "VoiceResolution",
-    "copy_public_header",
     "resolve_document_voice",
-    "resolve_pause_defaults",
 ]

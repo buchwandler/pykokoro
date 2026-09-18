@@ -36,27 +36,10 @@ if TYPE_CHECKING:
         with_spacy_model_size,
     )
     from .pipeline_config import PipelineConfig, resolve_pipeline_config
-    from .release_catalog import (
-        available_model_releases,
-        download_model_release,
-        resolve_model_release,
-    )
     from .types import AudioUnitDescriptor, AudioUnitKind, AudioUnitResult, WordTiming
 
 
 def __getattr__(name: str) -> Any:
-    if name in {"available_model_releases", "resolve_model_release", "download_model_release"}:
-        from .release_catalog import (
-            available_model_releases,
-            download_model_release,
-            resolve_model_release,
-        )
-
-        return {
-            "available_model_releases": available_model_releases,
-            "resolve_model_release": resolve_model_release,
-            "download_model_release": download_model_release,
-        }[name]
     if name in {
         "discover_models",
         "ModelCapabilities",
