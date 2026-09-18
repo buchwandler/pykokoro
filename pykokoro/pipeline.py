@@ -1951,6 +1951,88 @@ class KokoroPipeline:
         """Prepare and render text as an explicit AudioCompose job."""
         return self._prepare_audio_job(text, **overrides).job
 
+
+    def to_audio_job_from_plan(self, plan: UtterancePlan, **overrides: Any) -> AudioJob:
+        """Create an AudioJob from an existing UtterancePlan without replanning.
+
+        This method validates the plan, rejects planning-only overrides,
+        reuses the prepare_plan_units path, and preserves plan segment IDs
+        and markers in the AudioJob provenance.
+
+        The input plan is never mutated, and UtterancePlanner.plan() is never called.
+        """
+        assert_renderer_overrides(overrides)
+        cfg = _copy_config_for_preparation(self._resolve_run_config(overrides))
+        if cfg.generation.is_phonemes:
+            raise ConfigurationError(
+                "to_audio_job_from_plan() requires a text UtterancePlan; phoneme input plans are unsupported"
+            )
+        unit = self._plan_unit_kind(plan)
+        prepared = self._prepare_document_from_plan(plan, cfg, unit)
+        rendered_audio: list[np.ndarray] = []
+        for index in range(len(prepared.groups)):
+            rendered = self._render_prepared_unit(prepared, index)
+            rendered_audio.append(np.asarray(rendered.audio, dtype=np.float32))
+        document_metadata = {
+            "title": prepared.doc.header.get("title"),
+            "voice_bindings": prepared.doc.header.get("voice_bindings", {}),
+            "pause_defaults": prepared.doc.header.get("pause_defaults", {}),
+            **prepared.doc.metadata,
+        }
+        boundaries: list[BoundaryEvent] = []
+        for group in prepared.groups:
+            boundaries.extend(group.marker_events)
+        marker_positions: dict[str, int] = {}
+        for index, boundary in enumerate(boundaries):
+            if boundary.kind == "marker" and boundary.attrs.get("marker"):
+                marker_positions[f"marker:{index}"] = boundary.pos
+        source_metadata = {
+            "clean_text": prepared.doc.clean_text,
+            "source_text": prepared.doc.structural_clean_text,
+            "metadata": _copy_metadata_value(document_metadata),
+        }
+        has_segment_audio = any(
+            segment.processed_audio is not None or segment.raw_audio is not None
+            for segment in prepared.phoneme_segments
+        )
+        if has_segment_audio:
+            job = rendered_segments_to_audio_job(
+                prepared.phoneme_segments,
+                boundaries=boundaries,
+                sample_rate=SAMPLE_RATE,
+                loudness=cfg.loudness,
+                producer={"name": "pykokoro"},
+                source=source_metadata,
+            )
+        else:
+            job = waveform_to_audio_job(
+                np.concatenate(rendered_audio)
+                if rendered_audio
+                else np.zeros(0, dtype=np.float32),
+                sample_rate=SAMPLE_RATE,
+                loudness=cfg.loudness,
+                producer={"name": "pykokoro"},
+                source=source_metadata,
+            )
+        # Add plan provenance to the job
+        from dataclasses import replace as _dc_replace
+
+        plan_provenance = {
+            "plan_id": plan.plan_id,
+            "plan_schema_version": plan.schema_version,
+            "plan_producer": dict(plan.producer),
+            "segment_ids": tuple(segment.id for segment in plan.segments),
+            "unit_ids": tuple(unit.id for unit in plan.units),
+        }
+        existing_provenance = dict(job.provenance) if job.provenance else {}
+        existing_provenance["utterplan"] = plan_provenance
+        job = _dc_replace(job, provenance=existing_provenance)
+        # Clean up segment audio
+        for segment in prepared.phoneme_segments:
+            segment.raw_audio = None
+            segment.processed_audio = None
+        prepared.segments.clear()
+        return job
     def run(self, text: str, **overrides: Any) -> AudioResult:
         """Render text by preparing one job and composing it once with AudioCompose."""
         context = self._prepare_audio_job(text, **overrides)
