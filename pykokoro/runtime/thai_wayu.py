@@ -73,9 +73,9 @@ class ThaiWayuRuntime:
 
     @staticmethod
     def _default_session(path: Path) -> Any:
-        import onnxruntime as ort
+        from onnxvoice import OnnxSession
 
-        return ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+        return OnnxSession(path, providers="cpu")
 
     @classmethod
     def _paths_from_assets(cls, assets: ResolvedRuntimeAssets) -> dict[str, Path]:

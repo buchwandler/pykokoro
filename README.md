@@ -26,6 +26,24 @@ A Python library for Kokoro TTS (Text-to-Speech) using ONNX runtime.
 - **Maintainer Benchmarking**: PolyNorm-based phoneme regression tooling for the
   PyKokoro frontend path
 
+## Runtime and audio ownership
+
+PyKokoro is the Kokoro producer layer. OnnxVoice owns model installation, cached
+artifacts, providers, and ONNX execution. AudioCompose owns batch timeline composition,
+explicit silence, marker/span finalization, resampling, complete-output loudness, and
+WAV encoding.
+
+The existing `pipeline.run()` and `AudioResult` APIs remain available. Projects that
+need to combine generated audio with other engines can use the explicit job boundary:
+
+```python
+job = pipeline.to_audio_job("Hello world.", lang="en-us")
+job.save("hello.audiojob.json")
+```
+
+`run()` composes that same prepared job once. Streaming remains incremental producer
+output and does not apply complete-output loudness normalization.
+
 ## v0.9 orchestration contract
 
 PyKokoro v0.9 requires an explicit document language. Set

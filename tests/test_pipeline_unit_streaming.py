@@ -458,4 +458,6 @@ def test_run_applies_complete_target_after_unit_concatenation() -> None:
     metrics = measure_loudness(result.audio, sample_rate=result.sample_rate)
     assert metrics.integrated_lufs == pytest.approx(-42.0, abs=0.1)
     assert result.trace is not None
-    assert result.trace.model["output_loudness"]["applied_gain_db"] != 0.0
+    composition_events = [event for event in result.trace.events if event.stage == "composition"]
+    assert composition_events
+    assert composition_events[0].details["applied_loudness_gain_db"] != 0.0

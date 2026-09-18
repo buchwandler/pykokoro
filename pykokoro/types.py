@@ -371,9 +371,9 @@ class AudioResult:
         self.release_segment_audio()
 
     def save_wav(self, path: str) -> None:
-        import soundfile as sf
+        from audiocompose import write_wav
 
-        sf.write(path, self.audio, self.sample_rate)
+        write_wav(path, self.audio, self.sample_rate, clip_policy="clamp")
 
     def play(self, *, device: int | str | None = None) -> None:
         """Play the generated waveform through the system audio output.

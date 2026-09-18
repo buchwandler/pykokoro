@@ -27,26 +27,21 @@ class _Tokenizer:
 
 
 class _Session:
+    supports_timings = True
+    sample_rate = 24_000
+    cache_identity = ("test", "fp32", "cpu")
+
     def __init__(self, *, speed_type: str = "tensor(float)") -> None:
+        _ = speed_type
         self.calls = 0
-        self.inputs = [
-            _Input("tokens", "tensor(int64)"),
-            _Input("style"),
-            _Input("speed", speed_type),
-        ]
 
-    def get_inputs(self) -> list[_Input]:
-        return self.inputs
-
-    def get_outputs(self) -> list[_Output]:
-        return [_Output("audio"), _Output("pred_dur")]
-
-    def run(self, _outputs: Any, _inputs: dict[str, np.ndarray]) -> list[np.ndarray]:
+    def infer(self, token_ids, *, style, speed, seed=None):
+        _ = token_ids, style, speed, seed
         self.calls += 1
-        return [
-            np.array([[0.1, 0.2, 0.3]], dtype=np.float32),
-            np.array([1.0, 2.0, 3.0], dtype=np.float32),
-        ]
+        return SimpleNamespace(
+            audio=np.array([0.1, 0.2, 0.3], dtype=np.float32),
+            timings=np.array([1.0, 2.0, 3.0], dtype=np.float32),
+        )
 
 
 def _generator(**kwargs: Any) -> tuple[AudioGenerator, _Session]:
@@ -196,9 +191,13 @@ class _PhraseSession(_Session):
         super().__init__()
         self.audio = audio.astype(np.float32, copy=False)
 
-    def run(self, _outputs: Any, _inputs: dict[str, np.ndarray]) -> list[np.ndarray]:
+    def infer(self, token_ids, *, style, speed, seed=None):
+        _ = token_ids, style, speed, seed
         self.calls += 1
-        return [self.audio[None, :], np.array([1.0, 2.0, 3.0], dtype=np.float32)]
+        return SimpleNamespace(
+            audio=self.audio,
+            timings=np.array([1.0, 2.0, 3.0], dtype=np.float32),
+        )
 
 
 def _phrase_metadata(*, cutter: str = "energy-valley", valid: bool = True) -> dict[str, object]:
@@ -236,6 +235,7 @@ def test_phrase_cut_success_uses_one_model_call(waveform, cutter) -> None:
     audio, _ = generator._run_onnx("abc", np.zeros((2, 256), dtype=np.float32), 1.0, trace)
     segment = SimpleNamespace(
         text="Hi!",
+        lang="en-us",
         phonemes="abc",
         tokens=[1, 2, 3],
         word_timings=[],
@@ -265,6 +265,7 @@ def test_invalid_timestamps_use_one_retry(monkeypatch) -> None:
     )
     segment = SimpleNamespace(
         text="Hi!",
+        lang="en-us",
         phonemes="abc",
         tokens=[1, 2, 3],
         word_timings=[],
@@ -294,6 +295,7 @@ def test_retry_failure_uses_one_retry_and_wrap_fallback(monkeypatch) -> None:
     )
     segment = SimpleNamespace(
         text="Hi!",
+        lang="en-us",
         phonemes="abc",
         tokens=[1, 2, 3],
         word_timings=[],

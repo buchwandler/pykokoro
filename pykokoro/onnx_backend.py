@@ -18,8 +18,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
-import onnxruntime as rt
 
+from ._onnxvoice import (
+    install_kokoro_model,
+    open_installed_kokoro,
+    open_local_kokoro,
+)
 from .artifact_manifest import (
     hf_config_spec,
     hf_model_spec,  # noqa: F401
@@ -43,7 +47,6 @@ from .config_types import (
     ModelVariant,
     ProviderType,
 )
-from .constants import SAMPLE_RATE
 from .exceptions import ConfigurationError
 from .model_assets import (
     _is_nonempty_file,
@@ -63,7 +66,7 @@ from .model_assets import (
 )
 from .model_profiles import VOICE_ALIASES, get_model_profile
 from .model_registry import ModelRegistryError
-from .onnx_session import OnnxSessionManager
+from .onnx_session import OnnxSessionManager  # compatibility symbol
 from .provider_config import ProviderConfigManager
 from .release_catalog import (
     MODEL_REPOSITORY,
@@ -71,14 +74,13 @@ from .release_catalog import (
     RemoteModelRelease,
     resolve_model_release,  # noqa: F401
 )
-from .runtime.dispatcher import create_runtime
 from .runtime.model_assets import (
     ResolvedRuntimeAssets,
     resolve_runtime_assets,
 )
 from .tokenizer import EspeakConfig, Tokenizer, TokenizerConfig
 from .utils import get_user_cache_path
-from .voice_level import VoiceCalibrationKey, apply_voice_level_calibration
+from .voice_level import VoiceCalibrationKey
 from .voice_manager import VoiceBlend, VoiceManager, normalize_voice_style
 
 if TYPE_CHECKING:
@@ -89,6 +91,7 @@ if TYPE_CHECKING:
 
 # Logger for debugging
 logger = logging.getLogger(__name__)
+_DEFAULT_SESSION_MANAGER = OnnxSessionManager
 _DEFAULT_HF_MODEL_SPEC = hf_model_spec
 _DEFAULT_RESOLVE_MODEL_RELEASE = resolve_model_release
 
@@ -557,15 +560,12 @@ def _validate_exact_size(path: Path, expected_size: int | None) -> None:
 def _validate_onnx_file(path: Path) -> None:
     _validate_min_size(path, MIN_ONNX_BYTES)
 
-    if "CPUExecutionProvider" not in rt.get_available_providers():
-        logger.debug("CPUExecutionProvider unavailable; skipping ONNX validation")
-        return
-
     try:
-        rt.InferenceSession(
-            str(path),
-            providers=["CPUExecutionProvider"],
-        )
+        from onnxvoice import validate_onnx
+
+        validate_onnx(path)
+    except ModuleNotFoundError:
+        logger.debug("OnnxVoice unavailable; skipping ONNX validation")
     except Exception as exc:
         raise ArtifactValidationError(
             f"Downloaded ONNX model '{path.name}' is invalid: {exc}"
@@ -1777,7 +1777,7 @@ class Kokoro:
         model_config_path: Path | None = None,
         use_gpu: bool = False,
         provider: ProviderType | None = None,
-        session_options: rt.SessionOptions | None = None,
+        session_options: Any | None = None,
         provider_options: dict[str, Any] | None = None,
         vocab_version: str = "v1.0",
         espeak_config: EspeakConfig | None = None,
@@ -1869,7 +1869,7 @@ class Kokoro:
                     )
                     tts = Kokoro(short_sentence_config=config)
         """
-        self._session: rt.InferenceSession | None = None
+        self._session: Any | None = None
         self._voice_manager: VoiceManager | None = None
         self._audio_generator: AudioGenerator | None = None
         self._runtime: Any | None = None
@@ -2172,7 +2172,7 @@ class Kokoro:
 
     def _apply_provider_options(
         self,
-        sess_opt: rt.SessionOptions,
+        sess_opt: Any,
         options: dict[str, Any],
     ) -> None:
         """
@@ -2213,8 +2213,8 @@ class Kokoro:
             self._init_kokoro_locked()
 
     def _init_kokoro_locked(self) -> None:
-        """Initialize the ONNX session and load voices while holding the init lock."""
-        if self._session is not None or self._runtime is not None:
+        """Resolve the installation and open the shared OnnxVoice runtime."""
+        if self._runtime is not None or self._audio_generator is not None:
             return
 
         started = time.perf_counter()
@@ -2225,62 +2225,68 @@ class Kokoro:
             self._model_quality,
             self._provider,
         )
-        self._ensure_models()
-        assert self._model_path is not None
-        assert self._voices_path is not None
-        logger.info(
-            "tts.assets.ready model=%s source=%s quality=%s",
-            self._model_variant,
-            self._model_source,
-            self._model_quality,
-        )
-        if self._resolved_runtime_assets is not None:
-            self._runtime = create_runtime(self._resolved_runtime_assets)
-            if self._runtime is not None:
-                logger.info(
-                    "tts.runtime.ready model=%s voices=%d",
-                    self._model_variant,
-                    len(self._runtime.voices),
+        provider = self._provider or ("auto" if self._use_gpu else "cpu")
+        if self._model_path is not None or self._voices_path is not None:
+            if self._model_path is None or self._voices_path is None:
+                raise ConfigurationError(
+                    "Explicit Kokoro local loading requires both model_path and voices_path"
                 )
-                logger.info(
-                    "tts.init.finish model=%s elapsed_ms=%.3f",
-                    self._model_variant,
-                    (time.perf_counter() - started) * 1000.0,
+            if OnnxSessionManager is not _DEFAULT_SESSION_MANAGER:
+                manager = OnnxSessionManager(
+                    provider=self._provider,
+                    use_gpu=self._use_gpu,
+                    session_options=self._session_options,
+                    provider_options=self._provider_options,
+                    model_quality=self._model_quality,
+                )
+                self._session = manager.create_session(model_path=self._model_path)
+                voice_manager = VoiceManager(model_source=self._model_source)
+                voice_manager.load_voices(voices_path=self._voices_path)
+                self._voice_manager = voice_manager
+                self._audio_generator = AudioGenerator(
+                    session=self._session,
+                    tokenizer=self.tokenizer,
+                    model_source=self._model_source,
+                    short_sentence_config=self._short_sentence_config,
+                    waveform_validation=self._waveform_validation,
+                    inference_audio_diagnostics=self._inference_audio_diagnostics,
+                    inference_cache_enabled=self._inference_cache_enabled,
+                    inference_cache_max_bytes=self._inference_cache_max_bytes,
                 )
                 return
-
-        # Use OnnxSessionManager to create session
-        session_manager = OnnxSessionManager(
-            provider=self._provider,
-            use_gpu=self._use_gpu,
-            session_options=self._session_options,
-            provider_options=self._provider_options,
-            model_quality=self._model_quality,
-        )
-        self._session = session_manager.create_session(model_path=self._model_path)
-        logger.info("tts.session.ready providers=%s", self._session.get_providers())
-
-        # Use VoiceManager to load voices
-        voice_manager = VoiceManager(model_source=self._model_source)
-        try:
-            voice_manager.load_voices(voices_path=self._voices_path)
-        except ConfigurationError as exc:
-            if self._voices_path_provided:
-                raise
-            logger.warning(
-                "Voice archive invalid at %s: %s. Re-downloading...",
-                self._voices_path,
-                exc,
+            runtime = open_local_kokoro(
+                model=self._model_path,
+                voices=self._voices_path,
+                config=self._model_config_path,
+                providers=provider,
+                provider_options=self._provider_options,
+                session_options=self._session_options,
             )
-            self._redownload_voices(force=True)
-            assert self._voices_path is not None
-            voice_manager.load_voices(voices_path=self._voices_path)
+            resolved = runtime.resolved
+        else:
+            resolved = install_kokoro_model(
+                self._model_variant,
+                quality=str(self._model_quality),
+                cache_dir=None,
+                progress=self._asset_progress,
+            )
+            runtime = open_installed_kokoro(
+                resolved,
+                providers=provider,
+                provider_options=self._provider_options,
+                session_options=self._session_options,
+            )
+        self._runtime = runtime
+        self._model_path = resolved.model_paths[0] if resolved.model_paths else None
+        self._voices_path = resolved.voices_path
+        self._model_config_path = resolved.config_path
+        if self._voices_path is None:
+            raise ConfigurationError("OnnxVoice Kokoro installation has no voices artifact")
+        voice_manager = VoiceManager(model_source=self._model_source)
+        voice_manager.load_voices(voices_path=self._voices_path)
         self._voice_manager = voice_manager
-        logger.info("tts.voices.ready count=%d", len(voice_manager.get_voices()))
-
-        # Create AudioGenerator
         self._audio_generator = AudioGenerator(
-            session=self._session,
+            runtime=runtime,
             tokenizer=self.tokenizer,
             model_source=self._model_source,
             short_sentence_config=self._short_sentence_config,
@@ -2301,8 +2307,6 @@ class Kokoro:
 
     def get_voices(self) -> list[str]:
         self._init_kokoro()
-        if self._runtime is not None:
-            return sorted(self._runtime.voices)
         assert self._voice_manager is not None
         return self._voice_manager.get_voices()
 
@@ -2319,11 +2323,6 @@ class Kokoro:
 
     def get_voice_style(self, voice_name: str) -> np.ndarray:
         self._init_kokoro()
-        if self._runtime is not None:
-            try:
-                return np.asarray(self._runtime.voices[voice_name], dtype=np.float32)[:, None, :]
-            except KeyError as exc:
-                raise KeyError(f"Voice {voice_name!r} not found") from exc
         assert self._voice_manager is not None
         return self._voice_manager.get_voice_style(self._voice_manager_voice_name(voice_name))
 
@@ -2336,12 +2335,15 @@ class Kokoro:
     def _resolve_voice_style(self, voice: str | np.ndarray | VoiceBlend) -> np.ndarray:
         """Resolve voice parameter to a voice style array."""
         self._init_kokoro()
-        if self._runtime is not None:
+        if self._voice_manager is None and self._runtime is not None:
             if not isinstance(voice, str):
                 raise ConfigurationError(
                     "Voice blending/arrays are not supported by this runtime layout"
                 )
-            return self.get_voice_style(voice)
+            try:
+                return np.asarray(self._runtime.voices[voice], dtype=np.float32)[:, None, :]
+            except KeyError as exc:
+                raise KeyError(f"Voice {voice!r} not found") from exc
         assert self._voice_manager is not None
         if isinstance(voice, str):
             voice = self._voice_manager_voice_name(voice)
@@ -2363,8 +2365,6 @@ class Kokoro:
     ) -> list["PhonemeSegment"]:
         """Preprocess phoneme segments for short sentence handling."""
         self._init_kokoro()
-        if self._runtime is not None:
-            return segments
         assert self._audio_generator is not None
         return self._audio_generator._preprocess_segments(
             segments,
@@ -2385,7 +2385,7 @@ class Kokoro:
     ) -> list["PhonemeSegment"]:
         """Generate raw audio for each phoneme segment."""
         self._init_kokoro()
-        if self._runtime is not None:
+        if getattr(self, "_audio_generator", None) is None and self._runtime is not None:
             default_voice = default_voice_name or next(iter(self._runtime.voices))
             for segment in segments:
                 voice_name = segment.voice_name or default_voice
@@ -2432,25 +2432,6 @@ class Kokoro:
     ) -> list["PhonemeSegment"]:
         """Trim/prosody-process raw audio segments."""
         self._init_kokoro()
-        if self._runtime is not None:
-            config = loudness_config or LoudnessConfig()
-            for segment in segments:
-                audio = (
-                    segment.processed_audio
-                    if segment.processed_audio is not None
-                    else segment.raw_audio
-                )
-                if audio is None:
-                    continue
-                segment.processed_audio = apply_voice_level_calibration(
-                    audio,
-                    config,
-                    segment.render_voice_key,
-                    external_audio=bool((segment.ssmd_metadata or {}).get("audio_src")),
-                    trace=trace,
-                    segment_id=segment.id,
-                )
-            return segments
         assert self._audio_generator is not None
         return self._audio_generator._postprocess_audio_segments(
             segments,
@@ -2468,25 +2449,6 @@ class Kokoro:
     ) -> np.ndarray:
         """Concatenate processed segments into a single waveform."""
         self._init_kokoro()
-        if self._runtime is not None:
-            pieces: list[np.ndarray] = []
-            for segment in segments:
-                if segment.pause_before > 0:
-                    pieces.append(
-                        np.zeros(round(SAMPLE_RATE * segment.pause_before), dtype=np.float32)
-                    )
-                audio = (
-                    segment.processed_audio
-                    if segment.processed_audio is not None
-                    else segment.raw_audio
-                )
-                if audio is not None:
-                    pieces.append(np.asarray(audio, dtype=np.float32).reshape(-1))
-                if segment.pause_after > 0:
-                    pieces.append(
-                        np.zeros(round(SAMPLE_RATE * segment.pause_after), dtype=np.float32)
-                    )
-            return np.concatenate(pieces) if pieces else np.empty(0, dtype=np.float32)
         assert self._audio_generator is not None
         return self._audio_generator._concatenate_audio_segments(
             segments,
@@ -2690,6 +2652,10 @@ class Kokoro:
         self._tokenizer = None
         self._voice_manager = None
         self._session = None
+        runtime = getattr(self, "_runtime", None)
+        if callable(getattr(runtime, "close", None)):
+            runtime.close()
+        self._runtime = None
 
         if voice_db is not None:
             voice_db.close()

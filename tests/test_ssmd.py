@@ -318,6 +318,7 @@ class TestSSMDVoiceSwitching:
 
     def test_voice_resolver_called_for_segment_with_voice(self):
         """Test AudioGenerator calls voice_resolver for voice metadata."""
+        from types import SimpleNamespace
         from unittest.mock import Mock
 
         import numpy as np
@@ -328,12 +329,11 @@ class TestSSMDVoiceSwitching:
 
         tokenizer = create_tokenizer()
 
-        # Create mock session
-        mock_session = Mock()
-        mock_session.get_inputs.return_value = [Mock(name="input_ids")]
-        mock_session.run.return_value = [np.zeros((1, 100), dtype=np.float32)]
-
-        generator = AudioGenerator(mock_session, tokenizer)
+        # Create mock runtime
+        mock_runtime = Mock()
+        mock_runtime.infer.return_value = SimpleNamespace(audio=np.zeros(100, dtype=np.float32))
+        mock_runtime.cache_identity = ("test", "fp32", "v1.0")
+        generator = AudioGenerator(mock_runtime, tokenizer)
 
         # Create segments with voice metadata
         segments = [
@@ -394,7 +394,7 @@ class TestSSMDVoiceSwitching:
         assert voice_calls[1] == "am_michael"
 
     def test_voice_switching_without_resolver_uses_default(self):
-        """Test that segments with voice metadata but no resolver use default voice."""
+        from types import SimpleNamespace
         from unittest.mock import Mock
 
         import numpy as np
@@ -405,12 +405,11 @@ class TestSSMDVoiceSwitching:
 
         tokenizer = create_tokenizer()
 
-        # Create mock session
-        mock_session = Mock()
-        mock_session.get_inputs.return_value = [Mock(name="input_ids")]
-        mock_session.run.return_value = [np.zeros((1, 100), dtype=np.float32)]
-
-        generator = AudioGenerator(mock_session, tokenizer)
+        # Create mock runtime
+        mock_runtime = Mock()
+        mock_runtime.infer.return_value = SimpleNamespace(audio=np.zeros(100, dtype=np.float32))
+        mock_runtime.cache_identity = ("test", "fp32", "v1.0")
+        generator = AudioGenerator(mock_runtime, tokenizer)
 
         # Create segment with voice metadata
         segments = [

@@ -20,6 +20,7 @@ from .constants import MAX_PHONEME_LENGTH, SAMPLE_RATE
 from .exceptions import ConfigurationError
 from .loudness_config import LoudnessConfig
 from .prosody import apply_prosody, parse_pitch, parse_rate, parse_volume
+from .runtime_protocol import KokoroInferenceRuntime
 from .short_sentence_handler import (
     SHORT_SENTENCE_META_KEY,
     apply_short_sentence_mode,
@@ -33,8 +34,6 @@ from .voice_level import apply_voice_level_calibration
 from .voice_manager import normalize_voice_style
 
 if TYPE_CHECKING:
-    import onnxruntime as rt
-
     from .prosody_config import ProsodyConfig
     from .short_sentence_handler import ShortSentenceConfig
     from .types import Trace
@@ -276,38 +275,35 @@ ModelSource = Literal["huggingface", "github"]
 
 
 class AudioGenerator:
-    """Generates audio from phonemes, tokens, and segments using ONNX inference.
+    """Generate audio using a producer-neutral Kokoro inference runtime.
 
-    This class handles:
-    - ONNX inference for single phoneme batches
-    - Phoneme splitting for long inputs
-    - Batch generation from phoneme lists
-    - Segment-based generation with pause support
-    - Token-to-audio generation
-    - Short sentence handling via configured context modes
-
-    Args:
-        session: ONNX Runtime inference session
-        tokenizer: Tokenizer for phoneme<->token conversion
-        model_source: Model source ('huggingface' or 'github')
-        short_sentence_config: Configuration for short sentence handling
+    Token preparation, voice/style selection, short-sentence handling, timing
+    interpretation, and inference caching remain owned by PyKokoro.
     """
 
     def __init__(
         self,
-        session: rt.InferenceSession,
-        tokenizer: Tokenizer,
+        runtime: KokoroInferenceRuntime | Any | None = None,
+        tokenizer: Tokenizer | None = None,
         model_source: ModelSource = "huggingface",
         short_sentence_config: ShortSentenceConfig | None = None,
         waveform_validation: Literal["off", "warn", "strict"] = "off",
         inference_audio_diagnostics: bool = False,
         inference_cache_enabled: bool = True,
         inference_cache_max_bytes: int = 128 * 1024 * 1024,
+        *,
+        session: Any | None = None,
     ):
-        """Initialize the audio generator."""
+        """Initialize the audio generator with an OnnxVoice-compatible runtime."""
+        if runtime is None:
+            runtime = session
+        if runtime is None:
+            raise ValueError("runtime is required")
+        if tokenizer is None:
+            raise ValueError("tokenizer is required")
         if inference_cache_max_bytes < 0:
             raise ValueError("inference_cache_max_bytes must be non-negative")
-        self._session = session
+        self._runtime = runtime
         self._tokenizer = tokenizer
         self._model_source = model_source
         self._short_sentence_config = short_sentence_config
@@ -323,23 +319,7 @@ class AudioGenerator:
         )
         self._inference_cache_bytes = 0
         self._inference_call_number = 0
-        self._input_metas = {
-            str(input_meta.name): input_meta for input_meta in session.get_inputs()
-        }
-        self._uses_input_ids = "input_ids" in self._input_metas
-        get_outputs = getattr(session, "get_outputs", None)
-        outputs = get_outputs() if callable(get_outputs) else []
-        self._timestamp_output_index: int | None = None
-        try:
-            for index, output in enumerate(outputs):
-                name = str(getattr(output, "name", "")).lower()
-                if name in {"pred_dur", "pred_duration", "durations", "duration"}:
-                    self._timestamp_output_index = index
-                    break
-            self._has_timestamp_output = self._timestamp_output_index is not None
-        except TypeError:
-            # Some lightweight test doubles expose get_outputs() as a bare Mock.
-            self._has_timestamp_output = False
+        self._has_timestamp_output = bool(getattr(runtime, "supports_timings", False))
         self._reported_missing_timestamp_output = False
 
     def _tokenize_phonemes(self, phonemes: str) -> list[int]:
@@ -364,53 +344,14 @@ class AudioGenerator:
         return voice_style_indexed
 
     @staticmethod
-    def _pad_tokens(tokens: list[int]) -> list[list[int]]:
-        return [[0, *tokens, 0]]
-
-    def _float_speed_input(self, speed: float) -> np.ndarray:
-        return np.ones(1, dtype=np.float32) * speed
-
-    def _int_speed_input(self, speed: float) -> np.ndarray:
-        speed_int = max(1, round(speed))
-        return np.array([speed_int], dtype=np.int32)
-
-    def _input_dtype(self, name: str, default: np.dtype[Any]) -> np.dtype[Any]:
-        meta = self._input_metas.get(name)
-        type_name = str(getattr(meta, "type", "")).lower() if meta is not None else ""
-        return {
-            "tensor(float)": np.dtype(np.float32),
-            "tensor(float16)": np.dtype(np.float16),
-            "tensor(double)": np.dtype(np.float64),
-            "tensor(int64)": np.dtype(np.int64),
-            "tensor(int32)": np.dtype(np.int32),
-            "tensor(int16)": np.dtype(np.int16),
-        }.get(type_name, default)
-
-    def _build_onnx_inputs(
-        self,
-        tokens_padded: list[list[int]],
-        voice_style: np.ndarray,
-        speed: float,
-    ) -> dict[str, np.ndarray | list[list[int]]]:
-        token_name = "input_ids" if self._uses_input_ids else "tokens"
-        token_dtype = self._input_dtype(token_name, np.dtype(np.int64))
-        style_name = "ref_s" if "ref_s" in self._input_metas else "style"
-        style_dtype = self._input_dtype(style_name, np.dtype(np.float32))
-        speed_dtype = self._input_dtype("speed", np.dtype(np.float32))
-        if np.issubdtype(speed_dtype, np.integer):
-            speed_input = np.array([max(1, round(speed))], dtype=speed_dtype)
-        else:
-            speed_input = np.ones(1, dtype=speed_dtype) * speed
-        return {
-            token_name: np.asarray(tokens_padded, dtype=token_dtype),
-            style_name: np.asarray(voice_style, dtype=style_dtype),
-            "speed": speed_input,
-        }
-
-    @staticmethod
-    def _inference_cache_key(inputs: dict[str, np.ndarray | list[list[int]]]) -> bytes:
-        """Build a digest from the exact arrays passed to ONNX Runtime."""
+    def _inference_cache_key(
+        inputs: dict[str, np.ndarray | list[int]],
+        runtime_identity: object = None,
+    ) -> bytes:
+        """Build a digest from producer inputs and runtime identity."""
         digest = hashlib.blake2b(digest_size=20)
+        digest.update(repr(runtime_identity).encode("utf-8"))
+        digest.update(b"\0")
         for name in sorted(inputs):
             array = np.ascontiguousarray(np.asarray(inputs[name]))
             digest.update(name.encode("utf-8"))
@@ -468,7 +409,7 @@ class AudioGenerator:
         *,
         effective_phonemes: str,
         tokens: list[int],
-        inputs: dict[str, np.ndarray | list[list[int]]],
+        inputs: dict[str, np.ndarray | list[int]],
         audio: np.ndarray,
         runtime_s: float,
         cache_hit: bool,
@@ -523,6 +464,7 @@ class AudioGenerator:
         *,
         attempt_kind: str = "initial",
         tokens: list[int] | None = None,
+        seed: int | None = None,
     ) -> tuple[np.ndarray, np.ndarray | None]:
         effective_phonemes = phonemes[:MAX_PHONEME_LENGTH]
         effective_tokens = (
@@ -537,9 +479,13 @@ class AudioGenerator:
         voice_style_indexed = normalized_voice_style[style_idx]
         if voice_style_indexed.ndim == 1:
             voice_style_indexed = voice_style_indexed[None, :]
-        tokens_padded = self._pad_tokens(effective_tokens)
-        inputs = self._build_onnx_inputs(tokens_padded, voice_style_indexed, speed)
-        cache_key = self._inference_cache_key(inputs)
+        inputs: dict[str, np.ndarray | list[int]] = {
+            "token_ids": effective_tokens,
+            "style": voice_style_indexed,
+            "speed": np.asarray([speed], dtype=np.float32),
+        }
+        runtime_identity = getattr(self._runtime, "cache_identity", None)
+        cache_key = self._inference_cache_key(inputs, runtime_identity)
         cached = self._get_cached_inference(cache_key)
         if cached is not None:
             audio, pred_dur = cached
@@ -547,15 +493,16 @@ class AudioGenerator:
             cache_hit = True
         else:
             started = time.perf_counter()
-            results = self._session.run(None, inputs)
-            runtime_s = time.perf_counter() - started
-            audio = np.squeeze(np.asarray(results[0]).T)
-            timestamp_index = self._timestamp_output_index
-            pred_dur = (
-                np.asarray(results[timestamp_index]).squeeze()
-                if timestamp_index is not None and timestamp_index < len(results)
-                else None
+            result = self._runtime.infer(
+                effective_tokens,
+                style=voice_style_indexed,
+                speed=speed,
+                seed=seed,
             )
+            runtime_s = time.perf_counter() - started
+            audio = np.asarray(getattr(result, "audio", result), dtype=np.float32).reshape(-1)
+            raw_timings = getattr(result, "timings", None)
+            pred_dur = None if raw_timings is None else np.asarray(raw_timings).reshape(-1)
             self._put_cached_inference(cache_key, audio, pred_dur)
             cache_hit = False
         self._record_inference(
@@ -634,7 +581,7 @@ class AudioGenerator:
             Tuple of (audio samples, sample rate)
         """
         audio, _ = self._run_onnx(phonemes, voice_style, speed, trace=trace)
-        return audio, SAMPLE_RATE
+        return audio, int(getattr(self._runtime, "sample_rate", SAMPLE_RATE))
 
     def split_phonemes(self, phonemes: str) -> list[str]:  # noqa: C901
         """Split phonemes into batches at sentence-ending punctuation marks.

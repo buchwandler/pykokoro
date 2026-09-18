@@ -35,23 +35,15 @@ class _Tokenizer:
 
 
 class _NamedTimestampSession:
-    def get_inputs(self) -> list[Any]:
-        return [SimpleNamespace(name="input_ids")]
+    supports_timings = True
+    sample_rate = 24_000
 
-    def get_outputs(self) -> list[Any]:
-        return [
-            SimpleNamespace(name="waveform"),
-            SimpleNamespace(name="auxiliary"),
-            SimpleNamespace(name="pred_dur"),
-        ]
-
-    def run(self, output_names: Any, inputs: Any) -> list[np.ndarray]:
-        _ = output_names, inputs
-        return [
-            np.zeros(240, dtype=np.float32),
-            np.zeros(1, dtype=np.float32),
-            np.asarray([3, 1, 1, 2, 2, 2, 0], dtype=np.float32),
-        ]
+    def infer(self, token_ids, *, style, speed, seed=None):
+        _ = token_ids, style, speed, seed
+        return SimpleNamespace(
+            audio=np.zeros(240, dtype=np.float32),
+            timings=np.asarray([3, 1, 1, 2, 2, 2, 0], dtype=np.float32),
+        )
 
 
 def test_word_timing_seconds_and_sample_transform_helpers() -> None:

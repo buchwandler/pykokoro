@@ -16,23 +16,23 @@ class _Tokenizer:
 
 
 class _Session:
-    def get_inputs(self) -> list[Any]:
-        return [
-            SimpleNamespace(name="tokens", type="tensor(int64)"),
-            SimpleNamespace(name="style", type="tensor(float)"),
-            SimpleNamespace(name="speed", type="tensor(float)"),
-        ]
+    supports_timings = False
+    sample_rate = 24_000
 
-    def get_outputs(self) -> list[Any]:
-        return []
-
-    def run(self, _outputs, _inputs) -> list[np.ndarray]:
-        return [np.zeros((1, 4), dtype=np.float32)]
+    def infer(self, token_ids, *, style, speed, seed=None):
+        _ = token_ids, style, speed, seed
+        return SimpleNamespace(audio=np.zeros(4, dtype=np.float32), timings=None)
 
 
 class _TimestampSession(_Session):
-    def get_outputs(self) -> list[Any]:
-        return [SimpleNamespace(name="audio"), SimpleNamespace(name="pred_dur")]
+    supports_timings = True
+
+    def infer(self, token_ids, *, style, speed, seed=None):
+        _ = token_ids, style, speed, seed
+        return SimpleNamespace(
+            audio=np.zeros(4, dtype=np.float32),
+            timings=np.ones(4, dtype=np.float32),
+        )
 
 
 def test_inference_logging_reports_counts_cache_and_runtime_without_payload(caplog) -> None:

@@ -109,25 +109,18 @@ def get_gpu_info(enabled: bool = True) -> tuple[str, bool]:
         return "GPU disabled in config. Using CPU.", False
 
     try:
-        import onnxruntime as ort
+        from onnxvoice import available_providers
 
-        providers = ort.get_available_providers()
-
-        # Check for CUDA
+        providers = available_providers()
         if "CUDAExecutionProvider" in providers:
-            return "CUDA GPU available via ONNX Runtime.", True
-
-        # Check for CoreML (Apple)
+            return "CUDA GPU available via OnnxVoice.", True
         if "CoreMLExecutionProvider" in providers:
-            return "CoreML GPU available via ONNX Runtime.", True
-
-        # Check for DirectML (Windows)
+            return "CoreML GPU available via OnnxVoice.", True
         if "DmlExecutionProvider" in providers:
-            return "DirectML GPU available via ONNX Runtime.", True
-
+            return "DirectML GPU available via OnnxVoice.", True
         return f"No GPU providers available. Using CPU. (Available: {providers})", False
-    except ImportError:
-        return "ONNX Runtime not installed. Using CPU.", False
+    except ModuleNotFoundError:
+        return "OnnxVoice not installed. Using CPU.", False
     except (RuntimeError, OSError) as e:
         return f"Error checking GPU: {e}", False
 
@@ -147,23 +140,16 @@ def get_device(use_gpu: bool = True) -> str:
         return "CPUExecutionProvider"
 
     try:
-        import onnxruntime as ort
+        from onnxvoice import available_providers
 
-        providers = ort.get_available_providers()
-
-        # Prefer CUDA
+        providers = available_providers()
         if "CUDAExecutionProvider" in providers:
             return "CUDAExecutionProvider"
-
-        # CoreML for Apple
         if "CoreMLExecutionProvider" in providers:
             return "CoreMLExecutionProvider"
-
-        # DirectML for Windows
         if "DmlExecutionProvider" in providers:
             return "DmlExecutionProvider"
-
-    except ImportError:
+    except ModuleNotFoundError:
         pass
 
     return "CPUExecutionProvider"

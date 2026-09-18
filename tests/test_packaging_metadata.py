@@ -58,18 +58,15 @@ def test_provider_extras_do_not_install_every_runtime_distribution() -> None:
     ]
 
     provider_packages = {
-        package.split(">=", 1)[0]
+        package.split(">=", 1)[0].split("[")[0]
         for extra in ("cpu", "gpu", "openvino", "directml", "coreml")
         for package in optional[extra]
-        if package.startswith("onnxruntime")
+        if package.startswith("onnxvoice")
     }
     assert optional["all"]
-    assert not any(package.startswith("onnxruntime") for package in optional["all"])
+    assert not any(package.startswith("onnxvoice") for package in optional["all"])
     assert provider_packages == {
-        "onnxruntime",
-        "onnxruntime-gpu",
-        "onnxruntime-openvino",
-        "onnxruntime-directml",
+        "onnxvoice",
     }
 
 

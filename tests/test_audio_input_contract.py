@@ -1,111 +1,80 @@
+from __future__ import annotations
+
 from types import SimpleNamespace
 
 import numpy as np
-import pytest
 from kokorog2p import get_kokoro_vocab
 
 from pykokoro.audio_generator import AudioGenerator
 from pykokoro.tokenizer import Tokenizer
-from pykokoro.types import PhonemeSegment
 
 
-class Session:
-    def __init__(self, inputs):
-        self._inputs = inputs
+class Runtime:
+    sample_rate = 24_000
+    supports_timings = True
+    cache_identity = ("kokoro:v1.0", "fp32", "cpu")
 
-    def get_inputs(self):
-        return self._inputs
+    def __init__(self) -> None:
+        self.calls: list[tuple[list[int], np.ndarray, float, int | None]] = []
 
-    def get_outputs(self):
-        return []
+    def infer(self, token_ids, *, style, speed, seed=None):
+        self.calls.append((list(token_ids), np.asarray(style), speed, seed))
+        return SimpleNamespace(
+            audio=np.zeros(8, dtype=np.float32),
+            timings=np.ones(len(token_ids), dtype=np.float32),
+        )
 
-
-@pytest.mark.parametrize(
-    ("token_name", "speed_type", "expected_speed"),
-    [
-        ("tokens", "tensor(float)", np.float32),
-        ("input_ids", "tensor(float)", np.float32),
-        ("input_ids", "tensor(int32)", np.int32),
-    ],
-)
-def test_onnx_inputs_follow_metadata(token_name, speed_type, expected_speed):
-    session = Session(
-        [
-            SimpleNamespace(name=token_name, type="tensor(int64)"),
-            SimpleNamespace(name="style", type="tensor(float)"),
-            SimpleNamespace(name="speed", type=speed_type),
-        ]
-    )
-    generator = AudioGenerator(session=session, tokenizer=object(), model_source="github")
-
-    inputs = generator._build_onnx_inputs([[0, 1, 0]], np.zeros((1, 256)), 1.125)
-
-    assert set(inputs) == {token_name, "style", "speed"}
-    assert inputs[token_name].dtype == np.int64
-    assert inputs["style"].dtype == np.float32
-    assert inputs["speed"].dtype == expected_speed
-    if np.issubdtype(expected_speed, np.floating):
-        assert inputs["speed"].item() == pytest.approx(1.125)
-    else:
-        assert inputs["speed"].item() == 1
+    def close(self) -> None:
+        pass
 
 
-def test_nabra_uses_ref_s_input_name():
-    session = Session(
-        [
-            SimpleNamespace(name="input_ids", type="tensor(int64)"),
-            SimpleNamespace(name="ref_s", type="tensor(float)"),
-            SimpleNamespace(name="speed", type="tensor(float)"),
-        ]
-    )
-    generator = AudioGenerator(session=session, tokenizer=object(), model_source="github")
-
-    inputs = generator._build_onnx_inputs([[0, 1, 0]], np.zeros((1, 256)), 1.0)
-
-    assert set(inputs) == {"input_ids", "ref_s", "speed"}
-    assert inputs["input_ids"].dtype == np.int64
-    assert inputs["ref_s"].dtype == np.float32
-    assert inputs["speed"].dtype == np.float32
-
-
-class RecordingSession(Session):
-    def __init__(self, inputs):
-        super().__init__(inputs)
-        self.calls = []
-
-    def run(self, _outputs, inputs):
-        self.calls.append(inputs)
-        return [np.zeros((1, 8), dtype=np.float32)]
-
-
-def test_audio_generator_sends_prepared_chinese_tokens_to_onnx():
+def test_runtime_receives_model_ready_tokens_without_graph_padding() -> None:
     phonemes = "ㄋㄧ2ㄏㄠ3"
     tokenizer = Tokenizer(vocab_version="1.1", vocab=get_kokoro_vocab(model="1.1"))
     prepared_tokens = tokenizer.tokenize(phonemes)
-    session = RecordingSession(
-        [
-            SimpleNamespace(name="input_ids", type="tensor(int64)"),
-            SimpleNamespace(name="ref_s", type="tensor(float)"),
-            SimpleNamespace(name="speed", type="tensor(float)"),
-        ]
-    )
-    generator = AudioGenerator(session=session, tokenizer=tokenizer, model_source="github")
-    segment = PhonemeSegment(
-        id="zh-1",
-        segment_id="zh-1",
-        phoneme_id=0,
-        text="你好",
-        phonemes=phonemes,
-        tokens=prepared_tokens,
-    )
+    runtime = Runtime()
+    generator = AudioGenerator(runtime=runtime, tokenizer=tokenizer, model_source="github")
 
-    generator.generate_from_segments(
-        [segment],
+    generator.generate_from_phonemes(
+        phonemes,
         np.zeros((510, 256), dtype=np.float32),
-        1.0,
-        trim_silence=False,
-        enable_short_sentence_override=False,
+        1.125,
     )
 
-    assert len(session.calls) == 1
-    assert session.calls[0]["input_ids"].tolist() == [[0, *prepared_tokens, 0]]
+    assert len(runtime.calls) == 1
+    token_ids, style, speed, seed = runtime.calls[0]
+    assert token_ids == prepared_tokens
+    assert style.shape == (1, 256)
+    assert speed == 1.125
+    assert seed is None
+
+
+def test_runtime_cache_key_includes_style_and_speed() -> None:
+    runtime = Runtime()
+    generator = AudioGenerator(
+        runtime=runtime, tokenizer=SimpleNamespace(tokenize=lambda text: [1, 2])
+    )
+    style = np.zeros((4, 256), dtype=np.float32)
+
+    generator.generate_from_phonemes("ab", style, 1.0)
+    generator.generate_from_phonemes("ab", style, 1.0)
+    generator.generate_from_phonemes("ab", style, 1.1)
+
+    assert len(runtime.calls) == 2
+
+
+def test_runtime_identity_changes_cache_key() -> None:
+    style = np.zeros((4, 256), dtype=np.float32)
+    first = Runtime()
+    second = Runtime()
+    second.cache_identity = ("kokoro:v1.1", "fp32", "cpu")
+    generator = AudioGenerator(
+        runtime=first, tokenizer=SimpleNamespace(tokenize=lambda text: [1, 2])
+    )
+    generator.generate_from_phonemes("ab", style, 1.0)
+
+    generator._runtime = second
+    generator.generate_from_phonemes("ab", style, 1.0)
+
+    assert len(first.calls) == 1
+    assert len(second.calls) == 1

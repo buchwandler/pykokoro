@@ -38,22 +38,23 @@ class DummyTokenizer:
 
 
 class DummySession:
-    def get_inputs(self):
-        return [SimpleNamespace(name="input_ids")]
+    supports_timings = False
+    sample_rate = 24_000
 
-    def get_outputs(self):
-        return [SimpleNamespace(name="waveform")]
+    def infer(self, token_ids, *, style, speed, seed=None):
+        _ = token_ids, style, speed, seed
+        return SimpleNamespace(audio=np.zeros(8, dtype=np.float32), timings=None)
 
 
 class TimestampSession(DummySession):
-    def get_outputs(self):
-        return [SimpleNamespace(name="waveform"), SimpleNamespace(name="pred_dur")]
+    supports_timings = True
 
-    def run(self, output_names, inputs):
-        _ = output_names, inputs
-        audio = np.zeros(8, dtype=np.float32)
-        pred_dur = np.array([3, 1, 1, 1, 2, 2, 0], dtype=np.float32)
-        return [audio, pred_dur]
+    def infer(self, token_ids, *, style, speed, seed=None):
+        _ = token_ids, style, speed, seed
+        return SimpleNamespace(
+            audio=np.zeros(8, dtype=np.float32),
+            timings=np.array([3, 1, 1, 1, 2, 2, 0], dtype=np.float32),
+        )
 
 
 def test_split_phonemes_uses_token_count():

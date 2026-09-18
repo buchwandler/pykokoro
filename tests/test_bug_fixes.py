@@ -7,6 +7,7 @@ This module tests the specific bug fixes:
 """
 
 import json
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import numpy as np
@@ -74,8 +75,11 @@ class TestBugFix2_VoiceStyleBoundsChecking:
         """Test that style index doesn't exceed voice_style array size."""
         # Create mock session and tokenizer
         mock_session = Mock()
-        mock_session.get_inputs.return_value = [Mock(name="tokens")]
-        mock_session.run.return_value = [np.zeros((100, 1), dtype=np.float32)]
+        mock_session.sample_rate = 24_000
+        mock_session.supports_timings = False
+        mock_session.infer.return_value = SimpleNamespace(
+            audio=np.zeros(100, dtype=np.float32), timings=None
+        )
 
         mock_tokenizer = Mock()
         mock_tokenizer.tokenize.return_value = [1, 2, 3, 4, 5]  # 5 tokens
@@ -105,8 +109,11 @@ class TestBugFix2_VoiceStyleBoundsChecking:
     def test_voice_style_index_clamped_correctly(self):
         """Test that style index is clamped to voice_style size."""
         mock_session = Mock()
-        mock_session.get_inputs.return_value = [Mock(name="tokens")]
-        mock_session.run.return_value = [np.zeros((100, 1), dtype=np.float32)]
+        mock_session.sample_rate = 24_000
+        mock_session.supports_timings = False
+        mock_session.infer.return_value = SimpleNamespace(
+            audio=np.zeros(100, dtype=np.float32), timings=None
+        )
 
         # Create tokenizer that returns many tokens (would exceed small array)
         mock_tokenizer = Mock()
@@ -134,8 +141,11 @@ class TestBugFix2_VoiceStyleBoundsChecking:
     def test_voice_style_normal_size(self):
         """Test that normal-sized voice arrays still work correctly."""
         mock_session = Mock()
-        mock_session.get_inputs.return_value = [Mock(name="tokens")]
-        mock_session.run.return_value = [np.zeros((100, 1), dtype=np.float32)]
+        mock_session.sample_rate = 24_000
+        mock_session.supports_timings = False
+        mock_session.infer.return_value = SimpleNamespace(
+            audio=np.zeros(100, dtype=np.float32), timings=None
+        )
 
         mock_tokenizer = Mock()
         mock_tokenizer.tokenize.return_value = [1, 2, 3]
@@ -159,14 +169,16 @@ class TestBugFix2_VoiceStyleBoundsChecking:
     def test_voice_style_input_shape(self):
         """Test that style input is normalized to 2D float32."""
         mock_session = Mock()
-        mock_session.get_inputs.return_value = [Mock(name="input_ids")]
+        mock_session.sample_rate = 24_000
+        mock_session.supports_timings = False
         captured_inputs = {}
 
-        def _run(_, inputs):
-            captured_inputs.update(inputs)
-            return [np.zeros((1, 100), dtype=np.float32)]
+        def _infer(token_ids, *, style, speed, seed=None):
+            _ = token_ids, speed, seed
+            captured_inputs["style"] = style
+            return SimpleNamespace(audio=np.zeros(100, dtype=np.float32), timings=None)
 
-        mock_session.run.side_effect = _run
+        mock_session.infer.side_effect = _infer
 
         mock_tokenizer = Mock()
         mock_tokenizer.tokenize.return_value = [1, 2, 3]
@@ -189,18 +201,15 @@ class TestBugFix2_VoiceStyleBoundsChecking:
 @pytest.mark.parametrize("phoneme_length", [1, 2, 8, MAX_PHONEME_LENGTH])
 def test_voice_style_index_uses_phoneme_length_not_token_count(phoneme_length):
     session = Mock()
-    session.get_inputs.return_value = [
-        Mock(name="tokens", type="tensor(int64)"),
-        Mock(name="style", type="tensor(float)"),
-        Mock(name="speed", type="tensor(float)"),
-    ]
+    session.sample_rate = 24_000
+    session.supports_timings = False
     captured_inputs = {}
 
-    def _run(_, inputs):
-        captured_inputs.update(inputs)
-        return [np.zeros((1, 4), dtype=np.float32)]
+    def _infer(token_ids, *, style, speed, seed=None):
+        captured_inputs["style"] = style
+        return SimpleNamespace(audio=np.zeros(4, dtype=np.float32), timings=None)
 
-    session.run.side_effect = _run
+    session.infer.side_effect = _infer
     tokenizer = Mock()
     tokenizer.tokenize.side_effect = lambda text: list(range(len(text) + 3))
     generator = AudioGenerator(session=session, tokenizer=tokenizer, model_source="github")
@@ -224,8 +233,16 @@ def test_voice_style_index_uses_phoneme_length_not_token_count(phoneme_length):
 
 def test_voice_style_index_clamps_custom_voicepack_after_phoneme_length():
     session = Mock()
-    session.get_inputs.return_value = [Mock(name="tokens"), Mock(name="style"), Mock(name="speed")]
-    session.run.return_value = [np.zeros((1, 1), dtype=np.float32)]
+    session.sample_rate = 24_000
+    session.supports_timings = False
+    captured_inputs = {}
+
+    def _infer(token_ids, *, style, speed, seed=None):
+        _ = token_ids, speed, seed
+        captured_inputs["style"] = style
+        return SimpleNamespace(audio=np.zeros(1, dtype=np.float32), timings=None)
+
+    session.infer.side_effect = _infer
     tokenizer = Mock()
     tokenizer.tokenize.return_value = list(range(20))
     generator = AudioGenerator(session=session, tokenizer=tokenizer, model_source="github")
@@ -233,7 +250,7 @@ def test_voice_style_index_clamps_custom_voicepack_after_phoneme_length():
 
     generator.generate_from_phonemes("abcdefgh", voice_style, 1.0)
 
-    style_input = session.run.call_args.args[1]["style"]
+    style_input = captured_inputs["style"]
     np.testing.assert_array_equal(style_input, voice_style[2])
 
 

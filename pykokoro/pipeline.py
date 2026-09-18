@@ -13,16 +13,18 @@ from types import MappingProxyType, TracebackType
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
+from audiocompose import AudioJob
 from typing_extensions import Self
 from utterplan import UtterancePlan, UtterancePlanner
 
+from .audio_job import rendered_segments_to_audio_job, waveform_to_audio_job
+from .composition import compose_audio_job
 from .constants import SAMPLE_RATE
 from .emphasis import apply_emphasis_policy
 from .exceptions import ConfigurationError, PlanConsumptionError
 from .generation_config import GenerationConfig
 from .language_detection import LanguageDetectionConfig
 from .loudness_config import LoudnessConfig
-from .output_loudness import apply_complete_output_loudness
 from .pipeline_config import PipelineConfig, require_document_language, resolve_model_defaults
 from .planning import adapt_plan, assert_renderer_overrides, planner_config_from_pipeline
 from .runtime.language_plan import build_language_plan
@@ -114,6 +116,19 @@ class _PreparedDocument:
     phoneme_processor: PhonemeProcessor
     audio_generator: AudioGeneratorStage
     audio_postprocessor: AudioPostprocessor
+
+
+@dataclass(slots=True)
+class _PreparedAudioJobContext:
+    job: AudioJob
+    cfg: PipelineConfig
+    segments: list[Segment]
+    phoneme_segments: list[PhonemeSegment]
+    trace: Trace
+    document_metadata: dict[str, Any]
+    clean_text: str
+    source_text: str | None
+    marker_positions: dict[str, int]
 
 
 @dataclass(slots=True)
@@ -1834,7 +1849,16 @@ class KokoroPipeline:
             )
             audio = np.concatenate(final_audio) if final_audio else np.array([], dtype=np.float32)
             metadata = dict(prepared_units.document_metadata)
-            audio = apply_complete_output_loudness(audio, SAMPLE_RATE, cfg.loudness, prepared.trace)
+            compatibility_job = waveform_to_audio_job(
+                audio,
+                sample_rate=SAMPLE_RATE,
+                markers=markers,
+                word_timings=word_timings,
+                loudness=cfg.loudness,
+                producer={"name": "pykokoro"},
+                source={"clean_text": prepared_units.clean_text},
+            )
+            audio = compose_audio_job(compatibility_job).audio
             return AudioResult(
                 audio=audio,
                 sample_rate=SAMPLE_RATE,
@@ -1850,66 +1874,141 @@ class KokoroPipeline:
         finally:
             prepared_units.close()
 
-    def run(self, text: str, **overrides: Any) -> AudioResult:
-        with self.prepare_units(text, unit="paragraph", **overrides) as prepared:
-            cfg = prepared._prepared.cfg if prepared._prepared is not None else self.config
-            final_audio: list[Any] = []
-            markers: list[dict[str, Any]] = []
-            word_timings: list[Any] = []
-            retained_phonemes: list[PhonemeSegment] = []
-            base_offset = 0
-            for unit_result in prepared.render():
-                final_audio.append(unit_result.audio)
-                markers.extend(
-                    {
-                        "name": marker["name"],
-                        "char_offset": marker["char_offset"],
-                        "sample_offset": marker["sample_offset"] + base_offset,
-                    }
-                    for marker in unit_result.markers
+    def _prepare_audio_job(self, text: str, **overrides: Any) -> _PreparedAudioJobContext:
+        cfg = _copy_config_for_preparation(self._resolve_run_config(overrides))
+        requested_retain_segment_audio = cfg.retain_segment_audio
+        cfg = replace(cfg, retain_segment_audio=True)
+        prepared = self._prepare_document(text, cfg, "paragraph")
+        marker_positions: dict[str, int] = {}
+        boundaries: list[BoundaryEvent] = []
+        for group in prepared.groups:
+            boundaries.extend(group.marker_events)
+        for index, boundary in enumerate(boundaries):
+            if boundary.kind == "marker" and boundary.attrs.get("marker"):
+                marker_positions[f"marker:{index}"] = boundary.pos
+        try:
+            rendered_audio: list[np.ndarray] = []
+            for index in range(len(prepared.groups)):
+                rendered = self._render_prepared_unit(prepared, index)
+                rendered_audio.append(np.asarray(rendered.audio, dtype=np.float32))
+            document_metadata = {
+                "title": prepared.doc.header.get("title"),
+                "voice_bindings": prepared.doc.header.get("voice_bindings", {}),
+                "pause_defaults": prepared.doc.header.get("pause_defaults", {}),
+                **prepared.doc.metadata,
+            }
+            segments = list(prepared.segments)
+            phoneme_segments = [
+                _copy_phoneme_segment(segment) for segment in prepared.phoneme_segments
+            ]
+            source_metadata = {
+                "clean_text": prepared.doc.clean_text,
+                "source_text": prepared.doc.structural_clean_text,
+                "metadata": _copy_metadata_value(document_metadata),
+            }
+            has_segment_audio = any(
+                segment.processed_audio is not None or segment.raw_audio is not None
+                for segment in prepared.phoneme_segments
+            )
+            if has_segment_audio:
+                job = rendered_segments_to_audio_job(
+                    prepared.phoneme_segments,
+                    boundaries=boundaries,
+                    sample_rate=SAMPLE_RATE,
+                    loudness=cfg.loudness,
+                    producer={"name": "pykokoro"},
+                    source=source_metadata,
                 )
-                word_timings.extend(
-                    replace(
-                        timing,
-                        start_sample=timing.start_sample + base_offset,
-                        end_sample=timing.end_sample + base_offset,
-                    )
-                    for timing in unit_result.word_timings
+            else:
+                job = waveform_to_audio_job(
+                    np.concatenate(rendered_audio)
+                    if rendered_audio
+                    else np.zeros(0, dtype=np.float32),
+                    sample_rate=SAMPLE_RATE,
+                    loudness=cfg.loudness,
+                    producer={"name": "pykokoro"},
+                    source=source_metadata,
                 )
-                if cfg.retain_segment_audio:
-                    retained_phonemes.extend(
-                        _copy_phoneme_segment(segment) for segment in unit_result.phoneme_segments
-                    )
-                base_offset += len(unit_result.audio)
+            return _PreparedAudioJobContext(
+                job=job,
+                cfg=replace(cfg, retain_segment_audio=requested_retain_segment_audio),
+                segments=segments,
+                phoneme_segments=phoneme_segments,
+                trace=prepared.trace,
+                document_metadata=_copy_metadata_value(document_metadata),
+                clean_text=prepared.doc.clean_text,
+                source_text=prepared.doc.structural_clean_text,
+                marker_positions=marker_positions,
+            )
+        finally:
+            for segment in prepared.phoneme_segments:
+                segment.raw_audio = None
+                segment.processed_audio = None
+            prepared.segments.clear()
 
-            source_segments = list(prepared._prepared.segments) if prepared._prepared else []
-            source_phonemes = (
-                retained_phonemes
-                if cfg.retain_segment_audio
-                else list(prepared._prepared.phoneme_segments)
-                if prepared._prepared
-                else []
+    def to_audio_job(self, text: str, **overrides: Any) -> AudioJob:
+        """Prepare and render text as an explicit AudioCompose job."""
+        return self._prepare_audio_job(text, **overrides).job
+
+    def run(self, text: str, **overrides: Any) -> AudioResult:
+        """Render text by preparing one job and composing it once with AudioCompose."""
+        context = self._prepare_audio_job(text, **overrides)
+        composed = compose_audio_job(context.job)
+        trace = context.trace
+        trace.events.append(
+            TraceEvent(
+                stage="composition",
+                name="audiocompose",
+                ms=0.0,
+                details={
+                    "sample_rate": composed.sample_rate,
+                    "item_count": len(composed.items),
+                    "marker_count": len(composed.markers),
+                    "span_count": len(composed.spans),
+                    "diagnostics": [diagnostic.code for diagnostic in composed.diagnostics],
+                    **dict(composed.provenance),
+                },
             )
-            audio = np.concatenate(final_audio) if final_audio else np.array([], dtype=np.float32)
-            audio = apply_complete_output_loudness(
-                audio,
-                SAMPLE_RATE,
-                cfg.loudness,
-                prepared._prepared.trace if prepared._prepared is not None else None,
-            )
-            trace = prepared._prepared.trace if prepared._prepared is not None else None
-            metadata = dict(prepared.document_metadata)
+        )
+        marker_positions = context.marker_positions
+        markers = [
+            {
+                "name": marker.name,
+                "char_offset": marker_positions.get(marker.id),
+                "sample_offset": marker.sample_offset,
+            }
+            for marker in composed.markers
+        ]
+        spans = {span.id: span for span in composed.spans if span.id is not None}
+        word_timings: list[Any] = []
+        for segment in context.phoneme_segments:
+            for index, timing in enumerate(segment.word_timings):
+                span = spans.get(f"word:{segment.id}:{index}")
+                if span is None:
+                    word_timings.append(timing)
+                else:
+                    word_timings.append(
+                        replace(
+                            timing,
+                            start_sample=span.sample_start,
+                            end_sample=span.sample_end,
+                        )
+                    )
+        if not context.cfg.retain_segment_audio:
+            for segment in context.phoneme_segments:
+                segment.raw_audio = None
+                segment.processed_audio = None
         return AudioResult(
-            audio=audio,
-            sample_rate=SAMPLE_RATE,
-            segments=source_segments,
-            phoneme_segments=source_phonemes,
-            trace=trace if cfg.return_trace else None,
-            document_metadata=metadata,
+            audio=np.asarray(composed.audio, dtype=np.float32),
+            sample_rate=composed.sample_rate,
+            segments=context.segments,
+            phoneme_segments=context.phoneme_segments,
+            trace=trace if context.cfg.return_trace else None,
+            document_metadata=context.document_metadata,
             markers=markers,
             word_timings=word_timings,
-            clean_text=prepared.clean_text,
-            source_text=prepared.source_text,
+            clean_text=context.clean_text,
+            source_text=context.source_text,
         )
 
     def play_streaming(
