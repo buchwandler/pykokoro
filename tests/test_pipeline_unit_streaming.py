@@ -4,6 +4,7 @@ from dataclasses import replace
 
 import numpy as np
 import pytest
+from audiocompose import Composer
 from audiosig import measure_loudness
 
 from pykokoro import (
@@ -21,7 +22,7 @@ from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
 from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
 from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
 from pykokoro.stages.protocols import DocumentResult
-from pykokoro.types import BoundaryEvent, PhonemeSegment, Segment
+from pykokoro.types import BoundaryEvent, PhonemeSegment, Segment, WordTiming
 
 
 class CountingG2P:
@@ -47,6 +48,56 @@ class CountingG2P:
             )
             for segment in segments
         ]
+
+class TwoSegmentG2P:
+    def phonemize(self, segments, doc, cfg, trace):
+        _ = doc, trace
+        source = segments[0]
+        return [
+            PhonemeSegment(
+                id=f"{source.id}-a",
+                segment_id=source.id,
+                phoneme_id=0,
+                text="first",
+                phonemes="a",
+                tokens=[],
+                lang=cfg.generation.lang,
+                char_start=source.char_start,
+                char_end=source.char_start + 5,
+                pause_after=10 / 24000,
+            ),
+            PhonemeSegment(
+                id=f"{source.id}-b",
+                segment_id=source.id,
+                phoneme_id=1,
+                text="second",
+                phonemes="a",
+                tokens=[],
+                lang=cfg.generation.lang,
+                char_start=source.char_start + 6,
+                char_end=source.char_end,
+            ),
+        ]
+
+
+class TimedGenerator:
+    def generate(self, phoneme_segments, cfg, trace):
+        _ = cfg, trace
+        for index, segment in enumerate(phoneme_segments):
+            length = 100 + index * 20
+            segment.raw_audio = np.ones(length, dtype=np.float32)
+            segment.word_timings = [
+                WordTiming(
+                    segment.text,
+                    segment.char_start,
+                    segment.char_end,
+                    10,
+                    length - 20,
+                    segment.id,
+                )
+            ]
+        return phoneme_segments
+
 
 
 class CountingProcessor:
@@ -165,6 +216,34 @@ def test_streamed_audio_matches_run_for_noop_stages() -> None:
             pieces.append(result.audio.copy())
             result.release_audio()
     np.testing.assert_array_equal(legacy.audio, np.concatenate(pieces))
+
+def test_pipeline_timing_contract_without_network() -> None:
+    pipeline = KokoroPipeline(
+        PipelineConfig(generation=GenerationConfig(lang="en-us")),
+        doc_parser=PlainTextDocumentParser(),
+        g2p=TwoSegmentG2P(),
+        phoneme_processing=CountingProcessor(),
+        audio_generation=TimedGenerator(),
+        audio_postprocessing=NoopAudioPostprocessingAdapter(),
+    )
+
+    job = pipeline.to_audio_job("First second")
+    _ = Composer().compose(job)
+    for item in job.items:
+        if not hasattr(item, "source") or not item.spans:
+            continue
+        waveform = item.source.load()[0]
+        for span in item.spans:
+            assert 0 <= span.sample_start <= span.sample_end <= len(waveform)
+
+    result = pipeline.run("First second")
+    for segment in result.phoneme_segments:
+        assert segment.processed_audio is not None
+        for timing in segment.word_timings:
+            assert 0 <= timing.start_sample <= timing.end_sample <= len(segment.processed_audio)
+
+    starts = [timing.start_sample for timing in result.word_timings]
+    assert starts == sorted(starts)
 
 
 def test_skip_indices_do_not_generate_and_order_is_descriptor_order() -> None:

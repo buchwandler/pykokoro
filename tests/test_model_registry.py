@@ -381,9 +381,22 @@ def test_console_asset_progress_reports_lifecycle() -> None:
     )
     reporter(
         AssetProgressEvent(
-            phase="download-complete",
+            phase="verify-complete",
             bytes_done=base["bytes_total"],
             **base,
+        )
+    )
+    reporter(
+        AssetProgressEvent(
+            phase="install-complete",
+            bytes_done=base["bytes_total"],
+            artifact_id="",
+            filename="",
+            role="artifact",
+            distribution_id=base["distribution_id"],
+            model_id=base["model_id"],
+            bytes_total=None,
+            target="/cache/onnxvoice/kokoro/v1.0",
         )
     )
 
@@ -391,4 +404,77 @@ def test_console_asset_progress_reports_lifecycle() -> None:
     assert "Downloading model:" in text
     assert "13.0 MiB" in text
     assert "Verifying model:" in text
-    assert "Ready: model.onnx" in text
+    assert "Runtime assets ready:" in text
+    assert "/cache/onnxvoice/kokoro/v1.0" in text
+
+def test_console_asset_progress_reports_cache_unknown_size_and_install_state() -> None:
+    cached_stream = StringIO()
+    cached = ConsoleAssetProgress(cached_stream)
+    cached(
+        AssetProgressEvent(
+            phase="cache-hit",
+            model_id="v1.0",
+            distribution_id="github-v1",
+            artifact_id="voices",
+            role="voices",
+            filename="voices.npz",
+            bytes_done=0,
+            bytes_total=123,
+            target="/cache/voices.npz",
+        )
+    )
+    assert cached_stream.getvalue() == "Using cached voices: voices.npz\n"
+
+    unknown_stream = StringIO()
+    unknown = ConsoleAssetProgress(unknown_stream)
+    unknown(
+        AssetProgressEvent(
+            phase="download-start",
+            model_id="v1.0",
+            distribution_id="github-v1",
+            artifact_id="model",
+            role="model",
+            filename="model.onnx",
+            bytes_done=0,
+            bytes_total=None,
+            target="/cache/model.onnx",
+        )
+    )
+    unknown(
+        AssetProgressEvent(
+            phase="download-progress",
+            model_id="v1.0",
+            distribution_id="github-v1",
+            artifact_id="model",
+            role="model",
+            filename="model.onnx",
+            bytes_done=2 * 1024 * 1024,
+            bytes_total=None,
+            target="/cache/model.onnx",
+        )
+    )
+    unknown_text = unknown_stream.getvalue()
+    assert "model.onnx" in unknown_text
+    assert "size unknown" in unknown_text
+    assert "0 B" not in unknown_text
+
+    installed_stream = StringIO()
+    installed = ConsoleAssetProgress(installed_stream)
+    installed(
+        AssetProgressEvent(
+            phase="install-complete",
+            model_id="v1.0",
+            distribution_id="github-v1",
+            artifact_id="",
+            role="artifact",
+            filename="",
+            bytes_done=0,
+            bytes_total=None,
+            target="/cache/onnxvoice/kokoro/v1.0",
+            message="already installed",
+        )
+    )
+    installed_text = installed_stream.getvalue()
+    assert "Runtime assets already installed:" in installed_text
+    assert "/cache/onnxvoice/kokoro/v1.0" in installed_text
+    assert "Downloading" not in installed_text

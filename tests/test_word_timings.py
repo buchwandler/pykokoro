@@ -7,6 +7,7 @@ import numpy as np
 
 from pykokoro.audio_generator import (
     AudioGenerator,
+    _collect_unit_word_timings,
     _crop_word_timings,
     _join_timestamps,
     _record_short_sentence_timing_alignment,
@@ -53,6 +54,37 @@ def test_word_timing_seconds_and_sample_transform_helpers() -> None:
     assert _crop_word_timings([timing], 5, 25)[0].start_sample == 5
     assert _scale_word_timings([timing], 20, 40)[0].end_sample == 40
     assert _translate_word_timings([timing], 7)[0].start_sample == 17
+
+def test_collect_unit_word_timings_translates_copies_and_preserves_segments() -> None:
+    first = PhonemeSegment(
+        id="a",
+        segment_id="a",
+        phoneme_id=0,
+        text="A",
+        phonemes="a",
+        tokens=[1],
+        processed_audio=np.zeros(100, dtype=np.float32),
+        pause_after=1.0,
+        word_timings=[WordTiming("A", 0, 1, 10, 80, "a")],
+    )
+    second = PhonemeSegment(
+        id="b",
+        segment_id="b",
+        phoneme_id=0,
+        text="B",
+        phonemes="b",
+        tokens=[1],
+        processed_audio=np.zeros(120, dtype=np.float32),
+        word_timings=[WordTiming("B", 2, 3, 20, 100, "b")],
+    )
+    before_first = list(first.word_timings)
+    before_second = list(second.word_timings)
+
+    timings = _collect_unit_word_timings([first, second], sample_rate=10)
+
+    assert [(timing.start_sample, timing.end_sample) for timing in timings] == [(10, 80), (130, 210)]
+    assert first.word_timings == before_first
+    assert second.word_timings == before_second
 
 
 def test_timestamp_output_is_selected_by_name() -> None:

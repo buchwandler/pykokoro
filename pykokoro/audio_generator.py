@@ -9,7 +9,7 @@ import random
 import re
 import time
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
@@ -29,7 +29,7 @@ from .short_sentence_handler import (
 )
 from .tokenizer import Tokenizer
 from .types import G2PAlignmentToken, PhonemeSegment, WordTiming, _exact_timing_geometry
-from .utils import generate_silence
+from .utils import generate_silence, seconds_to_samples
 from .voice_level import apply_voice_level_calibration
 from .voice_manager import normalize_voice_style
 
@@ -1565,20 +1565,16 @@ class AudioGenerator:
         trace: Trace | None = None,
     ) -> np.ndarray:
         audio_parts: list[np.ndarray] = []
-        cursor_samples = 0
         previous_index: int | None = None
         previous_segment: PhonemeSegment | None = None
 
         for segment in segments:
             if segment.pause_before > 0:
-                pause = generate_silence(segment.pause_before, SAMPLE_RATE)
-                audio_parts.append(pause)
-                cursor_samples += len(pause)
+                audio_parts.append(generate_silence(segment.pause_before, SAMPLE_RATE))
                 previous_index = None
                 previous_segment = None
 
             if segment.processed_audio is not None:
-                segment.word_timings = _translate_word_timings(segment.word_timings, cursor_samples)
                 current = np.asarray(segment.processed_audio)
                 if (
                     previous_index is not None
@@ -1607,15 +1603,12 @@ class AudioGenerator:
                 audio_parts.append(current)
                 previous_index = len(audio_parts) - 1
                 previous_segment = segment
-                cursor_samples += len(current)
             else:
                 previous_index = None
                 previous_segment = None
 
             if segment.pause_after > 0:
-                pause = generate_silence(segment.pause_after, SAMPLE_RATE)
-                audio_parts.append(pause)
-                cursor_samples += len(pause)
+                audio_parts.append(generate_silence(segment.pause_after, SAMPLE_RATE))
                 previous_index = None
                 previous_segment = None
 
@@ -1829,6 +1822,33 @@ def _translate_word_timings(timings: list[WordTiming], sample_offset: int) -> li
         )
         for timing in timings
     ]
+
+def _collect_unit_word_timings(
+    segments: Sequence[PhonemeSegment],
+    *,
+    sample_rate: int = SAMPLE_RATE,
+) -> list[WordTiming]:
+    """Translate segment-local timings into unit-local copies without mutation."""
+    result: list[WordTiming] = []
+    cursor = 0
+    for segment in segments:
+        cursor += seconds_to_samples(segment.pause_before, sample_rate)
+        if segment.processed_audio is not None:
+            waveform_length = len(np.asarray(segment.processed_audio).reshape(-1))
+            for index, timing in enumerate(segment.word_timings):
+                if not (
+                    0 <= timing.start_sample <= timing.end_sample <= waveform_length
+                ):
+                    raise ValueError(
+                        "word timing is not segment-local: "
+                        f"segment={segment.id!r} word_index={index} "
+                        f"range={timing.start_sample}:{timing.end_sample} "
+                        f"waveform_length={waveform_length}"
+                    )
+            result.extend(_translate_word_timings(segment.word_timings, cursor))
+            cursor += waveform_length
+        cursor += seconds_to_samples(segment.pause_after, sample_rate)
+    return result
 
 
 def _join_timestamps(

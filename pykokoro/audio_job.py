@@ -19,6 +19,7 @@ from audiocompose import (
 
 from .loudness_config import LoudnessConfig
 from .types import BoundaryEvent, PhonemeSegment
+from .utils import seconds_to_samples
 
 
 def _json_safe(value: Any) -> Any:
@@ -32,7 +33,20 @@ def _json_safe(value: Any) -> Any:
 
 
 def _quantized_seconds(seconds: float, sample_rate: int) -> float:
-    return round(seconds * sample_rate) / sample_rate
+    return seconds_to_samples(seconds, sample_rate) / sample_rate
+def _validate_segment_word_timings(
+    segment: PhonemeSegment,
+    waveform_length: int,
+) -> None:
+    for index, timing in enumerate(segment.word_timings):
+        if not (0 <= timing.start_sample <= timing.end_sample <= waveform_length):
+            raise ValueError(
+                "word timing is not segment-local: "
+                f"segment={segment.id!r} word_index={index} text={timing.text!r} "
+                f"range={timing.start_sample}:{timing.end_sample} "
+                f"waveform_length={waveform_length}"
+            )
+
 
 
 def _loudness_policy(config: LoudnessConfig | None) -> LoudnessPolicy:
@@ -76,6 +90,7 @@ def rendered_segments_to_audio_job(
             continue
         waveform = np.asarray(audio, dtype=np.float32).reshape(-1)
         anchors: list[AudioAnchor] = []
+        _validate_segment_word_timings(segment, len(waveform))
         for index, boundary in enumerate(marker_events):
             if index in used_markers:
                 continue
@@ -93,8 +108,8 @@ def rendered_segments_to_audio_job(
             AudioSpan(
                 source_start=timing.char_start,
                 source_end=timing.char_end,
-                sample_start=max(0, timing.start_sample),
-                sample_end=max(0, timing.end_sample),
+                sample_start=timing.start_sample,
+                sample_end=timing.end_sample,
                 id=f"word:{segment.id}:{index}",
                 metadata={"text": timing.text, "segment_id": timing.segment_id},
             )

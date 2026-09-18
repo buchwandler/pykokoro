@@ -228,6 +228,10 @@ def format_chapters_range(indices: list[int], total_chapters: int) -> str:
     return f"chapters_{min_chapter}-{max_chapter}"
 
 
+def seconds_to_samples(seconds: float, sample_rate: int) -> int:
+    """Convert seconds to samples using the pipeline's canonical rounding."""
+    return round(seconds * sample_rate)
+
 def generate_silence(duration: float, sample_rate: int = 24000) -> Any:
     """Generate silence array of specified duration.
 
@@ -240,7 +244,7 @@ def generate_silence(duration: float, sample_rate: int = 24000) -> Any:
     """
     import numpy as np
 
-    return np.zeros(int(duration * sample_rate), dtype=np.float32)
+    return np.zeros(seconds_to_samples(duration, sample_rate), dtype=np.float32)
 
 
 def format_filename_template(

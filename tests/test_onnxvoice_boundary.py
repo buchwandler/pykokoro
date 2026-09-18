@@ -146,7 +146,7 @@ def test_progress_and_diagnostics_are_trace_safe() -> None:
             phase="download_progress",
             ref="kokoro:v1.0",
             distribution="cpu",
-            artifact="model",
+            artifact="model.onnx",
             role="model",
             filename="model.onnx",
             completed=3,
@@ -159,8 +159,8 @@ def test_progress_and_diagnostics_are_trace_safe() -> None:
         AssetProgressEvent(
             phase="download-progress",
             model_id="v1.0",
-            distribution_id="cpu",
-            artifact_id="model",
+            distribution_id="",
+            artifact_id="model.onnx",
             role="model",
             filename="model.onnx",
             bytes_done=3,
@@ -169,6 +169,38 @@ def test_progress_and_diagnostics_are_trace_safe() -> None:
         )
     ]
 
+
+def test_progress_maps_install_lifecycle_and_ignores_unknown_phases() -> None:
+    events: list[AssetProgressEvent] = []
+    callback = boundary.adapt_progress(events.append)
+    assert callback is not None
+
+    callback(SimpleNamespace(phase="install_started", ref="kokoro:v1.0"))
+    assert events == []
+
+    callback(
+        SimpleNamespace(
+            phase="install_completed",
+            ref="kokoro:v1.0",
+            target="/cache/onnxvoice/kokoro/v1.0",
+        )
+    )
+    assert events == [
+        AssetProgressEvent(
+            phase="install-complete",
+            model_id="v1.0",
+            distribution_id="",
+            artifact_id="",
+            role="artifact",
+            filename="",
+            bytes_done=0,
+            bytes_total=None,
+            target="/cache/onnxvoice/kokoro/v1.0",
+        )
+    ]
+
+    callback(SimpleNamespace(phase="future_phase", ref="kokoro:v1.0"))
+    assert len(events) == 1
     diagnostic = SimpleNamespace(
         system="kokoro",
         ref="kokoro:v1.0",

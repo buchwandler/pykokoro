@@ -17,6 +17,7 @@ from audiocompose import AudioJob
 from typing_extensions import Self
 from utterplan import UtterancePlan, UtterancePlanner
 
+from .audio_generator import _collect_unit_word_timings
 from .audio_job import rendered_segments_to_audio_job, waveform_to_audio_job
 from .composition import compose_audio_job
 from .constants import SAMPLE_RATE
@@ -1795,7 +1796,7 @@ class KokoroPipeline:
                         **prepared.doc.metadata,
                     }
                 ),
-                word_timings=[timing for segment in generated for timing in segment.word_timings],
+                word_timings=_collect_unit_word_timings(generated),
             )
             if not prepared.cfg.retain_segment_audio:
                 result.release_segment_audio()

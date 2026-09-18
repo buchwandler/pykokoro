@@ -10,7 +10,12 @@ AssetProgressPhase = Literal[
     "download-start",
     "download-progress",
     "verify-start",
+    "verify-complete",
     "download-complete",
+    "cache-hit",
+    "artifact-installed",
+    "install-complete",
+    "install-failed",
 ]
 
 
@@ -25,8 +30,9 @@ class AssetProgressEvent:
     role: str
     filename: str
     bytes_done: int
-    bytes_total: int
+    bytes_total: int | None
     target: str
+    message: str | None = None
 
 
 class AssetProgressCallback(Protocol):
@@ -54,11 +60,12 @@ _ROLE_NAMES = {
     "config": "config",
     "vocabulary": "vocabulary",
     "bundle": "bundle",
+    "artifact": "artifact",
 }
 
 
 class ConsoleAssetProgress:
-    """Render runtime asset download progress to a text stream."""
+    """Render runtime asset progress to a text stream."""
 
     def __init__(
         self,
@@ -71,10 +78,12 @@ class ConsoleAssetProgress:
         self.stream = stream if stream is not None else sys.stderr
         self.min_percent_step = min_percent_step
         self._last_percent: dict[str, int] = {}
+        self._last_bytes: dict[str, int] = {}
         self._download_started = False
         self._active_tty_artifact: str | None = None
 
     def __call__(self, event: AssetProgressEvent) -> None:
+        artifact_id = event.artifact_id or event.filename or event.target
         if event.phase == "download-start":
             if not self._download_started:
                 print(
@@ -82,48 +91,92 @@ class ConsoleAssetProgress:
                     file=self.stream,
                 )
                 self._download_started = True
-            self._last_percent[event.artifact_id] = -self.min_percent_step
-            self._active_tty_artifact = event.artifact_id if self._is_tty() else None
+            self._last_percent[artifact_id] = -self.min_percent_step
+            self._last_bytes[artifact_id] = 0
+            self._active_tty_artifact = artifact_id if self._is_tty() else None
+            size = (
+                format_bytes(event.bytes_total)
+                if event.bytes_total is not None
+                else "size unknown"
+            )
             print(
-                f"Downloading {self._role(event.role)}: {event.filename} "
-                f"({format_bytes(event.bytes_total)})",
+                f"Downloading {self._role(event.role)}: {self._artifact_name(event)} ({size})",
                 file=self.stream,
                 flush=True,
             )
             return
 
         if event.phase == "download-progress":
-            percent = _percent(event.bytes_done, event.bytes_total)
-            previous = self._last_percent.get(event.artifact_id, -self.min_percent_step)
-            if percent < 100 and percent - previous < self.min_percent_step:
-                return
-            self._last_percent[event.artifact_id] = percent
-            if self._is_tty():
-                print(
-                    f"\r  {percent:3d}% {format_bytes(event.bytes_done)} / "
-                    f"{format_bytes(event.bytes_total)}",
-                    end="",
-                    file=self.stream,
-                    flush=True,
+            if event.bytes_total is None:
+                if event.bytes_done and event.bytes_done - self._last_bytes.get(artifact_id, 0) < 1024 * 1024:
+                    return
+                self._last_bytes[artifact_id] = event.bytes_done
+                message = f"  {format_bytes(event.bytes_done)} / (size unknown)"
+            else:
+                percent = _percent(event.bytes_done, event.bytes_total)
+                previous = self._last_percent.get(artifact_id, -self.min_percent_step)
+                if percent < 100 and percent - previous < self.min_percent_step:
+                    return
+                self._last_percent[artifact_id] = percent
+                message = (
+                    f"  {percent:3d}% {format_bytes(event.bytes_done)} / "
+                    f"{format_bytes(event.bytes_total)}"
                 )
+            if self._is_tty():
+                print(f"\r{message}", end="", file=self.stream, flush=True)
+            else:
+                print(message, file=self.stream, flush=True)
             return
 
         if event.phase == "verify-start":
-            if self._is_tty() and self._active_tty_artifact == event.artifact_id:
-                print(file=self.stream)
-                self._active_tty_artifact = None
+            self._finish_tty_line(artifact_id)
             print(
-                f"Verifying {self._role(event.role)}: {event.filename}",
+                f"Verifying {self._role(event.role)}: {self._artifact_name(event)}",
                 file=self.stream,
                 flush=True,
             )
             return
 
-        if event.phase == "download-complete":
-            if self._is_tty() and self._active_tty_artifact == event.artifact_id:
-                print(file=self.stream)
-                self._active_tty_artifact = None
-            print(f"Ready: {event.filename}", file=self.stream, flush=True)
+        if event.phase == "verify-complete":
+            print(
+                f"Verified {self._role(event.role)}: {self._artifact_name(event)}",
+                file=self.stream,
+                flush=True,
+            )
+            return
+
+        if event.phase == "cache-hit":
+            print(
+                f"Using cached {self._role(event.role)}: {self._artifact_name(event)}",
+                file=self.stream,
+                flush=True,
+            )
+            return
+
+        if event.phase == "install-complete":
+            self._finish_tty_line(artifact_id)
+            heading = (
+                "Runtime assets already installed:"
+                if event.message == "already installed"
+                else "Runtime assets ready:"
+            )
+            print(heading, file=self.stream, flush=True)
+            if event.target:
+                print(f"  {event.target}", file=self.stream, flush=True)
+            return
+
+        if event.phase == "install-failed":
+            self._finish_tty_line(artifact_id)
+            print(
+                f"Runtime asset installation failed: {event.target or self._artifact_name(event)}",
+                file=self.stream,
+                flush=True,
+            )
+
+    def _finish_tty_line(self, artifact_id: str) -> None:
+        if self._is_tty() and self._active_tty_artifact == artifact_id:
+            print(file=self.stream)
+            self._active_tty_artifact = None
 
     def _is_tty(self) -> bool:
         isatty = getattr(self.stream, "isatty", None)
@@ -131,10 +184,14 @@ class ConsoleAssetProgress:
 
     @staticmethod
     def _role(role: str) -> str:
-        return _ROLE_NAMES.get(role, role)
+        return _ROLE_NAMES.get(role, role or "artifact")
+
+    @staticmethod
+    def _artifact_name(event: AssetProgressEvent) -> str:
+        return event.filename or event.artifact_id or "artifact"
 
 
-def _percent(done: int, total: int) -> int:
-    if total <= 0:
+def _percent(done: int, total: int | None) -> int:
+    if total is None or total <= 0:
         return 0
     return min(100, max(0, done * 100 // total))

@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from .asset_progress import AssetProgressEvent, AssetProgressPhase
 from .exceptions import BackendError, ConfigurationError, KokoroError
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,34 +112,40 @@ def adapt_progress(
         return None
 
     def emit(event: Any) -> None:
-        phase_map = {
-            "catalog_started": "download-start",
-            "catalog_cached": "download-complete",
-            "catalog_completed": "download-complete",
-            "install_started": "download-start",
-            "install_completed": "download-complete",
+        phase_map: dict[str, AssetProgressPhase] = {
             "download_started": "download-start",
             "download_progress": "download-progress",
-            "download_completed": "download-complete",
-            "artifact_cached": "download-complete",
             "verify_started": "verify-start",
+            "verify_completed": "verify-complete",
+            "download_completed": "download-complete",
+            "artifact_cached": "cache-hit",
+            "artifact_installed": "artifact-installed",
+            "install_completed": "install-complete",
+            "install_failed": "install-failed",
         }
-        phase = cast(
-            AssetProgressPhase, phase_map.get(str(getattr(event, "phase", "")), "verify-start")
-        )
+        raw_phase = str(getattr(event, "phase", ""))
+        phase = phase_map.get(raw_phase)
+        if phase is None:
+            logger.debug("Ignoring unsupported OnnxVoice progress phase %r", raw_phase)
+            return
         ref = getattr(event, "ref", None)
         model_id = ref.split(":", 1)[1] if isinstance(ref, str) and ":" in ref else str(ref or "")
+        artifact = getattr(event, "artifact", None)
+        role = getattr(event, "role", None)
+        completed = getattr(event, "completed", None)
+        total = getattr(event, "total", None)
         callback(
             AssetProgressEvent(
                 phase=phase,
                 model_id=model_id,
-                distribution_id=str(getattr(event, "distribution", "") or ""),
-                artifact_id=str(getattr(event, "artifact", "") or ""),
-                role=str(getattr(event, "role", "model") or "model"),
-                filename=str(getattr(event, "filename", "") or ""),
-                bytes_done=int(getattr(event, "completed", 0) or 0),
-                bytes_total=int(getattr(event, "total", 0) or 0),
+                distribution_id="",
+                artifact_id=str(artifact or ""),
+                role=str(role or "artifact"),
+                filename=str(artifact or ""),
+                bytes_done=int(completed) if completed is not None else 0,
+                bytes_total=int(total) if total is not None else None,
                 target=str(getattr(event, "target", "") or ""),
+                message=getattr(event, "message", None),
             )
         )
 
