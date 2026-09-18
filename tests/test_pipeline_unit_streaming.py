@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 from audiocompose import Composer
 from audiosig import measure_loudness
+from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
 
 from pykokoro import (
     AudioUnitDescriptor,
@@ -20,7 +21,6 @@ from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline import _unit_text_hash
 from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
 from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
-from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
 from pykokoro.stages.protocols import DocumentResult
 from pykokoro.types import BoundaryEvent, PhonemeSegment, Segment, WordTiming
 
@@ -48,6 +48,7 @@ class CountingG2P:
             )
             for segment in segments
         ]
+
 
 class TwoSegmentG2P:
     def phonemize(self, segments, doc, cfg, trace):
@@ -97,7 +98,6 @@ class TimedGenerator:
                 )
             ]
         return phoneme_segments
-
 
 
 class CountingProcessor:
@@ -216,6 +216,7 @@ def test_streamed_audio_matches_run_for_noop_stages() -> None:
             pieces.append(result.audio.copy())
             result.release_audio()
     np.testing.assert_array_equal(legacy.audio, np.concatenate(pieces))
+
 
 def test_pipeline_timing_contract_without_network() -> None:
     pipeline = KokoroPipeline(

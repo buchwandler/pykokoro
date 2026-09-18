@@ -11,6 +11,9 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
+from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
+from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
+
 from pykokoro import __version__ as pykokoro_version
 from pykokoro.constants import SUPPORTED_LANGUAGES
 from pykokoro.generation_config import GenerationConfig
@@ -19,8 +22,6 @@ from pykokoro.pipeline_config import PipelineConfig, resolve_model_defaults
 from pykokoro.spacy_models import make_spacy_model_request
 from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
 from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
-from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
 from pykokoro.stages.phoneme_processing.noop import NoopPhonemeProcessorAdapter
 from pykokoro.tokenizer import TokenizerConfig, _legacy_fallback_kwargs
 

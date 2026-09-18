@@ -2,12 +2,12 @@ import os
 
 import numpy as np
 import pytest
+from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
+from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
 
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline_config import PipelineConfig as PipelineConfigType
-from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
 from pykokoro.stages.protocols import DocumentResult
 from pykokoro.types import PhonemeSegment, Segment, Trace
 

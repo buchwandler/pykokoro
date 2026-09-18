@@ -64,7 +64,7 @@ def test_resolve_maps_installation_metadata(
 
         def resolve(self, ref: str, **kwargs: object) -> object:
             assert ref == "kokoro:v1.0"
-            assert kwargs == {"quality": "fp32", "distribution": "cpu"}
+            assert kwargs == {"quality": "fp32", "distribution": None}
             return installation
 
     monkeypatch.setattr(boundary, "_onnxvoice", lambda: SimpleNamespace(OnnxVoice=Manager))

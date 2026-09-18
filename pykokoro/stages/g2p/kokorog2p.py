@@ -31,7 +31,6 @@ if TYPE_CHECKING:
     from ...types import Segment, Trace
 
 
-
 _LANGUAGE_ALIASES = {
     "en": "en-us",
     "fr": "fr-fr",
@@ -56,6 +55,7 @@ def canonicalize_g2p_language(language: str) -> str:
     if normalized not in supported and base_language not in supported:
         raise ValueError(f"Unsupported language {language!r}")
     return normalized
+
 
 def _context_token_value(token: Any, name: str, default: object) -> object:
     if isinstance(token, dict):
@@ -98,8 +98,6 @@ class _CachedContextResult:
     tokens: tuple[_CachedContextToken, ...]
 
 
-
-
 @dataclass(frozen=True, slots=True)
 class _G2PTokenAnnotation:
     """Segment-local token annotation for G2P processing.
@@ -116,6 +114,7 @@ class _G2PTokenAnnotation:
     tag: str | None = None
     lemma: str | None = None
     language: str | None = None
+
 
 class KokoroG2PAdapter(G2PAdapter):
     _cache_schema = 11

@@ -26,9 +26,8 @@ from .exceptions import ConfigurationError, PlanConsumptionError
 from .generation_config import GenerationConfig
 from .language_detection import LanguageDetectionConfig
 from .loudness_config import LoudnessConfig
-from .pipeline_config import PipelineConfig, require_document_language, resolve_model_defaults
+from .pipeline_config import PipelineConfig, resolve_model_defaults
 from .planning import adapt_plan, assert_renderer_overrides, planner_config_from_pipeline
-from .runtime.language_plan import build_language_plan
 from .runtime.linguistics import (
     LinguisticRequestState,
     LinguisticResourcePool,
@@ -1840,7 +1839,6 @@ class KokoroPipeline:
         """Prepare and render text as an explicit AudioCompose job."""
         return self._prepare_audio_job(text, **overrides).job
 
-
     def to_audio_job_from_plan(self, plan: UtterancePlan, **overrides: Any) -> AudioJob:
         """Create an AudioJob from an existing UtterancePlan without replanning.
 
@@ -1895,9 +1893,7 @@ class KokoroPipeline:
             )
         else:
             job = waveform_to_audio_job(
-                np.concatenate(rendered_audio)
-                if rendered_audio
-                else np.zeros(0, dtype=np.float32),
+                np.concatenate(rendered_audio) if rendered_audio else np.zeros(0, dtype=np.float32),
                 sample_rate=SAMPLE_RATE,
                 loudness=cfg.loudness,
                 producer={"name": "pykokoro"},
@@ -1922,6 +1918,7 @@ class KokoroPipeline:
             segment.processed_audio = None
         prepared.segments.clear()
         return job
+
     def run(self, text: str, **overrides: Any) -> AudioResult:
         """Render text by preparing one job and composing it once with AudioCompose."""
         context = self._prepare_audio_job(text, **overrides)

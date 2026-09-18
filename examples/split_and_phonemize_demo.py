@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Demonstrate span-based splitting + phonemization with the pipeline stages."""
 
-from pykokoro import PipelineConfig
 from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
+
+from pykokoro import PipelineConfig
 from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
 from pykokoro.types import Trace
 

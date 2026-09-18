@@ -54,6 +54,22 @@ def normalize_kokoro_ref(ref: str) -> str:
     return f"kokoro:{model_id}"
 
 
+# Mapping from PyKokoro's ModelSource to OnnxVoice distribution IDs.
+# OnnxVoice uses specific distribution IDs that may differ from PyKokoro's source names.
+_DISTRIBUTION_MAP: dict[tuple[str, str], str] = {
+    ("github", "v1.0"): "github-model-files-v1.0-timestamped-r4",
+    ("github", "v1.1-zh"): "github-model-files-v1.1",
+}
+
+
+def map_distribution(source: str, variant: str) -> str | None:
+    """Map PyKokoro's ModelSource and variant to an OnnxVoice distribution ID.
+
+    Returns None if no mapping exists (for huggingface or unknown sources).
+    """
+    return _DISTRIBUTION_MAP.get((source, variant))
+
+
 def _provider_name(value: Any) -> tuple[str, dict[str, Any]]:
     if hasattr(value, "name"):
         return str(value.name), dict(getattr(value, "options", {}) or {})
@@ -199,7 +215,7 @@ def _installation_info(installation: Any, *, ref: str | None = None) -> Resolved
         (
             Path(artifact.path)
             for artifact in artifacts
-            if getattr(artifact, "role", None) == "config"
+            if getattr(artifact, "role", None) in {"config", "vocab"}
         ),
         None,
     )
@@ -237,7 +253,7 @@ def install_kokoro_model(
         lambda: manager.install(
             normalized,
             quality=quality,
-            distribution=distribution,
+            distribution=None,
             refresh=refresh,
             force=force,
             progress=adapt_progress(progress),
@@ -258,7 +274,7 @@ def resolve_kokoro_model(
     manager = _onnxvoice().OnnxVoice(cache_dir=cache_dir, offline=offline)
     installation = _call(
         "resolve",
-        lambda: manager.resolve(normalized, quality=quality, distribution=distribution),
+        lambda: manager.resolve(normalized, quality=quality, distribution=None),
     )
     return _installation_info(installation, ref=normalized)
 

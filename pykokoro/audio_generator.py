@@ -1823,6 +1823,7 @@ def _translate_word_timings(timings: list[WordTiming], sample_offset: int) -> li
         for timing in timings
     ]
 
+
 def _collect_unit_word_timings(
     segments: Sequence[PhonemeSegment],
     *,
@@ -1836,9 +1837,7 @@ def _collect_unit_word_timings(
         if segment.processed_audio is not None:
             waveform_length = len(np.asarray(segment.processed_audio).reshape(-1))
             for index, timing in enumerate(segment.word_timings):
-                if not (
-                    0 <= timing.start_sample <= timing.end_sample <= waveform_length
-                ):
+                if not (0 <= timing.start_sample <= timing.end_sample <= waveform_length):
                     raise ValueError(
                         "word timing is not segment-local: "
                         f"segment={segment.id!r} word_index={index} "

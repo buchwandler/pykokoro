@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from pykokoro.generation_config import GenerationConfig
-from pykokoro.pipeline_config import PipelineConfig
 from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
 from pykokoro.stages.segmentation.phrasplit import PhrasplitSentenceSegmenter
 from pykokoro.stages.text_preparation.spokenform import SpokenformTextPreparer
+
+from pykokoro.generation_config import GenerationConfig
+from pykokoro.pipeline_config import PipelineConfig
 from pykokoro.types import Trace
 
 

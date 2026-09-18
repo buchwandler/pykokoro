@@ -407,6 +407,7 @@ def test_console_asset_progress_reports_lifecycle() -> None:
     assert "Runtime assets ready:" in text
     assert "/cache/onnxvoice/kokoro/v1.0" in text
 
+
 def test_console_asset_progress_reports_cache_unknown_size_and_install_state() -> None:
     cached_stream = StringIO()
     cached = ConsoleAssetProgress(cached_stream)

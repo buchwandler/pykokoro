@@ -4,6 +4,7 @@ import sys
 import types
 
 import pytest
+from pykokoro.stages.segmentation.phrasplit import PhrasplitSentenceSegmenter
 
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline_config import PipelineConfig
@@ -12,7 +13,6 @@ from pykokoro.runtime.linguistics import LinguisticRequestState, PreparedRunAnal
 from pykokoro.runtime.spans import slice_boundaries
 from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
 from pykokoro.stages.protocols import DocumentResult
-from pykokoro.stages.segmentation.phrasplit import PhrasplitSentenceSegmenter
 from pykokoro.types import BoundaryEvent, Segment, Trace
 
 FINAL_TEXT = "They changed out their clothes (stained with blood)."

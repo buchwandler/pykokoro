@@ -26,14 +26,12 @@ from ._onnxvoice import (
 )
 from .artifact_manifest import (
     hf_config_spec,
-    hf_model_spec,  # noqa: F401
+    hf_model_spec,
     hf_voice_spec,
 )
 from .asset_constants import (
     HF_CONFIG_FILENAME,
     HF_MODEL_SUBFOLDER,
-    MODEL_QUALITY_CACHE_FILES_HF_V1_0,  # noqa: F401
-    MODEL_QUALITY_FILES,
     MODEL_QUALITY_FILES_HF,
 )
 from .asset_progress import AssetProgressCallback
@@ -66,15 +64,13 @@ from .model_assets import (
 )
 from .model_profiles import VOICE_ALIASES, get_model_profile
 from .model_registry import ModelRegistryError
-from .onnx_session import OnnxSessionManager  # compatibility symbol
 from .release_catalog import (
     MODEL_REPOSITORY,
     ReleaseAsset,
     RemoteModelRelease,
-    resolve_model_release,  # noqa: F401
+    resolve_model_release,
 )
 from .runtime.model_assets import (
-    ResolvedRuntimeAssets,
     resolve_runtime_assets,
 )
 from .tokenizer import EspeakConfig, Tokenizer, TokenizerConfig
@@ -112,7 +108,7 @@ class ArtifactValidationError(RuntimeError):
     """Raised when a cached or downloaded artifact fails integrity checks."""
 
 
-# GitHub release discovery is centralized in release_catalog.py.
+# GitHub release discovery and model installation are owned by OnnxVoice.
 # Direct Hugging Face compatibility downloads use the same pinned sources as the registry.
 HF_REPO_V1_0 = "onnx-community/Kokoro-82M-v1.0-ONNX"
 HF_REPO_V1_1_ZH = "onnx-community/Kokoro-82M-v1.1-zh-ONNX"
@@ -1747,8 +1743,6 @@ def download_all_models_github(
         raise ArtifactValidationError(str(exc)) from exc
 
 
-
-
 class Kokoro:
     """
     Native ONNX backend for TTS generation.
@@ -1902,26 +1896,13 @@ class Kokoro:
             resolved_quality = model_quality
         else:
             quality_from_cfg = cfg.get("model_quality", DEFAULT_MODEL_QUALITY)
-            # Validate it's a valid quality option and cast to ModelQuality
-            if quality_from_cfg in MODEL_QUALITY_FILES:
-                resolved_quality = quality_from_cfg
+            resolved_quality = model_quality or cast(ModelQuality, quality_from_cfg)
 
-        # Validate quality is available for the selected source/variant
-        # GitHub qualities are discovered from the selected release manifest.
-        if model_source == "huggingface" and resolved_quality not in MODEL_QUALITY_FILES_HF:
-            available = ", ".join(MODEL_QUALITY_FILES_HF.keys())
-            raise ValueError(
-                f"Quality '{resolved_quality}' not available for HuggingFace {model_variant}. "
-                f"Available qualities: {available}"
-            )
         self._model_quality: ModelQuality = resolved_quality
-
         # Registry assets are resolved lazily as one atomic distribution.
-        self._resolved_runtime_assets: ResolvedRuntimeAssets | None = None
         self._model_path = model_path
         self._voices_path = voices_path
         self._asset_progress = asset_progress
-
         # Voice database connection (for kokovoicelab integration)
         self._voice_db: sqlite3.Connection | None = None
 
@@ -1965,6 +1946,7 @@ class Kokoro:
             return load_vocab_from_config(self._model_variant, vocabulary_path)
 
         return get_kokoro_vocab()
+
     def _resolve_model_variant(self, lang: str) -> ModelVariant:
         """Resolve the appropriate model variant based on language.
 
@@ -2018,10 +2000,6 @@ class Kokoro:
             )
         return self._tokenizer
 
-            self._model_variant,
-            force=force,
-        )
-
     def _init_kokoro(self) -> None:
         """Initialize the ONNX session and load voices once, safely across threads."""
         with self._init_lock:
@@ -2059,6 +2037,7 @@ class Kokoro:
             resolved = install_kokoro_model(
                 self._model_variant,
                 quality=str(self._model_quality),
+                distribution=self._model_source,
                 cache_dir=None,
                 progress=self._asset_progress,
             )
@@ -2405,24 +2384,26 @@ class Kokoro:
     @property
     def runtime_metadata(self) -> dict[str, Any]:
         """Return selected distribution and local artifact identity."""
-        if self._resolved_runtime_assets is not None:
-            distribution = self._resolved_runtime_assets.distribution
-            artifacts = [
-                {
-                    "id": artifact.id,
-                    "role": artifact.role,
-                    "path": str(self._resolved_runtime_assets.artifacts[artifact.id]),
-                    "size": artifact.size,
-                    "sha256": artifact.sha256,
-                }
-                for artifact in distribution.artifacts
-            ]
+        runtime = self._runtime
+        resolved = getattr(runtime, "resolved", None)
+        if resolved is not None:
+            installation = resolved.installation
+            artifacts = tuple(getattr(installation, "artifacts", ()) or ())
             return {
-                "model_id": self._resolved_runtime_assets.model_id,
-                "distribution_id": distribution.id,
-                "release_tag": distribution.release_tag,
-                "artifacts": artifacts,
+                "model_id": resolved.model_id or self._model_variant,
+                "distribution_id": resolved.metadata.get("distribution_id"),
+                "release_tag": resolved.metadata.get("release_tag"),
+                "artifacts": [
+                    {
+                        "role": getattr(artifact, "role", None),
+                        "path": str(getattr(artifact, "path", "")),
+                        "size": getattr(artifact, "size", None),
+                        "sha256": getattr(artifact, "sha256", None),
+                    }
+                    for artifact in artifacts
+                ],
             }
+
         paths = [path for path in (self._model_path, self._voices_path) if path is not None]
         return {
             "model_id": self._model_variant,

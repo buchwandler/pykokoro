@@ -55,6 +55,7 @@ def test_word_timing_seconds_and_sample_transform_helpers() -> None:
     assert _scale_word_timings([timing], 20, 40)[0].end_sample == 40
     assert _translate_word_timings([timing], 7)[0].start_sample == 17
 
+
 def test_collect_unit_word_timings_translates_copies_and_preserves_segments() -> None:
     first = PhonemeSegment(
         id="a",
@@ -82,7 +83,10 @@ def test_collect_unit_word_timings_translates_copies_and_preserves_segments() ->
 
     timings = _collect_unit_word_timings([first, second], sample_rate=10)
 
-    assert [(timing.start_sample, timing.end_sample) for timing in timings] == [(10, 80), (130, 210)]
+    assert [(timing.start_sample, timing.end_sample) for timing in timings] == [
+        (10, 80),
+        (130, 210),
+    ]
     assert first.word_timings == before_first
     assert second.word_timings == before_second
 

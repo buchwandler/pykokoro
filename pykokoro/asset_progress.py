@@ -95,9 +95,7 @@ class ConsoleAssetProgress:
             self._last_bytes[artifact_id] = 0
             self._active_tty_artifact = artifact_id if self._is_tty() else None
             size = (
-                format_bytes(event.bytes_total)
-                if event.bytes_total is not None
-                else "size unknown"
+                format_bytes(event.bytes_total) if event.bytes_total is not None else "size unknown"
             )
             print(
                 f"Downloading {self._role(event.role)}: {self._artifact_name(event)} ({size})",
@@ -108,7 +106,10 @@ class ConsoleAssetProgress:
 
         if event.phase == "download-progress":
             if event.bytes_total is None:
-                if event.bytes_done and event.bytes_done - self._last_bytes.get(artifact_id, 0) < 1024 * 1024:
+                if (
+                    event.bytes_done
+                    and event.bytes_done - self._last_bytes.get(artifact_id, 0) < 1024 * 1024
+                ):
                     return
                 self._last_bytes[artifact_id] = event.bytes_done
                 message = f"  {format_bytes(event.bytes_done)} / (size unknown)"

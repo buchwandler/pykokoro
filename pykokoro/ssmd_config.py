@@ -8,8 +8,6 @@ from dataclasses import dataclass, field
 from numbers import Real
 from typing import Any, Literal
 
-from .exceptions import SSMDDocumentError
-
 
 @dataclass(frozen=True)
 class SSMDPauseOverrides:

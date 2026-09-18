@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from pykokoro.ssmd_parser import parse_ssmd_document
 
 from pykokoro.emphasis import apply_emphasis_policy, resolve_emphasis
 from pykokoro.exceptions import CapabilityError
@@ -13,7 +14,6 @@ from pykokoro.pipeline import KokoroPipeline
 from pykokoro.pipeline_config import PipelineConfig
 from pykokoro.prosody import apply_volume
 from pykokoro.ssmd_config import SSMDRenderConfig
-from pykokoro.ssmd_parser import parse_ssmd_document
 from pykokoro.stages.protocols import DocumentResult
 from pykokoro.types import PhonemeSegment, Segment, Trace
 

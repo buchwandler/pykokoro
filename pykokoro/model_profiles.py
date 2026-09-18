@@ -329,55 +329,30 @@ GERMAN_MARTIN_V1_2 = MODEL_PROFILES[("github", "v1.2-de-martin")]
 
 
 def _legacy_profile(variant: ModelVariant, source: ModelSource) -> RuntimeProfile:
-    from .asset_constants import (
-        MODEL_QUALITY_CACHE_FILES_HF_V1_0,
-        MODEL_QUALITY_FILES_GITHUB_V1_0,
-        MODEL_QUALITY_FILES_GITHUB_V1_1_ZH,
-        MODEL_QUALITY_FILES_HF,
-    )
-
     if variant not in {"v1.0", "v1.1-zh"}:
         raise ValueError(f"Unknown model profile: {source}/{variant}")
-    if source == "github":
-        qualities = (
-            MODEL_QUALITY_FILES_GITHUB_V1_0
-            if variant == "v1.0"
-            else MODEL_QUALITY_FILES_GITHUB_V1_1_ZH
-        )
-        return RuntimeProfile(
-            source=source,
-            variant=variant,
-            language_codes=("en", "es", "fr", "hi", "it", "ja", "pt", "zh")
-            if variant == "v1.0"
-            else ("zh",),
-            default_voice="af_heart" if variant == "v1.0" else "af_maple",
-            vocabulary_source="downloaded-release",
-            tokenizer_vocab_version="1.1" if variant == "v1.1-zh" else "1.0",
-            frontend="pykokoro-native-v1",
-            frontend_experimental=False,
-            quality_files=qualities,
-        )
-    qualities = (
-        MODEL_QUALITY_CACHE_FILES_HF_V1_0
-        if variant == "v1.0"
-        else {
-            key: value
-            for key, value in MODEL_QUALITY_FILES_HF.items()
-            if key not in {"q8f16", "uint8f16"}
-        }
-    )
-    if variant == "v1.1-zh":
-        qualities.update({"int8": "model_int8.onnx", "bnb4": "model_bnb4.onnx"})
+    if source not in {"github", "huggingface"}:
+        raise ValueError(f"Unknown model profile: {source}/{variant}")
+
+    is_zh = variant == "v1.1-zh"
+
     return RuntimeProfile(
         source=source,
         variant=variant,
-        language_codes=(),
-        default_voice="af_heart" if variant == "v1.0" else "af_maple",
-        vocabulary_source="downloaded-config",
-        tokenizer_vocab_version="1.1" if variant == "v1.1-zh" else "1.0",
+        language_codes=(
+            ("zh",)
+            if source == "github" and is_zh
+            else ("en", "es", "fr", "hi", "it", "ja", "pt", "zh")
+            if source == "github"
+            else ()
+        ),
+        default_voice="af_maple" if is_zh else "af_heart",
+        vocabulary_source=("downloaded-release" if source == "github" else "downloaded-config"),
+        tokenizer_vocab_version="1.1" if is_zh else "1.0",
         frontend="pykokoro-native-v1",
         frontend_experimental=False,
-        quality_files=qualities,
+        quality_files={},
+        voice_names=(),
     )
 
 

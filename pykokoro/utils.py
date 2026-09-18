@@ -232,6 +232,7 @@ def seconds_to_samples(seconds: float, sample_rate: int) -> int:
     """Convert seconds to samples using the pipeline's canonical rounding."""
     return round(seconds * sample_rate)
 
+
 def generate_silence(duration: float, sample_rate: int = 24000) -> Any:
     """Generate silence array of specified duration.
 

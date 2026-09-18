@@ -39,7 +39,6 @@ class DocumentResult:
     linguistic_state: LinguisticRequestState | None = field(default=None, repr=False, compare=False)
 
 
-
 class G2PAdapter(Protocol):
     def phonemize(
         self,

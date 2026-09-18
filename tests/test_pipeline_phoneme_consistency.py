@@ -1,11 +1,11 @@
 import pytest
+from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
+from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
 
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
 from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
-from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
 from pykokoro.stages.phoneme_processing.noop import NoopPhonemeProcessorAdapter
 
 CASES = [

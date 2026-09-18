@@ -13,13 +13,14 @@ try:
 except ImportError:
     from _output import artifact_path
 
+from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
+from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
+
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.onnx_backend import Kokoro
 from pykokoro.stages.audio_generation.onnx import OnnxAudioGenerationAdapter
 from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
 from pykokoro.stages.audio_postprocessing.onnx import OnnxAudioPostprocessingAdapter
-from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
 from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
 from pykokoro.stages.phoneme_processing.noop import NoopPhonemeProcessorAdapter
 from pykokoro.stages.phoneme_processing.onnx import OnnxPhonemeProcessorAdapter

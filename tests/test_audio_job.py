@@ -35,6 +35,7 @@ def test_rendered_segments_create_quantized_pauses_markers_and_spans() -> None:
     assert composed.markers[0].name == "start"
     assert composed.spans[0].id == "word:seg-1:0"
 
+
 def test_multi_segment_spans_remain_clip_local_and_compose_globally() -> None:
     first = PhonemeSegment(
         id="a",
@@ -92,6 +93,7 @@ def test_invalid_segment_word_timing_fails_before_composition() -> None:
     else:
         raise AssertionError("invalid local timing was accepted")
 
+
 def test_trim_and_prosody_timing_transforms_remain_composable() -> None:
     cropped = _crop_word_timings(
         [WordTiming("speech", 0, 6, 10, 90, "segment")],
@@ -114,6 +116,7 @@ def test_trim_and_prosody_timing_transforms_remain_composable() -> None:
     composed = Composer().compose(rendered_segments_to_audio_job([segment]))
     assert composed.spans[0].sample_start == 7
     assert composed.spans[0].sample_end == 113
+
 
 def test_audio_job_metadata_is_json_safe() -> None:
     segment = PhonemeSegment(

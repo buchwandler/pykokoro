@@ -156,7 +156,6 @@ def test_plan_trace_contains_identity() -> None:
     assert consume and consume[0].details["plan_id"] == plan.plan_id
 
 
-
 def test_default_pipeline_does_not_use_legacy_frontend() -> None:
     pipeline = KokoroPipeline(
         PipelineConfig(generation=GenerationConfig(lang="en-us")),
@@ -166,7 +165,7 @@ def test_default_pipeline_does_not_use_legacy_frontend() -> None:
         audio_postprocessing=NoopAudioPostprocessingAdapter(),
     )
     # Pipeline should not have legacy frontend stages
-    assert not hasattr(pipeline, '_legacy_frontend_compat') or not pipeline._legacy_frontend_compat
+    assert not hasattr(pipeline, "_legacy_frontend_compat") or not pipeline._legacy_frontend_compat
 
 
 def test_build_pipeline_does_not_use_legacy_frontend() -> None:
@@ -176,4 +175,4 @@ def test_build_pipeline_does_not_use_legacy_frontend() -> None:
         config={"generation": {"lang": "en-us"}},
     )
     # Pipeline should not have legacy frontend stages
-    assert not hasattr(pipeline, '_legacy_frontend_compat') or not pipeline._legacy_frontend_compat
+    assert not hasattr(pipeline, "_legacy_frontend_compat") or not pipeline._legacy_frontend_compat

@@ -34,6 +34,8 @@ def _json_safe(value: Any) -> Any:
 
 def _quantized_seconds(seconds: float, sample_rate: int) -> float:
     return seconds_to_samples(seconds, sample_rate) / sample_rate
+
+
 def _validate_segment_word_timings(
     segment: PhonemeSegment,
     waveform_length: int,
@@ -46,7 +48,6 @@ def _validate_segment_word_timings(
                 f"range={timing.start_sample}:{timing.end_sample} "
                 f"waveform_length={waveform_length}"
             )
-
 
 
 def _loudness_policy(config: LoudnessConfig | None) -> LoudnessPolicy:

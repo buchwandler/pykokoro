@@ -4,16 +4,17 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
+from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
+from pykokoro.stages.segmentation.phrasplit import PhrasplitSentenceSegmenter
+from pykokoro.stages.text_preparation.spokenform import SpokenformTextPreparer
+
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline import KokoroPipeline
 from pykokoro.pipeline_config import PipelineConfig
 from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
 from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
-from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
 from pykokoro.stages.phoneme_processing.noop import NoopPhonemeProcessorAdapter
-from pykokoro.stages.segmentation.phrasplit import PhrasplitSentenceSegmenter
-from pykokoro.stages.text_preparation.spokenform import SpokenformTextPreparer
 from pykokoro.tokenizer import TokenizerConfig
 
 LANGUAGE_TO_G2P = {"en-US": "en-us", "en-GB": "en-gb", "de-DE": "de"}

@@ -11,12 +11,13 @@ try:
 except ImportError:
     from _output import artifact_path
 
+from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
+
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.debug.segment_invariants import check_segment_invariants
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
 from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
 from pykokoro.stages.g2p.noop import NoopG2PAdapter
 from pykokoro.types import Segment, Trace
 

@@ -366,3 +366,58 @@ def test_registry_github_source_resolves_through_local_profile(variant, voice) -
     assert resolved.model_source == "github"
     assert resolved.model_variant == variant
     assert resolved.voice == voice
+
+
+@pytest.mark.parametrize(
+    ("source", "variant", "voice", "vocab_version"),
+    [
+        ("github", "v1.0", "af_heart", "1.0"),
+        ("github", "v1.1-zh", "af_maple", "1.1"),
+        ("huggingface", "v1.0", "af_heart", "1.0"),
+        ("huggingface", "v1.1-zh", "af_maple", "1.1"),
+    ],
+)
+def test_legacy_runtime_profiles_do_not_duplicate_asset_inventory(
+    source, variant, voice, vocab_version
+):
+    profile = get_model_profile(variant, source)
+
+    assert profile.default_voice == voice
+    assert profile.tokenizer_vocab_version == vocab_version
+    assert profile.quality_files == {}
+    assert profile.voice_names == ()
+
+
+def test_default_english_resolves_without_asset_constants():
+    resolved = resolve_model_defaults(
+        PipelineConfig(
+            voice="af_heart",
+            generation=GenerationConfig(lang="en-us"),
+        )
+    )
+
+    assert resolved.model_source == "github"
+    assert resolved.model_variant == "v1.0"
+    assert resolved.model_quality == "fp32"
+    assert resolved.voice == "af_heart"
+
+
+def test_default_chinese_still_selects_v1_1_zh():
+    resolved = resolve_model_defaults(PipelineConfig(generation=GenerationConfig(lang="zh")))
+
+    assert resolved.model_source == "github"
+    assert resolved.model_variant == "v1.1-zh"
+    assert resolved.voice == "af_maple"
+
+
+def test_legacy_quality_validation_is_deferred_to_runtime_registry():
+    resolved = resolve_model_defaults(
+        PipelineConfig(
+            model_source="github",
+            model_variant="v1.0",
+            model_quality="q8",
+            generation=GenerationConfig(lang="en-us"),
+        )
+    )
+
+    assert resolved.model_quality == "q8"

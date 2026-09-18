@@ -31,8 +31,9 @@ try:
 except ImportError:
     from _output import artifact_path
 
-from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
+
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
 from pykokoro.types import Trace
 

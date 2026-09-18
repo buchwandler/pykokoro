@@ -4,6 +4,7 @@ import sys
 import types
 
 import pytest
+from pykokoro.stages.segmentation.phrasplit import PhrasplitSentenceSegmenter
 
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline_config import PipelineConfig
@@ -11,7 +12,6 @@ from pykokoro.runtime.language_plan import LanguageRun
 from pykokoro.runtime.linguistics import LinguisticRequestState, PreparedRunAnalysis
 from pykokoro.runtime.spans import slice_boundaries
 from pykokoro.stages.protocols import DocumentResult
-from pykokoro.stages.segmentation.phrasplit import PhrasplitSentenceSegmenter
 from pykokoro.types import BoundaryEvent, Trace
 
 TEXT = "It had picked up the sound of a explosion, direction suggested it was behind."

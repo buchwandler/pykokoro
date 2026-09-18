@@ -11,28 +11,24 @@ These tests verify that to_audio_job_from_plan:
 
 from __future__ import annotations
 
-from dataclasses import replace
+import contextlib
 from unittest.mock import patch
 
-import numpy as np
 import pytest
-from audiocompose import AudioJob, AudioClip, Silence
-
-from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
+from audiocompose import AudioJob
 from utterplan import UtterancePlan
+
+from pykokoro import KokoroPipeline, PipelineConfig
 
 
 def _make_simple_plan() -> UtterancePlan:
     """Create a minimal valid UtterancePlan for testing."""
     from utterplan import (
-        AnnotationSpan,
         BoundaryEvent,
-        Diagnostic,
         LanguageRun,
         Marker,
         PlanSource,
         PlanTexts,
-        PlanUnit,
         TextPreparationInfo,
         TokenAnnotation,
     )
@@ -52,7 +48,9 @@ def _make_simple_plan() -> UtterancePlan:
         languages=(LanguageRun(id="lang1", spoken_start=0, spoken_end=29, language="en-us"),),
         annotations=(),
         boundaries=(
-            BoundaryEvent(id="b1", position=11, kind="pause", seconds=0.3, origin="default", strength="s"),
+            BoundaryEvent(
+                id="b1", position=11, kind="pause", seconds=0.3, origin="default", strength="s"
+            ),
         ),
         tokens=(
             TokenAnnotation(spoken_start=0, spoken_end=5, text="Hello"),
@@ -64,9 +62,7 @@ def _make_simple_plan() -> UtterancePlan:
         ),
         segments=(),
         units=(),
-        markers=(
-            Marker(id="m1", name="start", spoken_position=0),
-        ),
+        markers=(Marker(id="m1", name="start", spoken_position=0),),
         document_metadata={"title": "Test"},
         warnings=(),
         diagnostics=(),
@@ -114,10 +110,8 @@ class TestToAudioJobFromPlanDoesNotMutatePlan:
         original_units = plan.units
         original_markers = plan.markers
 
-        try:
+        with contextlib.suppress(Exception):  # Plan may not be fully valid
             pipeline.to_audio_job_from_plan(plan)
-        except Exception:
-            pass  # Plan may not be fully valid
 
         # Verify plan is unchanged
         assert plan.plan_id == original_plan_id
@@ -184,6 +178,7 @@ class TestToAudioJobFromPlanRejectsPlanningOverrides:
             pipeline.to_audio_job_from_plan(plan, model="new-model")
 
         assert exc_info.value is not None
+
     def test_rejects_lang_override(self) -> None:
         """Language is a planning override and must be rejected."""
         plan = _make_simple_plan()
