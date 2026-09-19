@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("pykokoro.stages.segmentation.phrasplit")
+
+
 import sys
 import types
 

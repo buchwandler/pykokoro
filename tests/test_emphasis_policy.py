@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("pykokoro.ssmd_parser")
+
+
 import math
 from types import SimpleNamespace
 

@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("benchmarks.hard_cases.frontend")
+pytest.importorskip("benchmarks.hard_cases.segmentation")
+
+
 from benchmarks.hard_cases.frontend import NoOnnxFrontend
 from benchmarks.hard_cases.segmentation import build_segment_plan, validate_offsets
 

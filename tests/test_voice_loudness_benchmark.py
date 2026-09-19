@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("pykokoro.stages.doc_parsers.plain")
+
+
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
-import pytest
 
 from benchmarks import voice_loudness as benchmark
 from pykokoro.discovery import ModelCapabilities, VoiceCapabilities

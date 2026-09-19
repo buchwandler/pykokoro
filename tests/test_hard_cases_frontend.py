@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("benchmarks.hard_cases.data")
+pytest.importorskip("benchmarks.hard_cases.frontend")
+pytest.importorskip("benchmarks.hard_cases.phonemes")
+
+
 from benchmarks.hard_cases.data import load_cases
 from benchmarks.hard_cases.frontend import NoOnnxFrontend
 from benchmarks.hard_cases.phonemes import evaluate_case

@@ -1,6 +1,6 @@
 """Local runtime metadata for supported model frontends.
 
-Published artifact inventory is intentionally resolved by :mod:`release_catalog`.
+Published artifact inventory is resolved by OnnxVoice.
 """
 
 from __future__ import annotations

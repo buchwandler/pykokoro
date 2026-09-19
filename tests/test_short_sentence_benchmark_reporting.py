@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("pykokoro.stages.doc_parsers.plain")
+
+
 from benchmarks._short_sentence_reporting import (
     aggregate_short_sentence_rows,
     build_short_sentence_summary,

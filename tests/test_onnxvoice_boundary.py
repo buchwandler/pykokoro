@@ -50,7 +50,10 @@ def test_resolve_maps_installation_metadata(
         id="v1.0",
         ref="kokoro:v1.0",
         sample_rate=24_000,
-        metadata={"selected_quality": "fp32"},
+        selected_quality="fp32",
+        selected_distribution="github-model-files-v1.0-timestamped-r4",
+        storage_id="kokoro--sel-abc123",
+        metadata={},
         artifacts=(
             SimpleNamespace(role="model", path=model),
             SimpleNamespace(role="voices", path=voices),
@@ -64,7 +67,10 @@ def test_resolve_maps_installation_metadata(
 
         def resolve(self, ref: str, **kwargs: object) -> object:
             assert ref == "kokoro:v1.0"
-            assert kwargs == {"quality": "fp32", "distribution": None}
+            assert kwargs == {
+                "quality": "fp32",
+                "distribution": "github-model-files-v1.0-timestamped-r4",
+            }
             return installation
 
     monkeypatch.setattr(boundary, "_onnxvoice", lambda: SimpleNamespace(OnnxVoice=Manager))
@@ -72,7 +78,7 @@ def test_resolve_maps_installation_metadata(
     resolved = boundary.resolve_kokoro_model(
         "v1.0",
         quality="fp32",
-        distribution="cpu",
+        source="github",
         cache_dir=tmp_path,
         offline=True,
     )
@@ -80,6 +86,8 @@ def test_resolve_maps_installation_metadata(
     assert resolved.ref == "kokoro:v1.0"
     assert resolved.model_id == "v1.0"
     assert resolved.quality == "fp32"
+    assert resolved.distribution == "github-model-files-v1.0-timestamped-r4"
+    assert resolved.storage_id == "kokoro--sel-abc123"
     assert resolved.sample_rate == 24_000
     assert resolved.model_paths == (model,)
     assert resolved.voices_path == voices
@@ -232,3 +240,102 @@ def test_summarize_inference_is_json_safe() -> None:
 
     assert timings == {"shape": [4], "dtype": "float32"}
     assert outputs == {"duration": {"shape": [1, 4], "dtype": "int64"}}
+
+
+def test_onnxvoice_distribution_for_maps_github_variants() -> None:
+    assert (
+        boundary.onnxvoice_distribution_for(source="github", variant="v1.0")
+        == "github-model-files-v1.0-timestamped-r4"
+    )
+    assert (
+        boundary.onnxvoice_distribution_for(source="github", variant="v1.1-zh")
+        == "github-model-files-v1.1"
+    )
+
+
+def test_onnxvoice_distribution_for_raises_on_unmapped_pair() -> None:
+    with pytest.raises(ConfigurationError, match="No OnnxVoice distribution mapping"):
+        boundary.onnxvoice_distribution_for(source="huggingface", variant="v1.0")
+
+    with pytest.raises(ConfigurationError, match="No OnnxVoice distribution mapping"):
+        boundary.onnxvoice_distribution_for(source="github", variant="v2.0")
+
+
+def test_cache_identity_uses_storage_id_for_managed_installations(tmp_path: Path) -> None:
+    model = tmp_path / "model.onnx"
+    resolved = boundary.ResolvedKokoroModel(
+        ref="kokoro:v1.0",
+        model_id="v1.0",
+        quality="fp32",
+        distribution="github-model-files-v1.0-timestamped-r4",
+        storage_id="kokoro--sel-abc123",
+        installation=None,
+        metadata={},
+        sample_rate=24_000,
+        model_paths=(model,),
+        voices_path=None,
+        config_path=None,
+    )
+    runtime = SimpleNamespace(infer=lambda *a, **kw: None)
+    adapter = boundary.KokoroRuntimeAdapter(runtime, resolved)
+
+    assert adapter.cache_identity == ("managed", "kokoro:v1.0", "kokoro--sel-abc123")
+
+
+def test_cache_identity_uses_paths_for_local_models(tmp_path: Path) -> None:
+    model = tmp_path / "model.onnx"
+    voices = tmp_path / "voices.bin"
+    resolved = boundary.ResolvedKokoroModel(
+        ref=None,
+        model_id=None,
+        quality=None,
+        distribution=None,
+        storage_id=None,
+        installation=None,
+        metadata={},
+        sample_rate=24_000,
+        model_paths=(model,),
+        voices_path=voices,
+        config_path=None,
+    )
+    runtime = SimpleNamespace(infer=lambda *a, **kw: None)
+    adapter = boundary.KokoroRuntimeAdapter(runtime, resolved)
+
+    assert adapter.cache_identity[0] == "local"
+    assert adapter.cache_identity[1] == (str(model.resolve()),)
+    assert adapter.cache_identity[2] == str(voices.resolve())
+
+
+def test_different_distributions_produce_different_cache_identities(tmp_path: Path) -> None:
+    model = tmp_path / "model.onnx"
+    resolved_a = boundary.ResolvedKokoroModel(
+        ref="kokoro:v1.0",
+        model_id="v1.0",
+        quality="fp32",
+        distribution="github-model-files-v1.0-timestamped-r4",
+        storage_id="kokoro--sel-aaa",
+        installation=None,
+        metadata={},
+        sample_rate=24_000,
+        model_paths=(model,),
+        voices_path=None,
+        config_path=None,
+    )
+    resolved_b = boundary.ResolvedKokoroModel(
+        ref="kokoro:v1.0",
+        model_id="v1.0",
+        quality="fp32",
+        distribution="github-model-files-v1.1",
+        storage_id="kokoro--sel-bbb",
+        installation=None,
+        metadata={},
+        sample_rate=24_000,
+        model_paths=(model,),
+        voices_path=None,
+        config_path=None,
+    )
+    runtime = SimpleNamespace(infer=lambda *a, **kw: None)
+    adapter_a = boundary.KokoroRuntimeAdapter(runtime, resolved_a)
+    adapter_b = boundary.KokoroRuntimeAdapter(runtime, resolved_b)
+
+    assert adapter_a.cache_identity != adapter_b.cache_identity

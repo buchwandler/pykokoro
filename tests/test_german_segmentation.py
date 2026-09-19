@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("pykokoro.stages.doc_parsers.plain")
+pytest.importorskip("pykokoro.stages.segmentation.phrasplit")
+pytest.importorskip("pykokoro.stages.text_preparation.spokenform")
+
+
 from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
 from pykokoro.stages.segmentation.phrasplit import PhrasplitSentenceSegmenter
 from pykokoro.stages.text_preparation.spokenform import SpokenformTextPreparer

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import pytest
 
+pytest.importorskip("benchmarks.polynorm_eval")
+
+
 from benchmarks.polynorm_eval import PyKokoroPhonemeHarness
 
 

@@ -1,3 +1,8 @@
+import pytest
+
+pytest.importorskip("pykokoro.stages.doc_parsers.plain")
+pytest.importorskip("pykokoro.stages.doc_parsers.ssmd")
+
 import sys
 import types
 

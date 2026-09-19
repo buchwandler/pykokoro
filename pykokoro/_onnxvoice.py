@@ -21,9 +21,14 @@ class ResolvedKokoroModel:
 
     ref: str | None
     model_id: str | None
+
     quality: str | None
+    distribution: str | None
+    storage_id: str | None
+
     installation: Any | None
     metadata: Mapping[str, Any]
+
     sample_rate: int
     model_paths: tuple[Path, ...]
     voices_path: Path | None
@@ -62,12 +67,17 @@ _DISTRIBUTION_MAP: dict[tuple[str, str], str] = {
 }
 
 
-def map_distribution(source: str, variant: str) -> str | None:
-    """Map PyKokoro's ModelSource and variant to an OnnxVoice distribution ID.
+def onnxvoice_distribution_for(*, source: str, variant: str) -> str:
+    """Translate PyKokoro's ModelSource and variant to an exact OnnxVoice distribution ID.
 
-    Returns None if no mapping exists (for huggingface or unknown sources).
+    Raises ConfigurationError if the explicit source/variant pair has no mapping.
     """
-    return _DISTRIBUTION_MAP.get((source, variant))
+    try:
+        return _DISTRIBUTION_MAP[(source, variant)]
+    except KeyError as exc:
+        raise ConfigurationError(
+            f"No OnnxVoice distribution mapping for source={source!r}, variant={variant!r}"
+        ) from exc
 
 
 def _provider_name(value: Any) -> tuple[str, dict[str, Any]]:
@@ -199,32 +209,78 @@ def _call(operation: str, function: Callable[[], Any]) -> Any:
 
 
 def _installation_info(installation: Any, *, ref: str | None = None) -> ResolvedKokoroModel:
-    artifacts = tuple(getattr(installation, "artifacts", ()) or ())
-    model_paths = tuple(
-        Path(artifact.path) for artifact in artifacts if getattr(artifact, "role", None) == "model"
-    )
-    voices_path = next(
-        (
+    """Extract PyKokoro's resolved view from an OnnxVoice Installation."""
+    # Use semantic artifact helpers where available.
+    # Fall back to manual scanning for test mocks that lack these methods.
+    if hasattr(installation, "artifacts_for"):
+        model_paths = tuple(Path(artifact.path) for artifact in installation.artifacts_for("model"))
+    else:
+        artifacts = tuple(getattr(installation, "artifacts", ()) or ())
+        model_paths = tuple(
             Path(artifact.path)
             for artifact in artifacts
-            if getattr(artifact, "role", None) == "voices"
-        ),
-        None,
-    )
-    config_path = next(
-        (
-            Path(artifact.path)
-            for artifact in artifacts
-            if getattr(artifact, "role", None) in {"config", "vocab"}
-        ),
-        None,
-    )
-    metadata = dict(getattr(installation, "metadata", {}) or {})
-    selected_quality = metadata.get("selected_quality")
+            if getattr(artifact, "role", None) == "model"
+        )
+
+    if hasattr(installation, "require_artifact"):
+        try:
+            voices_path = Path(installation.require_artifact("voices").path)
+        except Exception:
+            voices_path = None
+    else:
+        artifacts = tuple(getattr(installation, "artifacts", ()) or ())
+        voices_path = next(
+            (
+                Path(artifact.path)
+                for artifact in artifacts
+                if getattr(artifact, "role", None) == "voices"
+            ),
+            None,
+        )
+
+    # Vocabulary/config: prefer artifact_path for unique roles.
+    config_path = None
+    if hasattr(installation, "artifact_path"):
+        try:
+            config_path = Path(installation.artifact_path("vocab"))
+        except Exception:
+            try:
+                config_path = Path(installation.artifact_path("config"))
+            except Exception:
+                config_path = None
+    else:
+        artifacts = tuple(getattr(installation, "artifacts", ()) or ())
+        config_path = next(
+            (
+                Path(artifact.path)
+                for artifact in artifacts
+                if getattr(artifact, "role", None) in {"config", "vocab"}
+            ),
+            None,
+        )
+
+    # Use typed properties from the Installation, with metadata fallback.
+    selected_quality = getattr(installation, "selected_quality", None)
+    if selected_quality is None:
+        metadata = dict(getattr(installation, "metadata", {}) or {})
+        selected_quality = metadata.get("selected_quality")
+    else:
+        metadata = dict(getattr(installation, "metadata", {}) or {})
+
+    selected_distribution = getattr(installation, "selected_distribution", None)
+    if selected_distribution is None:
+        selected_distribution = metadata.get("selected_distribution")
+
+    storage_id = getattr(installation, "storage_id", None)
+    if storage_id is None:
+        storage_id = metadata.get("storage_id")
+
     return ResolvedKokoroModel(
         ref=ref or getattr(installation, "ref", None),
         model_id=getattr(installation, "id", None),
         quality=str(selected_quality) if selected_quality is not None else None,
+        distribution=str(selected_distribution) if selected_distribution is not None else None,
+        storage_id=str(storage_id) if storage_id is not None else None,
         installation=installation,
         metadata=metadata,
         sample_rate=int(getattr(installation, "sample_rate", None) or 24000),
@@ -238,6 +294,7 @@ def install_kokoro_model(
     ref: str,
     *,
     quality: str | None = None,
+    source: str | None = None,
     distribution: str | None = None,
     cache_dir: str | Path | None = None,
     offline: bool = False,
@@ -245,7 +302,19 @@ def install_kokoro_model(
     force: bool = False,
     progress: Callable[[AssetProgressEvent], None] | None = None,
 ) -> ResolvedKokoroModel:
+    """Install a Kokoro model via OnnxVoice.
+
+    Either *source* (PyKokoro compatibility alias like 'github') or
+    *distribution* (exact OnnxVoice distribution ID) may be supplied.
+    When *source* is given, it is translated to an OnnxVoice distribution
+    using the internal mapping.
+    """
     normalized = normalize_kokoro_ref(ref)
+    if source is not None:
+        variant = normalized.split(":", 1)[1]
+        onnxvoice_distribution = onnxvoice_distribution_for(source=source, variant=variant)
+    else:
+        onnxvoice_distribution = distribution
     module = _onnxvoice()
     manager = module.OnnxVoice(cache_dir=cache_dir, offline=offline)
     installation = _call(
@@ -253,7 +322,7 @@ def install_kokoro_model(
         lambda: manager.install(
             normalized,
             quality=quality,
-            distribution=None,
+            distribution=onnxvoice_distribution,
             refresh=refresh,
             force=force,
             progress=adapt_progress(progress),
@@ -266,15 +335,26 @@ def resolve_kokoro_model(
     ref: str,
     *,
     quality: str | None = None,
+    source: str | None = None,
     distribution: str | None = None,
     cache_dir: str | Path | None = None,
     offline: bool = False,
 ) -> ResolvedKokoroModel:
+    """Resolve a locally installed Kokoro model via OnnxVoice.
+
+    Either *source* (PyKokoro compatibility alias) or
+    *distribution* (exact OnnxVoice distribution ID) may be supplied.
+    """
     normalized = normalize_kokoro_ref(ref)
+    if source is not None:
+        variant = normalized.split(":", 1)[1]
+        onnxvoice_distribution = onnxvoice_distribution_for(source=source, variant=variant)
+    else:
+        onnxvoice_distribution = distribution
     manager = _onnxvoice().OnnxVoice(cache_dir=cache_dir, offline=offline)
     installation = _call(
         "resolve",
-        lambda: manager.resolve(normalized, quality=quality, distribution=None),
+        lambda: manager.resolve(normalized, quality=quality, distribution=onnxvoice_distribution),
     )
     return _installation_info(installation, ref=normalized)
 
@@ -387,7 +467,21 @@ class KokoroRuntimeAdapter:
         self.supports_timings = bool(
             isinstance(runtime_metadata, Mapping) and runtime_metadata.get("timings_output")
         )
-        self.cache_identity = (resolved.ref, resolved.quality, resolved.model_id)
+        # Managed installations use storage_id for cache identity.
+        # Local unmanaged models use path-sensitive identity.
+        if resolved.storage_id is not None:
+            self.cache_identity: tuple[Any, ...] = (
+                "managed",
+                resolved.ref,
+                resolved.storage_id,
+            )
+        else:
+            self.cache_identity = (
+                "local",
+                tuple(str(path.resolve()) for path in resolved.model_paths),
+                str(resolved.voices_path.resolve()) if resolved.voices_path is not None else None,
+                str(resolved.config_path.resolve()) if resolved.config_path is not None else None,
+            )
         self._closed = False
 
     def infer(
@@ -427,6 +521,7 @@ __all__ = [
     "install_kokoro_model",
     "normalize_kokoro_ref",
     "normalize_provider_request",
+    "onnxvoice_distribution_for",
     "open_installed_kokoro",
     "open_local_kokoro",
     "resolve_kokoro_model",

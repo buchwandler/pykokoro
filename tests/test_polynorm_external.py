@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("benchmarks.polynorm_eval")
+
+
 from pathlib import Path
 
-import pytest
 
 from benchmarks.polynorm_data import PolyNormDataError, load_cases, locale_cache_path
 from benchmarks.polynorm_phoneme import main as polynorm_main

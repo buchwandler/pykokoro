@@ -1,7 +1,12 @@
 import os
 
-import numpy as np
 import pytest
+
+pytest.importorskip("pykokoro.stages.doc_parsers.plain")
+pytest.importorskip("pykokoro.stages.doc_parsers.ssmd")
+
+
+import numpy as np
 from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
 from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
 

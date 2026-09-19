@@ -2,6 +2,12 @@ from __future__ import annotations
 
 import pytest
 
+pytest.importorskip("benchmarks.hard_cases.schema")
+pytest.importorskip("benchmarks.hard_cases.selection")
+
+
+import pytest
+
 from benchmarks.hard_cases.schema import HardCaseError
 from benchmarks.hard_cases.selection import list_categories, select_cases
 

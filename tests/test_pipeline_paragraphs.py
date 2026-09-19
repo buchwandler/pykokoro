@@ -1,4 +1,8 @@
 import pytest
+
+pytest.importorskip("pykokoro.stages.doc_parsers.ssmd")
+
+import pytest
 from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
 
 from pykokoro import KokoroPipeline, PipelineConfig

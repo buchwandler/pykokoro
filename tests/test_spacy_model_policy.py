@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("pykokoro.stages.segmentation.phrasplit")
+
+
 from types import SimpleNamespace
 
-import pytest
 from pykokoro.stages.doc_parsers.plain import PhrasplitSentenceSplitter
 from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
 

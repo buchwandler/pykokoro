@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("pykokoro.stages.doc_parsers.plain")
+
+
 from dataclasses import replace
 
 import numpy as np
-import pytest
 from audiocompose import Composer
 from audiosig import measure_loudness
 from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser

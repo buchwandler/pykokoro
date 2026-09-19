@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("benchmarks.hard_cases.acoustic")
+pytest.importorskip("benchmarks.hard_cases.baseline")
+pytest.importorskip("benchmarks.hard_cases.metrics")
+
+
 from types import SimpleNamespace
 
 from benchmarks.hard_cases.acoustic import evaluate_audio

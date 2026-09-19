@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("pykokoro.stages.doc_parsers.plain")
+
+
 import subprocess
 import sys
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from benchmarks.short_sentence_parameter_sweep import (
     RenderedAudio,

@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import pytest
+
+pytest.importorskip("benchmarks.hard_cases.data")
+
+
 from benchmarks.hard_cases.data import case_counts, load_cases
 
 

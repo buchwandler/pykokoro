@@ -1,4 +1,9 @@
 import pytest
+
+pytest.importorskip("pykokoro.stages.doc_parsers.plain")
+pytest.importorskip("pykokoro.stages.doc_parsers.ssmd")
+
+import pytest
 from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
 from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
 

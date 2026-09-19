@@ -2,6 +2,11 @@ from __future__ import annotations
 
 import pytest
 
+pytest.importorskip("benchmarks.hard_cases.schema")
+
+
+import pytest
+
 from benchmarks.hard_cases.schema import HardCase, HardCaseError, load_jsonl
 
 
