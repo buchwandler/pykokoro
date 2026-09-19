@@ -2,15 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-pytest.importorskip("pykokoro.stages.doc_parsers.plain")
-
 
 from dataclasses import replace
 
 import numpy as np
 from audiocompose import Composer
 from audiosig import measure_loudness
-from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
 
 from pykokoro import (
     AudioUnitDescriptor,
@@ -25,8 +22,7 @@ from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline import _unit_text_hash
 from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
 from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
-from pykokoro.stages.protocols import DocumentResult
-from pykokoro.types import BoundaryEvent, PhonemeSegment, Segment, WordTiming
+from pykokoro.types import PhonemeSegment, WordTiming
 
 
 class CountingG2P:
@@ -145,7 +141,6 @@ def build_pipeline(
 ) -> KokoroPipeline:
     return KokoroPipeline(
         config or PipelineConfig(generation=GenerationConfig(lang="en-us")),
-        doc_parser=PlainTextDocumentParser(),
         g2p=g2p or CountingG2P(),
         phoneme_processing=processor or CountingProcessor(),
         audio_generation=generator or CountingGenerator(),
@@ -225,7 +220,6 @@ def test_streamed_audio_matches_run_for_noop_stages() -> None:
 def test_pipeline_timing_contract_without_network() -> None:
     pipeline = KokoroPipeline(
         PipelineConfig(generation=GenerationConfig(lang="en-us")),
-        doc_parser=PlainTextDocumentParser(),
         g2p=TwoSegmentG2P(),
         phoneme_processing=CountingProcessor(),
         audio_generation=TimedGenerator(),
@@ -305,36 +299,6 @@ def test_pipeline_close_closes_prepared_objects() -> None:
         prepared.render()
 
 
-class MarkerParser:
-    def parse(self, text, cfg, trace):
-        return DocumentResult(
-            clean_text=text,
-            segments=[
-                Segment(
-                    id="p0_s0_c0_seg0",
-                    text="One.",
-                    char_start=0,
-                    char_end=4,
-                    paragraph_idx=0,
-                    sentence_idx=0,
-                ),
-                Segment(
-                    id="p1_s0_c0_seg1",
-                    text="Two.",
-                    char_start=6,
-                    char_end=10,
-                    paragraph_idx=1,
-                    sentence_idx=0,
-                ),
-            ],
-            boundary_events=[
-                BoundaryEvent(0, "marker", attrs={"marker": "before"}),
-                BoundaryEvent(3, "marker", attrs={"marker": "after_one"}),
-                BoundaryEvent(6, "marker", attrs={"marker": "before_two"}),
-            ],
-        )
-
-
 class MarkerG2P(CountingG2P):
     def phonemize(self, segments, doc, cfg, trace):
         self.calls += 1
@@ -357,20 +321,19 @@ class MarkerG2P(CountingG2P):
 def test_markers_have_local_offsets_and_aggregate_offsets() -> None:
     pipeline = KokoroPipeline(
         PipelineConfig(generation=GenerationConfig(lang="en-us")),
-        doc_parser=MarkerParser(),
         g2p=MarkerG2P(),
         phoneme_processing=CountingProcessor(),
         audio_generation=CountingGenerator(),
         audio_postprocessing=NoopAudioPostprocessingAdapter(),
     )
-    text = "One.\n\nTwo."
+    text = "@before\nOne.\n@after_one\n\n@before_two\nTwo."
     with pipeline.prepare_units(text) as prepared:
         results = []
         for result in prepared.render():
             results.append((result.descriptor, result.markers, len(result.audio)))
             result.release_audio()
-    assert results[0][0].marker_names == ("before", "after_one")
-    assert results[1][0].marker_names == ("before_two",)
+    assert results[0][0].marker_names == ("before",)
+    assert results[1][0].marker_names == ("after_one", "before_two")
     assert all("unit_index" in marker for _, markers, _ in results for marker in markers)
 
     legacy = pipeline.run(text)

@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """Demonstrate span-based splitting + phonemization with the pipeline stages."""
 
-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
-
-from pykokoro import PipelineConfig
-from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
-from pykokoro.types import Trace
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
+from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
+from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
 
 
 def print_separator(title: str) -> None:
@@ -50,15 +48,19 @@ People walk to work. Cars fill the streets. The city comes alive."""
     print(text)
     print("-" * 80)
 
-    cfg = PipelineConfig(voice="af_bella")
-    trace = Trace()
-    parser = SsmdDocumentParser()
-    g2p = KokoroG2PAdapter()
+    cfg = PipelineConfig(
+        voice="af_bella",
+        generation=GenerationConfig(lang="en-us"),
+    )
+    pipeline = KokoroPipeline(
+        cfg,
+        audio_generation=NoopAudioGenerationAdapter(seconds_per_segment=0.0),
+        audio_postprocessing=NoopAudioPostprocessingAdapter(),
+    )
 
     try:
-        doc = parser.parse(text, cfg, trace)
-        text_segments = doc.segments
-        phoneme_segments = g2p.phonemize(text_segments, doc, cfg, trace)
+        result = pipeline.run(text)
+        phoneme_segments = result.phoneme_segments
 
         print_segments(phoneme_segments)
 
@@ -72,14 +74,13 @@ People walk to work. Cars fill the streets. The city comes alive."""
         print(f"  Total tokens:     {total_tokens}")
         print(f"  Avg chars/seg:    {total_chars / len(phoneme_segments):.1f}")
         print(f"  Avg phonemes/seg: {total_phonemes / len(phoneme_segments):.1f}")
-
     except ImportError as e:
-        print(f"\n⚠️  Error: {e}")
-        print("   Sentence/clause splitting requires spaCy.")
-        print("   Install with: pip install spacy")
-        print("   Then: python -m spacy download en_core_web_sm")
+        print(f"\nError: {e}")
+        print("   Install the required G2P dependencies.")
     except Exception as e:
-        print(f"\n❌ Error processing text: {e}")
+        print(f"\nError processing text: {e}")
+    finally:
+        pipeline.close()
 
 
 if __name__ == "__main__":

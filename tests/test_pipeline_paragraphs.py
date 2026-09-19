@@ -1,13 +1,9 @@
 import pytest
 
-pytest.importorskip("pykokoro.stages.doc_parsers.ssmd")
-
 import pytest
-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
 
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
-from pykokoro.runtime.spans import slice_boundaries
 from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
 from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
 from pykokoro.stages.phoneme_processing.noop import NoopPhonemeProcessorAdapter
@@ -28,13 +24,8 @@ class DummyG2P:
         _ = trace
         out = []
         for segment in segments:
-            boundaries = slice_boundaries(
-                doc.boundary_events,
-                segment.char_start,
-                segment.char_end,
-                doc_end=len(doc.clean_text),
-            )
-            pause_before, pause_after = _resolve_pauses(boundaries, cfg.generation)
+            plan_pauses = doc.metadata.get("utterplan_pauses", {})
+            pause_before, pause_after = plan_pauses.get(segment.id, (0.0, 0.0))
             out.append(
                 PhonemeSegment(
                     id=f"{segment.id}_ph0",
@@ -56,38 +47,9 @@ class DummyG2P:
         return out
 
 
-def _resolve_pauses(boundaries, generation):
-    pause_before = 0.0
-    pause_after = 0.0
-    for boundary in boundaries:
-        if boundary.kind != "pause":
-            continue
-        duration = boundary.duration_s
-        if duration is None:
-            strength = boundary.attrs.get("strength")
-            if strength == "c":
-                duration = generation.pause_clause
-            elif strength == "s":
-                duration = generation.pause_sentence
-            elif strength == "p":
-                duration = generation.pause_paragraph
-            elif strength == "w":
-                duration = 0.15
-            elif strength == "n":
-                duration = 0.0
-        if duration is None:
-            continue
-        if boundary.pos == 0:
-            pause_before = max(pause_before, duration)
-        else:
-            pause_after = max(pause_after, duration)
-    return pause_before, pause_after
-
-
 def _build_pipeline(cfg: PipelineConfig) -> KokoroPipeline:
     return KokoroPipeline(
         cfg,
-        doc_parser=SsmdDocumentParser(),
         g2p=DummyG2P(),
         phoneme_processing=NoopPhonemeProcessorAdapter(),
         audio_generation=NoopAudioGenerationAdapter(seconds_per_segment=0.01),

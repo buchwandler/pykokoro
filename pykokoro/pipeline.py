@@ -624,10 +624,12 @@ def build_pipeline(
 
     Stage overrides (advanced)
     --------------------------
-    You may pass custom stage instances (``doc_parser``, ``g2p``,
-    ``phoneme_processing``,
-    ``audio_generation``, ``audio_postprocessing``) for testing
-    or experimentation.
+    You may pass custom ``planner``, ``g2p``, ``phoneme_processing``,
+    ``audio_generation``, and ``audio_postprocessing`` instances for testing or
+    experimentation. The planner is used by the normal ``run(text)`` path, but
+    PyKokoro derives the effective planner configuration from ``PipelineConfig`` on
+    each call. Build an explicit ``UtterancePlan`` and use ``run_plan()`` when the
+    plan configuration must differ from the pipeline configuration.
     Unspecified stages fall back to the library defaults.
 
     Examples
@@ -661,7 +663,7 @@ def build_pipeline(
             to bind ONNX stages to.
         eager: If true (and no ``backend`` is supplied), eagerly create/own
             backend and default stages.
-        doc_parser: Optional document parser stage.
+        planner: Optional UtterancePlanner used by the normal ``run(text)`` planning path.
         g2p: Optional grapheme-to-phoneme stage.
         phoneme_processing: Optional phoneme processing stage.
         audio_generation: Optional audio generation stage.

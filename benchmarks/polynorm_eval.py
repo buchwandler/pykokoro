@@ -11,14 +11,14 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
-from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
+from utterplan import UtterancePlanner
 
 from pykokoro import __version__ as pykokoro_version
 from pykokoro.constants import SUPPORTED_LANGUAGES
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline import KokoroPipeline
 from pykokoro.pipeline_config import PipelineConfig, resolve_model_defaults
+from pykokoro.planning import planner_config_from_pipeline
 from pykokoro.spacy_models import make_spacy_model_request
 from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
 from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
@@ -115,17 +115,25 @@ class PyKokoroPhonemeHarness:
         )
         self.resolved_config = resolve_model_defaults(self.config)
 
-        parser = SsmdDocumentParser() if ssmd else PlainTextDocumentParser()
+        base_planner_config = planner_config_from_pipeline(
+            self.resolved_config,
+            unit="paragraph",
+        )
+        self.planner_config = replace(
+            base_planner_config,
+            document_format="ssmd" if ssmd else "plain",
+        )
+        self.planner = UtterancePlanner(self.planner_config)
         self.pipeline = KokoroPipeline(
             self.config,
-            doc_parser=parser,
             phoneme_processing=NoopPhonemeProcessorAdapter(),
             audio_generation=NoopAudioGenerationAdapter(seconds_per_segment=0.0),
             audio_postprocessing=NoopAudioPostprocessingAdapter(),
         )
 
     def phonemize(self, text: str) -> PhonemeObservation:
-        result = self.pipeline.run(text)
+        plan = self.planner.plan(text)
+        result = self.pipeline.run_plan(plan)
         phonemes = " ".join(
             segment.phonemes for segment in result.phoneme_segments if segment.phonemes
         )
@@ -141,6 +149,7 @@ class PyKokoroPhonemeHarness:
 
     def close(self) -> None:
         self.pipeline.close()
+        self.planner.close()
 
     def __enter__(self) -> PyKokoroPhonemeHarness:
         return self

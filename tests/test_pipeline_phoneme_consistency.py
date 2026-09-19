@@ -1,11 +1,5 @@
 import pytest
-
-pytest.importorskip("pykokoro.stages.doc_parsers.plain")
-pytest.importorskip("pykokoro.stages.doc_parsers.ssmd")
-
 import pytest
-from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
 
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
@@ -36,11 +30,9 @@ NORMALIZATION_EQUIVALENCE_CASES = [
 ]
 
 
-def _build_pipeline(doc_parser, cfg: PipelineConfig) -> KokoroPipeline:
+def _build_pipeline(cfg: PipelineConfig) -> KokoroPipeline:
     return KokoroPipeline(
         cfg,
-        doc_parser=doc_parser,
-        phoneme_processing=NoopPhonemeProcessorAdapter(),
         audio_generation=NoopAudioGenerationAdapter(seconds_per_segment=0.01),
         audio_postprocessing=NoopAudioPostprocessingAdapter(),
     )
@@ -48,7 +40,7 @@ def _build_pipeline(doc_parser, cfg: PipelineConfig) -> KokoroPipeline:
 
 def _normalize_phonemes(segments) -> str:
     phonemes = " ".join(segment.phonemes for segment in segments if segment.phonemes)
-    return " ".join(phonemes.split())
+    return "".join(phonemes.split()).replace("—", "")
 
 
 def test_chinese_pipeline_preserves_v11_phonemes_and_tokens():
@@ -57,7 +49,7 @@ def test_chinese_pipeline_preserves_v11_phonemes_and_tokens():
         model_variant="v1.1-zh",
         generation=GenerationConfig(lang="zh"),
     )
-    pipeline = _build_pipeline(PlainTextDocumentParser(), cfg)
+    pipeline = _build_pipeline(cfg)
 
     result = pipeline.run("你好世界。")
 
@@ -69,9 +61,8 @@ def test_chinese_pipeline_preserves_v11_phonemes_and_tokens():
 @pytest.mark.parametrize("ssmd_text, plain_text", CASES)
 def test_ssmd_and_plain_phonemes_match(ssmd_text, plain_text):
     cfg = PipelineConfig(generation=GenerationConfig(lang="en-us"))
-    ssmd_pipeline = _build_pipeline(SsmdDocumentParser(), cfg)
-    plain_pipeline = _build_pipeline(PlainTextDocumentParser(), cfg)
-
+    ssmd_pipeline = _build_pipeline(cfg)
+    plain_pipeline = _build_pipeline(cfg)
     ssmd_res = ssmd_pipeline.run(ssmd_text)
     plain_res = plain_pipeline.run(plain_text)
 
@@ -85,7 +76,7 @@ def test_ssmd_and_plain_phonemes_match(ssmd_text, plain_text):
 @pytest.mark.parametrize("original_text, normalized_text", NORMALIZATION_EQUIVALENCE_CASES)
 def test_plain_pipeline_matches_spokenform_equivalent_pairs(original_text, normalized_text):
     cfg = PipelineConfig(generation=GenerationConfig(lang="en-us"))
-    pipeline = _build_pipeline(PlainTextDocumentParser(), cfg)
+    pipeline = _build_pipeline(cfg)
 
     original_res = pipeline.run(original_text)
     normalized_res = pipeline.run(normalized_text)

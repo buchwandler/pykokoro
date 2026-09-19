@@ -1,18 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
-from typing import Any
+from dataclasses import dataclass, field, replace
 
-from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
-from pykokoro.stages.segmentation.phrasplit import PhrasplitSentenceSegmenter
-from pykokoro.stages.text_preparation.spokenform import SpokenformTextPreparer
+from utterplan import UtterancePlanner
 
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline import KokoroPipeline
 from pykokoro.pipeline_config import PipelineConfig
 from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
+from pykokoro.planning import planner_config_from_pipeline
 from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
 from pykokoro.stages.phoneme_processing.noop import NoopPhonemeProcessorAdapter
 from pykokoro.tokenizer import TokenizerConfig
@@ -73,18 +70,21 @@ class NoOnnxFrontend:
         )
         self.locale = locale
         self.variant = selected
+        planner_config = replace(
+            planner_config_from_pipeline(config, unit="paragraph"),
+            document_format="ssmd" if ssmd else "plain",
+        )
+        self.planner = UtterancePlanner(planner_config)
         self.pipeline = KokoroPipeline(
             config,
-            doc_parser=SsmdDocumentParser() if ssmd else PlainTextDocumentParser(),
-            text_preparer=SpokenformTextPreparer(),
-            sentence_segmenter=PhrasplitSentenceSegmenter(),
             phoneme_processing=NoopPhonemeProcessorAdapter(),
             audio_generation=NoopAudioGenerationAdapter(seconds_per_segment=0.0),
             audio_postprocessing=NoopAudioPostprocessingAdapter(),
         )
 
     def run(self, text: str) -> FrontendResult:
-        result = self.pipeline.run(text)
+        plan = self.planner.plan(text)
+        result = self.pipeline.run_plan(plan)
         return FrontendResult(
             text=text,
             clean_text=result.clean_text,
@@ -99,6 +99,7 @@ class NoOnnxFrontend:
 
     def close(self) -> None:
         self.pipeline.close()
+        self.planner.close()
 
     def __enter__(self) -> NoOnnxFrontend:
         return self

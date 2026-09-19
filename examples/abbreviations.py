@@ -20,7 +20,6 @@ try:
 except ImportError:
     from _output import artifact_path
 
-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
 
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.debug.segment_invariants import check_segment_invariants
@@ -115,8 +114,6 @@ def main() -> None:
     generation = GenerationConfig(lang=args.lang, pause_mode=args.pause_mode)
     cfg = PipelineConfig(voice=args.voice, generation=generation, return_trace=True)
 
-    doc_parser = SsmdDocumentParser()
-
     noop_synth = args.noop_synth
     if args.noop_g2p and not args.noop_synth:
         print("Forcing no-op synth because no-op g2p omits tokens.")
@@ -128,7 +125,6 @@ def main() -> None:
 
     pipeline = KokoroPipeline(
         cfg,
-        doc_parser=doc_parser,
         g2p=g2p,
         audio_generation=audio_generation,
         audio_postprocessing=audio_postprocessing,

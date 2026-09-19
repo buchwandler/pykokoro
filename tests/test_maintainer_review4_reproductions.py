@@ -17,25 +17,6 @@ from pykokoro.tokenizer import TokenizerConfig
 from pykokoro.types import PhonemeSegment, Segment
 
 
-class _DocParser:
-    def parse(self, text: str, cfg: PipelineConfig, trace: Any) -> DocumentResult:
-        _ = (cfg, trace)
-        return DocumentResult(
-            clean_text=text,
-            segments=[
-                Segment(
-                    id="segment-0",
-                    text=text,
-                    char_start=0,
-                    char_end=len(text),
-                    paragraph_idx=0,
-                    sentence_idx=0,
-                    clause_idx=0,
-                )
-            ],
-        )
-
-
 class _RecordingG2P:
     def __init__(self) -> None:
         self.configs: list[PipelineConfig] = []
@@ -86,7 +67,6 @@ def _pipeline(g2p: _RecordingG2P) -> KokoroPipeline:
     stage = _PassthroughStage()
     return KokoroPipeline(
         PipelineConfig(),
-        doc_parser=_DocParser(),
         g2p=g2p,
         phoneme_processing=stage,
         audio_generation=stage,

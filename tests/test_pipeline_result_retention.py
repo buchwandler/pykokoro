@@ -5,27 +5,25 @@ import numpy as np
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline import KokoroPipeline
 from pykokoro.pipeline_config import PipelineConfig
-from pykokoro.stages.protocols import DocumentResult
-from pykokoro.types import BoundaryEvent, PhonemeSegment, Segment
+from pykokoro.types import PhonemeSegment
+from utterplan import PlannerConfig, UtterancePlanner
 
 
-class RetentionDocumentParser:
-    def parse(self, text, cfg, trace):
-        _ = cfg, trace
-        segments = [
-            Segment(id="seg0", text=text[:3], char_start=0, char_end=3),
-            Segment(id="seg1", text=text[3:], char_start=3, char_end=len(text)),
-        ]
-        return DocumentResult(
-            clean_text=text,
-            segments=segments,
-            boundary_events=[BoundaryEvent(pos=3, kind="marker", attrs={"marker": "middle"})],
-            header={
-                "title": "Retention test",
-                "voice_bindings": {"default": "af"},
-                "pause_defaults": {"sentence": 0.2},
-            },
+RETENTION_TEXT = "---\ntitle: Retention test\nvoice_bindings:\n  default: af\npause_defaults:\n  sentence: 0.2\n---\nabc.\n\n@middle\ndef."
+
+
+def _plan(text: str):
+    planner = UtterancePlanner(
+        PlannerConfig(
+            language="en-us",
+            document_format="ssmd",
+            text_preparation="identity",
         )
+    )
+    try:
+        return planner.plan(text)
+    finally:
+        planner.close()
 
 
 class RetentionG2P:
@@ -101,7 +99,6 @@ class CountingKokoro:
 def _pipeline() -> KokoroPipeline:
     return KokoroPipeline(
         PipelineConfig(voice="af", generation=GenerationConfig(lang="en-us"), return_trace=True),
-        doc_parser=RetentionDocumentParser(),
         g2p=RetentionG2P(),
     )
 
@@ -111,11 +108,11 @@ def test_default_retention_keeps_segment_audio(monkeypatch) -> None:
     monkeypatch.setattr("pykokoro.onnx_backend.Kokoro", CountingKokoro)
     pipeline = _pipeline()
     try:
-        result = pipeline.run("abcdef")
+        result = pipeline.run_plan(_plan(RETENTION_TEXT))
     finally:
         pipeline.close()
 
-    assert result.audio.size == 5
+    assert result.audio.size == 4
     assert all(segment.raw_audio is not None for segment in result.phoneme_segments)
     assert all(segment.processed_audio is not None for segment in result.phoneme_segments)
     assert result.trace is not None
@@ -127,15 +124,15 @@ def test_compact_mode_preserves_audio_markers_and_metadata(monkeypatch) -> None:
     retained_pipeline = _pipeline()
     compact_pipeline = _pipeline()
     try:
-        retained = retained_pipeline.run("abcdef", retain_segment_audio=True)
-        compact = compact_pipeline.run("abcdef", retain_segment_audio=False)
+        retained = retained_pipeline.run_plan(_plan(RETENTION_TEXT), retain_segment_audio=True)
+        compact = compact_pipeline.run_plan(_plan(RETENTION_TEXT), retain_segment_audio=False)
     finally:
         retained_pipeline.close()
         compact_pipeline.close()
 
     np.testing.assert_array_equal(retained.audio, compact.audio)
     assert retained.markers == compact.markers
-    assert compact.markers == [{"name": "middle", "char_offset": 3, "sample_offset": 2}]
+    assert compact.markers == [{"name": "middle", "char_offset": 6, "sample_offset": 2}]
     assert retained.document_metadata == compact.document_metadata
     assert len(retained.segments) == len(compact.segments) == 2
     assert len(retained.phoneme_segments) == len(compact.phoneme_segments) == 2
@@ -150,11 +147,11 @@ def test_retention_override_reuses_backend(monkeypatch) -> None:
     monkeypatch.setattr("pykokoro.onnx_backend.Kokoro", CountingKokoro)
     pipeline = _pipeline()
     try:
-        retained = pipeline.run("abcdef", retain_segment_audio=True)
-        compact = pipeline.run("abcdef", retain_segment_audio=False)
+        retained = pipeline.run_plan(_plan(RETENTION_TEXT), retain_segment_audio=True)
+        compact = pipeline.run_plan(_plan(RETENTION_TEXT), retain_segment_audio=False)
 
         assert CountingKokoro.instances == 1
-        assert retained.audio.size == compact.audio.size == 5
+        assert retained.audio.size == compact.audio.size == 4
         assert all(segment.raw_audio is None for segment in compact.phoneme_segments)
     finally:
         pipeline.close()

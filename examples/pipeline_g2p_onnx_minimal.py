@@ -20,27 +20,6 @@ except ImportError:
     from _output import artifact_path
 
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
-from pykokoro.stages.protocols import DocumentResult
-from pykokoro.types import Segment, Trace
-
-
-class PlainDocumentParser:
-    def parse(self, text: str, cfg: PipelineConfig, trace: Trace) -> DocumentResult:
-        _ = (cfg, trace)
-        return DocumentResult(
-            clean_text=text,
-            segments=[
-                Segment(
-                    id="p0_s0_c0_seg0",
-                    text=text,
-                    char_start=0,
-                    char_end=len(text),
-                    paragraph_idx=0,
-                    sentence_idx=0,
-                    clause_idx=0,
-                )
-            ],
-        )
 
 
 def main() -> None:
@@ -61,7 +40,6 @@ def main() -> None:
     )
     pipeline = KokoroPipeline(
         cfg,
-        doc_parser=PlainDocumentParser(),
     )
     result = pipeline.run(text)
     output_path = artifact_path("pipeline_g2p_onnx_minimal.wav")
@@ -79,13 +57,12 @@ def main() -> None:
             for event in trace.events:
                 print(f"- {event.stage}:{event.name} {event.ms:.2f}ms")
 
-    doc = pipeline.doc_parser.parse(text, cfg, Trace())
-    segments = doc.segments
-    print(segments)
-    phoneme_segments = pipeline.g2p.phonemize(segments, doc, cfg, Trace())
-    print(f"Text: {text}")
+    print(f"Text: {result.clean_text}")
+    print("Segments:")
+    for segment in result.segments:
+        print(segment)
     print("Phonemes:")
-    for segment in phoneme_segments:
+    for segment in result.phoneme_segments:
         print(segment.phonemes)
 
 

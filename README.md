@@ -144,9 +144,8 @@ only the cached registry and forbids network access. `refresh=True` refreshes re
 metadata only, never model or voice assets; the two options cannot be combined.
 `registry_source` and `cache_fallback` describe where the inventory came from.
 
-This API is distinct from `available_model_releases()`: discovery describes capabilities
-the installed PyKokoro runtime can use, while the release catalog describes published
-model artifacts.
+`discover_models()` describes the capabilities and inventory available to the installed
+PyKokoro runtime.
 
 ### Public pipeline configuration resolution
 
@@ -384,21 +383,29 @@ waveform before advancing the iterator because advancing releases the previous r
 The pipeline is built from composable stages so you can swap behavior without rewriting
 the whole flow:
 
-`doc_parser (SSMD structure) -> text_preparer (Spokenform) -> sentence_segmenter (Phrasplit) -> g2p (prepared mode) -> phoneme_processing -> audio_generation -> audio_postprocessing`
+`UtterancePlanner -> UtterancePlan adapter -> g2p -> phoneme_processing -> audio_generation -> audio_postprocessing`
 
-Stages can be replaced with no-op adapters when you want to disable behavior. The
-snippet below shows a small stage-injection example.
+UtterPlan owns SSMD and plain-text parsing, Spokenform preparation, phrase segmentation,
+pauses, markers, and directives. PyKokoro owns rendering after the plan is adapted.
+No-op adapters can still replace downstream renderer stages:
 
 ```python
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
-from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
+from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
+from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
 
 pipe = KokoroPipeline(
     PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_sarah"),
-    doc_parser=PlainTextDocumentParser(),
+    audio_generation=NoopAudioGenerationAdapter(seconds_per_segment=0.0),
+    audio_postprocessing=NoopAudioPostprocessingAdapter(),
 )
 res = pipe.run("First paragraph.\n\nSecond paragraph.")
 ```
+
+For an explicitly configured plan, create an `UtterancePlanner`, call
+`planner.plan(text)`, and pass the result to `pipe.run_plan(plan)`. The regular
+`run(text)` path derives the effective planner configuration from `PipelineConfig`;
+`run_plan()` is the handoff for plans compiled elsewhere.
 
 ### Migration
 
@@ -1304,18 +1311,21 @@ capability.
 
 ### Runtime capabilities versus published releases
 
-- `discover_models()` answers what this PyKokoro runtime can use.
-- `available_model_releases()` answers which compatible release artifacts are published.
-- `resolve_model_release()` selects one compatible published release.
-- `download_model_release()` explicitly downloads and verifies one selected release.
+- `discover_models()` answers what this PyKokoro runtime can use, including model IDs,
+  distributions, providers, qualities, voices, and runtime availability.
+- Lower-level published model catalog inspection belongs to OnnxVoice, for example
+  `OnnxVoice().list("kokoro")`.
+- Use `ModelCapabilities` and `ModelDiscoveryResult` for the structured PyKokoro
+  discovery result.
 
-For example, inspect published releases without downloading them:
+For example, inspect the installed capability inventory without network access:
 
 ```python
-from pykokoro import available_model_releases
+from pykokoro import discover_models
 
-for release in available_model_releases(offline=True):
-    print(release.profile, release.release_tag, release.model_version)
+result = discover_models(offline=True)
+for model in result.models:
+    print(model.model_id, model.distribution_id, model.provider, model.qualities)
 ```
 
 ### v1.0 and v1.1-zh examples

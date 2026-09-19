@@ -122,7 +122,6 @@ def _run_case(
     repeat: int,
     warmup: bool,
     cache_enabled: bool,
-    single_segment: bool = False,
     provider_options: dict[str, Any],
 ) -> None:
     text, make_config = _german_assets()
@@ -133,12 +132,7 @@ def _run_case(
         provider_options=provider_options,
         inference_cache_enabled=cache_enabled,
     )
-    if single_segment:
-        from examples.pipeline_g2p_onnx_minimal import PlainDocumentParser
-
-        pipeline = KokoroPipeline(config, doc_parser=PlainDocumentParser())
-    else:
-        pipeline = KokoroPipeline(config)
+    pipeline = KokoroPipeline(config)
     with pipeline:
         if warmup:
             pipeline.run("Warmup.")
@@ -228,9 +222,6 @@ def main() -> None:
         "--execution-mode", choices=("sequential", "parallel"), default="sequential"
     )
     parser.add_argument("--matrix", action="store_true", help="Run the Martin CPU option matrix")
-    parser.add_argument(
-        "--control", action="store_true", help="Compare normal and single-segment document paths"
-    )
     args = parser.parse_args()
     if args.repeat < 1:
         parser.error("--repeat must be at least 1")
@@ -268,25 +259,6 @@ def main() -> None:
         memory_enabled=None,
     )
     print(f"Provider/session options: {options}")
-    if args.control:
-        _run_case(
-            "normal",
-            lexicon=args.lexicon,
-            repeat=args.repeat,
-            warmup=not args.no_warmup,
-            cache_enabled=args.cache,
-            provider_options=options,
-        )
-        _run_case(
-            "single-segment",
-            lexicon=args.lexicon,
-            repeat=args.repeat,
-            warmup=not args.no_warmup,
-            cache_enabled=args.cache,
-            provider_options=options,
-            single_segment=True,
-        )
-        return
 
     _run_case(
         "Martin",

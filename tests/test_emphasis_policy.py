@@ -2,15 +2,12 @@ from __future__ import annotations
 
 import pytest
 
-pytest.importorskip("pykokoro.ssmd_parser")
-
 
 import math
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
-from pykokoro.ssmd_parser import parse_ssmd_document
 
 from pykokoro.emphasis import apply_emphasis_policy, resolve_emphasis
 from pykokoro.exceptions import CapabilityError
@@ -19,8 +16,7 @@ from pykokoro.pipeline import KokoroPipeline
 from pykokoro.pipeline_config import PipelineConfig
 from pykokoro.prosody import apply_volume
 from pykokoro.ssmd_config import SSMDRenderConfig
-from pykokoro.stages.protocols import DocumentResult
-from pykokoro.types import PhonemeSegment, Segment, Trace
+from pykokoro.types import PhonemeSegment, Trace
 
 
 def _segment(
@@ -191,28 +187,9 @@ def test_error_rejects_before_generation() -> None:
         apply_emphasis_policy([_segment("strong")], _cfg("error", scale=1.5), Trace())
 
 
-def test_ssmd_parser_emphasis_reaches_policy_metadata() -> None:
-    parsed = parse_ssmd_document('[important]{emphasis="moderate"}')
-    assert parsed.segments[0].metadata.emphasis == "moderate"
-
-    segment = _segment(parsed.segments[0].metadata.emphasis)
-    apply_emphasis_policy([segment], _cfg("approximate"), Trace())
-
-    assert segment.ssmd_metadata["prosody_volume"] == "+3dB"
-
-
 def test_invalid_mode_is_rejected_by_configuration() -> None:
     with pytest.raises(ValueError, match="emphasis_mode"):
         SSMDRenderConfig(emphasis_mode="invalid")  # type: ignore[arg-type]
-
-
-class _Doc:
-    def parse(self, text, cfg, trace):
-        _ = cfg, trace
-        return DocumentResult(
-            clean_text=text,
-            segments=[Segment("source-1", text, 0, len(text))],
-        )
 
 
 class _G2P:
@@ -250,7 +227,6 @@ def test_error_policy_runs_before_audio_generation() -> None:
             generation=GenerationConfig(lang="en-us"),
             ssmd=SSMDRenderConfig(emphasis_mode="error"),
         ),
-        doc_parser=_Doc(),
         g2p=_G2P(),
         phoneme_processing=_Processor(),
         audio_generation=generator,

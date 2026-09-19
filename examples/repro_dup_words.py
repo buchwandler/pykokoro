@@ -11,7 +11,6 @@ try:
 except ImportError:
     from _output import artifact_path
 
-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
 
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.debug.segment_invariants import check_segment_invariants
@@ -19,7 +18,7 @@ from pykokoro.generation_config import GenerationConfig
 from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
 from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
 from pykokoro.stages.g2p.noop import NoopG2PAdapter
-from pykokoro.types import Segment, Trace
+from pykokoro.types import Segment
 
 
 def parse_args() -> argparse.Namespace:
@@ -80,8 +79,6 @@ def main() -> None:
     generation = GenerationConfig(lang=args.lang, pause_mode=args.pause_mode)
     cfg = PipelineConfig(voice=args.voice, generation=generation, return_trace=True)
 
-    doc_parser = SsmdDocumentParser()
-
     noop_synth = args.noop_synth
     if args.noop_g2p and not args.noop_synth:
         print("Forcing no-op synth because no-op g2p omits tokens.")
@@ -93,7 +90,6 @@ def main() -> None:
 
     pipeline = KokoroPipeline(
         cfg,
-        doc_parser=doc_parser,
         g2p=g2p,
         audio_generation=audio_generation,
         audio_postprocessing=audio_postprocessing,
@@ -102,12 +98,10 @@ def main() -> None:
     result = pipeline.run(args.text)
     result.save_wav(args.out)
 
-    doc = doc_parser.parse(args.text, cfg, Trace())
-
-    print(f"clean_text length: {len(doc.clean_text)}")
+    print(f"clean_text length: {len(result.clean_text)}")
     print_segments(result.segments)
     print_phoneme_segments(result.phoneme_segments)
-    check_segment_invariants(result.segments, doc.clean_text)
+    check_segment_invariants(result.segments, result.clean_text)
 
     if result.trace and result.trace.warnings:
         print("Warnings:")

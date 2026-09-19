@@ -1,4 +1,19 @@
 from pykokoro.phoneme_dictionary import PhonemeDictionary
+from utterplan import PlannerConfig, UtterancePlanner
+
+
+def _plan_ssmd(text: str):
+    planner = UtterancePlanner(
+        PlannerConfig(
+            language="en-us",
+            document_format="ssmd",
+            text_preparation="identity",
+        )
+    )
+    try:
+        return planner.plan(text)
+    finally:
+        planner.close()
 
 
 def _make_dictionary(entries: dict[str, str]) -> PhonemeDictionary:
@@ -16,13 +31,11 @@ def test_apply_emits_unescaped_braces():
 
 
 def test_apply_round_trips_through_ssmd_parser():
-    from pykokoro.ssmd_parser import parse_ssmd_to_segments
-
     dictionary = _make_dictionary({"Hello": "heh-loh"})
-    initial, segments = parse_ssmd_to_segments(dictionary.apply("Hello"))
-
-    assert initial == 0.0
-    assert segments[0].metadata.phonemes == "heh-loh"
+    plan = _plan_ssmd(dictionary.apply("Hello"))
+    pronunciation = plan.segments[0].directives.pronunciation
+    assert pronunciation is not None
+    assert pronunciation.phonemes == "heh-loh"
 
 
 def test_apply_case_insensitive_preserves_casing():
@@ -54,12 +67,9 @@ def test_apply_punctuation_and_hyphenated_phrases():
 
 
 def test_apply_escapes_ssmd_attribute_characters():
-    from pykokoro.ssmd_parser import parse_ssmd_to_segments
-
     phoneme = 'a\\b"c{d}'
     dictionary = _make_dictionary({"Hello": phoneme})
-
-    rendered = dictionary.apply("Hello")
-    _initial, segments = parse_ssmd_to_segments(rendered)
-
-    assert segments[0].metadata.phonemes == phoneme
+    plan = _plan_ssmd(dictionary.apply("Hello"))
+    pronunciation = plan.segments[0].directives.pronunciation
+    assert pronunciation is not None
+    assert pronunciation.phonemes == phoneme

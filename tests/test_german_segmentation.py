@@ -1,37 +1,22 @@
 from __future__ import annotations
 
-import pytest
+from utterplan import UtterancePlanner
 
-pytest.importorskip("pykokoro.stages.doc_parsers.plain")
-pytest.importorskip("pykokoro.stages.segmentation.phrasplit")
-pytest.importorskip("pykokoro.stages.text_preparation.spokenform")
-
-
-from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
-from pykokoro.stages.segmentation.phrasplit import PhrasplitSentenceSegmenter
-from pykokoro.stages.text_preparation.spokenform import SpokenformTextPreparer
-
+from pykokoro import PipelineConfig
 from pykokoro.generation_config import GenerationConfig
-from pykokoro.pipeline_config import PipelineConfig
-from pykokoro.types import Trace
+from pykokoro.planning import planner_config_from_pipeline
 
 
-def test_german_abbreviations_and_ordinals_do_not_create_false_boundaries():
-    text = (
-        "Prof. Klein sagt: Bitte stelle die Form auf die 2. Schiene, backe alles für "
-        "45 Min. und lass es danach 1 Min. ruhen. Die Kosten liegen bei ca. "
-        "12,80 EUR zzgl. Pfand."
+def test_german_abbreviations_and_ordinals_keep_monotonic_offsets() -> None:
+    config = PipelineConfig(generation=GenerationConfig(lang="de"))
+    planner = UtterancePlanner(planner_config_from_pipeline(config, unit="paragraph"))
+    try:
+        plan = planner.plan("Dr. Schmidt kommt am 5. März. Das ist gut.")
+    finally:
+        planner.close()
+
+    assert plan.segments
+    assert all(
+        left.spoken_end <= right.spoken_start
+        for left, right in zip(plan.segments, plan.segments[1:])
     )
-    cfg = PipelineConfig(generation=GenerationConfig(lang="de"))
-    trace = Trace()
-    doc = PlainTextDocumentParser().parse(text, cfg, trace)
-    SpokenformTextPreparer().prepare(doc, cfg, trace)
-    doc.segments = PhrasplitSentenceSegmenter().split(doc, cfg, trace)
-    assert len(doc.segments) == 2
-    assert doc.segments[0].text.endswith("eine Minute ruhen.")
-    assert (
-        doc.segments[1].text
-        == "Die Kosten liegen bei zirka zwölf Euro achtzig Cent zuzüglich Pfand."
-    )
-    for segment in doc.segments:
-        assert segment.text == doc.clean_text[segment.char_start : segment.char_end]

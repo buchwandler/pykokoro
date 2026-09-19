@@ -31,11 +31,8 @@ try:
 except ImportError:
     from _output import artifact_path
 
-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
 
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
-from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
-from pykokoro.types import Trace
 
 # Dialogue with mix of very short and normal sentences
 DIALOGUE_TEXT = """
@@ -147,15 +144,11 @@ def main():
 
     # Analyze the text to show which segments are short
     print_separator("Analyzing Text Segments")
-    trace = Trace()
-    doc = SsmdDocumentParser().parse(DIALOGUE_TEXT, cfg, trace)
-    segments = KokoroG2PAdapter().phonemize(doc.segments, doc, cfg, trace)
-    stats = analyze_segments(segments, "Segment Analysis (pause_mode='tts')")
-
-    # Generate audio with automatic short sentence handling
-    print_separator("Generating Audio")
+    print_separator("Generating Audio and Analyzing Text Segments")
     print("\nShort segments will automatically use short-sentence handling...")
     result = pipe.run(DIALOGUE_TEXT)
+    segments = result.phoneme_segments
+    stats = analyze_segments(segments, "Segment Analysis (pause_mode='tts')")
     samples = result.audio
     sample_rate = result.sample_rate
 

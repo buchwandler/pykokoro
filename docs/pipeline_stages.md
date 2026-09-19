@@ -1,18 +1,20 @@
 # Pipeline Usage and Stages
 
-`KokoroPipeline` is the configurable engine behind the high-level `Kokoro` class. Use it
-when you want to swap parsing/segmentation stages, run custom G2P logic, or control
-model loading at a lower level.
+`KokoroPipeline` is the configurable renderer behind the high-level `Kokoro` class. Use
+it to swap G2P, phoneme processing, audio generation, or audio postprocessing stages, or
+to render an `UtterancePlan` compiled by UtterPlan.
 
 ## Pipeline overview
 
 The default pipeline wiring is:
 
-`doc_parser -> g2p -> phoneme_processing -> audio_generation -> audio_postprocessing`
+`UtterancePlanner -> UtterancePlan adapter -> g2p -> phoneme_processing -> audio_generation -> audio_postprocessing`
 
-Default stage classes:
+UtterPlan owns document parsing, Spokenform preparation, phrase segmentation, pauses,
+markers, and directives. PyKokoro owns rendering after plan adaptation.
 
-- `SsmdDocumentParser`
+Default renderer stage classes:
+
 - `KokoroG2PAdapter`
 - `OnnxPhonemeProcessorAdapter`
 - `OnnxAudioGenerationAdapter`
@@ -157,45 +159,36 @@ result = pipeline.run("Quick test", model_quality="q8")
 
 ## Stage behavior
 
-### SSMD document parser
+### UtterPlan frontend
 
-`SsmdDocumentParser` uses the SSMD 0.8 public front-matter parser and body-only
-segmentation to turn SSMD markup into clean text plus metadata spans, pause boundaries,
-and sentence/paragraph segments. Explicit break durations retain their processor
-mapping; implicit document defaults are reduced before G2P.
+`UtterancePlanner` is the planning frontend. It handles SSMD and plain-text parsing,
+Spokenform preparation, phrase segmentation, markers, pauses, and directives. The
+resulting immutable `UtterancePlan` is adapted into PyKokoro's renderer-side
+`DocumentResult` and segments before G2P runs.
 
-Supported SSMD features include:
+For normal applications, use `KokoroPipeline.run(text)`. For a precompiled plan, call
+`KokoroPipeline.run_plan(plan)`. Build an explicit planner when a caller needs a
+different planning configuration:
 
-- Break markers: `...c`, `...s`, `...p`, `...500ms`
-- Language overrides: `[Bonjour]{lang="fr"}`
-- IPA phoneme overrides: `[tomato]{ipa="təˈmeɪtoʊ"}`
-- Prosody annotations: `[text]{rate="fast" pitch="high" volume="loud"}`
-- Inline voice annotations and `<div voice="af_sarah">` directives
+```python
+from dataclasses import replace
+from utterplan import UtterancePlanner
+from pykokoro import KokoroPipeline
+from pykokoro.planning import planner_config_from_pipeline
 
-The parser attaches SSMD metadata to annotation spans so later stages can select
-per-segment language, voices, phonemes, and prosody. Sentence-level `<div>` language,
-voice, and prosody directives are inherited by contained segments, while inline
-annotations override individual fields.
+planner_config = replace(
+    planner_config_from_pipeline(config, unit="paragraph"),
+    document_format="plain",  # or "ssmd"
+)
+planner = UtterancePlanner(planner_config)
+try:
+    plan = planner.plan(text)
+    result = pipeline.run_plan(plan)
+finally:
+    planner.close()
+```
 
-### Plain text sentence splitting
-
-`PlainTextDocumentParser` uses Phrasplit 0.3.8's offset-preserving detailed split API
-for sentence splitting. In automatic mode, the prepared linguistic analysis is also
-passed to Phrasplit's high-confidence clausal-comma detector; list commas and
-shared-subject continuations are not treated as deterministic clause pauses. The
-returned diagnostics come from the same operation that produced the segments, so
-sentence-model metadata does not require a separate model-resolution pass. When
-`phrasplit` is unavailable, it falls back to a single segment. PhraseSplit may resolve
-once per hard range; PyKokoro does not claim one resolution for the whole document. The
-language model is derived from `generation.lang` using spaCy package naming rules (for
-example `en_core_web_sm` for English). Split boundaries are forced at SSMD pause
-boundaries and at spans that contain phoneme overrides so those overrides are kept
-intact. Set `PYKOKORO_DEBUG_SEGMENTS=1` to log segment offsets.
-
-The prepared-text flow is: prepared analysis -> sentence segmentation -> Phrasplit
-clausal-comma detection -> structural refinement -> deterministic boundary event -> G2P
-pause propagation. Detection reuses the existing prepared document and does not run
-spaCy again.
+Detailed parser and segmenter behavior belongs to UtterPlan documentation.
 
 ### Kokoro G2P adapter
 
@@ -252,10 +245,9 @@ script demonstrates multiple wiring styles:
 Example with explicit stage wiring:
 
 ```python
-from pykokoro import GenerationConfig, PipelineConfig, build_pipeline
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
 from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
 from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
 from pykokoro.stages.phoneme_processing.noop import NoopPhonemeProcessorAdapter
 
@@ -263,14 +255,14 @@ cfg = PipelineConfig(
     voice="af_heart",
     generation=GenerationConfig(lang="en-us"),
 )
-pipeline = build_pipeline(
-    config=cfg,
-    doc_parser=SsmdDocumentParser(),
+pipeline = KokoroPipeline(
+    cfg,
     g2p=KokoroG2PAdapter(),
     phoneme_processing=NoopPhonemeProcessorAdapter(),
     audio_generation=NoopAudioGenerationAdapter(),
     audio_postprocessing=NoopAudioPostprocessingAdapter(),
 )
+result = pipeline.run("Hello from the renderer.")
 ```
 
 ### SSMD 0.8 document controls

@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-pytest.importorskip("pykokoro.stages.doc_parsers.plain")
-
 
 import json
 import math

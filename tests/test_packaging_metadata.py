@@ -42,8 +42,8 @@ def test_companion_dependency_floors_match_current_integration_contract() -> Non
     ]
 
     assert "kokorog2p[espeak,en]>=0.9.9,<1.0" in dependencies
+    assert "utterplan>=0.1.2,<0.2" in dependencies
     assert "lexphon>=0.2.3,<0.3" in dependencies
-    assert "phrasplit>=0.3.9,<0.4" in dependencies
 
 
 def test_test_requirements_keep_kokorog2p_in_supported_window() -> None:
@@ -78,12 +78,14 @@ def test_goruut_extra_uses_companion_provider_contract() -> None:
     assert optional["goruut"] == ["kokorog2p[goruut]>=0.9.8,<1.0"]
 
 
-def test_ssmd_dependency_targets_current_contract() -> None:
+def test_planning_dependency_targets_current_contract() -> None:
     dependencies = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
         "dependencies"
     ]
-    assert "ssmd>=0.8.7,<0.9" in dependencies
-    assert "spokenform>=0.4.3,<0.5" in dependencies
+    assert "utterplan>=0.1.2,<0.2" in dependencies
+    assert not any(requirement.startswith("phrasplit") for requirement in dependencies)
+    assert not any(requirement.startswith("ssmd") for requirement in dependencies)
+    assert not any(requirement.startswith("spokenform") for requirement in dependencies)
 
 
 def test_audiosig_is_the_only_declared_dsp_backend() -> None:
@@ -181,9 +183,7 @@ def test_lower_bound_workflow_pins_match_project_floors() -> None:
     expected_packages = {
         "kokorog2p",
         "lexphon",
-        "phrasplit",
-        "ssmd",
-        "spokenform",
+        "utterplan",
         "audiosig",
     }
 
