@@ -18,5 +18,5 @@ def test_german_abbreviations_and_ordinals_keep_monotonic_offsets() -> None:
     assert plan.segments
     assert all(
         left.spoken_end <= right.spoken_start
-        for left, right in zip(plan.segments, plan.segments[1:], strict=True)
+        for left, right in zip(plan.segments, plan.segments[1:], strict=False)
     )
