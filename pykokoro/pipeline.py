@@ -1911,9 +1911,10 @@ class KokoroPipeline:
             "segment_ids": tuple(segment.id for segment in plan.segments),
             "unit_ids": tuple(unit.id for unit in plan.units),
         }
-        existing_provenance = dict(job.provenance) if job.provenance else {}
-        existing_provenance["utterplan"] = plan_provenance
-        job = _dc_replace(job, provenance=existing_provenance)
+        metadata_field = "provenance" if hasattr(job, "provenance") else "source"
+        existing_metadata = dict(getattr(job, metadata_field) or {})
+        existing_metadata["utterplan"] = plan_provenance
+        job = _dc_replace(job, **{metadata_field: existing_metadata})
         # Clean up segment audio
         for segment in prepared.phoneme_segments:
             segment.raw_audio = None
