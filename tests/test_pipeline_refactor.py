@@ -6,8 +6,8 @@ from utterplan import UtterancePlanner
 
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
-from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
 from pykokoro.planning import planner_config_from_pipeline
+from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
 from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
 from pykokoro.stages.g2p.noop import NoopG2PAdapter
 from pykokoro.stages.phoneme_processing.noop import NoopPhonemeProcessorAdapter

@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
-
 import math
 from types import SimpleNamespace
 

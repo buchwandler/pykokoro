@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import numpy as np
+from utterplan import PlannerConfig, UtterancePlanner
 
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline import KokoroPipeline
 from pykokoro.pipeline_config import PipelineConfig
 from pykokoro.types import PhonemeSegment
-from utterplan import PlannerConfig, UtterancePlanner
-
 
 RETENTION_TEXT = "---\ntitle: Retention test\nvoice_bindings:\n  default: af\npause_defaults:\n  sentence: 0.2\n---\nabc.\n\n@middle\ndef."
 

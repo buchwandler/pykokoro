@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 from benchmarks._short_sentence_reporting import (
     aggregate_short_sentence_rows,
     build_short_sentence_summary,

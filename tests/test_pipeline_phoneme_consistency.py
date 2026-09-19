@@ -1,11 +1,9 @@
 import pytest
-import pytest
 
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
 from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
-from pykokoro.stages.phoneme_processing.noop import NoopPhonemeProcessorAdapter
 
 CASES = [
     (

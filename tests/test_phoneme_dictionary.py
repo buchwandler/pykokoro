@@ -1,5 +1,6 @@
-from pykokoro.phoneme_dictionary import PhonemeDictionary
 from utterplan import PlannerConfig, UtterancePlanner
+
+from pykokoro.phoneme_dictionary import PhonemeDictionary
 
 
 def _plan_ssmd(text: str):

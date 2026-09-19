@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-
 import logging
-
 
 from pykokoro import KokoroPipeline, PipelineConfig
 from pykokoro.generation_config import GenerationConfig

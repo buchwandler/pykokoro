@@ -2,14 +2,15 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
+from typing import Any
 
 from utterplan import UtterancePlanner
 
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline import KokoroPipeline
 from pykokoro.pipeline_config import PipelineConfig
-from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
 from pykokoro.planning import planner_config_from_pipeline
+from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
 from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
 from pykokoro.stages.phoneme_processing.noop import NoopPhonemeProcessorAdapter
 from pykokoro.tokenizer import TokenizerConfig

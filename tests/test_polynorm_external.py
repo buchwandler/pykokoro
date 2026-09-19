@@ -7,7 +7,6 @@ pytest.importorskip("benchmarks.polynorm_eval")
 
 from pathlib import Path
 
-
 from benchmarks.polynorm_data import PolyNormDataError, load_cases, locale_cache_path
 from benchmarks.polynorm_phoneme import main as polynorm_main
 

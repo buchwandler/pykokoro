@@ -39,5 +39,5 @@ def test_clausal_planning_has_no_overlapping_segments() -> None:
     plan = _plan("The cat sat, and the dog slept.")
     assert all(
         left.spoken_end <= right.spoken_start
-        for left, right in zip(plan.segments, plan.segments[1:])
+        for left, right in zip(plan.segments, plan.segments[1:], strict=True)
     )

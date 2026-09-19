@@ -412,7 +412,7 @@ def main() -> None:
     print(f"clean_text length: {len(result.clean_text)}")
     print_segments(result.segments)
     print_phoneme_segments(result.phoneme_segments)
-    check_segment_invariants(result.segments, doc.clean_text)
+    check_segment_invariants(result.segments, result.clean_text)
 
     if result.trace and result.trace.warnings:
         print("Warnings:")

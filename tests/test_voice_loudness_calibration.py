@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import pytest
-
-
 import json
 import math
 from pathlib import Path
 
+import pytest
 
 from benchmarks.voice_loudness_calibration import (
     PRODUCTION_CALIBRATION_PATH,

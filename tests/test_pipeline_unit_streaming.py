@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import pytest
-
-
 from dataclasses import replace
 
 import numpy as np
+import pytest
 from audiocompose import Composer
 from audiosig import measure_loudness
 
