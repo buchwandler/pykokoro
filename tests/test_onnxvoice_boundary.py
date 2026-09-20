@@ -94,6 +94,48 @@ def test_resolve_maps_installation_metadata(
     assert resolved.config_path == config
 
 
+@pytest.mark.parametrize(
+    ("metadata", "installation", "runtime_support", "expected"),
+    [
+        ({}, SimpleNamespace(), None, None),
+        ({"runtime": {"timings_output": "durations"}}, SimpleNamespace(), None, True),
+        (
+            {"onnx_contract": {"timing": {"output": "durations"}}},
+            SimpleNamespace(),
+            None,
+            True,
+        ),
+        ({}, SimpleNamespace(timing_output="durations"), None, True),
+        ({}, SimpleNamespace(), False, False),
+    ],
+)
+def test_runtime_adapter_preserves_tri_state_timing_support(
+    metadata: dict[str, object],
+    installation: object,
+    runtime_support: bool | None,
+    expected: bool | None,
+    tmp_path: Path,
+) -> None:
+    runtime = SimpleNamespace()
+    if runtime_support is not None:
+        runtime.supports_timings = runtime_support
+    resolved = boundary.ResolvedKokoroModel(
+        ref="kokoro:v1.0",
+        model_id="v1.0",
+        quality="fp32",
+        distribution="github-model-files-v1.0-timestamped-r4",
+        storage_id="kokoro--test",
+        installation=installation,
+        metadata=metadata,
+        sample_rate=24_000,
+        model_paths=(tmp_path / "model.onnx",),
+        voices_path=None,
+        config_path=None,
+    )
+    adapter = boundary.KokoroRuntimeAdapter(runtime, resolved)
+    assert adapter.supports_timings is expected
+
+
 def test_open_local_forwards_split_artifacts_and_runtime_options(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

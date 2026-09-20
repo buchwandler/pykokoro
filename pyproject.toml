@@ -28,7 +28,7 @@ dependencies = [
     "numpy",
     "audiosig>=0.1.4,<0.2",
     "platformdirs",
-    "onnxvoice>=0.1,<0.2",
+    "onnxvoice>=0.1.7,<0.2",
     "audiocompose>=0.1,<0.2",
     "chardet",
     "charset-normalizer",
@@ -68,11 +68,11 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.0.0",
 ]
-cpu = ["onnxvoice[cpu]>=0.1,<0.2"]
-gpu = ["onnxvoice[gpu]>=0.1,<0.2"]
-openvino = ["onnxvoice[openvino]>=0.1,<0.2"]
-directml = ["onnxvoice[directml]>=0.1,<0.2"]
-coreml = ["onnxvoice[coreml]>=0.1,<0.2"]
+cpu = ["onnxvoice[cpu]>=0.1.7,<0.2"]
+gpu = ["onnxvoice[gpu]>=0.1.7,<0.2"]
+openvino = ["onnxvoice[openvino]>=0.1.7,<0.2"]
+directml = ["onnxvoice[directml]>=0.1.7,<0.2"]
+coreml = ["onnxvoice[coreml]>=0.1.7,<0.2"]
 goruut = [
     "kokorog2p[goruut]>=0.9.8,<1.0",
 ]

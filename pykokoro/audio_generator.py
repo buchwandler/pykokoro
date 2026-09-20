@@ -319,7 +319,12 @@ class AudioGenerator:
         )
         self._inference_cache_bytes = 0
         self._inference_call_number = 0
-        self._has_timestamp_output = bool(getattr(runtime, "supports_timings", False))
+        runtime_support = getattr(runtime, "supports_timings", None)
+        self._timestamp_support_declared = isinstance(runtime_support, bool)
+        self._timestamp_support: bool | None = (
+            runtime_support if self._timestamp_support_declared else None
+        )
+        self._timestamp_support_observed = False
         self._reported_missing_timestamp_output = False
 
     def _tokenize_phonemes(self, phonemes: str) -> list[int]:
@@ -505,6 +510,12 @@ class AudioGenerator:
             pred_dur = None if raw_timings is None else np.asarray(raw_timings).reshape(-1)
             self._put_cached_inference(cache_key, audio, pred_dur)
             cache_hit = False
+        if pred_dur is not None:
+            self._timestamp_support = True
+            self._timestamp_support_observed = True
+        elif self._timestamp_support is None:
+            self._timestamp_support = False
+            self._timestamp_support_observed = True
         self._record_inference(
             trace,
             effective_phonemes=effective_phonemes,
@@ -518,13 +529,21 @@ class AudioGenerator:
         )
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
-                "inference.finish cache_hit=%s attempt=%s phonemes=%d tokens=%d samples=%d runtime_ms=%.3f",
+                "inference.finish cache_hit=%s attempt=%s phonemes=%d tokens=%d samples=%d runtime_ms=%.3f timing_values=%d timestamp_support=%s",
                 cache_hit,
                 attempt_kind,
                 len(effective_phonemes),
                 len(effective_tokens),
                 int(np.asarray(audio).size),
                 runtime_s * 1000.0,
+                0 if pred_dur is None else int(np.asarray(pred_dur).reshape(-1).size),
+                (
+                    "observed"
+                    if self._timestamp_support_observed
+                    else "declared"
+                    if self._timestamp_support_declared
+                    else "unknown"
+                ),
             )
         if trace is not None:
             style_values = np.asarray(voice_style_indexed, dtype=np.float32)
@@ -774,7 +793,7 @@ class AudioGenerator:
         if (
             effective_config is not None
             and effective_config.enabled
-            and not self._has_timestamp_output
+            and self._timestamp_support is False
             and self._uses_phrase_short_sentence_mode(effective_config)
         ):
             message = (
@@ -1111,6 +1130,12 @@ class AudioGenerator:
             pred_duration_count=short_sentence_metadata["pred_duration_count"],
         )
         if pred_dur is None:
+            if self._timestamp_support is False and not self._reported_missing_timestamp_output:
+                logger.warning(
+                    "ONNX inference returned no timing output; phrase-based short-sentence "
+                    "extraction requires timings. Falling back to wrap mode for this segment."
+                )
+                self._reported_missing_timestamp_output = True
             short_sentence_metadata.setdefault("timing_failure_reason", "missing-duration-output")
             short_sentence_metadata.setdefault("failure_stage", "timing-token-build")
             short_sentence_metadata.setdefault("cut_failure_reason", "missing-duration-output")

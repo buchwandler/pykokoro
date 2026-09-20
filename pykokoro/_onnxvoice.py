@@ -456,6 +456,64 @@ def close_runtime(runtime: Any | None) -> None:
             close()
 
 
+def _declared_timing_support(
+    resolved: ResolvedKokoroModel,
+    runtime: Any,
+) -> bool | None:
+    """Resolve declared timing support without conflating unknown with false."""
+    runtime_value = getattr(runtime, "supports_timings", None)
+    if isinstance(runtime_value, bool):
+        return runtime_value
+
+    installation = resolved.installation
+    timing_output = getattr(installation, "timing_output", None)
+    if isinstance(timing_output, bool):
+        return timing_output
+    if isinstance(timing_output, str) and timing_output.strip():
+        return True
+
+    metadata = resolved.metadata
+    runtime_metadata = metadata.get("runtime")
+    if isinstance(runtime_metadata, Mapping):
+        value = runtime_metadata.get("timings_output")
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str) and value.strip():
+            return True
+
+    onnx_contract = metadata.get("onnx_contract")
+    if isinstance(onnx_contract, Mapping):
+        timing = onnx_contract.get("timing")
+        if isinstance(timing, Mapping):
+            value = timing.get("output")
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str) and value.strip():
+                return True
+
+    return None
+
+
+def _timing_output_name(resolved: ResolvedKokoroModel) -> str | None:
+    """Return the declared timing output name for diagnostics, if available."""
+    installation_output = getattr(resolved.installation, "timing_output", None)
+    if isinstance(installation_output, str) and installation_output.strip():
+        return installation_output
+    runtime_metadata = resolved.metadata.get("runtime")
+    if isinstance(runtime_metadata, Mapping):
+        value = runtime_metadata.get("timings_output")
+        if isinstance(value, str) and value.strip():
+            return value
+    onnx_contract = resolved.metadata.get("onnx_contract")
+    if isinstance(onnx_contract, Mapping):
+        timing = onnx_contract.get("timing")
+        if isinstance(timing, Mapping):
+            value = timing.get("output")
+            if isinstance(value, str) and value.strip():
+                return value
+    return None
+
+
 class KokoroRuntimeAdapter:
     """Adapt an OnnxVoice Kokoro adapter to PyKokoro's runtime protocol."""
 
@@ -463,9 +521,11 @@ class KokoroRuntimeAdapter:
         self._runtime = runtime
         self.resolved = resolved
         self.sample_rate = resolved.sample_rate
-        runtime_metadata = resolved.metadata.get("runtime")
-        self.supports_timings = bool(
-            isinstance(runtime_metadata, Mapping) and runtime_metadata.get("timings_output")
+        self.supports_timings = _declared_timing_support(resolved, runtime)
+        logger.debug(
+            "Kokoro runtime created timestamp_support=%s timing_output=%s",
+            "declared" if self.supports_timings is not None else "unknown",
+            _timing_output_name(resolved),
         )
         # Managed installations use storage_id for cache identity.
         # Local unmanaged models use path-sensitive identity.

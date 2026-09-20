@@ -59,6 +59,41 @@ def test_inference_logging_reports_counts_cache_and_runtime_without_payload(capl
         assert source not in message
 
 
+class _UndeclaredTimestampSession:
+    sample_rate = 24_000
+    cache_identity = "undeclared-timestamp"
+
+    def infer(self, token_ids, *, style, speed, seed=None):
+        _ = token_ids, style, speed, seed
+        return SimpleNamespace(
+            audio=np.zeros(4, dtype=np.float32),
+            timings=np.ones(4, dtype=np.float32),
+        )
+
+
+def test_unknown_timestamp_logging_reports_observed_count_without_payload(caplog) -> None:
+    generator = AudioGenerator(
+        session=cast(Any, _UndeclaredTimestampSession()),
+        tokenizer=cast(Any, _Tokenizer()),
+        short_sentence_config=ShortSentenceConfig(resolve_mode="phrase"),
+    )
+    caplog.set_level(logging.DEBUG, logger="pykokoro.audio_generator")
+
+    config = generator._resolve_short_sentence_config(None)
+    assert config is not None
+    assert config.resolve_mode == "phrase"
+    generator._run_onnx("abc", np.zeros((16, 256), dtype=np.float32), 1.0)
+
+    messages = [record.message for record in caplog.records if "inference.finish" in record.message]
+    assert len(messages) == 1
+    assert "timing_values=4" in messages[0]
+    assert "timestamp_support=observed" in messages[0]
+    assert "timings=[" not in messages[0]
+    assert not any(
+        "Loaded ONNX model has no timestamp output" in record.message for record in caplog.records
+    )
+
+
 def test_implicit_short_sentence_default_uses_wrap_without_warning(caplog, capsys):
     generator = AudioGenerator(
         session=cast(Any, _Session()),

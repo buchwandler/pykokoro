@@ -57,6 +57,98 @@ class TimestampSession(DummySession):
         )
 
 
+class UndeclaredTimestampSession:
+    sample_rate = 24_000
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def infer(self, token_ids, *, style, speed, seed=None):
+        _ = token_ids, style, speed, seed
+        self.calls += 1
+        return SimpleNamespace(
+            audio=np.zeros(8, dtype=np.float32),
+            timings=np.arange(4, dtype=np.float32),
+        )
+
+
+class UndeclaredMissingTimingSession:
+    sample_rate = 24_000
+
+    def infer(self, token_ids, *, style, speed, seed=None):
+        _ = token_ids, style, speed, seed
+        return SimpleNamespace(audio=np.zeros(8, dtype=np.float32), timings=None)
+
+
+def _phrase_short_sentence_config() -> ShortSentenceConfig:
+    return ShortSentenceConfig(
+        resolve_modes={"phrase": PhraseResolveMode(neutral_phrase="Say {segment}.")},
+        resolve_mode="phrase",
+    )
+
+
+def test_unknown_timing_support_learns_from_inference_and_cache() -> None:
+    session = UndeclaredTimestampSession()
+    generator = AudioGenerator(
+        session=cast(Any, session),
+        tokenizer=cast(Any, DummyTokenizer(factor=1)),
+        short_sentence_config=_phrase_short_sentence_config(),
+    )
+    config = generator._resolve_short_sentence_config(None)
+    assert config is not None
+    assert config.resolve_mode == "phrase"
+
+    style = np.zeros((16, 256), dtype=np.float32)
+    first_audio, first_timings = generator._run_onnx("abc", style, 1.0)
+    second_audio, second_timings = generator._run_onnx("abc", style, 1.0)
+
+    assert session.calls == 1
+    assert first_timings is not None
+    assert second_timings is not None
+    assert np.array_equal(first_audio, second_audio)
+    assert np.array_equal(first_timings, second_timings)
+    assert generator._timestamp_support is True
+
+
+def test_unknown_timing_support_observes_missing_output_and_falls_back(caplog) -> None:
+    generator = AudioGenerator(
+        session=cast(Any, UndeclaredMissingTimingSession()),
+        tokenizer=cast(Any, DummyTokenizer(factor=1)),
+        short_sentence_config=_phrase_short_sentence_config(),
+    )
+    config = generator._resolve_short_sentence_config(None)
+    assert config is not None
+    assert config.resolve_mode == "phrase"
+
+    _, timings = generator._run_onnx("abc", np.zeros((16, 256), dtype=np.float32), 1.0)
+    assert timings is None
+    assert generator._timestamp_support is False
+
+    segment = PhonemeSegment(
+        id="seg_missing",
+        segment_id="seg_missing",
+        phoneme_id=0,
+        text="Go",
+        phonemes="abc",
+        tokens=[1, 2, 3],
+        ssmd_metadata={
+            SHORT_SENTENCE_META_KEY: {
+                "timing_tokens": [],
+                "timing_alignment_complete": True,
+                "generated_token_count": 0,
+            }
+        },
+    )
+    generator._log_short_sentence_timestamps(segment, None)
+    metadata = segment.ssmd_metadata[SHORT_SENTENCE_META_KEY]
+    assert metadata["cut_failure_reason"] == "missing-duration-output"
+    assert "ONNX inference returned no timing output" in caplog.text
+
+    later = generator._resolve_short_sentence_config(None)
+    assert later is not None
+    assert later.resolve_mode == "wrap"
+
+
 def test_split_phonemes_uses_token_count():
     tokenizer = DummyTokenizer(factor=300)
     generator = AudioGenerator(
