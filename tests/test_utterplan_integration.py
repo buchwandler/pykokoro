@@ -9,6 +9,7 @@ from pykokoro.exceptions import PlanConfigurationConflict, PlanConsumptionError
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.pipeline import KokoroPipeline
 from pykokoro.pipeline_config import PipelineConfig
+from pykokoro.ssmd_config import SSMDRenderConfig, resolve_document_voice
 from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
 from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
 from pykokoro.stages.g2p.noop import NoopG2PAdapter
@@ -25,6 +26,67 @@ def pipeline() -> KokoroPipeline:
         audio_postprocessing=NoopAudioPostprocessingAdapter(),
     )
 
+
+def test_run_plan_preserves_logical_voice_but_renders_resolved_api_voice() -> None:
+    plan = UtterancePlanner(
+        PlannerConfig(language="en-us", text_preparation="identity", document_format="ssmd")
+    ).plan('[Hello.]{voice="narrator"}')
+    pipeline = KokoroPipeline(
+        PipelineConfig(
+            voice="af_sarah",
+            generation=GenerationConfig(lang="en-us"),
+            ssmd=SSMDRenderConfig(
+                voice_bindings={"kokoro": {"narrator": "af_sarah"}}
+            ),
+        ),
+        phoneme_processing=NoopPhonemeProcessorAdapter(),
+        audio_generation=NoopAudioGenerationAdapter(),
+        audio_postprocessing=NoopAudioPostprocessingAdapter(),
+    )
+    try:
+        result = pipeline.run_plan(plan)
+    finally:
+        pipeline.close()
+
+    assert result.phoneme_segments
+    voiced_segments = [
+        segment
+        for segment in result.phoneme_segments
+        if segment.ssmd_metadata
+        and segment.ssmd_metadata.get("voice_reference") == "narrator"
+    ]
+    assert voiced_segments
+    assert {segment.ssmd_metadata["voice_reference"] for segment in voiced_segments} == {"narrator"}
+    assert {segment.ssmd_metadata["voice_source"] for segment in voiced_segments} == {"api"}
+    assert {segment.voice_name for segment in voiced_segments} == {"af_sarah"}
+
+
+@pytest.mark.parametrize(
+    ("reference", "api_bindings", "header_bindings", "target", "source"),
+    [
+        ("narrator", {"narrator": "af_sarah"}, {"narrator": "af_heart"}, "af_sarah", "api"),
+        ("host", {}, {"host": "af_bella"}, "af_bella", "header"),
+        ("af_sarah", {}, {}, "af_sarah", "direct"),
+    ],
+    ids=["api", "header", "direct"],
+)
+def test_resolve_document_voice_precedence(
+    reference: str,
+    api_bindings: dict[str, str],
+    header_bindings: dict[str, str],
+    target: str,
+    source: str,
+) -> None:
+    resolution = resolve_document_voice(
+        reference,
+        provider="kokoro",
+        api_bindings={"kokoro": api_bindings},
+        header_bindings={"kokoro": header_bindings},
+    )
+
+    assert resolution.reference == reference
+    assert resolution.target == target
+    assert resolution.source == source
 
 def test_run_plan_does_not_mutate_plan(pipeline: KokoroPipeline) -> None:
     plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("Hello world.")

@@ -209,6 +209,8 @@ class KokoroG2PAdapter(G2PAdapter):
             ssmd_metadata: dict[str, str] = {}
             if isinstance(plan_directives, dict):
                 self._apply_span_metadata(plan_directives, ssmd_metadata)
+            for span in span_list:
+                self._apply_span_metadata(span.attrs, ssmd_metadata)
             header_bindings = doc.header.get("voice_bindings", {})
             if not isinstance(header_bindings, Mapping):
                 header_bindings = {}
@@ -223,8 +225,6 @@ class KokoroG2PAdapter(G2PAdapter):
                 ssmd_metadata["voice_reference"] = resolution.reference
                 ssmd_metadata["voice_name"] = resolution.target
                 ssmd_metadata["voice_source"] = resolution.source
-            for span in span_list:
-                self._apply_span_metadata(span.attrs, ssmd_metadata)
             if not isinstance(lang, str) or not lang:
                 raise ValueError("A language is required for each G2P segment")
 

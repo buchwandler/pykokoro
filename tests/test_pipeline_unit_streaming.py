@@ -197,9 +197,11 @@ def test_global_stages_run_once_and_generation_is_deferred() -> None:
     with pipeline.prepare_units("One.\n\nTwo.") as prepared:
         assert len(prepared.units) == 2
         assert (g2p.calls, processor.calls, generator.calls) == (1, 1, 0)
-        first = next(prepared.render())
+        iterator = prepared.render()
+        first = next(iterator)
         assert generator.calls == 1
         first.release_audio()
+        iterator.close()
     assert generator.calls == 1
 
 
