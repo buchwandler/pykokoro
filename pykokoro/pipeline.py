@@ -185,6 +185,109 @@ class PreparedFrontend:
         self.close()
 
 
+@dataclass(frozen=True, slots=True)
+class RenderedPlanSegment:
+    """Canonical speech-only audio for one immutable UtterPlan segment."""
+
+    segment_id: str
+    audio: np.ndarray
+    sample_rate: int
+    word_timings: tuple[Any, ...]
+    diagnostics: Mapping[str, Any]
+
+
+
+class PreparedAudioSegments:
+    """Prepared plan segments rendered without semantic pauses or prosody."""
+
+    def __init__(self, pipeline: KokoroPipeline, prepared: _PreparedDocument) -> None:
+        self._pipeline = pipeline
+        self._prepared: _PreparedDocument | None = prepared
+        self._segments = tuple(prepared.segments)
+        self._closed = False
+        self._render_started = False
+
+    @property
+    def segments(self) -> tuple[Segment, ...]:
+        self._ensure_open()
+        return self._segments
+
+    def _ensure_open(self) -> None:
+        if self._closed:
+            raise RuntimeError("PreparedAudioSegments is closed")
+
+    def render(
+        self,
+        *,
+        segment_ids: Iterable[str] | None = None,
+    ) -> Iterator[RenderedPlanSegment]:
+        self._ensure_open()
+        if self._render_started:
+            raise RuntimeError("PreparedAudioSegments supports one render pass only")
+        requested = tuple(segment_ids) if segment_ids is not None else tuple(
+            segment.id for segment in self._segments
+        )
+        if len(set(requested)) != len(requested):
+            raise ValueError("segment_ids contains duplicate segment IDs")
+        by_id = {segment.id: segment for segment in self._segments}
+        missing = [segment_id for segment_id in requested if segment_id not in by_id]
+        if missing:
+            raise KeyError(f"unknown plan segment ID {missing[0]!r}")
+        self._render_started = True
+        return self._iterate(requested)
+
+    def _iterate(self, segment_ids: tuple[str, ...]) -> Iterator[RenderedPlanSegment]:
+        prepared = self._prepared
+        if prepared is None:
+            raise RuntimeError("PreparedAudioSegments is closed")
+        phonemes_by_id: dict[str, list[PhonemeSegment]] = {}
+        for segment in prepared.phoneme_segments:
+            phonemes_by_id.setdefault(segment.segment_id, []).append(segment)
+        try:
+            for segment_id in segment_ids:
+                source = phonemes_by_id.get(segment_id, [])
+                audio, generated = self._pipeline._render_canonical_segment(prepared, source)
+                yield RenderedPlanSegment(
+                    segment_id=segment_id,
+                    audio=audio,
+                    sample_rate=SAMPLE_RATE,
+                    word_timings=tuple(_collect_unit_word_timings(generated)),
+                    diagnostics={"warnings": tuple(prepared.trace.warnings)},
+                )
+                for item in generated:
+                    item.raw_audio = None
+                    item.processed_audio = None
+        finally:
+            self._render_started = False
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        prepared = self._prepared
+        if prepared is not None:
+            for segment in prepared.phoneme_segments:
+                segment.raw_audio = None
+                segment.processed_audio = None
+            prepared.segments.clear()
+            prepared.phoneme_segments.clear()
+            prepared.groups = ()
+        self._prepared = None
+        self._pipeline._unregister_prepared(self)
+
+    def __enter__(self) -> Self:
+        self._ensure_open()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        self.close()
+
+
 class PreparedAudioUnits:
     """A globally prepared document that can render selected units sequentially."""
 
@@ -979,6 +1082,24 @@ class KokoroPipeline:
         self._prepared_objects.append(result)
         return result
 
+
+    def prepare_plan_segments(
+        self,
+        plan: UtterancePlan,
+        **overrides: Any,
+    ) -> PreparedAudioSegments:
+        """Prepare canonical speech-only rendering for immutable plan segments."""
+        assert_renderer_overrides(overrides)
+        cfg = _copy_config_for_preparation(self._resolve_run_config(overrides))
+        if cfg.generation.is_phonemes:
+            raise ConfigurationError(
+                "prepare_plan_segments() requires a text UtterPlan; phoneme input plans are unsupported"
+            )
+        unit = self._plan_unit_kind(plan)
+        prepared = self._prepare_document_from_plan(plan, cfg, unit)
+        result = PreparedAudioSegments(self, prepared)
+        self._prepared_objects.append(result)
+        return result
     def run_plan(self, plan: UtterancePlan, **overrides: Any) -> AudioResult:
         """Render an existing UtterPlan without reparsing or replanning it."""
         with self.prepare_plan_units(plan, **overrides) as prepared:
@@ -1622,6 +1743,40 @@ class KokoroPipeline:
                 )
             )
         return tuple(finalized)
+
+    @staticmethod
+    def _canonical_phoneme_segment(segment: PhonemeSegment) -> PhonemeSegment:
+        metadata = dict(segment.ssmd_metadata or {})
+        for key in ("prosody_rate", "prosody_pitch", "prosody_volume"):
+            metadata.pop(key, None)
+        return replace(
+            segment,
+            pause_before=0.0,
+            pause_after=0.0,
+            ssmd_metadata=metadata or None,
+            raw_audio=None,
+            processed_audio=None,
+            word_timings=[],
+        )
+
+    def _render_canonical_segment(
+        self,
+        prepared: _PreparedDocument,
+        source: list[PhonemeSegment],
+    ) -> tuple[np.ndarray, list[PhonemeSegment]]:
+        canonical_source = [self._canonical_phoneme_segment(item) for item in source]
+        if not canonical_source:
+            return np.array([], dtype=np.float32), []
+        with trace_timing(prepared.trace, "audio_generation", "generate_canonical"):
+            generated = prepared.audio_generator.generate(
+                canonical_source, prepared.cfg, prepared.trace
+            )
+        with trace_timing(prepared.trace, "audio_postprocessing", "postprocess_canonical"):
+            audio = prepared.audio_postprocessor.postprocess(
+                generated, prepared.cfg, prepared.trace
+            )
+        return np.asarray(audio, dtype=np.float32), generated
+
 
     def _render_prepared_unit(self, prepared: _PreparedDocument, index: int) -> AudioUnitResult:
         group = prepared.groups[index]

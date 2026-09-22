@@ -217,6 +217,28 @@ def test_plan_trace_contains_identity() -> None:
     ]
     assert consume and consume[0].details["plan_id"] == plan.plan_id
 
+def test_prepare_plan_segments_omit_semantic_pauses() -> None:
+    plan = UtterancePlanner(PlannerConfig(language="en-us", unit="sentence")).plan(
+        "One. Two.", unit="sentence"
+    )
+    pipeline = KokoroPipeline(
+        PipelineConfig(
+            generation=GenerationConfig(lang="en-us", pause_mode="manual"),
+        ),
+        g2p=NoopG2PAdapter(),
+        phoneme_processing=NoopPhonemeProcessorAdapter(),
+        audio_generation=NoopAudioGenerationAdapter(),
+        audio_postprocessing=NoopAudioPostprocessingAdapter(),
+    )
+    try:
+        with pipeline.prepare_plan_segments(plan) as prepared:
+            rendered = list(prepared.render())
+    finally:
+        pipeline.close()
+
+    assert [item.segment_id for item in rendered] == [segment.id for segment in plan.segments]
+    assert all(item.audio.size > 0 for item in rendered)
+    assert all(item.word_timings == () for item in rendered)
 
 def test_default_pipeline_does_not_use_legacy_frontend() -> None:
     pipeline = KokoroPipeline(
