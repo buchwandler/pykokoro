@@ -123,7 +123,7 @@ jobs:
         python -m pip install \
           "kokorog2p[all]==0.9.9" \
           "lexphon==0.2.3" \
-          "utterplan==0.1.2" \
+          "utterplan==0.1.4" \
           "audiosig==0.1.4" \
           platformdirs
         python -m pip install -e .

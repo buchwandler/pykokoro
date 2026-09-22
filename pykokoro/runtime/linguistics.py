@@ -25,6 +25,7 @@ class TokenAnnotation:
     tag: str | None = None
     lemma: str | None = None
     language: str | None = None
+    morph: str | None = None
 
 
 @dataclass(slots=True)
@@ -186,6 +187,7 @@ class LinguisticResourcePool:
                 tag=getattr(token, "tag_", None) or None,
                 lemma=getattr(token, "lemma_", None) or None,
                 language=language,
+                morph=str(getattr(token, "morph", "")) or None,
             )
             for token in doc
         )

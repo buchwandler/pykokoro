@@ -38,14 +38,14 @@ def annotation_fingerprint(annotations: Sequence[Any] | None) -> str:
             values.append(
                 tuple(
                     item.get(key)
-                    for key in ("start", "end", "text", "pos", "tag", "lemma", "language")
+                    for key in ("start", "end", "text", "pos", "tag", "lemma", "language", "morph")
                 )
             )
         else:
             values.append(
                 tuple(
                     getattr(item, key, None)
-                    for key in ("start", "end", "text", "pos", "tag", "lemma", "language")
+                    for key in ("start", "end", "text", "pos", "tag", "lemma", "language", "morph")
                 )
             )
     return make_cache_key(values)

@@ -114,10 +114,11 @@ class _G2PTokenAnnotation:
     tag: str | None = None
     lemma: str | None = None
     language: str | None = None
+    morph: str | None = None
 
 
 class KokoroG2PAdapter(G2PAdapter):
-    _cache_schema = 11
+    _cache_schema = 12
 
     def __init__(self) -> None:
         self._g2p: ModuleType | None = None
@@ -464,6 +465,7 @@ class KokoroG2PAdapter(G2PAdapter):
                             tag=item.tag,
                             lemma=item.lemma,
                             language=item.language,
+                            morph=item.morph,
                         )
                     )
             return plan_annotations
@@ -494,6 +496,7 @@ class KokoroG2PAdapter(G2PAdapter):
                         tag=item.tag,
                         lemma=item.lemma,
                         language=forwarded_language,
+                        morph=item.morph,
                     )
                 )
             break
@@ -528,8 +531,11 @@ class KokoroG2PAdapter(G2PAdapter):
                 language_routing=language_routing,
                 target_model=target_model,
             )
-        # Compatibility for test doubles and old installations; released PyKokoro
-        # dependencies always provide the prepared entry point.
+        if annotations:
+            raise RuntimeError(
+                "kokorog2p does not support prepared token annotations required by Utterplan v2"
+            )
+        # Compatibility for test doubles and old installations with no annotations.
         return g2p.phonemize(
             text,
             language=language,

@@ -96,3 +96,10 @@ def test_annotation_fingerprint_includes_language_and_pos() -> None:
     assert annotation_fingerprint(base) == annotation_fingerprint(list(base))
     assert annotation_fingerprint(base) != annotation_fingerprint(tagged)
     assert annotation_fingerprint(base) != annotation_fingerprint(german)
+
+
+def test_annotation_fingerprint_includes_morph() -> None:
+    base = [{"start": 0, "end": 4, "text": "live", "pos": "VERB", "morph": "Tense=Pres"}]
+    changed = [{"start": 0, "end": 4, "text": "live", "pos": "VERB", "morph": "Tense=Past"}]
+
+    assert annotation_fingerprint(base) != annotation_fingerprint(changed)

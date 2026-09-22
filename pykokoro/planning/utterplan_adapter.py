@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
-from utterplan import UtterancePlan
+from utterplan import CURRENT_SCHEMA_VERSION, UtterancePlan
 
 from ..exceptions import PlanConfigurationConflict, PlanConsumptionError
 from ..stages.protocols import DocumentResult
@@ -122,6 +122,7 @@ def _metadata(plan: UtterancePlan) -> dict[str, Any]:
         "schema_version": plan.schema_version,
     }
     metadata["utterplan_tokens"] = tuple(plan.tokens)
+    metadata["utterplan_linguistic_runs"] = tuple(plan.linguistic_runs)
     metadata["utterplan_units"] = tuple(plan.units)
     metadata["utterplan_markers"] = tuple(plan.markers)
     metadata["utterplan_annotations"] = tuple(plan.annotations)
@@ -139,6 +140,11 @@ def adapt_plan(plan: UtterancePlan) -> RenderPlan:
     if not isinstance(plan, UtterancePlan):
         raise PlanConsumptionError(
             f"run_plan() requires utterplan.UtterancePlan, got {type(plan).__name__}"
+        )
+    if plan.schema_version != CURRENT_SCHEMA_VERSION:
+        raise PlanConsumptionError(
+            f"Unsupported UtterPlan schema version {plan.schema_version}; "
+            f"expected {CURRENT_SCHEMA_VERSION}"
         )
     try:
         plan.validate()

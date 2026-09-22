@@ -42,7 +42,7 @@ def test_companion_dependency_floors_match_current_integration_contract() -> Non
     ]
 
     assert "kokorog2p[espeak,en]>=0.9.9,<1.0" in dependencies
-    assert "utterplan>=0.1.2,<0.2" in dependencies
+    assert "utterplan>=0.1.4,<0.2" in dependencies
     assert "lexphon>=0.2.3,<0.3" in dependencies
 
 
@@ -82,7 +82,7 @@ def test_planning_dependency_targets_current_contract() -> None:
     dependencies = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
         "dependencies"
     ]
-    assert "utterplan>=0.1.2,<0.2" in dependencies
+    assert "utterplan>=0.1.4,<0.2" in dependencies
     assert not any(requirement.startswith("phrasplit") for requirement in dependencies)
     assert not any(requirement.startswith("ssmd") for requirement in dependencies)
     assert not any(requirement.startswith("spokenform") for requirement in dependencies)
