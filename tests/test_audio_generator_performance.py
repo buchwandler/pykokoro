@@ -117,7 +117,7 @@ def test_exact_input_cache_reuses_raw_outputs_and_returns_copies() -> None:
     )
     first_audio[0] = 99.0
     assert first_duration is not None
-    first_duration[0] = 99.0
+    assert not first_duration.values.flags.writeable
 
     second_trace = Trace()
     second_audio, second_duration = generator._run_onnx(

@@ -16,6 +16,12 @@ import numpy as np
 from audiosig import apply_gain_db, resample, resample_speed
 from audiosig import trim as trim_audio
 
+from ._onnxvoice import (
+    KokoroTimingPayload,
+    classify_timing,
+    summarize_inference,
+    timing_payload_from_result,
+)
 from .constants import MAX_PHONEME_LENGTH, SAMPLE_RATE
 from .exceptions import ConfigurationError
 from .loudness_config import LoudnessConfig
@@ -314,9 +320,9 @@ class AudioGenerator:
         self._inference_audio_diagnostics = inference_audio_diagnostics
         self._inference_cache_enabled = inference_cache_enabled and inference_cache_max_bytes > 0
         self._inference_cache_max_bytes = inference_cache_max_bytes
-        self._inference_cache: OrderedDict[bytes, tuple[np.ndarray, np.ndarray | None, int]] = (
-            OrderedDict()
-        )
+        self._inference_cache: OrderedDict[
+            bytes, tuple[np.ndarray, KokoroTimingPayload | None, int]
+        ] = OrderedDict()
         self._inference_cache_bytes = 0
         self._inference_call_number = 0
         runtime_support = getattr(runtime, "supports_timings", None)
@@ -368,32 +374,34 @@ class AudioGenerator:
             digest.update(memoryview(array).cast("B"))
         return digest.digest()
 
-    def _get_cached_inference(self, key: bytes) -> tuple[np.ndarray, np.ndarray | None] | None:
+    def _get_cached_inference(
+        self, key: bytes
+    ) -> tuple[np.ndarray, KokoroTimingPayload | None] | None:
         if not self._inference_cache_enabled:
             return None
         cached = self._inference_cache.get(key)
         if cached is None:
             return None
-        audio, pred_dur, _ = cached
+        audio, timing, _ = cached
         self._inference_cache.move_to_end(key)
-        return audio.copy(), None if pred_dur is None else pred_dur.copy()
+        return audio.copy(), timing
 
     def _put_cached_inference(
-        self, key: bytes, audio: np.ndarray, pred_dur: np.ndarray | None
+        self, key: bytes, audio: np.ndarray, timing: KokoroTimingPayload | None
     ) -> None:
         if not self._inference_cache_enabled:
             return
         cached_audio = np.array(audio, copy=True)
-        cached_duration = None if pred_dur is None else np.array(pred_dur, copy=True)
+        cached_timing = timing
         entry_bytes = cached_audio.nbytes + (
-            cached_duration.nbytes if cached_duration is not None else 0
+            cached_timing.values.nbytes if cached_timing is not None else 0
         )
         if entry_bytes > self._inference_cache_max_bytes:
             return
         previous = self._inference_cache.pop(key, None)
         if previous is not None:
             self._inference_cache_bytes -= previous[2]
-        self._inference_cache[key] = (cached_audio, cached_duration, entry_bytes)
+        self._inference_cache[key] = (cached_audio, cached_timing, entry_bytes)
         self._inference_cache_bytes += entry_bytes
         while self._inference_cache_bytes > self._inference_cache_max_bytes:
             _, (_, _, removed_bytes) = self._inference_cache.popitem(last=False)
@@ -470,7 +478,7 @@ class AudioGenerator:
         attempt_kind: str = "initial",
         tokens: list[int] | None = None,
         seed: int | None = None,
-    ) -> tuple[np.ndarray, np.ndarray | None]:
+    ) -> tuple[np.ndarray, KokoroTimingPayload | None]:
         effective_phonemes = phonemes[:MAX_PHONEME_LENGTH]
         effective_tokens = (
             list(tokens)
@@ -492,8 +500,9 @@ class AudioGenerator:
         runtime_identity = getattr(self._runtime, "cache_identity", None)
         cache_key = self._inference_cache_key(inputs, runtime_identity)
         cached = self._get_cached_inference(cache_key)
+        result: Any | None = None
         if cached is not None:
-            audio, pred_dur = cached
+            audio, timing = cached
             runtime_s = 0.0
             cache_hit = True
         else:
@@ -506,11 +515,14 @@ class AudioGenerator:
             )
             runtime_s = time.perf_counter() - started
             audio = np.asarray(getattr(result, "audio", result), dtype=np.float32).reshape(-1)
-            raw_timings = getattr(result, "timings", None)
-            pred_dur = None if raw_timings is None else np.asarray(raw_timings).reshape(-1)
-            self._put_cached_inference(cache_key, audio, pred_dur)
+            timing = timing_payload_from_result(
+                result,
+                len(effective_tokens),
+                declared_layout=getattr(self._runtime, "timing_layout", None),
+            )
+            self._put_cached_inference(cache_key, audio, timing)
             cache_hit = False
-        if pred_dur is not None:
+        if timing is not None:
             self._timestamp_support = True
             self._timestamp_support_observed = True
         elif self._timestamp_support is None:
@@ -527,16 +539,33 @@ class AudioGenerator:
             cache_key=cache_key,
             attempt_kind=attempt_kind,
         )
+        timing_summary = None
+        output_summary: dict[str, Any] = {}
+        if result is not None:
+            timing_summary, output_summary = summarize_inference(
+                result, timing, input_token_count=len(effective_tokens)
+            )
+        elif timing is not None:
+            timing_summary = {
+                "shape": [int(size) for size in timing.values.shape],
+                "dtype": str(timing.values.dtype),
+                "count": timing.raw_count,
+                "layout": timing.layout,
+            }
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
-                "inference.finish cache_hit=%s attempt=%s phonemes=%d tokens=%d samples=%d runtime_ms=%.3f timing_values=%d timestamp_support=%s",
+                "inference.finish cache_hit=%s attempt=%s phonemes=%d tokens=%d "
+                "samples=%d runtime_ms=%.3f timing_layout=%s timing_values=%d "
+                "expected_timing_count=%s timestamp_support=%s outputs=%s",
                 cache_hit,
                 attempt_kind,
                 len(effective_phonemes),
                 len(effective_tokens),
                 int(np.asarray(audio).size),
                 runtime_s * 1000.0,
-                0 if pred_dur is None else int(np.asarray(pred_dur).reshape(-1).size),
+                timing.layout if timing is not None else "missing",
+                timing.raw_count if timing is not None else 0,
+                timing.expected_raw_count if timing is not None else None,
                 (
                     "observed"
                     if self._timestamp_support_observed
@@ -544,6 +573,7 @@ class AudioGenerator:
                     if self._timestamp_support_declared
                     else "unknown"
                 ),
+                output_summary,
             )
         if trace is not None:
             style_values = np.asarray(voice_style_indexed, dtype=np.float32)
@@ -559,6 +589,8 @@ class AudioGenerator:
                         "std": float(np.std(style_values)) if style_values.size else 0.0,
                     },
                     "audio": {"samples": int(np.asarray(audio).size)},
+                    "timings": timing_summary,
+                    "outputs": output_summary,
                     "speed": {
                         "value": float(speed),
                         "dtype": str(np.asarray(inputs["speed"]).dtype),
@@ -575,7 +607,7 @@ class AudioGenerator:
                     }
                 )
                 diagnostic["audio"] = audio_metrics
-        return audio, pred_dur
+        return audio, timing
 
     def generate_from_phonemes(
         self,
@@ -1016,8 +1048,24 @@ class AudioGenerator:
             logger.warning(message)
         return segments
 
+    @staticmethod
+    def _coerce_timing_payload(
+        timing: KokoroTimingPayload | np.ndarray | None,
+        generated_position_count: int,
+    ) -> KokoroTimingPayload | None:
+        if timing is None:
+            return None
+        if isinstance(timing, KokoroTimingPayload):
+            return timing
+        # Private mapping helpers historically accepted padded vectors; keep that
+        # compatibility explicit rather than rediscovering layout from arbitrary counts.
+        return classify_timing(timing, generated_position_count, declared_layout="special-padded")
+
     def _map_pred_dur_to_word_timings(
-        self, segment: PhonemeSegment, pred_dur: np.ndarray | None, audio_length: int
+        self,
+        segment: PhonemeSegment,
+        pred_dur: KokoroTimingPayload | np.ndarray | None,
+        audio_length: int,
     ) -> list[WordTiming]:
         metadata = (segment.ssmd_metadata or {}).get(SHORT_SENTENCE_META_KEY)
         if isinstance(metadata, dict) and isinstance(metadata.get("timing_tokens"), list):
@@ -1040,15 +1088,24 @@ class AudioGenerator:
         self,
         segment: PhonemeSegment,
         raw_tokens: list[dict[str, object]],
-        pred_dur: np.ndarray | None,
+        pred_dur: KokoroTimingPayload | np.ndarray | None,
         audio_length: int,
         *,
         local_target_offsets: bool = False,
     ) -> list[WordTiming]:
         if pred_dur is None or audio_length <= 0:
             return []
-        durations = np.asarray(pred_dur).reshape(-1)
-        if durations.size < 3 or not np.isfinite(durations).all() or np.any(durations < 0):
+        generated_count = (
+            len(segment.tokens)
+            if segment.tokens
+            else sum(
+                geometry[1]
+                for token in raw_tokens
+                if (geometry := _exact_timing_geometry(token)) is not None
+            )
+        )
+        timing = self._coerce_timing_payload(pred_dur, generated_count)
+        if timing is None or not timing.is_valid:
             return []
         valid_tokens: list[dict[str, object]] = []
         for token in raw_tokens:
@@ -1064,7 +1121,7 @@ class AudioGenerator:
             valid_tokens.append(token)
         timestamped = _join_timestamps(
             cast(list[object], valid_tokens),
-            durations,
+            timing,
             strict=True,
             require_final_cursor=False,
         )
@@ -1113,7 +1170,7 @@ class AudioGenerator:
     def _log_short_sentence_timestamps(
         self,
         segment: PhonemeSegment,
-        pred_dur: np.ndarray | None,
+        pred_dur: KokoroTimingPayload | np.ndarray | None,
     ) -> None:
         short_sentence_metadata = (segment.ssmd_metadata or {}).get(SHORT_SENTENCE_META_KEY)
         if not isinstance(short_sentence_metadata, dict):
@@ -1121,15 +1178,24 @@ class AudioGenerator:
         timing_tokens = short_sentence_metadata.get("timing_tokens")
         if not isinstance(timing_tokens, list):
             return
-        short_sentence_metadata["pred_duration_count"] = (
-            0 if pred_dur is None else int(np.asarray(pred_dur).reshape(-1).size)
+        timing = (
+            pred_dur
+            if isinstance(pred_dur, KokoroTimingPayload)
+            else self._coerce_timing_payload(
+                pred_dur,
+                int(short_sentence_metadata.get("generated_token_count", 0)),
+            )
+            if pred_dur is not None
+            else None
         )
+        short_sentence_metadata["pred_duration_count"] = 0 if timing is None else timing.raw_count
         _record_short_sentence_timing_alignment(
             short_sentence_metadata,
             timing_tokens,
+            timing=timing,
             pred_duration_count=short_sentence_metadata["pred_duration_count"],
         )
-        if pred_dur is None:
+        if timing is None:
             if self._timestamp_support is False and not self._reported_missing_timestamp_output:
                 logger.warning(
                     "ONNX inference returned no timing output; phrase-based short-sentence "
@@ -1160,7 +1226,7 @@ class AudioGenerator:
         strict_join = "generated_token_count" in short_sentence_metadata
         timestamped = _join_timestamps(
             timing_tokens,
-            pred_dur,
+            timing,
             strict=strict_join,
             metadata=short_sentence_metadata,
         )
@@ -1337,6 +1403,7 @@ class AudioGenerator:
             return None
 
         non_retryable_details = {
+            "invalid-timing-contract",
             "missing-duration-output",
             "duration-position-count-mismatch",
             "unresolved-model-span",
@@ -1441,7 +1508,12 @@ class AudioGenerator:
                 _record_short_sentence_timing_alignment(
                     retry.metadata,
                     timing_tokens,
-                    pred_duration_count=int(np.asarray(pred_dur).reshape(-1).size),
+                    timing=pred_dur if isinstance(pred_dur, KokoroTimingPayload) else None,
+                    pred_duration_count=(
+                        pred_dur.raw_count
+                        if isinstance(pred_dur, KokoroTimingPayload)
+                        else int(np.asarray(pred_dur).reshape(-1).size)
+                    ),
                 )
                 expected_duration_count = retry.metadata.get("expected_pred_duration_count")
                 actual_duration_count = retry.metadata.get("pred_duration_count")
@@ -1877,21 +1949,33 @@ def _collect_unit_word_timings(
 
 def _join_timestamps(
     tokens: list[object],
-    pred_dur: np.ndarray,
+    pred_dur: KokoroTimingPayload | np.ndarray,
     *,
     strict: bool = False,
     require_final_cursor: bool = True,
     metadata: dict[str, object] | None = None,
 ) -> list[dict[str, object]]:
-    """Map model durations to G2P tokens using declared model geometry."""
-    durations = np.asarray(pred_dur).reshape(-1)
-    if not tokens or len(durations) < 3:
+    """Map explicit model-position durations to G2P tokens."""
+    if not tokens:
+        return []
+    if isinstance(pred_dur, KokoroTimingPayload):
+        timing = pred_dur
+    else:
+        raw_values = np.asarray(pred_dur).reshape(-1)
+        timing = classify_timing(
+            raw_values, max(int(raw_values.size) - 2, 0), declared_layout="special-padded"
+        )
+    if not timing.is_valid:
+        return []
+    position_values = timing.model_position_values
+    if position_values.size == 0:
         return []
     timestamped: list[dict[str, object]] = []
     divisor = 80
-    left = right = 2 * max(0.0, float(durations[0].item()) - 3)
-    cursor = 1
-    eos_index = len(durations) - 1
+    leading_duration = timing.leading_duration
+    left = right = 2 * max(0.0, leading_duration - 3) if leading_duration is not None else 0.0
+    cursor = 0
+    end_cursor = int(position_values.size)
     complete = True
     for raw_token in tokens:
         token = dict(raw_token) if isinstance(raw_token, dict) else {}
@@ -1909,15 +1993,15 @@ def _join_timestamps(
         if speech_count < 0 or span_count < speech_count:
             complete = False
             break
-        end_cursor = cursor + span_count
-        if end_cursor > eos_index:
+        token_end = cursor + span_count
+        if token_end > end_cursor:
             complete = False
             break
         speech_end_cursor = cursor + speech_count
-        gap_dur = float(durations[speech_end_cursor:end_cursor].sum().item())
+        gap_dur = float(position_values[speech_end_cursor:token_end].sum().item())
         if speech_count:
             token["start_ts"] = left / divisor
-            token_dur = float(durations[cursor:speech_end_cursor].sum().item())
+            token_dur = float(position_values[cursor:speech_end_cursor].sum().item())
             speech_end = right + (2 * token_dur)
             token["speech_end_ts"] = speech_end / divisor
             left = speech_end + gap_dur
@@ -1926,24 +2010,24 @@ def _join_timestamps(
         elif span_count:
             left = right + gap_dur
             right = left + gap_dur
-        cursor = end_cursor
+        cursor = token_end
         timestamped.append(token)
-    if strict and (not complete or (require_final_cursor and cursor != eos_index)):
-        if metadata is not None:
-            metadata["timing_final_duration_cursor"] = cursor
-            metadata["timing_expected_final_duration_cursor"] = eos_index
-            metadata["timing_duration_cursor_delta"] = cursor - eos_index
-        return []
     if metadata is not None:
+        metadata["timing_layout"] = timing.layout
+        metadata["timing_raw_count"] = timing.raw_count
+        metadata["timing_model_position_count"] = timing.model_position_count
         metadata["timing_final_duration_cursor"] = cursor
-        metadata["timing_expected_final_duration_cursor"] = eos_index
-        metadata["timing_duration_cursor_delta"] = cursor - eos_index
+        metadata["timing_expected_final_duration_cursor"] = end_cursor
+        metadata["timing_duration_cursor_delta"] = cursor - end_cursor
+    if strict and (not complete or (require_final_cursor and cursor != end_cursor)):
+        return []
     return timestamped
 
 
 def _record_short_sentence_timing_alignment(
     metadata: dict[str, object],
     timing_tokens: list[object],
+    timing: KokoroTimingPayload | None = None,
     pred_duration_count: int | None = None,
     *,
     timestamp_join_complete: bool | None = None,
@@ -1975,9 +2059,21 @@ def _record_short_sentence_timing_alignment(
         if isinstance(generated_token_count, int) and not isinstance(generated_token_count, bool)
         else None
     )
+    timing_layout = timing.layout if timing is not None else "special-padded"
+    metadata["timing_layout"] = timing_layout
+    if timing is not None:
+        metadata["timing_raw_count"] = timing.raw_count
+        metadata["timing_model_position_values_count"] = timing.model_position_count
+        metadata["timing_contract_error"] = timing.error
     expected_pred_duration_count = (
         generated_token_count + 2
-        if isinstance(generated_token_count, int) and not isinstance(generated_token_count, bool)
+        if timing_layout == "special-padded"
+        and isinstance(generated_token_count, int)
+        and not isinstance(generated_token_count, bool)
+        else generated_token_count
+        if timing_layout == "model-positions"
+        and isinstance(generated_token_count, int)
+        and not isinstance(generated_token_count, bool)
         else None
     )
     metadata["expected_pred_duration_count"] = expected_pred_duration_count
@@ -2008,6 +2104,12 @@ def _record_short_sentence_timing_alignment(
         metadata["timestamp_join_complete"] = timestamp_join_complete
     if target_timestamp_count is not None:
         metadata["target_timestamp_count"] = target_timestamp_count
+    if timing is not None and not timing.is_valid:
+        metadata["timing_alignment_complete"] = False
+        metadata["timing_failure_detail"] = "invalid-timing-contract"
+        metadata.setdefault("timing_failure_reason", "timing-model-position-mismatch")
+        metadata.setdefault("failure_stage", "timing-alignment")
+        metadata.setdefault("cut_failure_reason", "timing-model-position-mismatch")
     if not metadata["timing_alignment_complete"]:
         metadata["timing_failure_detail"] = (
             "unresolved-model-span"
@@ -2136,9 +2238,11 @@ def _log_short_sentence_cut_failure(
     max_attempts = int(metadata.get("phrase_fallback_tries", 0)) + 1
     logger.info(
         "short_sentence.phrase_attempt.failure segment=%r attempt=%d/%d stage=%s "
-        "reason=%s configured_cutter=%s cutter_reached=%s generated_positions=%s "
-        "timing_tokens=%s timing_positions=%s pred_durations=%s expected_pred_durations=%s "
-        "delta=%s timing_detail=%s retry_skipped_reason=%s template=%r audio_samples=%d",
+        "reason=%s configured_cutter=%s cutter_reached=%s timing_layout=%s "
+        "generated_positions=%s timing_tokens=%s timing_positions=%s pred_durations=%s "
+        "expected_pred_durations=%s model_position_delta=%s duration_count_delta=%s "
+        "timing_detail=%s runtime_ref=%s distribution=%s retry_skipped_reason=%s "
+        "template=%r audio_samples=%d",
         segment.text,
         attempt_number,
         max_attempts,
@@ -2146,6 +2250,7 @@ def _log_short_sentence_cut_failure(
         reason,
         metadata.get("cutter"),
         metadata.get("cutter_reached", stage not in {"timing-alignment", "timestamp-join"}),
+        metadata.get("timing_layout", "unknown"),
         metadata.get("generated_token_count"),
         metadata.get(
             "timing_token_count",
@@ -2157,7 +2262,10 @@ def _log_short_sentence_cut_failure(
         metadata.get("pred_duration_count", 0),
         metadata.get("expected_pred_duration_count"),
         metadata.get("timing_model_position_delta"),
+        metadata.get("pred_duration_count_delta"),
         metadata.get("timing_failure_detail"),
+        metadata.get("runtime_ref", "-"),
+        metadata.get("distribution", "-"),
         metadata.get("retry_skipped_reason", "-"),
         metadata.get("phrase_template"),
         audio_length,

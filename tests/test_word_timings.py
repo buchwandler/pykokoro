@@ -5,6 +5,7 @@ from typing import Any, cast
 
 import numpy as np
 
+from pykokoro._onnxvoice import KokoroTimingPayload
 from pykokoro.audio_generator import (
     AudioGenerator,
     _collect_unit_word_timings,
@@ -151,6 +152,31 @@ def test_join_timestamps_merges_source_expansions() -> None:
     joined = _join_timestamps(tokens, np.asarray([1, 2, 3, 4, 5], dtype=np.float32))
     assert joined[0]["start_ts"] == 0.0
     assert joined[1]["speech_end_ts"] >= joined[0]["speech_end_ts"]
+
+
+def test_join_timestamps_accepts_model_position_payload() -> None:
+    tokens = [
+        {
+            "text": "one",
+            "phonemes": "one",
+            "model_token_count": 2,
+            "model_span_token_count": 2,
+            "whitespace": " ",
+        },
+        {"text": "two", "phonemes": "two", "model_token_count": 1, "whitespace": ""},
+    ]
+    timing = KokoroTimingPayload(
+        values=np.asarray([1, 2, 3], dtype=np.float32),
+        layout="model-positions",
+        generated_position_count=3,
+        raw_count=3,
+    )
+
+    joined = _join_timestamps(tokens, timing, strict=True)
+
+    assert len(joined) == 2
+    assert joined[0]["start_ts"] == 0.0
+    assert joined[1]["start_ts"] >= joined[0]["end_ts"]
 
 
 def test_invalid_or_missing_timing_output_is_safe() -> None:

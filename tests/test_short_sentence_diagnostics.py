@@ -215,6 +215,9 @@ def test_probe_duration_mismatch_is_an_alignment_failure(monkeypatch) -> None:
     )
     assert result.failure_stage == "timing-alignment"
     assert result.metadata["timing_failure_detail"] == "duration-position-count-mismatch"
+    assert "timing_layout" in result.metadata
+    assert "timing_model_position_delta" in result.metadata
+    assert "pred_duration_count_delta" in result.metadata
     assert result.metadata["join_attempted"] is False
 
 

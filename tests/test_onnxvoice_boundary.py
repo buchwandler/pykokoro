@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -272,6 +273,44 @@ def test_progress_maps_install_lifecycle_and_ignores_unknown_phases() -> None:
     assert boundary.runtime_diagnostics(runtime)["sessions"][0]["component"] == "prosody"
 
 
+def test_runtime_diagnostics_exposes_timing_contract_json_safely(tmp_path: Path) -> None:
+    resolved = boundary.ResolvedKokoroModel(
+        ref="kokoro:v1.0",
+        model_id="v1.0",
+        quality="fp32",
+        distribution="github-model-files-v1.0-timestamped-r4",
+        storage_id="storage-1",
+        installation=None,
+        metadata={"runtime": {"timings_output": "durations"}},
+        sample_rate=24_000,
+        model_paths=(tmp_path / "model.onnx",),
+        voices_path=tmp_path / "voices.bin",
+        config_path=None,
+    )
+    diagnostic = SimpleNamespace(
+        system="kokoro",
+        ref="kokoro:v1.0",
+        layout="single",
+        sessions=(SimpleNamespace(outputs=("duration",)),),
+    )
+    runtime = SimpleNamespace(
+        resolved=resolved,
+        supports_timings=True,
+        timing_layout="special-padded",
+        diagnostics=lambda: diagnostic,
+    )
+
+    summary = boundary.runtime_diagnostics(runtime)
+    json.dumps(summary)
+    assert summary["distribution_id"] == "github-model-files-v1.0-timestamped-r4"
+    assert summary["timing_contract"] == {
+        "supports_timings": True,
+        "output": "durations",
+        "layout": "special-padded",
+    }
+    assert summary["sessions"][0]["outputs"] == ["duration"]
+
+
 def test_summarize_inference_is_json_safe() -> None:
     result = SimpleNamespace(
         timings=np.zeros(4, dtype=np.float32),
@@ -280,8 +319,8 @@ def test_summarize_inference_is_json_safe() -> None:
 
     timings, outputs = boundary.summarize_inference(result)
 
-    assert timings == {"shape": [4], "dtype": "float32"}
-    assert outputs == {"duration": {"shape": [1, 4], "dtype": "int64"}}
+    assert timings == {"shape": [4], "dtype": "float32", "count": 4, "layout": "unknown"}
+    assert outputs == {"duration": {"shape": [1, 4], "dtype": "int64", "count": 4}}
 
 
 def test_onnxvoice_distribution_for_maps_github_variants() -> None:
@@ -381,3 +420,52 @@ def test_different_distributions_produce_different_cache_identities(tmp_path: Pa
     adapter_b = boundary.KokoroRuntimeAdapter(runtime, resolved_b)
 
     assert adapter_a.cache_identity != adapter_b.cache_identity
+
+
+@pytest.mark.parametrize(
+    ("timings", "expected_layout", "expected_positions"),
+    [
+        (np.arange(5, dtype=np.float32), "special-padded", np.arange(1, 4, dtype=np.float32)),
+        (np.arange(3, dtype=np.float32), "model-positions", np.arange(3, dtype=np.float32)),
+    ],
+)
+def test_timing_boundary_classifies_supported_layouts(
+    timings: np.ndarray, expected_layout: str, expected_positions: np.ndarray
+) -> None:
+    result = SimpleNamespace(
+        timings=timings,
+        outputs={"duration": timings.copy()},
+        metadata={"runtime_ref": "onnxvoice-0.1.9"},
+    )
+    payload = boundary.timing_payload_from_result(result, generated_position_count=3)
+
+    assert payload is not None
+    assert payload.layout == expected_layout
+    assert payload.raw_count == len(timings)
+    np.testing.assert_array_equal(payload.model_position_values, expected_positions)
+    assert payload.is_valid
+
+
+def test_timing_boundary_rejects_unknown_count_and_non_finite_values() -> None:
+    unknown = boundary.classify_timing(np.ones(4), generated_position_count=3)
+    non_finite = boundary.classify_timing(np.array([1.0, np.nan, 1.0]), generated_position_count=3)
+
+    assert unknown.layout == "invalid"
+    assert not unknown.is_valid
+    assert "unsupported duration count" in (unknown.error or "")
+    assert non_finite.layout == "model-positions"
+    assert not non_finite.is_valid
+    assert "finite" in (non_finite.error or "")
+
+
+def test_timing_summary_preserves_named_outputs_and_runtime_identity() -> None:
+    result = SimpleNamespace(
+        timings=np.ones(3, dtype=np.float32),
+        outputs={"waveform": np.zeros((1, 8), dtype=np.float32)},
+        metadata={"runtime_ref": "onnxvoice-0.1.9"},
+    )
+    timing, outputs = boundary.summarize_inference(result, input_token_count=3)
+
+    assert timing == {"shape": [3], "dtype": "float32", "count": 3, "layout": "model-positions"}
+    assert outputs == {"waveform": {"shape": [1, 8], "dtype": "float32", "count": 8}}
+    assert result.metadata["runtime_ref"] == "onnxvoice-0.1.9"

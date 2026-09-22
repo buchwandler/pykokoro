@@ -18,6 +18,7 @@ from ._onnxvoice import (
     install_kokoro_model,
     open_installed_kokoro,
     open_local_kokoro,
+    runtime_diagnostics,
 )
 from .asset_progress import AssetProgressCallback
 from .audio_generator import AudioGenerator
@@ -322,6 +323,17 @@ class Kokoro:
                 provider_options=self._provider_options,
                 session_options=self._session_options,
             )
+        diagnostic = runtime_diagnostics(runtime)
+        timing_contract = diagnostic.get("timing_contract", {})
+        logger.info(
+            "runtime.open model=%s source=%s quality=%s distribution=%s timings=%s timing_layout=%s",
+            resolved.model_id or self._model_variant,
+            self._model_source,
+            resolved.quality or self._model_quality,
+            resolved.distribution,
+            timing_contract.get("supports_timings"),
+            timing_contract.get("layout"),
+        )
         self._runtime = runtime
         self._model_path = resolved.model_paths[0] if resolved.model_paths else None
         self._voices_path = resolved.voices_path
@@ -636,6 +648,14 @@ class Kokoro:
                 {"path": str(path), "size": path.stat().st_size} for path in paths if path.is_file()
             ],
         }
+
+    def runtime_diagnostics(self) -> dict[str, Any]:
+        """Return JSON-safe runtime and timing contract diagnostics."""
+        self._init_kokoro()
+        runtime = self._runtime
+        if runtime is None:
+            return {"model_id": self._model_variant, "timing_contract": {"supports_timings": False}}
+        return runtime_diagnostics(runtime)
 
     def close(self) -> None:
         """Release database, tokenizer, voice, generator, and ONNX resources."""

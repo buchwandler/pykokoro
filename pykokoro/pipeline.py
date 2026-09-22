@@ -772,6 +772,11 @@ class KokoroPipeline:
         kokoro, _ = self._ensure_kokoro(self.config)
         kokoro.warmup()
 
+    def runtime_diagnostics(self) -> dict[str, Any]:
+        """Return runtime diagnostics without exposing backend internals."""
+        kokoro, _ = self._ensure_kokoro(self.config)
+        return kokoro.runtime_diagnostics()
+
     def close(self) -> None:
         for prepared in tuple(self._prepared_objects):
             prepared.close()

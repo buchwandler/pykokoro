@@ -7,7 +7,9 @@ import os
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+
+import numpy as np
 
 from .asset_progress import AssetProgressEvent, AssetProgressPhase
 from .exceptions import BackendError, ConfigurationError, KokoroError
@@ -33,6 +35,142 @@ class ResolvedKokoroModel:
     model_paths: tuple[Path, ...]
     voices_path: Path | None
     config_path: Path | None
+
+
+TimingLayout = Literal["special-padded", "model-positions", "invalid", "unknown"]
+
+
+@dataclass(frozen=True, slots=True)
+class KokoroTimingPayload:
+    """Immutable, layout-aware timing values returned by the Kokoro boundary."""
+
+    values: np.ndarray
+    layout: TimingLayout
+    generated_position_count: int
+    raw_count: int
+    error: str | None = None
+
+    def __post_init__(self) -> None:
+        values = np.asarray(self.values).reshape(-1)
+        values.setflags(write=False)
+        object.__setattr__(self, "values", values)
+        if self.raw_count != int(values.size):
+            raise ValueError("raw_count must match timing values")
+        if self.generated_position_count < 0:
+            raise ValueError("generated_position_count must be non-negative")
+
+    @property
+    def is_valid(self) -> bool:
+        return self.layout in {"special-padded", "model-positions"} and self.error is None
+
+    @property
+    def model_position_values(self) -> np.ndarray:
+        if self.layout == "special-padded" and self.raw_count >= 2:
+            return self.values[1:-1]
+        if self.layout == "model-positions":
+            return self.values
+        return np.asarray([], dtype=self.values.dtype)
+
+    @property
+    def model_position_count(self) -> int:
+        return int(self.model_position_values.size)
+
+    @property
+    def leading_duration(self) -> float | None:
+        if self.layout == "special-padded" and self.raw_count:
+            return float(self.values[0])
+        return None
+
+    @property
+    def trailing_duration(self) -> float | None:
+        if self.layout == "special-padded" and self.raw_count >= 2:
+            return float(self.values[-1])
+        return None
+
+    @property
+    def expected_raw_count(self) -> int | None:
+        if self.layout == "special-padded":
+            return self.generated_position_count + 2
+        if self.layout == "model-positions":
+            return self.generated_position_count
+        return None
+
+    def __array__(self, dtype: Any | None = None) -> np.ndarray:
+        return np.asarray(self.values, dtype=dtype)
+
+    def __len__(self) -> int:
+        return self.raw_count
+
+    def tolist(self) -> list[Any]:
+        return self.values.tolist()
+
+
+def _timing_layout_from_result(result: Any) -> TimingLayout | None:
+    metadata = getattr(result, "metadata", None)
+    candidates: list[Any] = [
+        getattr(result, "timing_layout", None),
+        metadata.get("timing_layout") if isinstance(metadata, Mapping) else None,
+    ]
+    if isinstance(metadata, Mapping):
+        timing = metadata.get("timing")
+        if isinstance(timing, Mapping):
+            candidates.append(timing.get("layout"))
+    for value in candidates:
+        if isinstance(value, str):
+            normalized = value.strip().casefold()
+            if normalized in {"special-padded", "special_padded", "padded"}:
+                return "special-padded"
+            if normalized in {"model-positions", "model_positions", "positions"}:
+                return "model-positions"
+    return None
+
+
+def classify_timing(
+    values: Any,
+    generated_position_count: int,
+    *,
+    declared_layout: TimingLayout | None = None,
+    result: Any | None = None,
+) -> KokoroTimingPayload:
+    """Classify exactly supported timing representations without padding guesses."""
+    raw = np.asarray(values).reshape(-1)
+    raw_count = int(raw.size)
+    layout = declared_layout or (_timing_layout_from_result(result) if result is not None else None)
+    if layout not in {"special-padded", "model-positions"}:
+        if raw_count == generated_position_count + 2:
+            layout = "special-padded"
+        elif raw_count == generated_position_count:
+            layout = "model-positions"
+        else:
+            layout = "invalid"
+    expected = (
+        generated_position_count + 2 if layout == "special-padded" else generated_position_count
+    )
+    error: str | None = None
+    if layout not in {"special-padded", "model-positions"}:
+        error = "unknown timing layout or unsupported duration count"
+    elif raw_count != expected:
+        error = f"timing count {raw_count} does not match expected {expected}"
+    elif not np.issubdtype(raw.dtype, np.number) or not np.isfinite(raw).all():
+        error = "timing values must be finite numeric values"
+    elif np.any(raw < 0):
+        error = "timing values must be non-negative"
+    return KokoroTimingPayload(raw, layout, generated_position_count, raw_count, error)
+
+
+def timing_payload_from_result(
+    result: Any,
+    generated_position_count: int,
+    *,
+    declared_layout: TimingLayout | None = None,
+) -> KokoroTimingPayload | None:
+    """Return a classified payload for an OnnxVoice-like result."""
+    values = getattr(result, "timings", None)
+    if values is None:
+        return None
+    return classify_timing(
+        values, generated_position_count, declared_layout=declared_layout, result=result
+    )
 
 
 def _onnxvoice() -> Any:
@@ -413,40 +551,78 @@ def open_installed_kokoro(
 
 
 def runtime_diagnostics(runtime: Any) -> dict[str, Any]:
+    """Return JSON-safe runtime, session, and timing contract diagnostics."""
     diagnostic = runtime.diagnostics()
+    resolved = getattr(runtime, "resolved", None)
     sessions = getattr(diagnostic, "sessions", ())
     return {
         "system": getattr(diagnostic, "system", "kokoro"),
         "ref": getattr(diagnostic, "ref", None),
+        "model_id": getattr(resolved, "model_id", None),
+        "quality": getattr(resolved, "quality", None),
+        "distribution_id": getattr(resolved, "distribution", None),
+        "storage_id": getattr(resolved, "storage_id", None),
+        "sample_rate": getattr(resolved, "sample_rate", None),
+        "model_paths": [str(path) for path in getattr(resolved, "model_paths", ())],
+        "voices_path": (
+            str(resolved.voices_path)
+            if resolved is not None and resolved.voices_path is not None
+            else None
+        ),
+        "config_path": (
+            str(resolved.config_path)
+            if resolved is not None and resolved.config_path is not None
+            else None
+        ),
+        "supports_timings": getattr(runtime, "supports_timings", None),
+        "timing_output": _timing_output_name(resolved) if resolved is not None else None,
+        "timing_layout": getattr(runtime, "timing_layout", None),
+        "timing_contract": {
+            "supports_timings": getattr(runtime, "supports_timings", None),
+            "output": _timing_output_name(resolved) if resolved is not None else None,
+            "layout": getattr(runtime, "timing_layout", None),
+        },
         "layout": getattr(diagnostic, "layout", "single"),
-        "sessions": tuple(
+        "sessions": [
             {
                 "component": getattr(session, "component", None),
                 "model_path": str(getattr(session, "model_path", "")),
-                "providers_requested": tuple(getattr(session, "providers_requested", ())),
-                "providers_active": tuple(getattr(session, "providers_active", ())),
-                "inputs": tuple(getattr(session, "inputs", ())),
-                "outputs": tuple(getattr(session, "outputs", ())),
+                "providers_requested": list(getattr(session, "providers_requested", ())),
+                "providers_active": list(getattr(session, "providers_active", ())),
+                "inputs": list(getattr(session, "inputs", ())),
+                "outputs": list(getattr(session, "outputs", ())),
             }
             for session in sessions
-        ),
+        ],
     }
 
 
-def summarize_inference(result: Any) -> tuple[Any, dict[str, Any]]:
+def summarize_inference(
+    result: Any,
+    timing: KokoroTimingPayload | None = None,
+    input_token_count: int | None = None,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     """Return trace-safe timing and output shape summaries for an inference result."""
-    import numpy as np
 
     def summary(value: Any) -> dict[str, Any]:
         array = np.asarray(value)
-        return {"shape": [int(size) for size in array.shape], "dtype": str(array.dtype)}
+        return {
+            "shape": [int(size) for size in array.shape],
+            "dtype": str(array.dtype),
+            "count": int(array.size),
+        }
 
-    timing = getattr(result, "timings", None)
+    timing_values = getattr(result, "timings", None)
+    if timing is None and timing_values is not None and input_token_count is not None:
+        timing = classify_timing(timing_values, input_token_count, result=result)
+    timing_summary = summary(timing_values) if timing_values is not None else None
+    if timing_summary is not None:
+        timing_summary["layout"] = timing.layout if timing is not None else "unknown"
     outputs = {
         str(name): summary(value)
         for name, value in dict(getattr(result, "outputs", {}) or {}).items()
     }
-    return (summary(timing) if timing is not None else None), outputs
+    return timing_summary, outputs
 
 
 def close_runtime(runtime: Any | None) -> None:
@@ -514,6 +690,32 @@ def _timing_output_name(resolved: ResolvedKokoroModel) -> str | None:
     return None
 
 
+def _declared_timing_layout(resolved: ResolvedKokoroModel) -> TimingLayout | None:
+    for container in (
+        resolved.metadata.get("runtime"),
+        resolved.metadata.get("onnx_contract"),
+    ):
+        if not isinstance(container, Mapping):
+            continue
+        value = container.get("timing_layout")
+        if value is None and isinstance(container.get("timing"), Mapping):
+            value = container["timing"].get("layout")
+        if isinstance(value, str):
+            normalized = value.strip().casefold()
+            if normalized in {"special-padded", "special_padded", "padded"}:
+                return "special-padded"
+            if normalized in {"model-positions", "model_positions", "positions"}:
+                return "model-positions"
+    distribution = (resolved.distribution or "").casefold()
+    runtime = resolved.metadata.get("runtime")
+    runtime_layout = runtime.get("layout") if isinstance(runtime, Mapping) else None
+    if isinstance(runtime_layout, str) and runtime_layout in {"split", "multi", "split-onnx-v1"}:
+        return "model-positions"
+    if "timestamped" in distribution:
+        return "special-padded"
+    return None
+
+
 class KokoroRuntimeAdapter:
     """Adapt an OnnxVoice Kokoro adapter to PyKokoro's runtime protocol."""
 
@@ -522,6 +724,7 @@ class KokoroRuntimeAdapter:
         self.resolved = resolved
         self.sample_rate = resolved.sample_rate
         self.supports_timings = _declared_timing_support(resolved, runtime)
+        self.timing_layout = _declared_timing_layout(resolved)
         logger.debug(
             "Kokoro runtime created timestamp_support=%s timing_output=%s",
             "declared" if self.supports_timings is not None else "unknown",
@@ -574,6 +777,10 @@ class KokoroRuntimeAdapter:
 
 
 __all__ = [
+    "KokoroTimingPayload",
+    "TimingLayout",
+    "classify_timing",
+    "timing_payload_from_result",
     "ResolvedKokoroModel",
     "KokoroRuntimeAdapter",
     "adapt_progress",

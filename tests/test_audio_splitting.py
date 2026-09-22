@@ -1084,7 +1084,7 @@ def test_generate_logs_randomized_phrase_target_timestamps(caplog, capsys):
         phoneme_id=0,
         text="Go",
         phonemes="thgo",
-        tokens=[1, 2, 3, 4],
+        tokens=[1, 2, 3, 4, 5],
         ssmd_metadata={
             SHORT_SENTENCE_META_KEY: {
                 "kind": "randomized-phrase",
