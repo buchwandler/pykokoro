@@ -31,6 +31,14 @@ The default renderer loads model assets lazily. A cached model is reused by the 
 for requests with the same model configuration. `RenderedSegment.save_wav()` writes mono
 float32 WAV audio through `soundfile`.
 
+## Render longer text
+
+The default `long_text_split="none"` mode raises `SynthesisInputTooLongError` when a
+request exceeds the model capacity. Set `long_text_split="sentence"` to enable lazy,
+model-safe PhraseSplit chunking for oversized text. The chunks produce one
+`RenderedSegment`; spaCy is not required by default. See
+[long-text configuration](basic_usage.md#render-longer-text).
+
 ## Submit a prepared request
 
 Use `SynthesisSegment` when the caller already has an ID, resolved voice, or

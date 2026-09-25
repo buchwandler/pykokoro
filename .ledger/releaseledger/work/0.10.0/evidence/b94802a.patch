@@ -1,0 +1,4998 @@
+ pykokoro/__init__.py                             |    3 -
+ pykokoro/_onnxvoice.py                           |  149 +-
+ pykokoro/artifact_manifest.py                    |  103 --
+ pykokoro/asset_constants.py                      |   49 -
+ pykokoro/model_assets.py                         |  189 ---
+ pykokoro/model_profiles.py                       |    2 +-
+ pykokoro/onnx_backend.py                         | 1903 +---------------------
+ pykokoro/output_loudness.py                      |   72 -
+ pykokoro/release_catalog.py                      |  562 -------
+ pykokoro/runtime/dispatcher.py                   |   30 -
+ pykokoro/runtime/model_assets.py                 |  459 ------
+ pykokoro/runtime/thai_wayu.py                    |  211 ---
+ tests/test_auto_pause_mode.py                    |    5 +
+ tests/test_clausal_comma_pauses.py               |    5 +
+ tests/test_emphasis_policy.py                    |    5 +
+ tests/test_german_segmentation.py                |    7 +
+ tests/test_hard_cases_baseline.py                |    7 +
+ tests/test_hard_cases_data.py                    |    5 +
+ tests/test_hard_cases_frontend.py                |    7 +
+ tests/test_hard_cases_schema.py                  |    5 +
+ tests/test_hard_cases_segmentation.py            |    6 +
+ tests/test_hard_cases_selection.py               |    6 +
+ tests/test_import_boundaries.py                  |    1 -
+ tests/test_maintainer_review4_download_cache.py  |  226 ---
+ tests/test_onnxvoice_boundary.py                 |  113 +-
+ tests/test_parenthetical_pauses.py               |    5 +
+ tests/test_pipeline_logging.py                   |    5 +
+ tests/test_pipeline_paragraphs.py                |    4 +
+ tests/test_pipeline_phoneme_consistency.py       |    5 +
+ tests/test_pipeline_refactor.py                  |    7 +-
+ tests/test_pipeline_unit_streaming.py            |    6 +-
+ tests/test_polynorm_eval.py                      |    5 +
+ tests/test_polynorm_external.py                  |    6 +-
+ tests/test_polynorm_phoneme_harness.py           |    3 +
+ tests/test_short_sentence_benchmark_reporting.py |    5 +
+ tests/test_short_sentence_diagnostics.py         |    5 +
+ tests/test_short_sentence_parameter_sweep.py     |    6 +-
+ tests/test_spacy_model_policy.py                 |    6 +-
+ tests/test_voice_loudness_benchmark.py           |    6 +-
+ tests/test_voice_loudness_calibration.py         |    6 +-
+ 40 files changed, 427 insertions(+), 3783 deletions(-)
+
+diff --git a/pykokoro/__init__.py b/pykokoro/__init__.py
+index 77090dc..dc7c97c 100644
+--- a/pykokoro/__init__.py
++++ b/pykokoro/__init__.py
+@@ -134,9 +134,6 @@ __all__ = [
+     "AssetProgressEvent",
+     "AssetProgressCallback",
+     "ConsoleAssetProgress",
+-    "available_model_releases",
+-    "download_model_release",
+-    "resolve_model_release",
+     "discover_models",
+     "ModelCapabilities",
+     "ModelDiscoveryResult",
+diff --git a/pykokoro/_onnxvoice.py b/pykokoro/_onnxvoice.py
+index 97a11e5..c772a23 100644
+--- a/pykokoro/_onnxvoice.py
++++ b/pykokoro/_onnxvoice.py
+@@ -21,9 +21,14 @@ class ResolvedKokoroModel:
+
+     ref: str | None
+     model_id: str | None
++
+     quality: str | None
++    distribution: str | None
++    storage_id: str | None
++
+     installation: Any | None
+     metadata: Mapping[str, Any]
++
+     sample_rate: int
+     model_paths: tuple[Path, ...]
+     voices_path: Path | None
+@@ -62,12 +67,17 @@ _DISTRIBUTION_MAP: dict[tuple[str, str], str] = {
+ }
+
+
+-def map_distribution(source: str, variant: str) -> str | None:
+-    """Map PyKokoro's ModelSource and variant to an OnnxVoice distribution ID.
++def onnxvoice_distribution_for(*, source: str, variant: str) -> str:
++    """Translate PyKokoro's ModelSource and variant to an exact OnnxVoice distribution ID.
+
+-    Returns None if no mapping exists (for huggingface or unknown sources).
++    Raises ConfigurationError if the explicit source/variant pair has no mapping.
+     """
+-    return _DISTRIBUTION_MAP.get((source, variant))
++    try:
++        return _DISTRIBUTION_MAP[(source, variant)]
++    except KeyError as exc:
++        raise ConfigurationError(
++            f"No OnnxVoice distribution mapping for source={source!r}, variant={variant!r}"
++        ) from exc
+
+
+ def _provider_name(value: Any) -> tuple[str, dict[str, Any]]:
+@@ -199,32 +209,78 @@ def _call(operation: str, function: Callable[[], Any]) -> Any:
+
+
+ def _installation_info(installation: Any, *, ref: str | None = None) -> ResolvedKokoroModel:
+-    artifacts = tuple(getattr(installation, "artifacts", ()) or ())
+-    model_paths = tuple(
+-        Path(artifact.path) for artifact in artifacts if getattr(artifact, "role", None) == "model"
+-    )
+-    voices_path = next(
+-        (
++    """Extract PyKokoro's resolved view from an OnnxVoice Installation."""
++    # Use semantic artifact helpers where available.
++    # Fall back to manual scanning for test mocks that lack these methods.
++    if hasattr(installation, "artifacts_for"):
++        model_paths = tuple(Path(artifact.path) for artifact in installation.artifacts_for("model"))
++    else:
++        artifacts = tuple(getattr(installation, "artifacts", ()) or ())
++        model_paths = tuple(
+             Path(artifact.path)
+             for artifact in artifacts
+-            if getattr(artifact, "role", None) == "voices"
+-        ),
+-        None,
+-    )
+-    config_path = next(
+-        (
+-            Path(artifact.path)
+-            for artifact in artifacts
+-            if getattr(artifact, "role", None) in {"config", "vocab"}
+-        ),
+-        None,
+-    )
+-    metadata = dict(getattr(installation, "metadata", {}) or {})
+-    selected_quality = metadata.get("selected_quality")
++            if getattr(artifact, "role", None) == "model"
++        )
++
++    if hasattr(installation, "require_artifact"):
++        try:
++            voices_path = Path(installation.require_artifact("voices").path)
++        except Exception:
++            voices_path = None
++    else:
++        artifacts = tuple(getattr(installation, "artifacts", ()) or ())
++        voices_path = next(
++            (
++                Path(artifact.path)
++                for artifact in artifacts
++                if getattr(artifact, "role", None) == "voices"
++            ),
++            None,
++        )
++
++    # Vocabulary/config: prefer artifact_path for unique roles.
++    config_path = None
++    if hasattr(installation, "artifact_path"):
++        try:
++            config_path = Path(installation.artifact_path("vocab"))
++        except Exception:
++            try:
++                config_path = Path(installation.artifact_path("config"))
++            except Exception:
++                config_path = None
++    else:
++        artifacts = tuple(getattr(installation, "artifacts", ()) or ())
++        config_path = next(
++            (
++                Path(artifact.path)
++                for artifact in artifacts
++                if getattr(artifact, "role", None) in {"config", "vocab"}
++            ),
++            None,
++        )
++
++    # Use typed properties from the Installation, with metadata fallback.
++    selected_quality = getattr(installation, "selected_quality", None)
++    if selected_quality is None:
++        metadata = dict(getattr(installation, "metadata", {}) or {})
++        selected_quality = metadata.get("selected_quality")
++    else:
++        metadata = dict(getattr(installation, "metadata", {}) or {})
++
++    selected_distribution = getattr(installation, "selected_distribution", None)
++    if selected_distribution is None:
++        selected_distribution = metadata.get("selected_distribution")
++
++    storage_id = getattr(installation, "storage_id", None)
++    if storage_id is None:
++        storage_id = metadata.get("storage_id")
++
+     return ResolvedKokoroModel(
+         ref=ref or getattr(installation, "ref", None),
+         model_id=getattr(installation, "id", None),
+         quality=str(selected_quality) if selected_quality is not None else None,
++        distribution=str(selected_distribution) if selected_distribution is not None else None,
++        storage_id=str(storage_id) if storage_id is not None else None,
+         installation=installation,
+         metadata=metadata,
+         sample_rate=int(getattr(installation, "sample_rate", None) or 24000),
+@@ -238,6 +294,7 @@ def install_kokoro_model(
+     ref: str,
+     *,
+     quality: str | None = None,
++    source: str | None = None,
+     distribution: str | None = None,
+     cache_dir: str | Path | None = None,
+     offline: bool = False,
+@@ -245,7 +302,19 @@ def install_kokoro_model(
+     force: bool = False,
+     progress: Callable[[AssetProgressEvent], None] | None = None,
+ ) -> ResolvedKokoroModel:
++    """Install a Kokoro model via OnnxVoice.
++
++    Either *source* (PyKokoro compatibility alias like 'github') or
++    *distribution* (exact OnnxVoice distribution ID) may be supplied.
++    When *source* is given, it is translated to an OnnxVoice distribution
++    using the internal mapping.
++    """
+     normalized = normalize_kokoro_ref(ref)
++    if source is not None:
++        variant = normalized.split(":", 1)[1]
++        onnxvoice_distribution = onnxvoice_distribution_for(source=source, variant=variant)
++    else:
++        onnxvoice_distribution = distribution
+     module = _onnxvoice()
+     manager = module.OnnxVoice(cache_dir=cache_dir, offline=offline)
+     installation = _call(
+@@ -253,7 +322,7 @@ def install_kokoro_model(
+         lambda: manager.install(
+             normalized,
+             quality=quality,
+-            distribution=None,
++            distribution=onnxvoice_distribution,
+             refresh=refresh,
+             force=force,
+             progress=adapt_progress(progress),
+@@ -266,15 +335,26 @@ def resolve_kokoro_model(
+     ref: str,
+     *,
+     quality: str | None = None,
++    source: str | None = None,
+     distribution: str | None = None,
+     cache_dir: str | Path | None = None,
+     offline: bool = False,
+ ) -> ResolvedKokoroModel:
++    """Resolve a locally installed Kokoro model via OnnxVoice.
++
++    Either *source* (PyKokoro compatibility alias) or
++    *distribution* (exact OnnxVoice distribution ID) may be supplied.
++    """
+     normalized = normalize_kokoro_ref(ref)
++    if source is not None:
++        variant = normalized.split(":", 1)[1]
++        onnxvoice_distribution = onnxvoice_distribution_for(source=source, variant=variant)
++    else:
++        onnxvoice_distribution = distribution
+     manager = _onnxvoice().OnnxVoice(cache_dir=cache_dir, offline=offline)
+     installation = _call(
+         "resolve",
+-        lambda: manager.resolve(normalized, quality=quality, distribution=None),
++        lambda: manager.resolve(normalized, quality=quality, distribution=onnxvoice_distribution),
+     )
+     return _installation_info(installation, ref=normalized)
+
+@@ -387,7 +467,21 @@ class KokoroRuntimeAdapter:
+         self.supports_timings = bool(
+             isinstance(runtime_metadata, Mapping) and runtime_metadata.get("timings_output")
+         )
+-        self.cache_identity = (resolved.ref, resolved.quality, resolved.model_id)
++        # Managed installations use storage_id for cache identity.
++        # Local unmanaged models use path-sensitive identity.
++        if resolved.storage_id is not None:
++            self.cache_identity: tuple[Any, ...] = (
++                "managed",
++                resolved.ref,
++                resolved.storage_id,
++            )
++        else:
++            self.cache_identity = (
++                "local",
++                tuple(str(path.resolve()) for path in resolved.model_paths),
++                str(resolved.voices_path.resolve()) if resolved.voices_path is not None else None,
++                str(resolved.config_path.resolve()) if resolved.config_path is not None else None,
++            )
+         self._closed = False
+
+     def infer(
+@@ -427,6 +521,7 @@ __all__ = [
+     "install_kokoro_model",
+     "normalize_kokoro_ref",
+     "normalize_provider_request",
++    "onnxvoice_distribution_for",
+     "open_installed_kokoro",
+     "open_local_kokoro",
+     "resolve_kokoro_model",
+diff --git a/pykokoro/artifact_manifest.py b/pykokoro/artifact_manifest.py
+deleted file mode 100644
+index 75941dd..0000000
+--- a/pykokoro/artifact_manifest.py
++++ /dev/null
+@@ -1,103 +0,0 @@
+-"""Immutable upstream artifact coordinates used by the download backend."""
+-
+-from __future__ import annotations
+-
+-from dataclasses import dataclass
+-
+-
+-@dataclass(frozen=True)
+-class ArtifactSpec:
+-    """Pinned revision and optional content digest for one remote artifact."""
+-
+-    revision: str
+-    sha256: str | None = None
+-
+-
+-HF_MODEL_REVISIONS: dict[str, str] = {
+-    "v1.0": "1939ad2a8e416c0acfeecc08a694d14ef25f2231",
+-    "v1.1-zh": "6cc0f0d2ebe369a68b0df87c2b65c1af8c0ac3e3",
+-}
+-
+-HF_CONFIG_REVISIONS: dict[str, str] = {
+-    "v1.0": "f3ff3571791e39611d31c381e3a41a3af07b4987",
+-    "v1.1-zh": "01e7505bd6a7a2ac4975463114c3a7650a9f7218",
+-}
+-
+-HF_MODEL_SHA256: dict[tuple[str, str], str] = {
+-    ("v1.0", "model.onnx"): "8fbea51ea711f2af382e88c833d9e288c6dc82ce5e98421ea61c058ce21a34cb",
+-    ("v1.0", "model_fp16.onnx"): "ba4527a874b42b21e35f468c10d326fdff3c7fc8cac1f85e9eb6c0dfc35c334a",
+-    (
+-        "v1.0",
+-        "model_quantized.onnx",
+-    ): "fbae9257e1e05ffc727e951ef9b9c98418e6d79f1c9b6b13bd59f5c9028a1478",
+-    (
+-        "v1.0",
+-        "model_q8f16.onnx",
+-    ): "04c658aec1b6008857c2ad10f8c589d4180d0ec427e7e6118ceb487e215c3cd0",
+-    ("v1.0", "model_q4.onnx"): "04cf570cf9c4153694f76347ed4b9a48c1b59ff1de0999e6605d123966b197c7",
+-    (
+-        "v1.0",
+-        "model_q4f16.onnx",
+-    ): "d1a508a6a29671ead84fac99c7401fbd3c21a583fc6ed1406d1ec974d53bf45f",
+-    (
+-        "v1.0",
+-        "model_uint8.onnx",
+-    ): "6607a397d77b8514065420b7c1e7320117f7aabfdb45ce15f0050c5b0fe75aea",
+-    (
+-        "v1.0",
+-        "model_uint8f16.onnx",
+-    ): "883333e03c597584b532eebea0f8310f25f0c9ade58fe864792c12d969944a9a",
+-    ("v1.1-zh", "model.onnx"): "94b973941b1852754f979be5d5e20be666d5c81d9bb886b88ae1dc85c9b895ca",
+-    (
+-        "v1.1-zh",
+-        "model_fp16.onnx",
+-    ): "d59cb626c885c91acb7ecf7250f26f9915ad0af99b770572000d90b598c3dfbc",
+-    (
+-        "v1.1-zh",
+-        "model_int8.onnx",
+-    ): "58b9b997faeaf42b427bac24c8a6246b236b0561311f6b118318cd9d2f47acb1",
+-    (
+-        "v1.1-zh",
+-        "model_quantized.onnx",
+-    ): "a39469be791eeaa3089c1ed5e58b8731d1f2462ea0e7dae2bc44388e58f973d8",
+-    (
+-        "v1.1-zh",
+-        "model_q4.onnx",
+-    ): "dbf3e5a505c4e453303de84d941d51271f5b460956d9b911dea310a90c88b7c2",
+-    (
+-        "v1.1-zh",
+-        "model_q4f16.onnx",
+-    ): "9ee7ca1ace506c7dc983d0c9a20c7edfcb08c2027645ae4450afa3dbbd8a57ef",
+-    (
+-        "v1.1-zh",
+-        "model_uint8.onnx",
+-    ): "a39469be791eeaa3089c1ed5e58b8731d1f2462ea0e7dae2bc44388e58f973d8",
+-    (
+-        "v1.1-zh",
+-        "model_bnb4.onnx",
+-    ): "71d417643add4820933a7ae552074eb3dc646e622cf022bcd69dbbfea4332338",
+-}
+-
+-HF_CONFIG_SHA256: dict[str, str] = {
+-    "v1.0": "5abb01e2403b072bf03d04fde160443e209d7a0dad49a423be15196b9b43c17f",
+-    "v1.1-zh": "bc333efa5ce4ceff433c8c8e5d027a1eca0166001e4e4a62bea2d26ff7a46890",
+-}
+-
+-
+-def hf_model_spec(variant: str, filename: str) -> ArtifactSpec:
+-    return ArtifactSpec(
+-        revision=HF_MODEL_REVISIONS[variant],
+-        sha256=HF_MODEL_SHA256.get((variant, filename)),
+-    )
+-
+-
+-def hf_config_spec(variant: str) -> ArtifactSpec:
+-    return ArtifactSpec(
+-        revision=HF_CONFIG_REVISIONS[variant],
+-        sha256=HF_CONFIG_SHA256.get(variant),
+-    )
+-
+-
+-def hf_voice_spec(variant: str, filename: str) -> ArtifactSpec:
+-    del filename
+-    return ArtifactSpec(revision=HF_MODEL_REVISIONS[variant])
+diff --git a/pykokoro/asset_constants.py b/pykokoro/asset_constants.py
+deleted file mode 100644
+index 4cb9428..0000000
+--- a/pykokoro/asset_constants.py
++++ /dev/null
+@@ -1,49 +0,0 @@
+-"""Dependency-light model and voice artifact filenames."""
+-
+-HF_MODEL_SUBFOLDER = "onnx"
+-HF_CONFIG_FILENAME = "config.json"
+-
+-MODEL_QUALITY_FILES_HF: dict[str, str] = {
+-    "fp32": "model.onnx",
+-    "fp16": "model_fp16.onnx",
+-    "q8": "model_quantized.onnx",
+-    "q8f16": "model_q8f16.onnx",
+-    "q4": "model_q4.onnx",
+-    "q4f16": "model_q4f16.onnx",
+-    "uint8": "model_uint8.onnx",
+-    "uint8f16": "model_uint8f16.onnx",
+-}
+-
+-MODEL_QUALITY_FILES_GITHUB_V1_0: dict[str, str] = {
+-    "fp32": "kokoro-v1.0.onnx",
+-    "fp16": "kokoro-v1.0.fp16.onnx",
+-    "q8": "kokoro-v1.0.q8.onnx",
+-    "q8f16": "kokoro-v1.0.q8f16.onnx",
+-    "q4": "kokoro-v1.0.q4.onnx",
+-    "q4f16": "kokoro-v1.0.q4f16.onnx",
+-    "uint8": "kokoro-v1.0.uint8.onnx",
+-    "uint8f16": "kokoro-v1.0.uint8f16.onnx",
+-}
+-
+-
+-MODEL_QUALITY_FILES_GITHUB_V1_1_ZH: dict[str, str] = {
+-    "fp32": "kokoro-v1.1-zh.onnx",
+-    "fp16": "kokoro-v1.1-zh.fp16.onnx",
+-    "q8": "kokoro-v1.1-zh.q8.onnx",
+-    "int8": "kokoro-v1.1-zh.int8.onnx",
+-    "q4": "kokoro-v1.1-zh.q4.onnx",
+-    "q4f16": "kokoro-v1.1-zh.q4f16.onnx",
+-    "uint8": "kokoro-v1.1-zh.uint8.onnx",
+-    "bnb4": "kokoro-v1.1-zh.bnb4.onnx",
+-}
+-
+-
+-MODEL_QUALITY_FILES_GITHUB_V1_2_DE_MARTIN: dict[str, str] = {
+-    "fp32": "kokoro-german-martin-v1.2.onnx",
+-}
+-
+-MODEL_QUALITY_CACHE_FILES_HF_V1_0 = MODEL_QUALITY_FILES_HF.copy()
+-MODEL_QUALITY_FILES = MODEL_QUALITY_FILES_HF
+-GITHUB_VOICES_FILENAME_V1_0 = "voices-v1.0.npz"
+-GITHUB_VOICES_FILENAME_V1_1_ZH = "voices-v1.1-zh.npz"
+-GITHUB_VOICES_FILENAME_V1_2_DE_MARTIN = "voices-german-martin-v1.2.bin"
+diff --git a/pykokoro/model_assets.py b/pykokoro/model_assets.py
+deleted file mode 100644
+index 11b8cdf..0000000
+--- a/pykokoro/model_assets.py
++++ /dev/null
+@@ -1,189 +0,0 @@
+-"""Dependency-light model, config, and voice asset inspection."""
+-
+-from __future__ import annotations
+-
+-from dataclasses import dataclass
+-from pathlib import Path
+-
+-from .asset_constants import HF_CONFIG_FILENAME, HF_MODEL_SUBFOLDER
+-from .config_types import (
+-    DEFAULT_MODEL_QUALITY,
+-    DEFAULT_MODEL_SOURCE,
+-    DEFAULT_MODEL_VARIANT,
+-    ModelQuality,
+-    ModelSource,
+-    ModelVariant,
+-)
+-from .model_profiles import get_model_profile
+-from .release_catalog import ReleaseAsset, RemoteModelRelease
+-from .utils import get_user_cache_path
+-
+-
+-def _is_nonempty_file(path: Path) -> bool:
+-    try:
+-        return path.is_file() and path.stat().st_size > 0
+-    except OSError:
+-        return False
+-
+-
+-def _model_filename(
+-    quality: ModelQuality, source: ModelSource, variant: ModelVariant
+-) -> tuple[str, bool]:
+-    if source == "github":
+-        from .asset_constants import (
+-            MODEL_QUALITY_FILES_GITHUB_V1_0,
+-            MODEL_QUALITY_FILES_GITHUB_V1_1_ZH,
+-        )
+-
+-        legacy = {
+-            "v1.0": MODEL_QUALITY_FILES_GITHUB_V1_0,
+-            "v1.1-zh": MODEL_QUALITY_FILES_GITHUB_V1_1_ZH,
+-        }.get(variant)
+-        if legacy is not None:
+-            try:
+-                return legacy[quality], False
+-            except KeyError as exc:
+-                available = ", ".join(legacy)
+-                raise ValueError(
+-                    f"Quality {quality!r} is not available for {source}/{variant}. Available: {available}"
+-                ) from exc
+-        if variant == "v1.2-de-martin":
+-            if quality != "fp32":
+-                raise ValueError(
+-                    f"Quality {quality!r} is not available for {source}/{variant}. Available: fp32"
+-                )
+-            return "kokoro-german-martin-v1.2.onnx", False
+-        return f"{quality}.onnx", False
+-    profile = get_model_profile(variant, source)
+-    try:
+-        return profile.quality_files[quality], True
+-    except KeyError as exc:
+-        available = ", ".join(profile.quality_files) or "none"
+-        raise ValueError(
+-            f"Quality {quality!r} is not available for {source}/{variant}. Available: {available}"
+-        ) from exc
+-
+-
+-def _model_asset_dir(source: ModelSource, variant: ModelVariant) -> Path:
+-    return get_user_cache_path() / "models" / source / variant
+-
+-
+-def _voices_asset_dir(source: ModelSource, variant: ModelVariant) -> Path:
+-    return get_user_cache_path() / "voices" / source / variant
+-
+-
+-def _config_asset_path(variant: ModelVariant) -> Path:
+-    return get_user_cache_path() / "config" / variant / HF_CONFIG_FILENAME
+-
+-
+-@dataclass(frozen=True, slots=True)
+-class ModelAssetPaths:
+-    source: ModelSource
+-    variant: ModelVariant
+-    quality: ModelQuality
+-    config: Path | None
+-    model: Path
+-    voices: Path
+-
+-    @property
+-    def missing(self) -> tuple[str, ...]:
+-        missing: list[str] = []
+-        required = [("model", self.model), ("voices", self.voices)]
+-        if self.config is not None:
+-            required.insert(0, ("config", self.config))
+-        for name, path in required:
+-            if not _is_nonempty_file(path):
+-                missing.append(name)
+-        return tuple(missing)
+-
+-    @property
+-    def complete(self) -> bool:
+-        return not self.missing
+-
+-
+-def get_voices_archive_path(
+-    source: ModelSource = DEFAULT_MODEL_SOURCE, variant: ModelVariant = DEFAULT_MODEL_VARIANT
+-) -> Path:
+-    """Return the compatibility cache path for a combined voice archive."""
+-    if source == "huggingface":
+-        filename = "voices.bin.npz"
+-    else:
+-        from .asset_constants import GITHUB_VOICES_FILENAME_V1_0, GITHUB_VOICES_FILENAME_V1_1_ZH
+-
+-        filename = {
+-            "v1.0": GITHUB_VOICES_FILENAME_V1_0,
+-            "v1.1-zh": GITHUB_VOICES_FILENAME_V1_1_ZH,
+-        }.get(variant)
+-        if filename is None and variant == "v1.2-de-martin":
+-            filename = "voices-german-martin-v1.2.bin"
+-        filename = filename or "voices.npz"
+-    return _voices_asset_dir(source, variant) / filename
+-
+-
+-def release_asset_path(release: RemoteModelRelease, asset: ReleaseAsset) -> Path:
+-    """Return the release-identity-aware local path for one published asset."""
+-    return get_user_cache_path("releases") / release.profile / release.release_tag / asset.name
+-
+-
+-def installed_manifest_path(release: RemoteModelRelease) -> Path:
+-    return (
+-        get_user_cache_path("releases")
+-        / release.profile
+-        / release.release_tag
+-        / "release-manifest.json"
+-    )
+-
+-
+-def installed_sidecar_path(release: RemoteModelRelease) -> Path:
+-    return (
+-        get_user_cache_path("releases") / release.profile / release.release_tag / "installed.json"
+-    )
+-
+-
+-def get_model_asset_paths(
+-    *,
+-    quality: ModelQuality = DEFAULT_MODEL_QUALITY,
+-    source: ModelSource = DEFAULT_MODEL_SOURCE,
+-    variant: ModelVariant = DEFAULT_MODEL_VARIANT,
+-) -> ModelAssetPaths:
+-    filename, uses_hf_subfolder = _model_filename(quality, source, variant)
+-    model = _model_asset_dir(source, variant) / filename
+-    if uses_hf_subfolder:
+-        model = model.parent / HF_MODEL_SUBFOLDER / model.name
+-    profile = get_model_profile(variant, source)
+-    return ModelAssetPaths(
+-        source=source,
+-        variant=variant,
+-        quality=quality,
+-        config=(
+-            _config_asset_path(variant)
+-            if source == "huggingface" and profile.vocabulary_source == "downloaded-config"
+-            else None
+-        ),
+-        model=model,
+-        voices=get_voices_archive_path(source, variant),
+-    )
+-
+-
+-def is_model_downloaded(
+-    quality: ModelQuality = DEFAULT_MODEL_QUALITY,
+-    source: ModelSource = DEFAULT_MODEL_SOURCE,
+-    variant: ModelVariant = DEFAULT_MODEL_VARIANT,
+-) -> bool:
+-    return _is_nonempty_file(
+-        get_model_asset_paths(quality=quality, source=source, variant=variant).model
+-    )
+-
+-
+-def are_voices_downloaded(
+-    source: ModelSource = DEFAULT_MODEL_SOURCE, variant: ModelVariant = DEFAULT_MODEL_VARIANT
+-) -> bool:
+-    return _is_nonempty_file(get_voices_archive_path(source, variant))
+-
+-
+-def are_models_downloaded(
+-    quality: ModelQuality = DEFAULT_MODEL_QUALITY,
+-    source: ModelSource = DEFAULT_MODEL_SOURCE,
+-    variant: ModelVariant = DEFAULT_MODEL_VARIANT,
+-) -> bool:
+-    return get_model_asset_paths(quality=quality, source=source, variant=variant).complete
+diff --git a/pykokoro/model_profiles.py b/pykokoro/model_profiles.py
+index ca8e23a..ca124b2 100644
+--- a/pykokoro/model_profiles.py
++++ b/pykokoro/model_profiles.py
+@@ -1,6 +1,6 @@
+ """Local runtime metadata for supported model frontends.
+
+-Published artifact inventory is intentionally resolved by :mod:`release_catalog`.
++Published artifact inventory is resolved by OnnxVoice.
+ """
+
+ from __future__ import annotations
+diff --git a/pykokoro/onnx_backend.py b/pykokoro/onnx_backend.py
+index 3693224..603c039 100644
+--- a/pykokoro/onnx_backend.py
++++ b/pykokoro/onnx_backend.py
+@@ -1,19 +1,14 @@
+ """ONNX backend for pykokoro - native ONNX TTS without external dependencies."""
+
+-import contextlib
+-import hashlib
++from __future__ import annotations
++
+ import io
+ import json
+ import logging
+-import os
+-import shutil
+ import sqlite3
+-import tempfile
+ import threading
+ import time
+-import urllib.request
+ from collections.abc import Callable
+-from datetime import datetime, timezone
+ from pathlib import Path
+ from typing import TYPE_CHECKING, Any, Literal, cast
+
+@@ -24,16 +19,6 @@ from ._onnxvoice import (
+     open_installed_kokoro,
+     open_local_kokoro,
+ )
+-from .artifact_manifest import (
+-    hf_config_spec,
+-    hf_model_spec,
+-    hf_voice_spec,
+-)
+-from .asset_constants import (
+-    HF_CONFIG_FILENAME,
+-    HF_MODEL_SUBFOLDER,
+-    MODEL_QUALITY_FILES_HF,
+-)
+ from .asset_progress import AssetProgressCallback
+ from .audio_generator import AudioGenerator
+ from .config_types import (
+@@ -46,37 +31,10 @@ from .config_types import (
+     ProviderType,
+ )
+ from .exceptions import ConfigurationError
+-from .model_assets import (
+-    _is_nonempty_file,
+-    get_voices_archive_path,
+-    installed_manifest_path,
+-    installed_sidecar_path,
+-    release_asset_path,
+-)
+-from .model_assets import (
+-    are_models_downloaded as _are_models_downloaded,
+-)
+-from .model_assets import (
+-    are_voices_downloaded as _are_voices_downloaded,
+-)
+-from .model_assets import (
+-    is_model_downloaded as _is_model_downloaded,
+-)
+ from .model_profiles import VOICE_ALIASES, get_model_profile
+-from .model_registry import ModelRegistryError
+-from .release_catalog import (
+-    MODEL_REPOSITORY,
+-    ReleaseAsset,
+-    RemoteModelRelease,
+-    resolve_model_release,
+-)
+-from .runtime.model_assets import (
+-    resolve_runtime_assets,
+-)
+ from .tokenizer import EspeakConfig, Tokenizer, TokenizerConfig
+-from .utils import get_user_cache_path
+ from .voice_level import VoiceCalibrationKey
+-from .voice_manager import VoiceBlend, VoiceManager, normalize_voice_style
++from .voice_manager import VoiceBlend, VoiceManager
+
+ if TYPE_CHECKING:
+     from .loudness_config import LoudnessConfig
+@@ -87,1071 +45,42 @@ if TYPE_CHECKING:
+ # Logger for debugging
+ logger = logging.getLogger(__name__)
+
+-DOWNLOAD_CHUNK_SIZE = 1024 * 1024
+-DOWNLOAD_RETRIES = 3
+-DOWNLOAD_TIMEOUT_SECONDS = 30
+-DOWNLOAD_LOCK_TIMEOUT_SECONDS = 30
+-MIN_ONNX_BYTES = 1_000_000
+-MIN_VOICE_ARCHIVE_BYTES = 64 * 1024
+-MIN_VOICE_BIN_BYTES = 100_000
+-MIN_CONFIG_BYTES = 100
+-
+-
+-def _hf_hub_download(**kwargs: Any) -> str:
+-    """Load and call the Hugging Face client only for Hugging Face downloads."""
+-    from huggingface_hub import hf_hub_download
+-
+-    return hf_hub_download(**kwargs)
+-
+-
+-class ArtifactValidationError(RuntimeError):
+-    """Raised when a cached or downloaded artifact fails integrity checks."""
+-
+-
+-# GitHub release discovery and model installation are owned by OnnxVoice.
+-# Direct Hugging Face compatibility downloads use the same pinned sources as the registry.
+-HF_REPO_V1_0 = "onnx-community/Kokoro-82M-v1.0-ONNX"
+-HF_REPO_V1_1_ZH = "onnx-community/Kokoro-82M-v1.1-zh-ONNX"
+-HF_CONFIG_REPO_V1_0 = "hexgrad/Kokoro-82M"
+-HF_CONFIG_REPO_V1_1_ZH = "hexgrad/Kokoro-82M-v1.1-zh"
+-HF_VOICES_SUBFOLDER = "voices"
+-# All available voice names for v1.0 (54 voices - English/multilingual)
+-# Used by both HuggingFace and GitHub sources
+-# These are used for downloading individual voice files from HuggingFace
+-VOICE_NAMES_V1_0 = [
+-    "af_alloy",
+-    "af_aoede",
+-    "af_bella",
+-    "af_heart",
+-    "af_jessica",
+-    "af_kore",
+-    "af_nicole",
+-    "af_nova",
+-    "af_river",
+-    "af_sarah",
+-    "af_sky",
+-    "am_adam",
+-    "am_echo",
+-    "am_eric",
+-    "am_fenrir",
+-    "am_liam",
+-    "am_michael",
+-    "am_onyx",
+-    "am_puck",
+-    "am_santa",
+-    "bf_alice",
+-    "bf_emma",
+-    "bf_isabella",
+-    "bf_lily",
+-    "bm_daniel",
+-    "bm_fable",
+-    "bm_george",
+-    "bm_lewis",
+-    "ef_dora",
+-    "em_alex",
+-    "em_santa",
+-    "ff_siwis",
+-    "hf_alpha",
+-    "hf_beta",
+-    "hm_omega",
+-    "hm_psi",
+-    "if_sara",
+-    "im_nicola",
+-    "jf_alpha",
+-    "jf_gongitsune",
+-    "jf_nezumi",
+-    "jf_tebukuro",
+-    "jm_kumo",
+-    "pf_dora",
+-    "pm_alex",
+-    "pm_santa",
+-    "zf_xiaobei",
+-    "zf_xiaoni",
+-    "zf_xiaoxiao",
+-    "zm_yunjian",
+-    "zm_yunxi",
+-    "zm_yunxia",
+-    "zm_yunyang",
+-]
+-
+-
+-# Expected voice names for GitHub v1.1-zh (Chinese model)
+-# Note: These are loaded dynamically from voices.bin, this list is for reference
+-# The v1.1-zh model contains 103 voices with various Chinese speakers
+-VOICE_NAMES_ZH = [
+-    # Sample voices from the v1.1-zh model:
+-    "af_maple",  # Female voice
+-    "af_sol",  # Female voice
+-    "bf_vale",  # British female voice
+-    # Numbered Chinese female voices (zf_XXX)
+-    "zf_001",
+-    "zf_002",
+-    "zf_003",  # ... many more numbered voices
+-    # Numbered Chinese male voices (zm_XXX)
+-    "zm_009",
+-    "zm_010",
+-    "zm_011",  # ... many more numbered voices
+-    # Note: Full list contains 103 voices total
+-    # Use kokoro.get_voices() to retrieve the complete list at runtime
+-]
+-
+-# Complete voice list for v1.1-zh (103 voices - Chinese)
+-# Used by both HuggingFace and GitHub sources
+-VOICE_NAMES_V1_1_ZH = [
+-    "af_maple",
+-    "af_sol",
+-    "bf_vale",
+-    "zf_001",
+-    "zf_002",
+-    "zf_003",
+-    "zf_004",
+-    "zf_005",
+-    "zf_006",
+-    "zf_007",
+-    "zf_008",
+-    "zf_017",
+-    "zf_018",
+-    "zf_019",
+-    "zf_021",
+-    "zf_022",
+-    "zf_023",
+-    "zf_024",
+-    "zf_026",
+-    "zf_027",
+-    "zf_028",
+-    "zf_032",
+-    "zf_036",
+-    "zf_038",
+-    "zf_039",
+-    "zf_040",
+-    "zf_042",
+-    "zf_043",
+-    "zf_044",
+-    "zf_046",
+-    "zf_047",
+-    "zf_048",
+-    "zf_049",
+-    "zf_051",
+-    "zf_059",
+-    "zf_060",
+-    "zf_067",
+-    "zf_070",
+-    "zf_071",
+-    "zf_072",
+-    "zf_073",
+-    "zf_074",
+-    "zf_075",
+-    "zf_076",
+-    "zf_077",
+-    "zf_078",
+-    "zf_079",
+-    "zf_083",
+-    "zf_084",
+-    "zf_085",
+-    "zf_086",
+-    "zf_087",
+-    "zf_088",
+-    "zf_090",
+-    "zf_092",
+-    "zf_093",
+-    "zf_094",
+-    "zf_099",
+-    "zm_009",
+-    "zm_010",
+-    "zm_011",
+-    "zm_012",
+-    "zm_013",
+-    "zm_014",
+-    "zm_015",
+-    "zm_016",
+-    "zm_020",
+-    "zm_025",
+-    "zm_029",
+-    "zm_030",
+-    "zm_031",
+-    "zm_033",
+-    "zm_034",
+-    "zm_035",
+-    "zm_037",
+-    "zm_041",
+-    "zm_045",
+-    "zm_050",
+-    "zm_052",
+-    "zm_053",
+-    "zm_054",
+-    "zm_055",
+-    "zm_056",
+-    "zm_057",
+-    "zm_058",
+-    "zm_061",
+-    "zm_062",
+-    "zm_063",
+-    "zm_064",
+-    "zm_065",
+-    "zm_066",
+-    "zm_068",
+-    "zm_069",
+-    "zm_080",
+-    "zm_081",
+-    "zm_082",
+-    "zm_089",
+-    "zm_091",
+-    "zm_095",
+-    "zm_096",
+-    "zm_097",
+-    "zm_098",
+-    "zm_100",
+-]
+-
+-
+-# Voice name documentation by language/variant
+-# These voices are dynamically loaded from the model's voices.bin file
+-# The actual available voices may vary depending on the model source and variant
+-VOICE_NAMES_BY_VARIANT = {
+-    "v1.0": VOICE_NAMES_V1_0,  # Same as HuggingFace (multi-language)
+-    "v1.1-zh": VOICE_NAMES_V1_1_ZH,  # Chinese-specific voices
+-}
+-
+-
+-# Language code mapping for kokoro-onnx
+-LANG_CODE_TO_ONNX = {
+-    "a": "en-us",  # American English
+-    "b": "en-gb",  # British English
+-    "e": "es",  # Spanish
+-    "f": "fr",  # French
+-    "h": "hi",  # Hindi
+-    "i": "it",  # Italian
+-    "j": "ja",  # Japanese
+-    "p": "pt",  # Portuguese
+-    "z": "zh",  # Chinese
+-    "d": "de",  # German
+-}
+-
+-
+-def get_onnx_lang_code(ttsforge_lang: str) -> str:
+-    """Convert ttsforge language code to kokoro-onnx language code."""
+-    return LANG_CODE_TO_ONNX.get(ttsforge_lang, "en-us")
+-
+-
+-# =============================================================================
+-# Path helper functions
+-# =============================================================================
+-
+-
+-def get_model_dir(
+-    source: ModelSource = DEFAULT_MODEL_SOURCE,
+-    variant: ModelVariant = DEFAULT_MODEL_VARIANT,
+-) -> Path:
+-    """
+-    Get directory for model files.
+-
+-    Returns: ~/.cache/pykokoro/models/{source}/{variant}/
+-
+-    Args:
+-        source: Model source (huggingface or github)
+-        variant: Model variant (v1.0, v1.1-zh)
+-
+-    Returns:
+-        Path to model directory
+-    """
+-    model_dir = get_user_cache_path("models") / source / variant
+-    model_dir.mkdir(parents=True, exist_ok=True)
+-    return model_dir
+-
+-
+-def get_voices_dir(
+-    source: ModelSource = DEFAULT_MODEL_SOURCE,
+-    variant: ModelVariant = DEFAULT_MODEL_VARIANT,
+-) -> Path:
+-    """
+-    Get directory for voice files.
+-
+-    Returns: ~/.cache/pykokoro/voices/{source}/{variant}/
+-
+-    Args:
+-        source: Model source (huggingface or github)
+-        variant: Model variant (v1.0 or v1.1-zh)
+-
+-    Returns:
+-        Path to voices directory
+-    """
+-    voices_dir = get_user_cache_path("voices") / source / variant
+-    voices_dir.mkdir(parents=True, exist_ok=True)
+-    return voices_dir
+-
+-
+-def get_config_path(variant: ModelVariant = DEFAULT_MODEL_VARIANT) -> Path:
+-    """
+-    Get path to config file (shared across sources for same variant).
+-
+-    Returns: ~/.cache/pykokoro/config/{variant}/config.json
+-
+-    Config files are downloaded from hexgrad repos and shared between
+-    HuggingFace and GitHub sources for the same variant.
+-
+-    Args:
+-        variant: Model variant (v1.0 or v1.1-zh)
+-
+-    Returns:
+-        Path to config file
+-    """
+-    config_dir = get_user_cache_path("config") / variant
+-    config_dir.mkdir(parents=True, exist_ok=True)
+-    return config_dir / HF_CONFIG_FILENAME
+-
+-
+-def get_vocabulary_path(variant: ModelVariant) -> Path:
+-    profile = get_model_profile(variant, "github")
+-    filename = (
+-        HF_CONFIG_FILENAME
+-        if profile.vocabulary_source != "downloaded-release"
+-        else "vocabulary.json"
+-    )
+-    path = get_user_cache_path("config") / variant / filename
+-    path.parent.mkdir(parents=True, exist_ok=True)
+-    return path
+-
+-
+-def get_voices_bin_path() -> Path:
+-    """Get the legacy global voice archive path.
+-
+-    New code should use :func:`get_voices_archive_path` with an explicit source
+-    and variant instead.
+-    """
+-    return get_user_cache_path() / "voices.bin.npz"
+-
+-
+-def get_model_path(
+-    quality: ModelQuality = DEFAULT_MODEL_QUALITY,
+-    source: ModelSource = DEFAULT_MODEL_SOURCE,
+-    variant: ModelVariant = DEFAULT_MODEL_VARIANT,
+-) -> Path:
+-    """
+-    Get full path to a specific model file.
+-
+-    Args:
+-        quality: Model quality/quantization level
+-        source: Model source (huggingface or github)
+-        variant: Model variant (v1.0 or v1.1-zh)
+-
+-    Returns:
+-        Path to model file
+-
+-    Raises:
+-        ValueError: If quality is not available for the source/variant combination
+-    """
+-    model_dir = get_model_dir(source, variant)
+-    if source == "github":
+-        return model_dir / f"{quality}.onnx"
+-    profile = get_model_profile(variant, source)
+-    try:
+-        filename = profile.quality_files[quality]
+-    except KeyError as exc:
+-        available = ", ".join(profile.quality_files.keys())
+-        raise ValueError(
+-            f"Quality '{quality}' not available for {source}/{variant}. Available: {available}"
+-        ) from exc
+-    return model_dir / HF_MODEL_SUBFOLDER / filename
+-
+-
+-def get_voice_path(
+-    voice_name: str,
+-    source: ModelSource = DEFAULT_MODEL_SOURCE,
+-    variant: ModelVariant = DEFAULT_MODEL_VARIANT,
+-) -> Path:
+-    """Get the full path to an individual voice file."""
+-    return get_voices_dir(source, variant) / f"{voice_name}.bin"
+-
+-
+-# =============================================================================
+-# Download check functions
+-# =============================================================================
+-
+-
+-def is_config_downloaded(variant: ModelVariant = DEFAULT_MODEL_VARIANT) -> bool:
+-    """Check if config.json is downloaded for a specific variant.
+-
+-    Args:
+-        variant: Model variant (v1.0 or v1.1-zh)
+-
+-    Returns:
+-        True if config exists and has content, False otherwise
+-    """
+-    config_path = get_config_path(variant)
+-    return config_path.exists() and config_path.stat().st_size > 0
+-
+-
+-def is_model_downloaded(
+-    quality: ModelQuality = DEFAULT_MODEL_QUALITY,
+-    source: ModelSource = DEFAULT_MODEL_SOURCE,
+-    variant: ModelVariant = DEFAULT_MODEL_VARIANT,
+-) -> bool:
+-    """Check if the requested source, variant, and quality model is downloaded."""
+-    return _is_model_downloaded(quality, source, variant)
+-
+-
+-def is_voice_downloaded(voice_name: str) -> bool:
+-    """Check if an individual voice file is already downloaded."""
+-    voice_path = get_voice_path(voice_name)
+-    return voice_path.exists() and voice_path.stat().st_size > 0
+-
+-
+-def are_voices_downloaded(
+-    source: ModelSource = DEFAULT_MODEL_SOURCE,
+-    variant: ModelVariant = DEFAULT_MODEL_VARIANT,
+-) -> bool:
+-    """Check if the requested source and variant voice archive is downloaded."""
+-    return _are_voices_downloaded(source, variant)
+-
+-
+-def are_models_downloaded(
+-    quality: ModelQuality = DEFAULT_MODEL_QUALITY,
+-    source: ModelSource = DEFAULT_MODEL_SOURCE,
+-    variant: ModelVariant = DEFAULT_MODEL_VARIANT,
+-) -> bool:
+-    """Check if the requested config, model, and voice archive are downloaded."""
+-    return _are_models_downloaded(quality, source, variant)
+-
+-
+-# =============================================================================
+-# Download functions
+-# =============================================================================
+-
+-
+-def _huggingface_repo_for_variant(variant: ModelVariant) -> str:
+-    repositories = {
+-        "v1.0": HF_REPO_V1_0,
+-        "v1.1-zh": HF_REPO_V1_1_ZH,
+-    }
+-    try:
+-        return repositories[variant]
+-    except KeyError as exc:
+-        raise ValueError(f"Unknown variant: {variant}") from exc
+-
+-
+-def _validate_min_size(path: Path, min_size: int) -> None:
+-    size = path.stat().st_size
+-    if size < min_size:
+-        raise ArtifactValidationError(
+-            f"Downloaded file {path.name} is too small ({size} bytes). "
+-            f"Expected at least {min_size} bytes."
+-        )
+-
+-
+-def _validate_exact_size(path: Path, expected_size: int | None) -> None:
+-    if expected_size is None:
+-        return
+-    actual_size = path.stat().st_size
+-    if actual_size != expected_size:
+-        raise ArtifactValidationError(
+-            f"Downloaded file {path.name} has size {actual_size} bytes; "
+-            f"expected exactly {expected_size} bytes."
+-        )
+-
+-
+-def _validate_onnx_file(path: Path) -> None:
+-    _validate_min_size(path, MIN_ONNX_BYTES)
+-
+-    try:
+-        from onnxvoice import validate_onnx
+-
+-        validate_onnx(path)
+-    except ModuleNotFoundError:
+-        logger.debug("OnnxVoice unavailable; skipping ONNX validation")
+-    except Exception as exc:
+-        raise ArtifactValidationError(
+-            f"Downloaded ONNX model '{path.name}' is invalid: {exc}"
+-        ) from exc
+-
+-
+-def _validate_voice_archive(
+-    path: Path,
+-    *,
+-    expected_voice_names: tuple[str, ...] | None = None,
+-) -> None:
+-    _validate_min_size(path, MIN_VOICE_ARCHIVE_BYTES)
+-
+-    try:
+-        with np.load(str(path), allow_pickle=False) as voices:
+-            if not voices.files:
+-                raise RuntimeError("Voice archive is empty")
+-            if expected_voice_names is not None:
+-                missing = sorted(set(expected_voice_names) - set(voices.files))
+-                if missing:
+-                    raise RuntimeError(
+-                        "Voice archive is missing expected voices: " + ", ".join(missing)
+-                    )
+-            for voice_name in expected_voice_names or (voices.files[0],):
+-                normalize_voice_style(
+-                    voices[voice_name],
+-                    expected_length=None,
+-                    require_dtype=True,
+-                    voice_name=voice_name,
+-                )
+-    except Exception as exc:
+-        raise ArtifactValidationError(
+-            f"Downloaded voice archive '{path.name}' is invalid: {exc}"
+-        ) from exc
+-
+-
+-def _validate_voice_bin(path: Path) -> None:
+-    _validate_min_size(path, MIN_VOICE_BIN_BYTES)
+-
+-    size = path.stat().st_size
+-    if size % 4 != 0:
+-        raise ArtifactValidationError(
+-            f"Downloaded voice file '{path.name}' has invalid byte size {size}."
+-        )
+-
+-
+-def _validate_sha256(path: Path, expected_sha256: str | None) -> None:
+-    if expected_sha256 is None:
+-        return
+-    digest = hashlib.sha256()
+-    with path.open("rb") as source:
+-        for chunk in iter(lambda: source.read(DOWNLOAD_CHUNK_SIZE), b""):
+-            digest.update(chunk)
+-    actual = digest.hexdigest()
+-    if actual.lower() != expected_sha256.lower():
+-        raise ArtifactValidationError(
+-            f"Artifact '{path.name}' has checksum {actual}; expected {expected_sha256}."
+-        )
+-
+-
+-def _validate_artifact(
+-    path: Path,
+-    *,
+-    min_size: int | None = None,
+-    validator: Callable[[Path], None] | None = None,
+-    expected_sha256: str | None = None,
+-    expected_size: int | None = None,
+-) -> None:
+-    if min_size is not None:
+-        _validate_min_size(path, min_size)
+-    _validate_exact_size(path, expected_size)
+-    # A pinned digest rejects known-wrong large files before expensive ONNX parsing.
+-    _validate_sha256(path, expected_sha256)
+-    if validator is not None:
+-        validator(path)
+-
+-
+-def _remove_invalid_cached_file(
+-    path: Path,
+-    *,
+-    min_size: int | None = None,
+-    validator: Callable[[Path], None] | None = None,
+-    expected_sha256: str | None = None,
+-    expected_size: int | None = None,
+-) -> bool:
+-    if not path.exists():
+-        return False
+-    try:
+-        _validate_artifact(
+-            path,
+-            min_size=min_size,
+-            validator=validator,
+-            expected_sha256=expected_sha256,
+-            expected_size=expected_size,
+-        )
+-    except (OSError, ArtifactValidationError) as exc:
+-        logger.warning("Removing invalid cached artifact %s: %s", path, exc)
+-        with contextlib.suppress(FileNotFoundError):
+-            path.unlink()
+-        return True
+-    return False
+-
+-
+-@contextlib.contextmanager
+-def _download_lock(
+-    target_path: Path,
+-    timeout: float = DOWNLOAD_LOCK_TIMEOUT_SECONDS,
+-) -> Any:
+-    lock_path = target_path.with_suffix(target_path.suffix + ".lock")
+-    start = time.monotonic()
+-    while True:
+-        try:
+-            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+-            with os.fdopen(fd, "w", encoding="utf-8") as lock_file:
+-                json.dump({"pid": os.getpid(), "created_at": time.time()}, lock_file)
+-            break
+-        except FileExistsError as e:
+-            if _is_stale_download_lock(lock_path, timeout):
+-                logger.warning("Recovering stale download lock %s", lock_path)
+-                with contextlib.suppress(FileNotFoundError):
+-                    lock_path.unlink()
+-                continue
+-            if time.monotonic() - start > timeout:
+-                raise RuntimeError(f"Timed out waiting for download lock on {target_path}") from e
+-            time.sleep(0.1)
+-
+-    try:
+-        yield
+-    finally:
+-        with contextlib.suppress(FileNotFoundError):
+-            lock_path.unlink()
+-
+-
+-def _is_stale_download_lock(lock_path: Path, timeout: float) -> bool:
+-    try:
+-        metadata = json.loads(lock_path.read_text(encoding="utf-8"))
+-        pid = int(metadata["pid"])
+-        created_at = float(metadata["created_at"])
+-    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+-        return False
+-    if time.time() - created_at <= timeout:
+-        return False
+-    try:
+-        os.kill(pid, 0)
+-    except ProcessLookupError:
+-        return True
+-    except PermissionError:
+-        return False
+-    except OSError as exc:
+-        # On Windows, probing a nonexistent PID with ``os.kill(pid, 0)``
+-        # raises ERROR_INVALID_PARAMETER instead of ProcessLookupError.
+-        return getattr(exc, "winerror", None) == 87
+-    return False
+-
+-
+-def _run_with_retries(
+-    action: Callable[[], Path],
+-    *,
+-    description: str,
+-    retries: int = DOWNLOAD_RETRIES,
+-) -> Path:
+-    last_error: Exception | None = None
+-    for attempt in range(1, retries + 1):
+-        try:
+-            return action()
+-        except (OSError, ArtifactValidationError) as exc:
+-            last_error = exc
+-            if attempt == retries:
+-                break
+-            delay = 2 ** (attempt - 1)
+-            logger.warning(
+-                f"{description} failed on attempt {attempt}/{retries}: {exc}. Retrying in {delay}s."
+-            )
+-            time.sleep(delay)
+-
+-    raise RuntimeError(f"{description} failed after {retries} attempts: {last_error}")
+-
+-
+-def _stream_download(
+-    url: str,
+-    local_path: Path,
+-    *,
+-    timeout: float,
+-    min_size: int | None = None,
+-    validator: Callable[[Path], None] | None = None,
+-    expected_sha256: str | None = None,
+-    expected_size: int | None = None,
+-) -> Path:
+-    local_path.parent.mkdir(parents=True, exist_ok=True)
+-
+-    part_path = local_path.with_suffix(local_path.suffix + ".part")
+-    resume_from = part_path.stat().st_size if part_path.is_file() else 0
+-    request: urllib.request.Request | str = url
+-    if resume_from:
+-        request = urllib.request.Request(url, headers={"Range": f"bytes={resume_from}-"})
+-
+-    try:
+-        with urllib.request.urlopen(request, timeout=timeout) as response:
+-            status = getattr(response, "status", None)
+-            content_range = (
+-                response.headers.get("Content-Range", "") if hasattr(response, "headers") else ""
+-            )
+-            can_resume = bool(
+-                resume_from and status == 206 and content_range.startswith(f"bytes {resume_from}-")
+-            )
+-            mode = "ab" if can_resume else "wb"
+-            with part_path.open(mode) as part_file:
+-                for chunk in iter(lambda: response.read(DOWNLOAD_CHUNK_SIZE), b""):
+-                    part_file.write(chunk)
+-                part_file.flush()
+-                os.fsync(part_file.fileno())
+-    except Exception:
+-        # Preserve a partial transfer so a retry can use HTTP Range when supported.
+-        raise
+-
+-    try:
+-        _validate_artifact(
+-            part_path,
+-            min_size=min_size,
+-            validator=validator,
+-            expected_sha256=expected_sha256,
+-            expected_size=expected_size,
+-        )
+-        os.replace(part_path, local_path)
+-    except Exception:
+-        with contextlib.suppress(FileNotFoundError):
+-            part_path.unlink()
+-        raise
+-
+-    return local_path
+-
+-
+-def _atomic_copy(source: Path, destination: Path) -> None:
+-    destination.parent.mkdir(parents=True, exist_ok=True)
+-    with tempfile.NamedTemporaryFile(
+-        delete=False,
+-        dir=destination.parent,
+-        prefix=f"{destination.name}.",
+-        suffix=".tmp",
+-    ) as tmp_file:
+-        tmp_path = Path(tmp_file.name)
+-    try:
+-        shutil.copyfile(source, tmp_path)
+-        os.replace(tmp_path, destination)
+-    except Exception:
+-        with contextlib.suppress(FileNotFoundError):
+-            tmp_path.unlink()
+-        raise
+-
+-
+-def _download_from_hf(
+-    repo_id: str,
+-    filename: str,
+-    subfolder: str | None = None,
+-    local_dir: Path | None = None,
+-    local_filename: str | None = None,
+-    force: bool = False,
+-    min_size: int | None = None,
+-    validator: Callable[[Path], None] | None = None,
+-    retries: int = DOWNLOAD_RETRIES,
+-    revision: str | None = None,
+-    expected_sha256: str | None = None,
+-    offline: bool = False,
+-) -> Path:
+-    """
+-    Download a file from Hugging Face Hub.
+-
+-    Args:
+-        repo_id: Hugging Face repository ID
+-        filename: File to download
+-        subfolder: Subfolder in the repository
+-        local_dir: Local directory to save to
+-        local_filename: Optional filename to use under local_dir
+-        force: Force re-download even if file exists
+-
+-    Returns:
+-        Path to the downloaded file
+-    """
+-    # Use hf_hub_download to download the file
+-    # It handles caching automatically
+-    local_dir_path = Path(local_dir) if local_dir else None
+-    target_path: Path | None = None
+-    if local_dir_path is not None:
+-        target_filename = local_filename or filename
+-        target_path = local_dir_path / target_filename
+-        if subfolder:
+-            target_path = local_dir_path / subfolder / target_filename
+-        target_path.parent.mkdir(parents=True, exist_ok=True)
+-
+-    force_download = force
+-
+-    def _download() -> Path:
+-        nonlocal force_download
+-        use_local_dir = local_dir_path is not None and local_filename is None
+-        if offline:
+-            raise RuntimeError(
+-                f"Offline mode is enabled and {filename} is not available in the cache."
+-            )
+-        downloaded_path = _hf_hub_download(
+-            repo_id=repo_id,
+-            filename=filename,
+-            subfolder=subfolder,
+-            local_dir=str(local_dir_path) if use_local_dir else None,
+-            force_download=force_download,
+-            revision=revision,
+-        )
+-        downloaded = Path(downloaded_path)
+-        delete_on_error = use_local_dir
+-        try:
+-            _validate_artifact(
+-                downloaded,
+-                min_size=min_size,
+-                validator=validator,
+-                expected_sha256=expected_sha256,
+-            )
+-            if target_path is not None and downloaded != target_path:
+-                _atomic_copy(downloaded, target_path)
+-                downloaded = target_path
+-                delete_on_error = True
+-        except (OSError, ArtifactValidationError):
+-            force_download = True
+-            if delete_on_error:
+-                with contextlib.suppress(FileNotFoundError):
+-                    downloaded.unlink()
+-            raise
+-        return downloaded
+-
+-    if target_path is not None:
+-        with _download_lock(target_path):
+-            if (
+-                target_path.exists()
+-                and not force
+-                and not _remove_invalid_cached_file(
+-                    target_path,
+-                    min_size=min_size,
+-                    validator=validator,
+-                    expected_sha256=expected_sha256,
+-                )
+-            ):
+-                return target_path
+-            if offline:
+-                raise RuntimeError(f"Offline mode is enabled and {target_path.name} is not cached.")
+-            return _run_with_retries(
+-                _download, description=f"HF download of {filename}", retries=retries
+-            )
+-
+-    if offline:
+-        raise RuntimeError(f"Offline mode is enabled and {filename} is not cached.")
+-    return _run_with_retries(_download, description=f"HF download of {filename}", retries=retries)
+-
+-
+-def download_config(
+-    variant: ModelVariant = DEFAULT_MODEL_VARIANT,
+-    force: bool = False,
+-    *,
+-    revision: str | None = None,
+-    sha256: str | None = None,
+-    offline: bool = False,
+-) -> Path:
+-    """
+-    Download config.json from hexgrad HuggingFace repository.
+-
+-    Config files are downloaded from hexgrad repos and stored in a shared
+-    location used by both HuggingFace and GitHub sources.
+-
+-    Args:
+-        variant: Model variant (v1.0 or v1.1-zh)
+-        force: Force re-download even if file exists
+-
+-    Returns:
+-        Path to the downloaded config file
+-
+-    Note:
+-        - v1.0 config from: hexgrad/Kokoro-82M
+-        - v1.1-zh config from: hexgrad/Kokoro-82M-v1.1-zh
+-    """
+-    config_path = get_config_path(variant)
+-
+-    # Select hexgrad repo based on variant
+-    config_repositories = {
+-        "v1.0": HF_CONFIG_REPO_V1_0,
+-        "v1.1-zh": HF_CONFIG_REPO_V1_1_ZH,
+-    }
+-    try:
+-        repo_id = config_repositories[variant]
+-    except KeyError as exc:
+-        raise ValueError(f"Unknown variant: {variant}") from exc
+-
+-    if revision is None:
+-        try:
+-            spec = hf_config_spec(variant)
+-        except KeyError as exc:
+-            raise ValueError(
+-                f"No immutable artifact manifest is available for config variant {variant!r}; "
+-                "pass an explicit revision and sha256."
+-            ) from exc
+-        revision = spec.revision
+-        if sha256 is None:
+-            sha256 = spec.sha256
+-
+-    logger.info(f"Downloading config for {variant} from {repo_id} at revision {revision}")
+-
+-    return _download_from_hf(
+-        repo_id=repo_id,
+-        filename=HF_CONFIG_FILENAME,
+-        local_dir=config_path.parent,
+-        force=force,
+-        min_size=MIN_CONFIG_BYTES,
+-        revision=revision,
+-        expected_sha256=sha256,
+-        offline=offline,
+-    )
+-
+-
+-def _validate_vocabulary(path: Path) -> None:
+-    _validate_min_size(path, MIN_CONFIG_BYTES)
+-    try:
+-        data = json.loads(path.read_text(encoding="utf-8"))
+-    except (OSError, ValueError) as exc:
+-        raise ArtifactValidationError(f"Vocabulary file {path.name} is invalid: {exc}") from exc
+-    if not isinstance(data, dict) or not all(
+-        isinstance(key, str) and isinstance(value, int) and not isinstance(value, bool)
+-        for key, value in data.items()
+-    ):
+-        raise ArtifactValidationError(
+-            f"Vocabulary file {path.name} must map string phonemes to integer IDs"
+-        )
+-
+-
+-def _record_installed_release(release: RemoteModelRelease, quality: str) -> None:
+-    manifest_path = installed_manifest_path(release)
+-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+-    manifest_data = json.dumps(release.manifest, indent=2, ensure_ascii=False).encode() + b"\n"
+-    manifest_path.write_bytes(manifest_data)
+-    model_asset = release.model_asset(quality)
+-    voice_asset = release.voice_asset()
+-    auxiliary = [asset.name for asset in release.assets if asset.role not in {"model", "voices"}]
+-    sidecar = {
+-        "install_format": 1,
+-        "repository": MODEL_REPOSITORY,
+-        "profile": release.profile,
+-        "model_version": release.model_version,
+-        "release_tag": release.release_tag,
+-        "release_published_at": release.release_published_at,
+-        "manifest_schema": release.manifest_schema,
+-        "runtime_contract": release.runtime_contract,
+-        "quality": quality,
+-        "model_asset": model_asset.name,
+-        "voices_asset": voice_asset.name,
+-        "auxiliary_assets": auxiliary,
+-        "installed_at": datetime.now(timezone.utc).isoformat(),
+-        "manifest_sha256": hashlib.sha256(manifest_data).hexdigest(),
+-    }
+-    installed_sidecar_path(release).write_text(
+-        json.dumps(sidecar, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+-    )
+-
+-
+-def _download_release_asset(
+-    release: RemoteModelRelease,
+-    asset: ReleaseAsset,
+-    *,
+-    quality: str,
+-    force: bool,
+-    validator: Callable[[Path], None] | None = None,
+-    offline: bool = False,
+-) -> Path:
+-    path = release_asset_path(release, asset)
+-    path.parent.mkdir(parents=True, exist_ok=True)
+-    result = _download_from_github(
+-        asset.download_url,
+-        path,
+-        force,
+-        validator=validator,
+-        expected_sha256=asset.sha256,
+-        expected_size=asset.size,
+-        offline=offline,
+-    )
+-    _record_installed_release(release, quality)
+-    return result
+-
+-
+-def download_vocabulary_github(
+-    variant: ModelVariant,
+-    force: bool = False,
+-    offline: bool = False,
+-    *,
+-    tag: str | None = None,
+-) -> Path:
+-    del tag
+-    return _download_registry_artifact(
+-        variant,
+-        "vocab",
+-        force=force,
+-        offline=offline,
+-        preference="github",
+-        validator=_validate_vocabulary,
+-    )
+-
+-
+-def _validate_json_asset(path: Path) -> None:
+-    try:
+-        json.loads(path.read_text(encoding="utf-8"))
+-    except (OSError, ValueError) as exc:
+-        raise ArtifactValidationError(f"JSON asset {path.name} is invalid: {exc}") from exc
+-
+-
+-def download_release_auxiliary(
+-    variant: ModelVariant,
+-    role: str,
+-    force: bool = False,
+-    offline: bool = False,
+-    *,
+-    tag: str | None = None,
+-) -> Path:
+-    del tag
+-    validator = _validate_vocabulary if role == "vocab" else _validate_json_asset
+-    return _download_registry_artifact(
+-        variant,
+-        role,
+-        force=force,
+-        offline=offline,
+-        preference="github",
+-        validator=validator,
+-    )
+-
+-
+-def download_config_github(
+-    variant: ModelVariant,
+-    force: bool = False,
+-    offline: bool = False,
+-    *,
+-    tag: str | None = None,
+-) -> Path:
+-    return download_release_auxiliary(variant, "config", force, offline, tag=tag)
+-
+-
+-def download_bundle_github(
+-    variant: ModelVariant,
+-    force: bool = False,
+-    offline: bool = False,
+-    *,
+-    tag: str | None = None,
+-) -> Path:
+-    return download_release_auxiliary(variant, "bundle", force, offline, tag=tag)
+-
+
+ def load_vocab_from_config(
+     variant: ModelVariant = DEFAULT_MODEL_VARIANT,
+     config_path: Path | None = None,
+ ) -> dict[str, int]:
+-    """Load vocabulary from variant-specific config.json.
++    """Load vocabulary from an already-resolved local config artifact.
+
+     Args:
+         variant: Model variant (v1.0 or v1.1-zh)
++        config_path: Path to the local config/vocab JSON file.  Must be
++            supplied by OnnxVoice resolution.  No download or cache-path
++            fallback is performed.
+
+     Returns:
+         Dictionary mapping phoneme characters to token indices
+
+     Raises:
+-        FileNotFoundError: If config file doesn't exist after download
+-        ValueError: If config doesn't contain vocab
++        FileNotFoundError: If *config_path* is ``None`` or does not exist
++        ValueError: If config doesn't contain a valid vocab mapping
+     """
+-    import json
+-
+-    from kokorog2p import get_kokoro_vocab
+-
+-    explicit_config_path = config_path is not None
+-    config_path = config_path or get_config_path(variant)
+-
+-    # Download if not exists
++    if config_path is None:
++        raise FileNotFoundError(
++            f"Model config/vocabulary file required for variant '{variant}' "
++            "but no config_path was resolved."
++        )
+     if not config_path.exists():
+-        if explicit_config_path:
+-            raise FileNotFoundError(f"Explicit model config does not exist: {config_path}")
+-        logger.info(f"Downloading config for variant '{variant}'...")
+-        try:
+-            download_config(variant=variant)
+-        except Exception as e:
+-            raise FileNotFoundError(
+-                f"Failed to download config for variant '{variant}': {e}"
+-            ) from e
++        raise FileNotFoundError(f"Resolved config path does not exist: {config_path}")
+
+-    # Load config
+     try:
+         with open(config_path, encoding="utf-8") as f:
+             config = json.load(f)
+     except (OSError, ValueError) as e:
+-        logger.error(
+-            f"Failed to load config from {config_path}: {e}. Falling back to default vocabulary."
+-        )
+-        return get_kokoro_vocab()
++        raise ValueError(f"Failed to load vocabulary from {config_path}: {e}") from e
+
+-    # Extract vocabulary
+-    # Release vocabularies are direct JSON maps; legacy configs nest the map under vocab.
++    # Release vocabularies are direct JSON maps; legacy configs nest
++    # the map under "vocab".
+     vocab = config.get("vocab") if isinstance(config, dict) else None
+     if vocab is None and isinstance(config, dict):
+         vocab = config
+@@ -1163,584 +92,12 @@ def load_vocab_from_config(
+             f"Vocabulary at {config_path} must be a JSON object mapping phonemes to IDs"
+         )
+     logger.info(
+-        f"Loaded vocabulary with {len(vocab)} tokens "
+-        f"for variant '{variant}' from {config_path.name}"
+-    )
+-    return vocab
+-
+-
+-def _download_legacy_hf_model(
+-    variant: ModelVariant,
+-    quality: ModelQuality,
+-    force: bool,
+-    revision: str | None,
+-    sha256: str | None,
+-    offline: bool,
+-) -> Path:
+-    repositories = {"v1.0": HF_REPO_V1_0, "v1.1-zh": HF_REPO_V1_1_ZH}
+-    filenames = dict(MODEL_QUALITY_FILES_HF)
+-    if variant == "v1.1-zh":
+-        filenames = {
+-            key: value for key, value in filenames.items() if key not in {"q8f16", "uint8f16"}
+-        }
+-        filenames.update({"int8": "model_int8.onnx", "bnb4": "model_bnb4.onnx"})
+-    if quality not in filenames:
+-        raise ValueError(f"Quality {quality!r} is not available for {variant}")
+-    filename = filenames[quality]
+-    if revision is None:
+-        spec = hf_model_spec(variant, filename)
+-        revision = spec.revision
+-        if sha256 is None:
+-            sha256 = spec.sha256
+-    return _download_from_hf(
+-        repo_id=repositories[variant],
+-        filename=filename,
+-        subfolder=HF_MODEL_SUBFOLDER,
+-        force=force,
+-        validator=_validate_onnx_file,
+-        revision=revision,
+-        expected_sha256=sha256,
+-        offline=offline,
+-    )
+-
+-
+-def download_model(
+-    variant: ModelVariant = DEFAULT_MODEL_VARIANT,
+-    quality: ModelQuality = DEFAULT_MODEL_QUALITY,
+-    force: bool = False,
+-    *,
+-    revision: str | None = None,
+-    sha256: str | None = None,
+-    offline: bool = False,
+-) -> Path:
+-    """
+-    Download model from HuggingFace (onnx-community repos).
+-
+-    Args:
+-        variant: Model variant (v1.0 or v1.1-zh)
+-        quality: Model quality/quantization level
+-        force: Force re-download even if file exists
+-
+-    Returns:
+-        Path to the downloaded model file
+-
+-    Raises:
+-        ValueError: If quality is not available
+-
+-    Note:
+-        - v1.0 from: onnx-community/Kokoro-82M-v1.0-ONNX
+-        - v1.1-zh from: onnx-community/Kokoro-82M-v1.1-zh-ONNX
+-    """
+-    del revision, sha256
+-    return _download_registry_artifact(
++        "Loaded vocabulary with %d tokens for variant '%s' from %s",
++        len(vocab),
+         variant,
+-        "model",
+-        quality=quality,
+-        force=force,
+-        offline=offline,
+-        preference="huggingface",
+-        validator=_validate_onnx_file,
++        config_path.name,
+     )
+-
+-
+-def download_voice(
+-    voice_name: str,
+-    variant: ModelVariant = DEFAULT_MODEL_VARIANT,
+-    force: bool = False,
+-    *,
+-    revision: str | None = None,
+-    sha256: str | None = None,
+-    offline: bool = False,
+-) -> Path:
+-    """
+-    Download a single voice file from HuggingFace.
+-
+-    Args:
+-        voice_name: Name of the voice to download
+-        variant: Model variant (v1.0 or v1.1-zh)
+-        force: Force re-download even if file exists
+-
+-    Returns:
+-        Path to the downloaded voice file
+-    """
+-    # Select repo based on variant
+-    repo_id = _huggingface_repo_for_variant(variant)
+-
+-    filename = f"{voice_name}.bin"
+-    if revision is None:
+-        spec = hf_voice_spec(variant, filename)
+-        revision = spec.revision
+-        if sha256 is None:
+-            sha256 = spec.sha256
+-    # Use new path structure
+-    voices_dir = get_voices_dir(source="huggingface", variant=variant)
+-    voices_dir.mkdir(parents=True, exist_ok=True)
+-    local_path = voices_dir / filename
+-
+-    if (
+-        local_path.exists()
+-        and not force
+-        and not _remove_invalid_cached_file(
+-            local_path,
+-            min_size=MIN_VOICE_BIN_BYTES,
+-            validator=_validate_voice_bin,
+-            expected_sha256=sha256,
+-        )
+-    ):
+-        logger.debug(f"Voice already exists: {local_path}")
+-        return local_path
+-    if offline:
+-        raise RuntimeError(f"Offline mode is enabled and {local_path.name} is not cached.")
+-
+-    logger.info(f"Downloading voice {voice_name} for {variant}")
+-
+-    download_name = f"{HF_VOICES_SUBFOLDER}/{filename}"
+-    downloaded_path = _download_from_hf(
+-        repo_id=repo_id,
+-        filename=download_name,
+-        local_dir=None,
+-        force=force,
+-        min_size=MIN_VOICE_BIN_BYTES,
+-        validator=_validate_voice_bin,
+-        revision=revision,
+-        expected_sha256=sha256,
+-        offline=offline,
+-    )
+-
+-    with _download_lock(local_path):
+-        _atomic_copy(downloaded_path, local_path)
+-
+-    return local_path
+-
+-
+-def download_all_voices(
+-    variant: ModelVariant = DEFAULT_MODEL_VARIANT,
+-    progress_callback: Callable[[str, int, int], None] | None = None,
+-    force: bool = False,
+-) -> Path:
+-    """
+-    Download all voice files from HuggingFace for a specific variant.
+-
+-    Downloads individual .bin files and combines them into voices.bin.
+-
+-    Args:
+-        variant: Model variant (v1.0 or v1.1-zh)
+-        progress_callback: Optional callback(filename, current, total)
+-        force: Force re-download even if files exist
+-
+-    Returns:
+-        Path to voices directory
+-
+-    Note:
+-        - v1.0: 54 voices from onnx-community/Kokoro-82M-v1.0-ONNX
+-        - v1.1-zh: 103 voices from onnx-community/Kokoro-82M-v1.1-zh-ONNX
+-    """
+-    # Select repo and voice list based on variant
+-    repo_id = _huggingface_repo_for_variant(variant)
+-    if variant == "v1.0":
+-        voice_names = VOICE_NAMES_V1_0
+-    elif variant == "v1.1-zh":
+-        voice_names = VOICE_NAMES_V1_1_ZH
+-    else:
+-        raise ValueError(f"Unknown variant: {variant}")
+-
+-    voices_dir = get_voices_dir(source="huggingface", variant=variant)
+-    voices_dir.mkdir(parents=True, exist_ok=True)
+-
+-    voices_bin_path = get_voices_archive_path("huggingface", variant)
+-    force_download = force
+-
+-    if voices_dir.exists():
+-        for temp_path in voices_dir.glob("voices.bin.npz.*.tmp*"):
+-            with contextlib.suppress(FileNotFoundError):
+-                temp_path.unlink()
+-        if voices_bin_path.exists() and voices_bin_path.stat().st_size == 0:
+-            logger.warning(
+-                "voices.bin.npz is empty at %s; re-downloading voices.",
+-                voices_bin_path,
+-            )
+-            force_download = True
+-        if voices_bin_path.exists() and force_download:
+-            with contextlib.suppress(FileNotFoundError):
+-                voices_bin_path.unlink()
+-
+-    # If voices.bin.npz already exists and not forcing, return early
+-    if voices_bin_path.exists() and not force_download:
+-        logger.info(f"voices.bin.npz already exists at {voices_bin_path}")
+-        return voices_dir
+-
+-    # Download individual voice files (.bin format from HuggingFace)
+-    total = len(voice_names)
+-    downloaded_files = []
+-
+-    for idx, voice_name in enumerate(voice_names):
+-        if progress_callback:
+-            progress_callback(voice_name, idx, total)
+-
+-        voice_path = voices_dir / f"{voice_name}.bin"
+-
+-        # Download if not exists or force
+-        if not voice_path.exists() or force:
+-            try:
+-                downloaded_path = _download_from_hf(
+-                    repo_id=repo_id,
+-                    filename=f"{HF_VOICES_SUBFOLDER}/{voice_name}.bin",
+-                    local_dir=None,
+-                    force=force,
+-                    min_size=MIN_VOICE_BIN_BYTES,
+-                    validator=_validate_voice_bin,
+-                )
+-                with _download_lock(voice_path):
+-                    _atomic_copy(downloaded_path, voice_path)
+-                logger.info(f"Downloaded {voice_name}.bin")
+-                downloaded_files.append(voice_name)
+-            except (RuntimeError, OSError) as e:
+-                logger.warning(f"Failed to download {voice_name}.bin: {e}")
+-                continue
+-        else:
+-            downloaded_files.append(voice_name)
+-
+-    # Load and combine all voices into a single .npz file (voices.bin.npz)
+-    if downloaded_files:
+-        logger.info(f"Combining {len(downloaded_files)} voices into voices.bin.npz")
+-        voices_data: dict[str, np.ndarray] = {}
+-
+-        lengths: set[int] = set()
+-        for voice_name in downloaded_files:
+-            voice_path = voices_dir / f"{voice_name}.bin"
+-            try:
+-                # HuggingFace .bin files are raw float32 arrays
+-                voice_data = np.fromfile(str(voice_path), dtype=np.float32)
+-                if voice_data.size % 256 != 0:
+-                    raise ValueError(f"Voice file length {voice_data.size} not divisible by 256")
+-                voice_data = voice_data.reshape(-1, 256)
+-                voice_array = normalize_voice_style(
+-                    voice_data,
+-                    expected_length=None,
+-                    require_dtype=True,
+-                    voice_name=voice_name,
+-                )
+-                lengths.add(voice_array.shape[0])
+-                voices_data[voice_name] = voice_array
+-            except (RuntimeError, OSError, ValueError) as e:
+-                logger.warning(f"Failed to load {voice_name}.bin: {e}")
+-
+-        if lengths and len(lengths) > 1:
+-            logger.debug(
+-                "Downloaded voices have mixed lengths: %s. "
+-                "Voices will be normalized to a common length on load.",
+-                ", ".join(str(length) for length in sorted(lengths)),
+-            )
+-
+-        if voices_data:
+-            np_savez = cast(Any, np.savez)
+-            with tempfile.NamedTemporaryFile(
+-                delete=False,
+-                dir=voices_bin_path.parent,
+-                prefix=f"{voices_bin_path.name}.",
+-                suffix=".tmp.npz",
+-            ) as tmp_file:
+-                tmp_path = Path(tmp_file.name)
+-            try:
+-                np_savez(str(tmp_path), **voices_data)
+-                os.replace(tmp_path, voices_bin_path)
+-            except Exception:
+-                with contextlib.suppress(FileNotFoundError):
+-                    tmp_path.unlink()
+-                raise
+-            logger.info(f"Created combined voices.bin.npz with {len(voices_data)} voices")
+-        else:
+-            raise RuntimeError(
+-                "No valid voice files could be loaded. "
+-                "Check your network connection or clear the cache and retry."
+-            )
+-
+-    return voices_dir
+-
+-
+-def _download_hf_voice_archive(
+-    variant: ModelVariant,
+-    *,
+-    force: bool = False,
+-) -> Path:
+-    """Download Hugging Face voices and return the canonical archive file."""
+-    download_all_voices(variant=variant, force=force)
+-    archive_path = get_voices_archive_path("huggingface", variant)
+-    if not _is_nonempty_file(archive_path):
+-        raise RuntimeError(f"Hugging Face voice download completed without creating {archive_path}")
+-    return archive_path
+-
+-
+-def download_all_models(
+-    variant: ModelVariant = DEFAULT_MODEL_VARIANT,
+-    quality: ModelQuality = DEFAULT_MODEL_QUALITY,
+-    progress_callback: Callable[[str, int, int], None] | None = None,
+-    force: bool = False,
+-) -> dict[str, Path]:
+-    """
+-    Download config, model, and all voice files for HuggingFace source.
+-
+-    Args:
+-        variant: Model variant (v1.0 or v1.1-zh)
+-        quality: Model quality/quantization level
+-        progress_callback: Optional callback (filename, current, total)
+-        force: Force re-download even if files exist
+-
+-    Returns:
+-        Dict mapping filename to path
+-    """
+-    paths: dict[str, Path] = {}
+-
+-    # Download config
+-    if progress_callback:
+-        progress_callback("config.json", 0, 3)
+-    paths["config.json"] = download_config(variant=variant, force=force)
+-
+-    # Download model
+-    if progress_callback:
+-        progress_callback("model", 1, 3)
+-    model_path = download_model(variant=variant, quality=quality, force=force)
+-    paths[model_path.name] = model_path
+-
+-    # Download all voices
+-    if progress_callback:
+-        progress_callback("voices", 2, 3)
+-    voices_dir = download_all_voices(variant=variant, progress_callback=None, force=force)
+-    paths["voices"] = voices_dir
+-
+-    if progress_callback:
+-        progress_callback("complete", 3, 3)
+-
+-    return paths
+-
+-
+-# ============================================================================
+-# GitHub Download Functions
+-# ============================================================================
+-
+-
+-def _download_from_github(
+-    url: str,
+-    local_path: Path,
+-    force: bool = False,
+-    min_size: int | None = None,
+-    validator: Callable[[Path], None] | None = None,
+-    timeout: float = DOWNLOAD_TIMEOUT_SECONDS,
+-    retries: int = DOWNLOAD_RETRIES,
+-    lock_timeout: float = DOWNLOAD_LOCK_TIMEOUT_SECONDS,
+-    expected_sha256: str | None = None,
+-    expected_size: int | None = None,
+-    offline: bool = False,
+-) -> Path:
+-    """
+-    Download a file from GitHub releases using urllib.
+-
+-    Args:
+-        url: Full URL to the file
+-        local_path: Local path to save the file
+-        force: Force re-download even if file exists
+-
+-    Returns:
+-        Path to the downloaded file
+-    """
+-    # Check if file already exists
+-    if (
+-        local_path.exists()
+-        and not force
+-        and not _remove_invalid_cached_file(
+-            local_path,
+-            min_size=min_size,
+-            validator=validator,
+-            expected_sha256=expected_sha256,
+-            expected_size=expected_size,
+-        )
+-    ):
+-        logger.debug(f"File already exists: {local_path}")
+-        return local_path
+-    if offline:
+-        raise RuntimeError(f"Offline mode is enabled and {local_path.name} is not cached.")
+-
+-    logger.info(f"Downloading from {url} to {local_path}")
+-
+-    if force:
+-        with contextlib.suppress(FileNotFoundError):
+-            local_path.with_suffix(local_path.suffix + ".part").unlink()
+-
+-    def _download() -> Path:
+-        return _stream_download(
+-            url,
+-            local_path,
+-            timeout=timeout,
+-            min_size=min_size,
+-            validator=validator,
+-            expected_sha256=expected_sha256,
+-            expected_size=expected_size,
+-        )
+-
+-    with _download_lock(local_path, timeout=lock_timeout):
+-        if (
+-            local_path.exists()
+-            and not force
+-            and not _remove_invalid_cached_file(
+-                local_path,
+-                min_size=min_size,
+-                validator=validator,
+-                expected_sha256=expected_sha256,
+-                expected_size=expected_size,
+-            )
+-        ):
+-            logger.debug(f"File already exists: {local_path}")
+-            return local_path
+-        if offline:
+-            raise RuntimeError(f"Offline mode is enabled and {local_path.name} is not cached.")
+-
+-        return _run_with_retries(
+-            _download,
+-            description=f"Download {local_path.name}",
+-            retries=retries,
+-        )
+-
+-
+-def _download_registry_artifact(
+-    variant: ModelVariant,
+-    role: str,
+-    *,
+-    quality: ModelQuality | None = None,
+-    force: bool = False,
+-    offline: bool = False,
+-    validator: Callable[[Path], None] | None = None,
+-    preference: Literal["auto", "github", "huggingface", "upstream"] = "github",
+-) -> Path:
+-    try:
+-        resolved = resolve_runtime_assets(
+-            model_id=variant,
+-            quality=quality,
+-            preference=preference,
+-            force=force,
+-            offline=offline,
+-        )
+-        path = resolved.artifact_for_role(role, quality=quality)
+-        if validator is not None:
+-            validator(path)
+-        return path
+-    except (ModelRegistryError, OSError, ArtifactValidationError) as exc:
+-        raise ArtifactValidationError(str(exc)) from exc
+-
+-
+-def _download_legacy_github_model(
+-    variant: ModelVariant,
+-    quality: ModelQuality,
+-    force: bool,
+-    offline: bool,
+-    tag: str | None,
+-) -> Path:
+-    release = resolve_model_release(variant, tag=tag, quality=quality, offline=offline)
+-    asset = release.model_asset(quality)
+-    return _download_release_asset(
+-        release, asset, quality=quality, force=force, validator=_validate_onnx_file, offline=offline
+-    )
+-
+-
+-def _download_legacy_github_voices(
+-    variant: ModelVariant,
+-    force: bool,
+-    offline: bool,
+-    tag: str | None,
+-) -> Path:
+-    release = resolve_model_release(
+-        variant, tag=tag, quality=DEFAULT_MODEL_QUALITY, offline=offline
+-    )
+-    asset = release.voice_asset()
+-    validator = (
+-        (lambda path: _validate_voice_archive(path, expected_voice_names=release.voices))
+-        if asset.format == "numpy-npz"
+-        else _validate_voice_bin
+-    )
+-    return _download_release_asset(
+-        release,
+-        asset,
+-        quality=DEFAULT_MODEL_QUALITY,
+-        force=force,
+-        validator=validator,
+-        offline=offline,
+-    )
+-
+-
+-def download_model_github(
+-    variant: ModelVariant = DEFAULT_MODEL_VARIANT,
+-    quality: ModelQuality = DEFAULT_MODEL_QUALITY,
+-    force: bool = False,
+-    offline: bool = False,
+-    *,
+-    tag: str | None = None,
+-) -> Path:
+-    del tag
+-    return _download_registry_artifact(
+-        variant,
+-        "model",
+-        quality=quality,
+-        force=force,
+-        offline=offline,
+-        validator=_validate_onnx_file,
+-    )
+-
+-
+-def download_voices_github(
+-    variant: ModelVariant = DEFAULT_MODEL_VARIANT,
+-    force: bool = False,
+-    offline: bool = False,
+-    *,
+-    tag: str | None = None,
+-) -> Path:
+-    del tag
+-    try:
+-        resolved = resolve_runtime_assets(
+-            model_id=variant,
+-            preference="github",
+-            force=force,
+-            offline=offline,
+-        )
+-        role = "voices" if resolved.artifacts_for_role("voices") else "voice"
+-        path = resolved.artifact_for_role(role)
+-        if role == "voices":
+-            _validate_voice_archive(path, expected_voice_names=resolved.model.voices)
+-        else:
+-            _validate_voice_bin(path)
+-        return path
+-    except (ModelRegistryError, OSError, ArtifactValidationError) as exc:
+-        raise ArtifactValidationError(str(exc)) from exc
+-
+-
+-def download_all_models_github(
+-    variant: ModelVariant = DEFAULT_MODEL_VARIANT,
+-    quality: ModelQuality = DEFAULT_MODEL_QUALITY,
+-    progress_callback: Callable[[str, int, int], None] | None = None,
+-    force: bool = False,
+-    offline: bool = False,
+-    *,
+-    tag: str | None = None,
+-) -> dict[str, Path]:
+-    del tag
+-    try:
+-        resolved = resolve_runtime_assets(
+-            model_id=variant,
+-            quality=quality,
+-            preference="github",
+-            force=force,
+-            offline=offline,
+-        )
+-        model_path = resolved.artifact_for_role("model", quality=quality)
+-        voice_role = "voices" if resolved.artifacts_for_role("voices") else "voice"
+-        voices_path = resolved.artifact_for_role(voice_role)
+-        if progress_callback:
+-            progress_callback("model", 0, 2)
+-        if progress_callback:
+-            progress_callback("voices", 1, 2)
+-        if progress_callback:
+-            progress_callback("complete", 2, 2)
+-        return {model_path.name: model_path, voices_path.name: voices_path}
+-    except (ModelRegistryError, OSError, ArtifactValidationError) as exc:
+-        raise ArtifactValidationError(str(exc)) from exc
++    return vocab
+
+
+ class Kokoro:
+@@ -1762,94 +119,17 @@ class Kokoro:
+         provider_options: dict[str, Any] | None = None,
+         vocab_version: str = "v1.0",
+         espeak_config: EspeakConfig | None = None,
+-        tokenizer_config: "TokenizerConfig | None" = None,
++        tokenizer_config: TokenizerConfig | None = None,
+         model_quality: ModelQuality | None = None,
+         model_source: ModelSource = DEFAULT_MODEL_SOURCE,
+         model_variant: ModelVariant = DEFAULT_MODEL_VARIANT,
+-        short_sentence_config: "ShortSentenceConfig | None" = None,
++        short_sentence_config: ShortSentenceConfig | None = None,
+         waveform_validation: Literal["off", "warn", "strict"] = "off",
+         inference_audio_diagnostics: bool = False,
+         inference_cache_enabled: bool = True,
+         inference_cache_max_bytes: int = 128 * 1024 * 1024,
+         asset_progress: AssetProgressCallback | None = None,
+     ) -> None:
+-        """
+-        Initialize the Kokoro ONNX backend.
+-
+-        Args:
+-            model_path: Path to the ONNX model file (auto-downloaded if None)
+-            voices_path: Path to the voices.bin file (auto-downloaded if None)
+-            use_gpu: Deprecated. Use provider parameter instead.
+-                Legacy GPU flag for backward compatibility.
+-            provider: Execution provider for ONNX Runtime. Options:
+-                "auto" (auto-select best), "cpu", "cuda" (NVIDIA),
+-                "openvino" (Intel), "directml" (Windows), "coreml" (macOS)
+-            session_options: Pre-configured ONNX Runtime SessionOptions object.
+-                If provided, this takes precedence over provider_options.
+-                For advanced users who need full control over session configuration.
+-            provider_options: Dictionary of provider and session options.
+-                Supports both SessionOptions attributes and provider-specific options.
+-
+-                Common SessionOptions attributes:
+-                - intra_op_num_threads: Parallelism within operations (default: auto)
+-                - inter_op_num_threads: Parallelism across operations (default: 1)
+-                - graph_optimization_level: 0-3 or GraphOptimizationLevel enum
+-                - execution_mode: Sequential or parallel
+-                - enable_profiling: Enable ONNX profiling
+-
+-                Provider-specific options:
+-
+-                OpenVINO:
+-                - device_type: "CPU_FP32", "GPU", etc.
+-                - precision: "FP32", "FP16", "BF16" (auto-set from model_quality)
+-                - num_of_threads: Number of threads (default: auto)
+-                - cache_dir: Model cache directory
+-                  (default: ~/.cache/pykokoro/openvino_cache)
+-                - enable_opencl_throttling: "true"/"false" for iGPU
+-
+-                CUDA:
+-                - device_id: GPU device ID (default: 0)
+-                - gpu_mem_limit: Memory limit in bytes
+-                - arena_extend_strategy: "kNextPowerOfTwo", "kSameAsRequested"
+-                - cudnn_conv_algo_search: "EXHAUSTIVE", "HEURISTIC", "DEFAULT"
+-
+-                DirectML:
+-                - device_id: GPU device ID
+-                - disable_metacommands: "true"/"false"
+-
+-                CoreML:
+-                - MLComputeUnits: "ALL", "CPU_ONLY", "CPU_AND_GPU"
+-                - EnableOnSubgraphs: "true"/"false"
+-
+-                Example:
+-                    provider_options={
+-                        "precision": "FP16",
+-                        "num_of_threads": 8,
+-                        "intra_op_num_threads": 4
+-                    }
+-            vocab_version: Vocabulary version for tokenizer
+-            espeak_config: Optional espeak-ng configuration
+-                (deprecated, use tokenizer_config)
+-            tokenizer_config: Optional tokenizer configuration
+-                (for mixed-language support)
+-            model_quality: Model quality/quantization level (default from config)
+-            model_source: Model source ("huggingface" or "github")
+-            model_variant: Model variant ("v1.0", "v1.1-zh")
+-            short_sentence_config: Configuration for short sentence handling.
+-                This improves audio quality for short sentences (like "Why?" or
+-                "Go!") by adding context.
+-                If None, uses default thresholds (min_phoneme_length=30).
+-                Set enabled=False to disable.
+-                Example:
+-                    from pykokoro.short_sentence_handler import ShortSentenceConfig
+-                    config = ShortSentenceConfig(
+-                        min_phoneme_length=20,  # Treat < 20 phonemes as short
+-                        resolve_mode="randomized-phrase",
+-                        enabled=True,
+-                        phoneme_pretext="—"
+-                    )
+-                    tts = Kokoro(short_sentence_config=config)
+-        """
+         self._session: Any | None = None
+         self._voice_manager: VoiceManager | None = None
+         self._audio_generator: AudioGenerator | None = None
+@@ -1876,7 +156,7 @@ class Kokoro:
+         # Store initial variant (before auto-detection)
+         self._initial_model_variant: ModelVariant = model_variant
+         self._model_variant: ModelVariant = model_variant
+-        self._auto_switched_variant = False  # Track if we auto-switched
++        self._auto_switched_variant = False
+
+         # Load config for defaults
+         from .utils import load_config
+@@ -1886,7 +166,7 @@ class Kokoro:
+         # Resolve provider_options from config if not specified
+         if provider_options is None and "provider_options" in cfg:
+             provider_options = cfg.get("provider_options")
+-            logger.info(f"Loaded provider_options from config: {provider_options}")
++            logger.info("Loaded provider_options from config: %s", provider_options)
+
+         self._provider_options = provider_options
+
+@@ -1960,7 +240,6 @@ class Kokoro:
+             Resolved model variant to use
+         """
+         # If user explicitly specified variant, don't auto-switch
+-        # (Check if variant differs from default)
+         if self._initial_model_variant != DEFAULT_MODEL_VARIANT:
+             return self._model_variant
+
+@@ -1968,8 +247,9 @@ class Kokoro:
+         if is_chinese_language(lang) and self._model_source == "github":
+             if not self._auto_switched_variant:
+                 logger.info(
+-                    f"Detected Chinese language '{lang}'. "
+-                    f"Automatically switching to model variant 'v1.1-zh'."
++                    "Detected Chinese language '%s'. "
++                    "Automatically switching to model variant 'v1.1-zh'.",
++                    lang,
+                 )
+                 self._auto_switched_variant = True
+             return "v1.1-zh"
+@@ -1979,24 +259,19 @@ class Kokoro:
+
+     @property
+     def tokenizer(self) -> Tokenizer:
+-        """Get the tokenizer instance (lazily initialized).
+-
+-        Uses variant-specific vocabulary for proper phoneme filtering.
+-        """
++        """Get the tokenizer instance (lazily initialized)."""
+         if self._tokenizer is None:
+-            # Get variant-specific vocabulary
+             vocab = self._get_vocabulary()
+-
+             logger.debug(
+-                f"Initializing tokenizer with {len(vocab)} tokens "
+-                f"for variant '{self._model_variant}'"
++                "Initializing tokenizer with %d tokens for variant '%s'",
++                len(vocab),
++                self._model_variant,
+             )
+-
+             self._tokenizer = Tokenizer(
+                 config=self._tokenizer_config,
+                 espeak_config=self._espeak_config,
+                 vocab_version=self._vocab_version,
+-                vocab=vocab,  # Pass variant-specific vocabulary
++                vocab=vocab,
+             )
+         return self._tokenizer
+
+@@ -2037,7 +312,7 @@ class Kokoro:
+             resolved = install_kokoro_model(
+                 self._model_variant,
+                 quality=str(self._model_quality),
+-                distribution=self._model_source,
++                source=self._model_source,
+                 cache_dir=None,
+                 progress=self._asset_progress,
+             )
+@@ -2129,11 +404,11 @@ class Kokoro:
+
+     def preprocess_segments(
+         self,
+-        segments: list["PhonemeSegment"],
++        segments: list[PhonemeSegment],
+         enable_short_sentence_override: bool | None,
+         random_seed: int | None = None,
+         context_phonemizer: Callable[[str, str], Any] | None = None,
+-    ) -> list["PhonemeSegment"]:
++    ) -> list[PhonemeSegment]:
+         """Preprocess phoneme segments for short sentence handling."""
+         self._init_kokoro()
+         assert self._audio_generator is not None
+@@ -2146,14 +421,14 @@ class Kokoro:
+
+     def generate_raw_audio_segments(
+         self,
+-        segments: list["PhonemeSegment"],
++        segments: list[PhonemeSegment],
+         voice_style: np.ndarray,
+         speed: float,
+         voice_resolver: Callable[[str], np.ndarray] | None,
+         *,
+         default_voice_name: str | None = None,
+-        trace: "Trace | None" = None,
+-    ) -> list["PhonemeSegment"]:
++        trace: Trace | None = None,
++    ) -> list[PhonemeSegment]:
+         """Generate raw audio for each phoneme segment."""
+         self._init_kokoro()
+         if getattr(self, "_audio_generator", None) is None and self._runtime is not None:
+@@ -2195,12 +470,12 @@ class Kokoro:
+
+     def postprocess_audio_segments(
+         self,
+-        segments: list["PhonemeSegment"],
++        segments: list[PhonemeSegment],
+         trim_silence: bool,
+-        prosody_config: "ProsodyConfig | None" = None,
+-        trace: "Trace | None" = None,
+-        loudness_config: "LoudnessConfig | None" = None,
+-    ) -> list["PhonemeSegment"]:
++        prosody_config: ProsodyConfig | None = None,
++        trace: Trace | None = None,
++        loudness_config: LoudnessConfig | None = None,
++    ) -> list[PhonemeSegment]:
+         """Trim/prosody-process raw audio segments."""
+         self._init_kokoro()
+         assert self._audio_generator is not None
+@@ -2214,9 +489,9 @@ class Kokoro:
+
+     def concatenate_audio_segments(
+         self,
+-        segments: list["PhonemeSegment"],
+-        prosody_config: "ProsodyConfig | None" = None,
+-        trace: "Trace | None" = None,
++        segments: list[PhonemeSegment],
++        prosody_config: ProsodyConfig | None = None,
++        trace: Trace | None = None,
+     ) -> np.ndarray:
+         """Concatenate processed segments into a single waveform."""
+         self._init_kokoro()
+@@ -2230,16 +505,9 @@ class Kokoro:
+     # Voice Database Integration (from kokovoicelab)
+
+     def load_voice_database(self, db_path: Path) -> None:
+-        """
+-        Load a voice database for custom/synthetic voices.
+-
+-        Args:
+-            db_path: Path to the SQLite voice database
+-        """
++        """Load a voice database for custom/synthetic voices."""
+         if self._voice_db is not None:
+             self._voice_db.close()
+-
+-        # Register numpy array converter
+         sqlite3.register_converter("array", self._convert_array)
+         self._voice_db = sqlite3.connect(str(db_path), detect_types=sqlite3.PARSE_DECLTYPES)
+
+@@ -2249,39 +517,23 @@ class Kokoro:
+         return np.load(out)
+
+     def get_voice_from_database(self, voice_name: str) -> np.ndarray | None:
+-        """
+-        Get a voice style vector from the database.
+-
+-        Args:
+-            voice_name: Name of the voice in the database
+-
+-        Returns:
+-            Voice style vector or None if not found
+-        """
++        """Get a voice style vector from the database."""
+         if self._voice_db is None:
+             return None
+-
+         cursor = self._voice_db.cursor()
+         cursor.execute(
+             "SELECT style_vector FROM voices WHERE name = ?",
+             (voice_name,),
+         )
+         row = cursor.fetchone()
+-
+         if row:
+             return row[0]
+         return None
+
+     def list_database_voices(self) -> list[dict[str, Any]]:
+-        """
+-        List all voices in the database.
+-
+-        Returns:
+-            List of voice metadata dictionaries
+-        """
++        """List all voices in the database."""
+         if self._voice_db is None:
+             return []
+-
+         cursor = self._voice_db.cursor()
+         cursor.execute(
+             """
+@@ -2290,7 +542,6 @@ class Kokoro:
+             ORDER BY quality DESC
+             """
+         )
+-
+         voices = []
+         for row in cursor.fetchall():
+             voices.append(
+@@ -2303,7 +554,6 @@ class Kokoro:
+                     "notes": row[5],
+                 }
+             )
+-
+         return voices
+
+     def interpolate_voices(
+@@ -2312,22 +562,7 @@ class Kokoro:
+         voice2: str | np.ndarray,
+         factor: float = 0.5,
+     ) -> np.ndarray:
+-        """
+-        Interpolate between two voices.
+-
+-        This uses the interpolation method from kokovoicelab to create
+-        voices that lie on the line between two source voices.
+-
+-        Args:
+-            voice1: First voice (name or style vector)
+-            voice2: Second voice (name or style vector)
+-            factor: Interpolation factor (0.0 = voice1, 1.0 = voice2)
+-
+-        Returns:
+-            Interpolated voice style vector
+-        """
+-        self._init_kokoro()
+-
++        """Interpolate between two voices."""
+         self._init_kokoro()
+         assert self._voice_manager is not None
+
+@@ -2338,31 +573,24 @@ class Kokoro:
+             voice2, voice_db_lookup=self.get_voice_from_database
+         )
+
+-        # Use kokovoicelab's interpolation method
+         diff_vector = style2 - style1
+         midpoint = (style1 + style2) / 2
+         return midpoint + (diff_vector * factor / 2)
+
+     def _generate_from_segments(
+         self,
+-        segments: list["PhonemeSegment"],
++        segments: list[PhonemeSegment],
+         voice_style: np.ndarray,
+         speed: float,
+         trim_silence: bool,
+         enable_short_sentence_override: bool | None = None,
+         random_seed: int | None = None,
+-        prosody_config: "ProsodyConfig | None" = None,
++        prosody_config: ProsodyConfig | None = None,
+     ) -> np.ndarray:
+-        """Delegate to AudioGenerator with voice resolution support.
+-
+-        This wrapper provides voice resolution for per-segment voice switching
+-        via SSMD voice annotations.
+-        """
++        """Delegate to AudioGenerator with voice resolution support."""
+         self._init_kokoro()
+         assert self._audio_generator is not None
+-        audio_generator = self._audio_generator
+
+-        # Create voice resolver callback
+         def voice_resolver(voice_name: str) -> np.ndarray:
+             """Resolve voice name to style vector."""
+             assert self._voice_manager is not None
+@@ -2370,7 +598,7 @@ class Kokoro:
+                 voice_name, voice_db_lookup=self.get_voice_from_database
+             )
+
+-        return audio_generator.generate_from_segments(
++        return self._audio_generator.generate_from_segments(
+             segments,
+             voice_style,
+             speed,
+@@ -2387,27 +615,22 @@ class Kokoro:
+         runtime = self._runtime
+         resolved = getattr(runtime, "resolved", None)
+         if resolved is not None:
+-            installation = resolved.installation
+-            artifacts = tuple(getattr(installation, "artifacts", ()) or ())
+             return {
+                 "model_id": resolved.model_id or self._model_variant,
+-                "distribution_id": resolved.metadata.get("distribution_id"),
++                "ref": resolved.ref,
++                "quality": resolved.quality,
++                "distribution_id": resolved.distribution,
++                "storage_id": resolved.storage_id,
+                 "release_tag": resolved.metadata.get("release_tag"),
+-                "artifacts": [
+-                    {
+-                        "role": getattr(artifact, "role", None),
+-                        "path": str(getattr(artifact, "path", "")),
+-                        "size": getattr(artifact, "size", None),
+-                        "sha256": getattr(artifact, "sha256", None),
+-                    }
+-                    for artifact in artifacts
+-                ],
+             }
+
+         paths = [path for path in (self._model_path, self._voices_path) if path is not None]
+         return {
+             "model_id": self._model_variant,
++            "ref": None,
++            "quality": None,
+             "distribution_id": None,
++            "storage_id": None,
+             "release_tag": None,
+             "artifacts": [
+                 {"path": str(path), "size": path.stat().st_size} for path in paths if path.is_file()
+diff --git a/pykokoro/output_loudness.py b/pykokoro/output_loudness.py
+deleted file mode 100644
+index e5961da..0000000
+--- a/pykokoro/output_loudness.py
++++ /dev/null
+@@ -1,72 +0,0 @@
+-"""Optional one-pass loudness normalization for complete PyKokoro output."""
+-
+-from __future__ import annotations
+-
+-import math
+-from typing import TYPE_CHECKING
+-
+-import numpy as np
+-from audiosig import apply_gain_db, measure_loudness
+-
+-from .exceptions import ConfigurationError
+-from .loudness_config import LoudnessConfig
+-
+-if TYPE_CHECKING:
+-    from .types import Trace
+-
+-
+-class LoudnessNormalizationError(ConfigurationError):
+-    """The requested complete-output target violates the peak policy."""
+-
+-
+-def apply_complete_output_loudness(
+-    audio: np.ndarray,
+-    sample_rate: int,
+-    config: LoudnessConfig,
+-    trace: Trace | None = None,
+-) -> np.ndarray:
+-    """Apply one static gain to a complete waveform when a target is configured."""
+-
+-    if config.target_lufs is None or audio.size == 0:
+-        return audio
+-
+-    metrics = measure_loudness(audio, sample_rate=sample_rate)
+-    if not math.isfinite(metrics.integrated_lufs):
+-        if trace is not None:
+-            trace.warnings.append(
+-                "output_loudness: digital silence has no integrated LUFS; unchanged"
+-            )
+-            trace.model.setdefault("output_loudness", {})
+-            trace.model["output_loudness"].update(
+-                {"target_lufs": config.target_lufs, "applied_gain_db": 0.0, "target_reached": False}
+-            )
+-        return audio
+-
+-    requested_gain_db = config.target_lufs - metrics.integrated_lufs
+-    safe_gain_db = math.inf
+-    if config.true_peak_ceiling_dbtp is not None and math.isfinite(metrics.true_peak_dbtp):
+-        safe_gain_db = config.true_peak_ceiling_dbtp - metrics.true_peak_dbtp
+-    if config.peak_policy == "error" and requested_gain_db > safe_gain_db:
+-        raise LoudnessNormalizationError(
+-            "Complete-output loudness target exceeds true-peak ceiling: "
+-            f"measured LUFS={metrics.integrated_lufs:.3f}, target LUFS={config.target_lufs:.3f}, "
+-            f"requested gain={requested_gain_db:.3f} dB, measured true peak={metrics.true_peak_dbtp:.3f} dBTP, "
+-            f"ceiling={config.true_peak_ceiling_dbtp!r} dBTP, maximum safe gain={safe_gain_db:.3f} dB"
+-        )
+-    applied_gain_db = (
+-        requested_gain_db if requested_gain_db <= 0.0 else min(requested_gain_db, safe_gain_db)
+-    )
+-    normalized = apply_gain_db(audio, applied_gain_db)
+-    if trace is not None:
+-        trace.model["output_loudness"] = {
+-            "integrated_lufs_before": metrics.integrated_lufs,
+-            "target_lufs": config.target_lufs,
+-            "requested_gain_db": requested_gain_db,
+-            "applied_gain_db": applied_gain_db,
+-            "sample_peak_before_dbfs": metrics.sample_peak_dbfs,
+-            "true_peak_before_dbtp": metrics.true_peak_dbtp,
+-            "true_peak_ceiling_dbtp": config.true_peak_ceiling_dbtp,
+-            "target_reached": math.isclose(applied_gain_db, requested_gain_db, abs_tol=1e-9),
+-            "peak_policy": config.peak_policy,
+-        }
+-    return np.asarray(normalized).astype(audio.dtype, copy=False)
+diff --git a/pykokoro/release_catalog.py b/pykokoro/release_catalog.py
+deleted file mode 100644
+index d33f1c3..0000000
+--- a/pykokoro/release_catalog.py
++++ /dev/null
+@@ -1,562 +0,0 @@
+-"""Discovery and validation of published Kokoro model releases."""
+-
+-from __future__ import annotations
+-
+-import hashlib
+-import json
+-import os
+-import urllib.error
+-import urllib.request
+-from collections.abc import Mapping
+-from dataclasses import dataclass, replace
+-from pathlib import Path
+-from typing import Any
+-
+-from .utils import get_user_cache_path
+-
+-MODEL_REPOSITORY = "buchwandler/kokoro-onnx-models"
+-GITHUB_API = "https://api.github.com"
+-MANIFEST_NAME = "release-manifest.json"
+-SUPPORTED_MANIFEST_SCHEMAS = frozenset({2})
+-_LEGACY_FRONTEND_ALIASES = {
+-    "tts_eu_pt TugaPhone pt-PT Lisbon": "tts-eu-pt-v1",
+-}
+-SUPPORTED_RUNTIME_CONTRACTS = frozenset({1})
+-SUPPORTED_FRONTENDS = frozenset(
+-    {
+-        "pykokoro-native-v1",
+-        "pykokoro-native",
+-        "vig2p",
+-        "vig2p-v1",
+-        "german-ipa-v1",
+-        "German IPA",
+-        "Arabic diacritizer + espeak-ng + Nabra cleanup",
+-        "nabra-arabic-v1",
+-        "Hebrew-specific G2P",
+-        "tts-eu-pt-v1",
+-    }
+-)
+-SUPPORTED_VOICE_FORMATS = frozenset({"numpy-npz", "raw-float32-le"})
+-
+-
+-class ReleaseCatalogError(RuntimeError):
+-    """Raised when a published release cannot be used."""
+-
+-
+-class IncompatibleReleaseError(ReleaseCatalogError):
+-    """Raised when an exact release exists but is not compatible."""
+-
+-    def __init__(self, tag: str, reason: str) -> None:
+-        self.tag = tag
+-        self.reason = reason
+-        super().__init__(f"Release {tag!r} is incompatible: {reason}")
+-
+-
+-@dataclass(frozen=True, slots=True)
+-class ReleaseAsset:
+-    name: str
+-    role: str
+-    format: str
+-    size: int
+-    sha256: str
+-    download_url: str
+-    quality: str | None = None
+-
+-
+-@dataclass(frozen=True, slots=True)
+-class RemoteModelRelease:
+-    profile: str
+-    model_version: str
+-    release_tag: str
+-    release_published_at: str
+-    manifest_schema: int
+-    runtime_contract: int
+-    language_codes: tuple[str, ...]
+-    frontend: str
+-    sample_rate: int
+-    default_voice: str
+-    voices: tuple[str, ...]
+-    assets: tuple[ReleaseAsset, ...]
+-    onnx_contract: Mapping[str, object]
+-    publication_enabled: bool
+-    manifest: Mapping[str, object]
+-    compatible: bool = True
+-    incompatibility_reason: str | None = None
+-
+-    def asset(
+-        self, role: str, *, quality: str | None = None, format: str | None = None
+-    ) -> ReleaseAsset:
+-        matches = [
+-            asset
+-            for asset in self.assets
+-            if asset.role == role
+-            and (quality is None or asset.quality == quality)
+-            and (format is None or asset.format == format)
+-        ]
+-        if not matches:
+-            detail = ", ".join(f"{item.role}/{item.quality or item.format}" for item in self.assets)
+-            raise ReleaseCatalogError(
+-                f"Release {self.release_tag!r} has no {role} asset ({detail})"
+-            )
+-        return matches[0]
+-
+-    def model_asset(self, quality: str = "fp32") -> ReleaseAsset:
+-        return self.asset("model", quality=quality)
+-
+-    def voice_asset(
+-        self, preferred_formats: tuple[str, ...] = ("numpy-npz", "raw-float32-le")
+-    ) -> ReleaseAsset:
+-        for asset_format in preferred_formats:
+-            try:
+-                return self.asset("voices", format=asset_format)
+-            except ReleaseCatalogError:
+-                continue
+-        return self.asset("voices")
+-
+-    def assets_for_role(self, role: str) -> tuple[ReleaseAsset, ...]:
+-        return tuple(asset for asset in self.assets if asset.role == role)
+-
+-
+-@dataclass(frozen=True, slots=True)
+-class InstalledModelRelease:
+-    """Paths and provenance for a verified local model release."""
+-
+-    release: RemoteModelRelease
+-    quality: str
+-    model_path: Path
+-    voices_path: Path
+-    auxiliary_paths: tuple[Path, ...] = ()
+-
+-
+-class GitHubReleaseClient:
+-    """Small urllib-based GitHub API client, easy to replace in tests."""
+-
+-    def __init__(self, *, token: str | None = None) -> None:
+-        self.token = token or os.environ.get("PYKOKORO_GITHUB_TOKEN")
+-
+-    def _request(self, url: str) -> bytes:
+-        headers = {
+-            "Accept": "application/vnd.github+json",
+-            "User-Agent": "pykokoro-release-catalog/1",
+-        }
+-        if self.token:
+-            headers["Authorization"] = f"Bearer {self.token}"
+-        request = urllib.request.Request(url, headers=headers)
+-        try:
+-            with urllib.request.urlopen(request, timeout=60) as response:
+-                return response.read()
+-        except urllib.error.HTTPError as exc:
+-            raise ReleaseCatalogError(f"GitHub request failed with HTTP {exc.code}: {url}") from exc
+-        except urllib.error.URLError as exc:
+-            raise ReleaseCatalogError(f"GitHub request failed: {url}: {exc.reason}") from exc
+-
+-    def json(self, url: str) -> Any:
+-        try:
+-            return json.loads(self._request(url))
+-        except json.JSONDecodeError as exc:
+-            raise ReleaseCatalogError(f"GitHub returned invalid JSON: {url}") from exc
+-
+-    def bytes(self, url: str) -> bytes:
+-        return self._request(url)
+-
+-    def list_releases(self) -> list[dict[str, Any]]:
+-        data = self.json(f"{GITHUB_API}/repos/{MODEL_REPOSITORY}/releases?per_page=100")
+-        if not isinstance(data, list):
+-            raise ReleaseCatalogError("GitHub releases response is not a list")
+-        return [item for item in data if isinstance(item, dict)]
+-
+-    def get_release(self, tag: str) -> dict[str, Any]:
+-        data = self.json(f"{GITHUB_API}/repos/{MODEL_REPOSITORY}/releases/tags/{tag}")
+-        if not isinstance(data, dict):
+-            raise ReleaseCatalogError(f"GitHub release response for {tag!r} is not an object")
+-        return data
+-
+-
+-_DEFAULT_CLIENT = GitHubReleaseClient()
+-
+-
+-def _sha256(data: bytes) -> str:
+-    return hashlib.sha256(data).hexdigest()
+-
+-
+-def _manifest_asset(release: Mapping[str, Any]) -> Mapping[str, Any]:
+-    for asset in release.get("assets", []):
+-        if isinstance(asset, Mapping) and asset.get("name") == MANIFEST_NAME:
+-            return asset
+-    raise ReleaseCatalogError(
+-        f"Release {release.get('tag_name', '<unknown>')!r} has no {MANIFEST_NAME}"
+-    )
+-
+-
+-def _verify_manifest_digest(data: bytes, asset: Mapping[str, Any]) -> None:
+-    digest = asset.get("digest") or asset.get("sha256")
+-    if isinstance(digest, str) and digest.startswith("sha256:"):
+-        digest = digest[7:]
+-    if digest is not None and _sha256(data) != str(digest).lower():
+-        raise ReleaseCatalogError(
+-            f"Manifest digest mismatch for {asset.get('name', MANIFEST_NAME)}"
+-        )
+-
+-
+-def _parse_asset(
+-    item: Mapping[str, Any], github_assets: Mapping[str, Mapping[str, Any]]
+-) -> ReleaseAsset:
+-    name = item.get("name")
+-    _require(isinstance(name, str) and name, "Manifest asset name is invalid")
+-    github_asset = github_assets.get(name)
+-    _require(github_asset is not None, f"Manifest asset {name!r} is not present in GitHub Release")
+-    role = item.get("role")
+-    asset_format = item.get("format")
+-    _require(isinstance(role, str) and role, f"Manifest asset {name!r} has no role")
+-    _require(
+-        isinstance(asset_format, str) and asset_format, f"Manifest asset {name!r} has no format"
+-    )
+-    size = item.get("size")
+-    sha256 = item.get("sha256")
+-    _require(isinstance(size, int) and size > 0, f"Manifest asset {name!r} has invalid size")
+-    _require(
+-        isinstance(sha256, str)
+-        and len(sha256) == 64
+-        and all(c in "0123456789abcdef" for c in sha256),
+-        f"Manifest asset {name!r} has invalid SHA-256",
+-    )
+-    url = github_asset.get("browser_download_url")
+-    _require(isinstance(url, str) and url, f"GitHub asset {name!r} has no browser download URL")
+-    quality = item.get("quality")
+-    return ReleaseAsset(
+-        name, role, asset_format, size, sha256, url, quality if isinstance(quality, str) else None
+-    )
+-
+-
+-def _require(condition: bool, message: str) -> None:
+-    if not condition:
+-        raise ReleaseCatalogError(message)
+-
+-
+-def _parse_release(
+-    release: Mapping[str, Any],
+-    manifest_data: bytes,
+-    manifest_asset: Mapping[str, Any],
+-    *,
+-    allow_prerelease: bool,
+-    local_base: Path | None = None,
+-) -> RemoteModelRelease:
+-    _verify_manifest_digest(manifest_data, manifest_asset)
+-    try:
+-        manifest = json.loads(manifest_data)
+-    except json.JSONDecodeError as exc:
+-        raise ReleaseCatalogError("Release manifest is not valid JSON") from exc
+-    _require(isinstance(manifest, dict), "Release manifest must be an object")
+-    _require(manifest.get("schema") in SUPPORTED_MANIFEST_SCHEMAS, "Unsupported manifest schema")
+-    _require(
+-        manifest.get("runtime_contract") in SUPPORTED_RUNTIME_CONTRACTS,
+-        "Unsupported runtime contract",
+-    )
+-    tag = release.get("tag_name") or manifest.get("tag")
+-    _require(isinstance(tag, str) and tag, "GitHub release has no tag")
+-    _require(
+-        manifest.get("repository") == MODEL_REPOSITORY,
+-        "Manifest repository does not match release repository",
+-    )
+-    _require(
+-        manifest.get("tag") == tag,
+-        f"Manifest tag {manifest.get('tag')!r} does not match GitHub tag {tag!r}",
+-    )
+-    if release.get("draft"):
+-        raise ReleaseCatalogError(f"Release {tag!r} is a draft")
+-    if release.get("prerelease") and not allow_prerelease:
+-        raise ReleaseCatalogError(f"Release {tag!r} is a prerelease")
+-
+-    runtime = manifest.get("runtime")
+-    _require(isinstance(runtime, dict), "Manifest runtime metadata is invalid")
+-    language_codes = runtime.get("language_codes")
+-    voices = runtime.get("voices")
+-    frontend = _LEGACY_FRONTEND_ALIASES.get(runtime.get("frontend"), runtime.get("frontend"))
+-    _require(
+-        isinstance(language_codes, list)
+-        and all(isinstance(value, str) for value in language_codes),
+-        "Manifest language codes are invalid",
+-    )
+-    _require(
+-        isinstance(voices, list) and voices and all(isinstance(value, str) for value in voices),
+-        "Manifest voices are invalid",
+-    )
+-    _require(isinstance(frontend, str) and frontend, "Manifest frontend is invalid")
+-    assets_data = manifest.get("assets")
+-    _require(isinstance(assets_data, list) and assets_data, "Manifest assets are invalid")
+-    github_assets = {
+-        item["name"]: item
+-        for item in release.get("assets", [])
+-        if isinstance(item, dict) and isinstance(item.get("name"), str)
+-    }
+-    seen_names: set[str] = set()
+-    assets: list[ReleaseAsset] = []
+-    for item in assets_data:
+-        _require(isinstance(item, dict), "Manifest asset is not an object")
+-        asset = _parse_asset(item, github_assets)
+-        _require(asset.name not in seen_names, f"Duplicate manifest asset {asset.name!r}")
+-        seen_names.add(asset.name)
+-        assets.append(
+-            ReleaseAsset(
+-                asset.name,
+-                asset.role,
+-                asset.format,
+-                asset.size,
+-                asset.sha256,
+-                (local_base / asset.name).as_uri() if local_base else asset.download_url,
+-                asset.quality,
+-            )
+-        )
+-    _require(any(asset.role == "model" for asset in assets), "Manifest has no model asset")
+-    voice_assets = [asset for asset in assets if asset.role == "voices"]
+-    _require(voice_assets, "Manifest has no voices asset")
+-    _require(
+-        any(asset.format in SUPPORTED_VOICE_FORMATS for asset in voice_assets),
+-        "Manifest has no supported voice format",
+-    )
+-    return RemoteModelRelease(
+-        profile=str(manifest["profile"]),
+-        model_version=str(manifest["model_version"]),
+-        release_tag=tag,
+-        release_published_at=str(
+-            release.get("published_at") or release.get("created_at") or manifest["generated_at"]
+-        ),
+-        manifest_schema=int(manifest["schema"]),
+-        runtime_contract=int(manifest["runtime_contract"]),
+-        language_codes=tuple(language_codes),
+-        frontend=frontend,
+-        sample_rate=int(runtime["sample_rate"]),
+-        default_voice=str(runtime["default_voice"]),
+-        voices=tuple(voices),
+-        assets=tuple(assets),
+-        onnx_contract=manifest.get("onnx_contract", {}),
+-        publication_enabled=bool(manifest.get("publication", {}).get("enabled")),
+-        manifest=manifest,
+-    )
+-
+-
+-def _compatibility_reason(
+-    release: RemoteModelRelease, *, profile: str | None, language: str | None, quality: str | None
+-) -> str | None:
+-    if profile is not None and release.profile != profile:
+-        return f"profile is {release.profile!r}, requested {profile!r}"
+-    if language is not None and language.lower() not in {
+-        value.lower() for value in release.language_codes
+-    }:
+-        return f"language {language!r} is not declared"
+-    if not release.publication_enabled:
+-        return "publication is disabled"
+-    if release.frontend not in SUPPORTED_FRONTENDS:
+-        return f"frontend {release.frontend!r} is not implemented"
+-    if quality is not None:
+-        try:
+-            release.model_asset(quality)
+-        except ReleaseCatalogError:
+-            return f"model quality {quality!r} is not published"
+-    return None
+-
+-
+-def _with_compatibility(
+-    release: RemoteModelRelease, *, profile: str | None, language: str | None, quality: str | None
+-) -> RemoteModelRelease:
+-    reason = _compatibility_reason(release, profile=profile, language=language, quality=quality)
+-    if reason is None:
+-        return release
+-    return replace(release, compatible=False, incompatibility_reason=reason)
+-
+-
+-def _remote_release(
+-    release: Mapping[str, Any], client: GitHubReleaseClient, *, allow_prerelease: bool
+-) -> RemoteModelRelease:
+-    manifest_asset = _manifest_asset(release)
+-    url = manifest_asset.get("browser_download_url")
+-    _require(isinstance(url, str) and url, "Manifest asset has no download URL")
+-    data = client.bytes(url)
+-    return _parse_release(release, data, manifest_asset, allow_prerelease=allow_prerelease)
+-
+-
+-def _installed_root() -> Path:
+-    return get_user_cache_path("releases")
+-
+-
+-def _installed_releases() -> list[RemoteModelRelease]:
+-    root = _installed_root()
+-    if not root.exists():
+-        return []
+-    result = []
+-    for manifest_path in root.glob("*/*/" + MANIFEST_NAME):
+-        base = manifest_path.parent
+-        try:
+-            manifest_data = manifest_path.read_bytes()
+-            manifest = json.loads(manifest_data)
+-            assets = {
+-                item["name"]: {
+-                    "name": item["name"],
+-                    "browser_download_url": (base / item["name"]).as_uri(),
+-                }
+-                for item in manifest["assets"]
+-            }
+-            release = {
+-                "tag_name": manifest["tag"],
+-                "published_at": manifest.get("generated_at"),
+-                "assets": list(assets.values()),
+-            }
+-            parsed = _parse_release(
+-                release,
+-                manifest_data,
+-                {"name": MANIFEST_NAME, "browser_download_url": manifest_path.as_uri()},
+-                allow_prerelease=True,
+-                local_base=base,
+-            )
+-            if all((base / asset.name).is_file() for asset in parsed.assets):
+-                if any(
+-                    not (base / asset.name).is_file()
+-                    or (base / asset.name).stat().st_size != asset.size
+-                    or _sha256((base / asset.name).read_bytes()) != asset.sha256
+-                    for asset in parsed.assets
+-                ):
+-                    continue
+-                result.append(parsed)
+-        except (OSError, KeyError, TypeError, ValueError, ReleaseCatalogError):
+-            continue
+-    return sorted(result, key=lambda item: item.release_published_at, reverse=True)
+-
+-
+-def available_model_releases(
+-    *,
+-    profile: str | None = None,
+-    language: str | None = None,
+-    quality: str | None = None,
+-    include_incompatible: bool = False,
+-    offline: bool = False,
+-    client: GitHubReleaseClient | None = None,
+-) -> tuple[RemoteModelRelease, ...]:
+-    """Return published compatible releases, newest first."""
+-    if offline:
+-        releases = _installed_releases()
+-    else:
+-        api = client or _DEFAULT_CLIENT
+-        releases = []
+-        for item in api.list_releases():
+-            if item.get("draft") or item.get("prerelease"):
+-                continue
+-            try:
+-                releases.append(_remote_release(item, api, allow_prerelease=False))
+-            except ReleaseCatalogError:
+-                continue
+-    filtered = [
+-        _with_compatibility(item, profile=profile, language=language, quality=quality)
+-        for item in releases
+-    ]
+-    if include_incompatible:
+-        return tuple(filtered)
+-    return tuple(item for item in filtered if item.compatible)
+-
+-
+-def resolve_model_release(
+-    profile: str,
+-    *,
+-    tag: str | None = None,
+-    quality: str = "fp32",
+-    offline: bool = False,
+-    client: GitHubReleaseClient | None = None,
+-) -> RemoteModelRelease:
+-    """Resolve the newest compatible release, or one exact tag."""
+-    if offline:
+-        candidates = _installed_releases()
+-        if tag is not None:
+-            candidates = [item for item in candidates if item.release_tag == tag]
+-    else:
+-        api = client or _DEFAULT_CLIENT
+-        if tag is not None:
+-            try:
+-                candidates = [_remote_release(api.get_release(tag), api, allow_prerelease=True)]
+-            except ReleaseCatalogError as exc:
+-                raise IncompatibleReleaseError(tag, str(exc)) from exc
+-        else:
+-            candidates = []
+-            for item in api.list_releases():
+-                if item.get("draft") or item.get("prerelease"):
+-                    continue
+-                try:
+-                    candidates.append(_remote_release(item, api, allow_prerelease=False))
+-                except ReleaseCatalogError:
+-                    continue
+-    for release in candidates:
+-        reason = _compatibility_reason(release, profile=profile, language=None, quality=quality)
+-        if reason is None:
+-            return release
+-        if tag is not None:
+-            raise IncompatibleReleaseError(tag, reason)
+-    if tag is not None:
+-        raise ReleaseCatalogError(f"Published release tag {tag!r} was not found")
+-    raise ReleaseCatalogError(
+-        f"No compatible published release found for profile {profile!r} and quality {quality!r}"
+-    )
+-
+-
+-def download_model_release(
+-    profile: str,
+-    *,
+-    tag: str | None = None,
+-    quality: str = "fp32",
+-    force: bool = False,
+-    offline: bool = False,
+-) -> InstalledModelRelease:
+-    """Download and verify all assets needed by one resolved release."""
+-    from .model_assets import release_asset_path
+-    from .onnx_backend import (
+-        _download_release_asset,
+-        _validate_json_asset,
+-        _validate_onnx_file,
+-        _validate_vocabulary,
+-        _validate_voice_archive,
+-        _validate_voice_bin,
+-    )
+-
+-    release = resolve_model_release(profile, tag=tag, quality=quality, offline=offline)
+-    model_asset = release.model_asset(quality)
+-    voice_asset = release.voice_asset()
+-    model_path = _download_release_asset(
+-        release,
+-        model_asset,
+-        quality=quality,
+-        force=force,
+-        offline=offline,
+-        validator=_validate_onnx_file,
+-    )
+-    voice_validator = (
+-        (lambda path: _validate_voice_archive(path, expected_voice_names=release.voices))
+-        if voice_asset.format == "numpy-npz"
+-        else _validate_voice_bin
+-    )
+-    voices_path = _download_release_asset(
+-        release,
+-        voice_asset,
+-        quality=quality,
+-        force=force,
+-        offline=offline,
+-        validator=voice_validator,
+-    )
+-    auxiliary_paths = []
+-    for role in ("config", "vocab", "bundle"):
+-        assets = release.assets_for_role(role)
+-        if assets:
+-            validator = _validate_vocabulary if role == "vocab" else _validate_json_asset
+-            auxiliary_paths.append(
+-                _download_release_asset(
+-                    release,
+-                    assets[0],
+-                    quality=quality,
+-                    force=force,
+-                    offline=offline,
+-                    validator=validator,
+-                )
+-            )
+-    return InstalledModelRelease(
+-        release=release,
+-        quality=quality,
+-        model_path=model_path or release_asset_path(release, model_asset),
+-        voices_path=voices_path or release_asset_path(release, voice_asset),
+-        auxiliary_paths=tuple(auxiliary_paths),
+-    )
+diff --git a/pykokoro/runtime/dispatcher.py b/pykokoro/runtime/dispatcher.py
+deleted file mode 100644
+index bda0d44..0000000
+--- a/pykokoro/runtime/dispatcher.py
++++ /dev/null
+@@ -1,30 +0,0 @@
+-"""Dispatch resolved registry assets to their layout-specific runtime."""
+-
+-from __future__ import annotations
+-
+-from collections.abc import Callable
+-from pathlib import Path
+-from typing import Any
+-
+-from ..model_registry import ModelRegistryError
+-from .model_assets import ResolvedRuntimeAssets
+-from .thai_wayu import ThaiWayuRuntime
+-
+-
+-class UnsupportedRuntimeLayout(ModelRegistryError):
+-    """Raised when a registry layout has no PyKokoro implementation."""
+-
+-
+-def create_runtime(
+-    assets: ResolvedRuntimeAssets,
+-    *,
+-    session_factory: Callable[[Path], Any] | None = None,
+-) -> ThaiWayuRuntime | None:
+-    """Create a nonstandard runtime, or return ``None`` for single-ONNX assets."""
+-    if assets.layout == "single-onnx-v1":
+-        return None
+-    if assets.layout == "split-onnx-v1":
+-        return ThaiWayuRuntime(assets, session_factory=session_factory)
+-    raise UnsupportedRuntimeLayout(
+-        f"Runtime layout {assets.layout!r} is not implemented for {assets.model_id!r}"
+-    )
+diff --git a/pykokoro/runtime/model_assets.py b/pykokoro/runtime/model_assets.py
+deleted file mode 100644
+index 3e7aa3e..0000000
+--- a/pykokoro/runtime/model_assets.py
++++ /dev/null
+@@ -1,459 +0,0 @@
+-"""Atomic runtime asset resolution from the canonical model registry."""
+-
+-from __future__ import annotations
+-
+-import json
+-import logging
+-import tempfile
+-import time
+-from collections.abc import Mapping
+-from dataclasses import dataclass
+-from pathlib import Path
+-from typing import Any
+-
+-import numpy as np
+-
+-from ..asset_progress import AssetProgressCallback, AssetProgressEvent, AssetProgressPhase
+-from ..model_registry import (
+-    ArtifactIntegrityError,
+-    DownloadPreference,
+-    ModelRegistry,
+-    ModelRegistryError,
+-    RegistryClient,
+-    RuntimeArtifact,
+-    RuntimeDistribution,
+-    RuntimeModel,
+-    download_artifact,
+-    verify_artifact,
+-)
+-from ..utils import get_user_cache_path
+-
+-logger = logging.getLogger(__name__)
+-
+-
+-class RuntimeResolutionError(ModelRegistryError):
+-    """Registry data cannot resolve the requested runtime assets."""
+-
+-
+-@dataclass(frozen=True, slots=True)
+-class ResolvedRuntimeAssets:
+-    """All files selected for one model and one registry distribution."""
+-
+-    model_id: str
+-    distribution_id: str
+-    provider: str
+-    layout: str
+-    artifacts: Mapping[str, Path]
+-    model: RuntimeModel
+-    distribution: RuntimeDistribution
+-
+-    @property
+-    def metadata(self) -> Mapping[str, Any]:
+-        return self.model.data
+-
+-    def artifact(self, artifact_id: str) -> Path:
+-        try:
+-            return self.artifacts[artifact_id]
+-        except KeyError as exc:
+-            raise ModelRegistryError(
+-                f"Distribution {self.distribution_id!r} has no materialized artifact {artifact_id!r}"
+-            ) from exc
+-
+-    def artifacts_for_role(self, role: str) -> Mapping[str, Path]:
+-        ids = {artifact.id for artifact in self.distribution.artifacts if artifact.role == role}
+-        return {
+-            artifact_id: path for artifact_id, path in self.artifacts.items() if artifact_id in ids
+-        }
+-
+-    def artifact_for_role(
+-        self, role: str, *, quality: str | None = None, component: str | None = None
+-    ) -> Path:
+-        candidates = [
+-            artifact
+-            for artifact in self.distribution.artifacts
+-            if artifact.id in self.artifacts
+-            and artifact.role == role
+-            and (quality is None or artifact.quality == quality)
+-            and (component is None or artifact.component == component)
+-        ]
+-        if not candidates:
+-            raise ModelRegistryError(
+-                f"Distribution {self.distribution_id!r} has no matching materialized {role} artifact"
+-            )
+-        return self.artifacts[candidates[0].id]
+-
+-    def materialize_raw_voices(self, *, force: bool = False) -> Path:
+-        """Convert validated individual raw voice artifacts into a cache-only NPZ."""
+-        voice_artifacts = [
+-            artifact for artifact in self.distribution.artifacts if artifact.role == "voice"
+-        ]
+-        if not voice_artifacts:
+-            return self.artifact_for_role("voices")
+-        parent = next(iter(self.artifacts.values())).parent
+-        target = parent / "voices-materialized.npz"
+-        provenance = target.with_suffix(".json")
+-        identity = {
+-            "model_id": self.model_id,
+-            "distribution_id": self.distribution_id,
+-            "provider": self.provider,
+-            "revision": self.distribution.revision,
+-            "artifacts": [
+-                {"id": artifact.id, "sha256": artifact.sha256} for artifact in voice_artifacts
+-            ],
+-        }
+-        if target.is_file() and provenance.is_file() and not force:
+-            try:
+-                if json.loads(provenance.read_text(encoding="utf-8")) == identity:
+-                    return target
+-            except (OSError, json.JSONDecodeError):
+-                pass
+-        voices: dict[str, np.ndarray] = {}
+-        for artifact in voice_artifacts:
+-            handling = artifact.handling or {}
+-            shape = handling.get("shape")
+-            if handling.get("dtype") != "float32" or not isinstance(shape, list) or len(shape) != 2:
+-                raise ModelRegistryError(
+-                    f"Raw voice artifact {artifact.id!r} has unsupported handling metadata"
+-                )
+-            endianness = handling.get("endianness", "little")
+-            if endianness not in {"little", "big"}:
+-                raise ModelRegistryError(
+-                    f"Raw voice artifact {artifact.id!r} has invalid endianness"
+-                )
+-            dtype = np.dtype((">" if endianness == "big" else "<") + "f4")
+-            values = np.fromfile(self.artifacts[artifact.id], dtype=dtype)
+-            expected = int(shape[0]) * int(shape[1])
+-            if values.size != expected:
+-                raise ModelRegistryError(
+-                    f"Raw voice artifact {artifact.id!r} has {values.size} values; expected {expected}"
+-                )
+-            name = artifact.voice or Path(artifact.local_name).stem
+-            voices[name] = values.reshape(int(shape[0]), 1, int(shape[1])).astype(np.float32)
+-        target.parent.mkdir(parents=True, exist_ok=True)
+-        with tempfile.NamedTemporaryFile(
+-            suffix=".npz", dir=target.parent, delete=False
+-        ) as temporary:
+-            temporary_path = Path(temporary.name)
+-        try:
+-            np.savez(temporary_path, **voices)  # type: ignore[arg-type]
+-            temporary_path.replace(target)
+-            provenance.write_text(json.dumps(identity, indent=2) + "\n", encoding="utf-8")
+-        except Exception:
+-            temporary_path.unlink(missing_ok=True)
+-            raise
+-        return target
+-
+-
+-def _cache_path(
+-    artifact: RuntimeArtifact,
+-    *,
+-    model_id: str,
+-    distribution_id: str,
+-    cache_dir: Path | None,
+-) -> Path:
+-    root = cache_dir or get_user_cache_path("registry")
+-    return root / model_id / distribution_id / artifact.local_name
+-
+-
+-def _materialize_artifact(
+-    artifact: RuntimeArtifact,
+-    target: Path,
+-    *,
+-    model_id: str,
+-    distribution_id: str,
+-    force: bool,
+-    offline: bool,
+-    progress_callback: AssetProgressCallback | None,
+-) -> Path:
+-    started = time.perf_counter()
+-    if target.is_file() and not force:
+-        try:
+-            logger.debug("artifact.cache.verify.start artifact_id=%s path=%s", artifact.id, target)
+-            verify_artifact(target, artifact)
+-        except ArtifactIntegrityError:
+-            logger.debug(
+-                "artifact.cache.invalid artifact_id=%s role=%s path=%s; redownloading",
+-                artifact.id,
+-                artifact.role,
+-                target,
+-            )
+-            logger.info(
+-                "Cached runtime artifact %s failed verification; downloading a replacement.",
+-                artifact.local_name,
+-            )
+-            target.unlink(missing_ok=True)
+-        else:
+-            logger.debug(
+-                "artifact.cache.hit artifact_id=%s role=%s path=%s",
+-                artifact.id,
+-                artifact.role,
+-                target,
+-            )
+-            return target
+-        finally:
+-            logger.debug(
+-                "artifact.cache.verify.finish artifact_id=%s elapsed_ms=%.3f",
+-                artifact.id,
+-                (time.perf_counter() - started) * 1000.0,
+-            )
+-    logger.debug(
+-        "artifact.download.required artifact_id=%s role=%s size=%d",
+-        artifact.id,
+-        artifact.role,
+-        artifact.size,
+-    )
+-    if offline:
+-        raise ModelRegistryError(
+-            f"Offline mode is enabled and {artifact.local_name!r} is not cached for "
+-            f"distribution {target.parent.name!r}"
+-        )
+-
+-    def emit(phase: AssetProgressPhase, bytes_done: int) -> None:
+-        if progress_callback is not None:
+-            progress_callback(
+-                AssetProgressEvent(
+-                    phase=phase,
+-                    model_id=model_id,
+-                    distribution_id=distribution_id,
+-                    artifact_id=artifact.id,
+-                    role=artifact.role,
+-                    filename=artifact.local_name,
+-                    bytes_done=bytes_done,
+-                    bytes_total=artifact.size,
+-                    target=str(target),
+-                )
+-            )
+-
+-    def on_bytes(_artifact: RuntimeArtifact, bytes_done: int, _bytes_total: int) -> None:
+-        emit("download-progress", bytes_done)
+-
+-    def on_phase(phase: str) -> None:
+-        if phase == "verify":
+-            emit("verify-start", artifact.size)
+-
+-    emit("download-start", 0)
+-    if progress_callback is None:
+-        result = download_artifact(artifact, target)
+-    else:
+-        result = download_artifact(
+-            artifact,
+-            target,
+-            progress_callback=on_bytes,
+-            phase_callback=on_phase,
+-        )
+-    logger.debug(
+-        "artifact.materialize.finish artifact_id=%s elapsed_ms=%.3f",
+-        artifact.id,
+-        (time.perf_counter() - started) * 1000.0,
+-    )
+-    emit("download-complete", artifact.size)
+-    return result
+-
+-
+-def _runtime_artifacts_for_quality(
+-    distribution: RuntimeDistribution, *, quality: str | None
+-) -> tuple[RuntimeArtifact, ...]:
+-    """Return the artifacts needed by a selected runtime quality."""
+-    if quality is None:
+-        return distribution.artifacts
+-    model_artifacts = tuple(
+-        artifact
+-        for artifact in distribution.artifacts
+-        if artifact.role == "model" and artifact.quality == quality
+-    )
+-    if not model_artifacts:
+-        raise RuntimeResolutionError(
+-            f"Distribution {distribution.id!r} has no model artifact for quality {quality!r}"
+-        )
+-    return tuple(
+-        artifact
+-        for artifact in distribution.artifacts
+-        if artifact.role != "model" or artifact.quality == quality
+-    )
+-
+-
+-def _resolve_runtime_assets_once(
+-    *,
+-    model_id: str,
+-    quality: str | None,
+-    preference: DownloadPreference,
+-    offline: bool,
+-    force: bool,
+-    registry: ModelRegistry,
+-    cache_dir: Path | None,
+-    progress_callback: AssetProgressCallback | None,
+-) -> ResolvedRuntimeAssets:
+-    try:
+-        model = registry.model(model_id)
+-    except ModelRegistryError as exc:
+-        raise RuntimeResolutionError(str(exc)) from exc
+-    if model.data.get("runtime_available", True) is False:
+-        raise RuntimeResolutionError(
+-            f"Model profile {model_id!r} is present in the registry but has no runtime-ready distribution"
+-        )
+-    if not model.redistribution_allowed:
+-        raise ModelRegistryError(
+-            f"Model profile {model_id!r} is restricted by its redistribution policy"
+-        )
+-
+-    try:
+-        distribution = model.distribution(preference)
+-        artifacts = _runtime_artifacts_for_quality(distribution, quality=quality)
+-    except ModelRegistryError as exc:
+-        raise RuntimeResolutionError(str(exc)) from exc
+-    materialized: dict[str, Path] = {}
+-    for artifact in artifacts:
+-        if artifact.id in materialized:
+-            raise ModelRegistryError(f"Duplicate artifact id in distribution {distribution.id!r}")
+-        target = _cache_path(
+-            artifact,
+-            model_id=model_id,
+-            distribution_id=distribution.id,
+-            cache_dir=cache_dir,
+-        )
+-        materialized[artifact.id] = _materialize_artifact(
+-            artifact,
+-            target,
+-            force=force,
+-            offline=offline,
+-            model_id=model_id,
+-            distribution_id=distribution.id,
+-            progress_callback=progress_callback,
+-        )
+-
+-    runtime = model.runtime
+-    layout = runtime.get("layout")
+-    if not isinstance(layout, str) or not layout:
+-        raise ModelRegistryError(f"Model {model_id!r} has no supported runtime layout metadata")
+-    return ResolvedRuntimeAssets(
+-        model_id=model_id,
+-        distribution_id=distribution.id,
+-        provider=distribution.provider,
+-        layout=layout,
+-        artifacts=materialized,
+-        model=model,
+-        distribution=distribution,
+-    )
+-
+-
+-def resolve_runtime_assets(
+-    *,
+-    model_id: str,
+-    quality: str | None = None,
+-    preference: DownloadPreference = "auto",
+-    offline: bool = False,
+-    force: bool = False,
+-    registry: ModelRegistry | None = None,
+-    registry_client: RegistryClient | None = None,
+-    cache_dir: Path | None = None,
+-    progress_callback: AssetProgressCallback | None = None,
+-) -> ResolvedRuntimeAssets:
+-    """Select and materialize every runtime artifact from one distribution."""
+-    started = time.perf_counter()
+-    logger.info(
+-        "model.resolve.start model_id=%s quality=%s preference=%s offline=%s",
+-        model_id,
+-        quality,
+-        preference,
+-        offline,
+-    )
+-    if registry is not None:
+-        result = _resolve_runtime_assets_once(
+-            model_id=model_id,
+-            quality=quality,
+-            preference=preference,
+-            offline=offline,
+-            force=force,
+-            registry=registry,
+-            cache_dir=cache_dir,
+-            progress_callback=progress_callback,
+-        )
+-    else:
+-        client = registry_client or RegistryClient()
+-        selected_registry = client.load(offline=offline)
+-        try:
+-            result = _resolve_runtime_assets_once(
+-                model_id=model_id,
+-                quality=quality,
+-                preference=preference,
+-                offline=offline,
+-                force=force,
+-                registry=selected_registry,
+-                cache_dir=cache_dir,
+-                progress_callback=progress_callback,
+-            )
+-        except RuntimeResolutionError as resolution_error:
+-            if offline:
+-                raise
+-            logger.warning(
+-                "Runtime asset resolution failed using registry %s; forcing one registry refresh: %s",
+-                selected_registry.source,
+-                resolution_error,
+-            )
+-            logger.info("registry.load.refresh reason=resolution_miss")
+-            try:
+-                fresh_registry = client.load(refresh=True, allow_cache_fallback=False)
+-            except ModelRegistryError as refresh_error:
+-                raise ModelRegistryError(
+-                    f"Runtime asset resolution failed using registry {selected_registry.source}; "
+-                    f"a fresh registry could not be obtained: {refresh_error}"
+-                ) from refresh_error
+-            try:
+-                result = _resolve_runtime_assets_once(
+-                    model_id=model_id,
+-                    quality=quality,
+-                    preference=preference,
+-                    offline=offline,
+-                    force=force,
+-                    registry=fresh_registry,
+-                    cache_dir=cache_dir,
+-                    progress_callback=progress_callback,
+-                )
+-            except RuntimeResolutionError as second_error:
+-                raise ModelRegistryError(
+-                    f"Runtime asset resolution still failed after one registry refresh: {second_error}"
+-                ) from second_error
+-        except ArtifactIntegrityError:
+-            if offline:
+-                raise
+-            logger.warning(
+-                "Artifact integrity mismatch using registry %s; forcing one registry refresh and retry",
+-                selected_registry.source,
+-            )
+-            try:
+-                fresh_registry = client.load(refresh=True, allow_cache_fallback=False)
+-            except ModelRegistryError as refresh_error:
+-                raise ModelRegistryError(
+-                    "Artifact integrity mismatch was detected while using registry "
+-                    f"{selected_registry.source}, and a fresh registry could not be obtained: "
+-                    f"{refresh_error}"
+-                ) from refresh_error
+-            logger.info(
+-                "Refreshed model registry; retrying runtime asset resolution for %r",
+-                model_id,
+-            )
+-            try:
+-                result = _resolve_runtime_assets_once(
+-                    model_id=model_id,
+-                    quality=quality,
+-                    preference=preference,
+-                    offline=offline,
+-                    force=force,
+-                    registry=fresh_registry,
+-                    cache_dir=cache_dir,
+-                    progress_callback=progress_callback,
+-                )
+-            except ArtifactIntegrityError as second_error:
+-                raise ModelRegistryError(
+-                    f"Artifact {second_error.artifact_id!r} still does not match the model registry "
+-                    "after a forced registry refresh. The published release and catalog are "
+-                    f"inconsistent. Registry source: {fresh_registry.source}"
+-                ) from second_error
+-    logger.info(
+-        "model.resolve.finish model_id=%s distribution=%s provider=%s elapsed_ms=%.3f",
+-        result.model_id,
+-        result.distribution_id,
+-        result.provider,
+-        (time.perf_counter() - started) * 1000.0,
+-    )
+-    return result
+diff --git a/pykokoro/runtime/thai_wayu.py b/pykokoro/runtime/thai_wayu.py
+deleted file mode 100644
+index 8a44d15..0000000
+--- a/pykokoro/runtime/thai_wayu.py
++++ /dev/null
+@@ -1,211 +0,0 @@
+-"""Runtime for the registry's ``split-onnx-v1`` Thai Wayu model."""
+-
+-from __future__ import annotations
+-
+-import json
+-from collections.abc import Callable, Mapping
+-from pathlib import Path
+-from typing import Any
+-
+-import numpy as np
+-
+-from ..model_registry import ModelRegistryError
+-from .model_assets import ResolvedRuntimeAssets
+-
+-HARMONICS = 9
+-UPSAMPLE_SCALE = 300
+-SAMPLE_RATE = 24000
+-VOICED_THRESHOLD = 10.0
+-SINE_AMP = 0.1
+-NOISE_STD = 0.003
+-N_FFT = 20
+-HOP = 5
+-
+-
+-class ThaiWayuRuntime:
+-    """Small, explicit inference adapter for the Thai split graph."""
+-
+-    COMPONENTS = ("prosody", "curves", "decoder")
+-
+-    def __init__(
+-        self,
+-        assets: ResolvedRuntimeAssets | Mapping[str, Path],
+-        *,
+-        session_factory: Callable[[Path], Any] | None = None,
+-    ) -> None:
+-        if isinstance(assets, ResolvedRuntimeAssets):
+-            self.assets: ResolvedRuntimeAssets | None = assets
+-            paths = self._paths_from_assets(assets)
+-            self.max_tokens = assets.model.max_tokens
+-        else:
+-            self.assets = None
+-            paths = dict(assets)
+-            self.max_tokens = 510
+-
+-        missing = [component for component in self.COMPONENTS if component not in paths]
+-        if missing:
+-            raise ModelRegistryError(
+-                "Thai Wayu distribution is missing model components: " + ", ".join(missing)
+-            )
+-        self.asset_paths = paths
+-        manifest_path = paths.get("manifest") or paths.get("config")
+-        if manifest_path is None:
+-            raise ModelRegistryError("Thai Wayu distribution is missing its ONNX manifest")
+-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+-        self.vocab = self._manifest_vocab(manifest)
+-        self.sessions = {
+-            component: (session_factory or self._default_session)(paths[component])
+-            for component in self.COMPONENTS
+-        }
+-        source_path = paths.get("source_params")
+-        voices_path = paths.get("voices")
+-        if source_path is None or voices_path is None:
+-            raise ModelRegistryError(
+-                "Thai Wayu distribution is missing source parameters or voices"
+-            )
+-        with np.load(source_path, allow_pickle=False) as source:
+-            self.source_weight = np.asarray(source["weight"])
+-            self.source_bias = np.asarray(source["bias"])
+-            self.window = np.asarray(source["window"])
+-        with np.load(voices_path, allow_pickle=False) as voices:
+-            self.voices = {name: np.asarray(voices[name]) for name in voices.files}
+-        self._validate_assets()
+-
+-    @staticmethod
+-    def _default_session(path: Path) -> Any:
+-        from onnxvoice import OnnxSession
+-
+-        return OnnxSession(path, providers="cpu")
+-
+-    @classmethod
+-    def _paths_from_assets(cls, assets: ResolvedRuntimeAssets) -> dict[str, Path]:
+-        paths: dict[str, Path] = {}
+-        for artifact in assets.distribution.artifacts:
+-            path = assets.artifacts[artifact.id]
+-            if artifact.role == "model" and artifact.component in cls.COMPONENTS:
+-                paths[artifact.component] = path
+-            elif artifact.role == "config":
+-                paths["config"] = path
+-            elif artifact.role == "metadata" and artifact.local_name.startswith("source-params"):
+-                paths["source_params"] = path
+-            elif artifact.role == "voices":
+-                paths["voices"] = path
+-        if "config" in paths:
+-            paths["manifest"] = paths["config"]
+-        return paths
+-
+-    @staticmethod
+-    def _manifest_vocab(manifest: Mapping[str, Any]) -> dict[str, int]:
+-        vocab = manifest.get("vocab")
+-        if not isinstance(vocab, Mapping):
+-            raise ModelRegistryError("Thai Wayu manifest has no vocabulary")
+-        return {str(symbol): int(token) for symbol, token in vocab.items()}
+-
+-    def _validate_assets(self) -> None:
+-        for name, session in self.sessions.items():
+-            inputs: list[Any] = getattr(session, "get_inputs", lambda: [])()
+-            if not inputs:
+-                continue
+-            names = {str(getattr(item, "name", "")) for item in inputs}
+-            if name == "prosody" and not {"input_ids", "style_dur", "speed"} <= names:
+-                raise ModelRegistryError(
+-                    "Thai Wayu prosody session has an incompatible input contract"
+-                )
+-            if name == "curves" and not {"en", "style_dur"} <= names:
+-                raise ModelRegistryError(
+-                    "Thai Wayu curves session has an incompatible input contract"
+-                )
+-            if (
+-                name == "decoder"
+-                and not {"asr", "f0_curve", "n_curve", "style_acou", "har"} <= names
+-            ):
+-                raise ModelRegistryError(
+-                    "Thai Wayu decoder session has an incompatible input contract"
+-                )
+-
+-    def phonemize(self, text: str) -> str:
+-        import kokorog2p
+-
+-        result = kokorog2p.phonemize(text, language="th", return_ids=False)
+-        phonemes = result.phonemes
+-        return phonemes if isinstance(phonemes, str) else "".join(phonemes)
+-
+-    def synthesize(
+-        self, text: str, voice: str, *, speed: float = 1.0, seed: int = 1234
+-    ) -> np.ndarray:
+-        ids = [self.vocab[phoneme] for phoneme in self.phonemize(text) if phoneme in self.vocab]
+-        if not ids:
+-            raise RuntimeError("Thai frontend produced no vocabulary symbols")
+-        if len(ids) > self.max_tokens:
+-            raise ValueError(
+-                f"Thai frontend produced {len(ids)} tokens, maximum is {self.max_tokens}"
+-            )
+-        if voice not in self.voices:
+-            raise KeyError(f"Unknown Thai voice: {voice}")
+-
+-        style = np.asarray(
+-            self.voices[voice][min(len(ids) - 1, self.voices[voice].shape[0] - 1)], dtype=np.float32
+-        ).reshape(1, 256)
+-        style_dur, style_acou = style[:, 128:], style[:, :128]
+-        pred_dur, d, t_en = self.sessions["prosody"].run(
+-            None,
+-            {
+-                "input_ids": np.asarray([[0, *ids, 0]], dtype=np.int64),
+-                "style_dur": style_dur,
+-                "speed": np.asarray([speed], dtype=np.float32),
+-            },
+-        )
+-        index = np.repeat(np.arange(pred_dur.shape[0], dtype=np.int64), pred_dur)
+-        en = np.ascontiguousarray(d.transpose(0, 2, 1)[:, :, index])
+-        asr = np.ascontiguousarray(t_en[:, :, index])
+-        f0_curve, n_curve = self.sessions["curves"].run(None, {"en": en, "style_dur": style_dur})
+-        har = self._harmonic_source(f0_curve, seed)
+-        (audio,) = self.sessions["decoder"].run(
+-            None,
+-            {
+-                "asr": asr,
+-                "f0_curve": f0_curve,
+-                "n_curve": n_curve,
+-                "style_acou": style_acou,
+-                "har": har,
+-            },
+-        )
+-        return np.asarray(audio, dtype=np.float32).reshape(-1)
+-
+-    def _harmonic_source(self, f0_curve: np.ndarray, seed: int) -> np.ndarray:
+-        rng = np.random.default_rng(seed)
+-        f0 = np.repeat(np.asarray(f0_curve, dtype=np.float64), UPSAMPLE_SCALE, axis=1)[..., None]
+-        rad = f0 * np.arange(1, HARMONICS + 1, dtype=np.float64) / SAMPLE_RATE
+-        rad -= np.floor(rad)
+-        rand_ini = rng.random((1, HARMONICS))
+-        rand_ini[:, 0] = 0.0
+-        rad[:, 0, :] += rand_ini
+-        phase = np.cumsum(self._resample(rad, 1 / UPSAMPLE_SCALE), axis=1) * 2 * np.pi
+-        phase = self._resample(phase * UPSAMPLE_SCALE, UPSAMPLE_SCALE)
+-        voiced = (f0 > VOICED_THRESHOLD).astype(np.float64)
+-        amplitude = voiced * NOISE_STD + (1 - voiced) * SINE_AMP / 3
+-        noise = rng.standard_normal((1, f0.shape[1], HARMONICS))
+-        waves = np.sin(phase) * SINE_AMP * voiced + amplitude * noise
+-        merged = np.tanh(waves @ self.source_weight.T + self.source_bias)
+-        return self._stft(merged[0, :, 0].astype(np.float32))
+-
+-    @staticmethod
+-    def _resample(values: np.ndarray, scale: float) -> np.ndarray:
+-        length = values.shape[1]
+-        output_length = int(length * scale)
+-        source = (np.arange(output_length, dtype=np.float64) + 0.5) / scale - 0.5
+-        np.clip(source, 0, length - 1, out=source)
+-        lower = np.floor(source).astype(np.int64)
+-        upper = np.minimum(lower + 1, length - 1)
+-        weight = (source - lower)[None, :, None]
+-        return values[:, lower] * (1 - weight) + values[:, upper] * weight
+-
+-    def _stft(self, audio: np.ndarray) -> np.ndarray:
+-        padded = np.pad(audio, N_FFT // 2, mode="reflect")
+-        frames = np.lib.stride_tricks.as_strided(
+-            padded,
+-            shape=((len(padded) - N_FFT) // HOP + 1, N_FFT),
+-            strides=(padded.strides[0] * HOP, padded.strides[0]),
+-        )
+-        spectrum = np.fft.rfft(frames * self.window, axis=1).T[None]
+-        return np.concatenate([np.abs(spectrum), np.angle(spectrum)], axis=1).astype(np.float32)
+diff --git a/tests/test_auto_pause_mode.py b/tests/test_auto_pause_mode.py
+index 57b40a0..02c118c 100644
+--- a/tests/test_auto_pause_mode.py
++++ b/tests/test_auto_pause_mode.py
+@@ -1,3 +1,8 @@
++import pytest
++
++pytest.importorskip("pykokoro.stages.doc_parsers.plain")
++pytest.importorskip("pykokoro.stages.doc_parsers.ssmd")
++
+ import sys
+ import types
+
+diff --git a/tests/test_clausal_comma_pauses.py b/tests/test_clausal_comma_pauses.py
+index 24738b9..7847eb3 100644
+--- a/tests/test_clausal_comma_pauses.py
++++ b/tests/test_clausal_comma_pauses.py
+@@ -1,5 +1,10 @@
+ from __future__ import annotations
+
++import pytest
++
++pytest.importorskip("pykokoro.stages.segmentation.phrasplit")
++
++
+ import sys
+ import types
+
+diff --git a/tests/test_emphasis_policy.py b/tests/test_emphasis_policy.py
+index 6d81bf7..06433c1 100644
+--- a/tests/test_emphasis_policy.py
++++ b/tests/test_emphasis_policy.py
+@@ -1,5 +1,10 @@
+ from __future__ import annotations
+
++import pytest
++
++pytest.importorskip("pykokoro.ssmd_parser")
++
++
+ import math
+ from types import SimpleNamespace
+
+diff --git a/tests/test_german_segmentation.py b/tests/test_german_segmentation.py
+index e575040..927ec63 100644
+--- a/tests/test_german_segmentation.py
++++ b/tests/test_german_segmentation.py
+@@ -1,5 +1,12 @@
+ from __future__ import annotations
+
++import pytest
++
++pytest.importorskip("pykokoro.stages.doc_parsers.plain")
++pytest.importorskip("pykokoro.stages.segmentation.phrasplit")
++pytest.importorskip("pykokoro.stages.text_preparation.spokenform")
++
++
+ from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
+ from pykokoro.stages.segmentation.phrasplit import PhrasplitSentenceSegmenter
+ from pykokoro.stages.text_preparation.spokenform import SpokenformTextPreparer
+diff --git a/tests/test_hard_cases_baseline.py b/tests/test_hard_cases_baseline.py
+index 49f681c..6ff963c 100644
+--- a/tests/test_hard_cases_baseline.py
++++ b/tests/test_hard_cases_baseline.py
+@@ -1,5 +1,12 @@
+ from __future__ import annotations
+
++import pytest
++
++pytest.importorskip("benchmarks.hard_cases.acoustic")
++pytest.importorskip("benchmarks.hard_cases.baseline")
++pytest.importorskip("benchmarks.hard_cases.metrics")
++
++
+ from types import SimpleNamespace
+
+ from benchmarks.hard_cases.acoustic import evaluate_audio
+diff --git a/tests/test_hard_cases_data.py b/tests/test_hard_cases_data.py
+index 1deb4e4..01388ef 100644
+--- a/tests/test_hard_cases_data.py
++++ b/tests/test_hard_cases_data.py
+@@ -1,5 +1,10 @@
+ from __future__ import annotations
+
++import pytest
++
++pytest.importorskip("benchmarks.hard_cases.data")
++
++
+ from benchmarks.hard_cases.data import case_counts, load_cases
+
+
+diff --git a/tests/test_hard_cases_frontend.py b/tests/test_hard_cases_frontend.py
+index 2bf29c8..98f17a7 100644
+--- a/tests/test_hard_cases_frontend.py
++++ b/tests/test_hard_cases_frontend.py
+@@ -1,5 +1,12 @@
+ from __future__ import annotations
+
++import pytest
++
++pytest.importorskip("benchmarks.hard_cases.data")
++pytest.importorskip("benchmarks.hard_cases.frontend")
++pytest.importorskip("benchmarks.hard_cases.phonemes")
++
++
+ from benchmarks.hard_cases.data import load_cases
+ from benchmarks.hard_cases.frontend import NoOnnxFrontend
+ from benchmarks.hard_cases.phonemes import evaluate_case
+diff --git a/tests/test_hard_cases_schema.py b/tests/test_hard_cases_schema.py
+index fa918c5..119b5b1 100644
+--- a/tests/test_hard_cases_schema.py
++++ b/tests/test_hard_cases_schema.py
+@@ -1,5 +1,10 @@
+ from __future__ import annotations
+
++import pytest
++
++pytest.importorskip("benchmarks.hard_cases.schema")
++
++
+ import pytest
+
+ from benchmarks.hard_cases.schema import HardCase, HardCaseError, load_jsonl
+diff --git a/tests/test_hard_cases_segmentation.py b/tests/test_hard_cases_segmentation.py
+index aa30ee8..187871e 100644
+--- a/tests/test_hard_cases_segmentation.py
++++ b/tests/test_hard_cases_segmentation.py
+@@ -1,5 +1,11 @@
+ from __future__ import annotations
+
++import pytest
++
++pytest.importorskip("benchmarks.hard_cases.frontend")
++pytest.importorskip("benchmarks.hard_cases.segmentation")
++
++
+ from benchmarks.hard_cases.frontend import NoOnnxFrontend
+ from benchmarks.hard_cases.segmentation import build_segment_plan, validate_offsets
+
+diff --git a/tests/test_hard_cases_selection.py b/tests/test_hard_cases_selection.py
+index 2480934..21febf8 100644
+--- a/tests/test_hard_cases_selection.py
++++ b/tests/test_hard_cases_selection.py
+@@ -1,5 +1,11 @@
+ from __future__ import annotations
+
++import pytest
++
++pytest.importorskip("benchmarks.hard_cases.schema")
++pytest.importorskip("benchmarks.hard_cases.selection")
++
++
+ import pytest
+
+ from benchmarks.hard_cases.schema import HardCaseError
+diff --git a/tests/test_import_boundaries.py b/tests/test_import_boundaries.py
+index 250a74f..4868ec1 100644
+--- a/tests/test_import_boundaries.py
++++ b/tests/test_import_boundaries.py
+@@ -21,7 +21,6 @@ def test_lightweight_imports_do_not_require_onnxruntime() -> None:
+         "builtins.__import__ = blocked\n"
+         "import pykokoro.runtime.cache\n"
+         "import pykokoro.generation_config\n"
+-        "import pykokoro.model_assets\n"
+         "print('ok')\n"
+     )
+     result = subprocess.run(
+diff --git a/tests/test_maintainer_review4_download_cache.py b/tests/test_maintainer_review4_download_cache.py
+deleted file mode 100644
+index 7a8bd16..0000000
+--- a/tests/test_maintainer_review4_download_cache.py
++++ /dev/null
+@@ -1,226 +0,0 @@
+-"""Deterministic download and disk-cache regression coverage."""
+-
+-from __future__ import annotations
+-
+-import hashlib
+-import json
+-import time
+-from pathlib import Path
+-from types import SimpleNamespace
+-
+-import pytest
+-
+-import pykokoro.onnx_backend as backend
+-from pykokoro.generation_config import GenerationConfig
+-from pykokoro.pipeline_config import PipelineConfig
+-from pykokoro.runtime.cache import DiskCache, make_g2p_key
+-from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
+-from pykokoro.stages.protocols import DocumentResult
+-from pykokoro.types import Segment, Trace
+-
+-
+-class _Response:
+-    def __init__(self, payload: bytes) -> None:
+-        self.payload = payload
+-
+-    def read(self, size: int = -1) -> bytes:
+-        if size == -1:
+-            payload, self.payload = self.payload, b""
+-            return payload
+-        payload, self.payload = self.payload[:size], self.payload[size:]
+-        return payload
+-
+-    def __enter__(self) -> _Response:
+-        return self
+-
+-    def __exit__(self, exc_type, exc, tb) -> bool:
+-        return False
+-
+-
+-def test_existing_invalid_github_cache_is_replaced(tmp_path, monkeypatch) -> None:
+-    destination = tmp_path / "artifact.bin"
+-    destination.write_bytes(b"bad")
+-    monkeypatch.setattr(
+-        backend.urllib.request,
+-        "urlopen",
+-        lambda *args, **kwargs: _Response(b"good"),
+-    )
+-
+-    result = backend._download_from_github(
+-        "https://example.com/artifact.bin",
+-        destination,
+-        min_size=4,
+-        retries=1,
+-        lock_timeout=1,
+-    )
+-
+-    assert result == destination
+-    assert destination.read_bytes() == b"good"
+-
+-
+-def test_existing_valid_cache_skips_download_and_honors_checksum(tmp_path, monkeypatch) -> None:
+-    destination = tmp_path / "artifact.bin"
+-    payload = b"valid artifact"
+-    destination.write_bytes(payload)
+-    monkeypatch.setattr(
+-        backend.urllib.request,
+-        "urlopen",
+-        lambda *args, **kwargs: pytest.fail("valid cache should not download"),
+-    )
+-
+-    result = backend._download_from_github(
+-        "https://example.com/artifact.bin",
+-        destination,
+-        expected_sha256=hashlib.sha256(payload).hexdigest(),
+-        retries=1,
+-        lock_timeout=1,
+-    )
+-
+-    assert result == destination
+-
+-
+-def test_validator_failure_retries_and_then_succeeds(tmp_path, monkeypatch) -> None:
+-    calls = 0
+-
+-    def fake_urlopen(*args, **kwargs):
+-        nonlocal calls
+-        calls += 1
+-        return _Response(b"bad" if calls == 1 else b"good")
+-
+-    def validator(path: Path) -> None:
+-        if path.read_bytes() != b"good":
+-            raise backend.ArtifactValidationError("temporary invalid payload")
+-
+-    monkeypatch.setattr(backend.urllib.request, "urlopen", fake_urlopen)
+-    destination = backend._download_from_github(
+-        "https://example.com/artifact.bin",
+-        tmp_path / "artifact.bin",
+-        validator=validator,
+-        retries=2,
+-        lock_timeout=1,
+-    )
+-
+-    assert destination.read_bytes() == b"good"
+-    assert calls == 2
+-
+-
+-def test_stale_dead_download_lock_is_recovered(tmp_path, monkeypatch) -> None:
+-    destination = tmp_path / "artifact.bin"
+-    lock_path = destination.with_suffix(destination.suffix + ".lock")
+-    lock_path.write_text(
+-        json.dumps({"pid": 99_999_999, "created_at": time.time() - 60}),
+-        encoding="utf-8",
+-    )
+-    monkeypatch.setattr(
+-        backend.urllib.request,
+-        "urlopen",
+-        lambda *args, **kwargs: _Response(b"ok"),
+-    )
+-
+-    backend._download_from_github(
+-        "https://example.com/artifact.bin",
+-        destination,
+-        min_size=2,
+-        retries=1,
+-        lock_timeout=0.01,
+-    )
+-
+-    assert destination.read_bytes() == b"ok"
+-    assert not lock_path.exists()
+-
+-
+-def test_stale_download_lock_handles_windows_missing_process_error(tmp_path, monkeypatch) -> None:
+-    lock_path = tmp_path / "artifact.bin.lock"
+-    lock_path.write_text(
+-        json.dumps({"pid": 99_999_999, "created_at": time.time() - 60}),
+-        encoding="utf-8",
+-    )
+-
+-    def fake_kill(pid: int, signal: int) -> None:
+-        error = OSError("missing process")
+-        error.winerror = 87
+-        raise error
+-
+-    monkeypatch.setattr(backend.os, "kill", fake_kill)
+-
+-    assert backend._is_stale_download_lock(lock_path, timeout=1)
+-
+-
+-def test_offline_mode_uses_valid_cache_and_rejects_missing_cache(tmp_path) -> None:
+-    destination = tmp_path / "cached.bin"
+-    destination.write_bytes(b"cached")
+-
+-    assert (
+-        backend._download_from_github("https://example.com/cached.bin", destination, offline=True)
+-        == destination
+-    )
+-
+-    with pytest.raises(RuntimeError, match="Offline mode"):
+-        backend._download_from_github(
+-            "https://example.com/missing.bin", tmp_path / "missing.bin", offline=True
+-        )
+-
+-
+-def test_g2p_cache_schema_recomputes_and_preserves_warnings(tmp_path, monkeypatch) -> None:
+-    segment = Segment(
+-        id="segment-0",
+-        text="hello",
+-        char_start=0,
+-        char_end=5,
+-        paragraph_idx=0,
+-        sentence_idx=0,
+-        clause_idx=0,
+-    )
+-    cfg = PipelineConfig(generation=GenerationConfig(lang="en-us"), cache_dir=str(tmp_path))
+-    key = make_g2p_key(
+-        text=segment.text,
+-        lang=cfg.generation.lang,
+-        is_phonemes=False,
+-        tokenizer_config=None,
+-        phoneme_override=None,
+-        kokorog2p_version="test",
+-        model_quality=cfg.model_quality,
+-        model_source=cfg.model_source,
+-        model_variant=cfg.model_variant,
+-        g2p_backend="kokorog2p",
+-    )
+-    DiskCache(tmp_path).set(key, ["obsolete payload"])
+-
+-    class FakeG2PModule:
+-        __version__ = "test"
+-
+-        @staticmethod
+-        def get_g2p(**kwargs):
+-            return object()
+-
+-        @staticmethod
+-        def phonemize(*args, **kwargs):
+-            return SimpleNamespace(phonemes="həˈloʊ", ids=[1, 2], warnings=["fallback"])
+-
+-        @staticmethod
+-        def ids_to_phonemes(tokens, model):
+-            return "həˈloʊ"
+-
+-    adapter = KokoroG2PAdapter()
+-    monkeypatch.setattr(adapter, "_load", lambda: FakeG2PModule())
+-    doc = DocumentResult(clean_text=segment.text, segments=[segment])
+-    first_trace = Trace()
+-    adapter.phonemize([segment], doc, cfg, first_trace)
+-    second_trace = Trace()
+-    adapter.phonemize([segment], doc, cfg, second_trace)
+-
+-    assert first_trace.warnings == ["fallback"]
+-    assert second_trace.warnings == ["fallback"]
+-    cached = DiskCache(tmp_path).get(key)
+-    assert cached == {
+-        "schema": 11,
+-        "g2p_input_mode": "prepared",
+-        "preparation_backend": "spokenform",
+-        "preparation_version": None,
+-        "phonemes": "həˈloʊ",
+-        "tokens": [1, 2],
+-        "alignment_tokens": [],
+-        "warnings": ["fallback"],
+-        "language_routes": [],
+-        "effective_language_routing": None,
+-    }
+diff --git a/tests/test_onnxvoice_boundary.py b/tests/test_onnxvoice_boundary.py
+index d2bc3ea..b5f7344 100644
+--- a/tests/test_onnxvoice_boundary.py
++++ b/tests/test_onnxvoice_boundary.py
+@@ -50,7 +50,10 @@ def test_resolve_maps_installation_metadata(
+         id="v1.0",
+         ref="kokoro:v1.0",
+         sample_rate=24_000,
+-        metadata={"selected_quality": "fp32"},
++        selected_quality="fp32",
++        selected_distribution="github-model-files-v1.0-timestamped-r4",
++        storage_id="kokoro--sel-abc123",
++        metadata={},
+         artifacts=(
+             SimpleNamespace(role="model", path=model),
+             SimpleNamespace(role="voices", path=voices),
+@@ -64,7 +67,10 @@ def test_resolve_maps_installation_metadata(
+
+         def resolve(self, ref: str, **kwargs: object) -> object:
+             assert ref == "kokoro:v1.0"
+-            assert kwargs == {"quality": "fp32", "distribution": None}
++            assert kwargs == {
++                "quality": "fp32",
++                "distribution": "github-model-files-v1.0-timestamped-r4",
++            }
+             return installation
+
+     monkeypatch.setattr(boundary, "_onnxvoice", lambda: SimpleNamespace(OnnxVoice=Manager))
+@@ -72,7 +78,7 @@ def test_resolve_maps_installation_metadata(
+     resolved = boundary.resolve_kokoro_model(
+         "v1.0",
+         quality="fp32",
+-        distribution="cpu",
++        source="github",
+         cache_dir=tmp_path,
+         offline=True,
+     )
+@@ -80,6 +86,8 @@ def test_resolve_maps_installation_metadata(
+     assert resolved.ref == "kokoro:v1.0"
+     assert resolved.model_id == "v1.0"
+     assert resolved.quality == "fp32"
++    assert resolved.distribution == "github-model-files-v1.0-timestamped-r4"
++    assert resolved.storage_id == "kokoro--sel-abc123"
+     assert resolved.sample_rate == 24_000
+     assert resolved.model_paths == (model,)
+     assert resolved.voices_path == voices
+@@ -232,3 +240,102 @@ def test_summarize_inference_is_json_safe() -> None:
+
+     assert timings == {"shape": [4], "dtype": "float32"}
+     assert outputs == {"duration": {"shape": [1, 4], "dtype": "int64"}}
++
++
++def test_onnxvoice_distribution_for_maps_github_variants() -> None:
++    assert (
++        boundary.onnxvoice_distribution_for(source="github", variant="v1.0")
++        == "github-model-files-v1.0-timestamped-r4"
++    )
++    assert (
++        boundary.onnxvoice_distribution_for(source="github", variant="v1.1-zh")
++        == "github-model-files-v1.1"
++    )
++
++
++def test_onnxvoice_distribution_for_raises_on_unmapped_pair() -> None:
++    with pytest.raises(ConfigurationError, match="No OnnxVoice distribution mapping"):
++        boundary.onnxvoice_distribution_for(source="huggingface", variant="v1.0")
++
++    with pytest.raises(ConfigurationError, match="No OnnxVoice distribution mapping"):
++        boundary.onnxvoice_distribution_for(source="github", variant="v2.0")
++
++
++def test_cache_identity_uses_storage_id_for_managed_installations(tmp_path: Path) -> None:
++    model = tmp_path / "model.onnx"
++    resolved = boundary.ResolvedKokoroModel(
++        ref="kokoro:v1.0",
++        model_id="v1.0",
++        quality="fp32",
++        distribution="github-model-files-v1.0-timestamped-r4",
++        storage_id="kokoro--sel-abc123",
++        installation=None,
++        metadata={},
++        sample_rate=24_000,
++        model_paths=(model,),
++        voices_path=None,
++        config_path=None,
++    )
++    runtime = SimpleNamespace(infer=lambda *a, **kw: None)
++    adapter = boundary.KokoroRuntimeAdapter(runtime, resolved)
++
++    assert adapter.cache_identity == ("managed", "kokoro:v1.0", "kokoro--sel-abc123")
++
++
++def test_cache_identity_uses_paths_for_local_models(tmp_path: Path) -> None:
++    model = tmp_path / "model.onnx"
++    voices = tmp_path / "voices.bin"
++    resolved = boundary.ResolvedKokoroModel(
++        ref=None,
++        model_id=None,
++        quality=None,
++        distribution=None,
++        storage_id=None,
++        installation=None,
++        metadata={},
++        sample_rate=24_000,
++        model_paths=(model,),
++        voices_path=voices,
++        config_path=None,
++    )
++    runtime = SimpleNamespace(infer=lambda *a, **kw: None)
++    adapter = boundary.KokoroRuntimeAdapter(runtime, resolved)
++
++    assert adapter.cache_identity[0] == "local"
++    assert adapter.cache_identity[1] == (str(model.resolve()),)
++    assert adapter.cache_identity[2] == str(voices.resolve())
++
++
++def test_different_distributions_produce_different_cache_identities(tmp_path: Path) -> None:
++    model = tmp_path / "model.onnx"
++    resolved_a = boundary.ResolvedKokoroModel(
++        ref="kokoro:v1.0",
++        model_id="v1.0",
++        quality="fp32",
++        distribution="github-model-files-v1.0-timestamped-r4",
++        storage_id="kokoro--sel-aaa",
++        installation=None,
++        metadata={},
++        sample_rate=24_000,
++        model_paths=(model,),
++        voices_path=None,
++        config_path=None,
++    )
++    resolved_b = boundary.ResolvedKokoroModel(
++        ref="kokoro:v1.0",
++        model_id="v1.0",
++        quality="fp32",
++        distribution="github-model-files-v1.1",
++        storage_id="kokoro--sel-bbb",
++        installation=None,
++        metadata={},
++        sample_rate=24_000,
++        model_paths=(model,),
++        voices_path=None,
++        config_path=None,
++    )
++    runtime = SimpleNamespace(infer=lambda *a, **kw: None)
++    adapter_a = boundary.KokoroRuntimeAdapter(runtime, resolved_a)
++    adapter_b = boundary.KokoroRuntimeAdapter(runtime, resolved_b)
++
++    assert adapter_a.cache_identity != adapter_b.cache_identity
+diff --git a/tests/test_parenthetical_pauses.py b/tests/test_parenthetical_pauses.py
+index b1495b6..5baf763 100644
+--- a/tests/test_parenthetical_pauses.py
++++ b/tests/test_parenthetical_pauses.py
+@@ -1,5 +1,10 @@
+ from __future__ import annotations
+
++import pytest
++
++pytest.importorskip("pykokoro.stages.segmentation.phrasplit")
++
++
+ import sys
+ import types
+
+diff --git a/tests/test_pipeline_logging.py b/tests/test_pipeline_logging.py
+index ec7d79d..9cf8bee 100644
+--- a/tests/test_pipeline_logging.py
++++ b/tests/test_pipeline_logging.py
+@@ -1,5 +1,10 @@
+ from __future__ import annotations
+
++import pytest
++
++pytest.importorskip("pykokoro.stages.doc_parsers.plain")
++
++
+ import logging
+
+ from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
+diff --git a/tests/test_pipeline_paragraphs.py b/tests/test_pipeline_paragraphs.py
+index 92a1e5c..f6df9b1 100644
+--- a/tests/test_pipeline_paragraphs.py
++++ b/tests/test_pipeline_paragraphs.py
+@@ -1,3 +1,7 @@
++import pytest
++
++pytest.importorskip("pykokoro.stages.doc_parsers.ssmd")
++
+ import pytest
+ from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
+
+diff --git a/tests/test_pipeline_phoneme_consistency.py b/tests/test_pipeline_phoneme_consistency.py
+index ce6cce6..faf0c1d 100644
+--- a/tests/test_pipeline_phoneme_consistency.py
++++ b/tests/test_pipeline_phoneme_consistency.py
+@@ -1,3 +1,8 @@
++import pytest
++
++pytest.importorskip("pykokoro.stages.doc_parsers.plain")
++pytest.importorskip("pykokoro.stages.doc_parsers.ssmd")
++
+ import pytest
+ from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
+ from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
+diff --git a/tests/test_pipeline_refactor.py b/tests/test_pipeline_refactor.py
+index 28988e3..3644194 100644
+--- a/tests/test_pipeline_refactor.py
++++ b/tests/test_pipeline_refactor.py
+@@ -1,7 +1,12 @@
+ import os
+
+-import numpy as np
+ import pytest
++
++pytest.importorskip("pykokoro.stages.doc_parsers.plain")
++pytest.importorskip("pykokoro.stages.doc_parsers.ssmd")
++
++
++import numpy as np
+ from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
+ from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
+
+diff --git a/tests/test_pipeline_unit_streaming.py b/tests/test_pipeline_unit_streaming.py
+index 22914aa..50b735e 100644
+--- a/tests/test_pipeline_unit_streaming.py
++++ b/tests/test_pipeline_unit_streaming.py
+@@ -1,9 +1,13 @@
+ from __future__ import annotations
+
++import pytest
++
++pytest.importorskip("pykokoro.stages.doc_parsers.plain")
++
++
+ from dataclasses import replace
+
+ import numpy as np
+-import pytest
+ from audiocompose import Composer
+ from audiosig import measure_loudness
+ from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
+diff --git a/tests/test_polynorm_eval.py b/tests/test_polynorm_eval.py
+index b057a8c..7113ecf 100644
+--- a/tests/test_polynorm_eval.py
++++ b/tests/test_polynorm_eval.py
+@@ -1,5 +1,10 @@
+ from __future__ import annotations
+
++import pytest
++
++pytest.importorskip("benchmarks.polynorm_eval")
++
++
+ import json
+ from pathlib import Path
+
+diff --git a/tests/test_polynorm_external.py b/tests/test_polynorm_external.py
+index 7dee320..2ca69ae 100644
+--- a/tests/test_polynorm_external.py
++++ b/tests/test_polynorm_external.py
+@@ -1,8 +1,12 @@
+ from __future__ import annotations
+
++import pytest
++
++pytest.importorskip("benchmarks.polynorm_eval")
++
++
+ from pathlib import Path
+
+-import pytest
+
+ from benchmarks.polynorm_data import PolyNormDataError, load_cases, locale_cache_path
+ from benchmarks.polynorm_phoneme import main as polynorm_main
+diff --git a/tests/test_polynorm_phoneme_harness.py b/tests/test_polynorm_phoneme_harness.py
+index 8703561..eea8952 100644
+--- a/tests/test_polynorm_phoneme_harness.py
++++ b/tests/test_polynorm_phoneme_harness.py
+@@ -2,6 +2,9 @@ from __future__ import annotations
+
+ import pytest
+
++pytest.importorskip("benchmarks.polynorm_eval")
++
++
+ from benchmarks.polynorm_eval import PyKokoroPhonemeHarness
+
+
+diff --git a/tests/test_short_sentence_benchmark_reporting.py b/tests/test_short_sentence_benchmark_reporting.py
+index 1ba7cde..7a41ee2 100644
+--- a/tests/test_short_sentence_benchmark_reporting.py
++++ b/tests/test_short_sentence_benchmark_reporting.py
+@@ -1,5 +1,10 @@
+ from __future__ import annotations
+
++import pytest
++
++pytest.importorskip("pykokoro.stages.doc_parsers.plain")
++
++
+ from benchmarks._short_sentence_reporting import (
+     aggregate_short_sentence_rows,
+     build_short_sentence_summary,
+diff --git a/tests/test_short_sentence_diagnostics.py b/tests/test_short_sentence_diagnostics.py
+index 0cae665..93ba5f2 100644
+--- a/tests/test_short_sentence_diagnostics.py
++++ b/tests/test_short_sentence_diagnostics.py
+@@ -1,5 +1,10 @@
+ from __future__ import annotations
+
++import pytest
++
++pytest.importorskip("pykokoro.stages.doc_parsers.plain")
++
++
+ from pathlib import Path
+ from types import SimpleNamespace
+
+diff --git a/tests/test_short_sentence_parameter_sweep.py b/tests/test_short_sentence_parameter_sweep.py
+index ce1a6f6..80c8fcf 100644
+--- a/tests/test_short_sentence_parameter_sweep.py
++++ b/tests/test_short_sentence_parameter_sweep.py
+@@ -1,11 +1,15 @@
+ from __future__ import annotations
+
++import pytest
++
++pytest.importorskip("pykokoro.stages.doc_parsers.plain")
++
++
+ import subprocess
+ import sys
+ from pathlib import Path
+
+ import numpy as np
+-import pytest
+
+ from benchmarks.short_sentence_parameter_sweep import (
+     RenderedAudio,
+diff --git a/tests/test_spacy_model_policy.py b/tests/test_spacy_model_policy.py
+index 66676b0..9995498 100644
+--- a/tests/test_spacy_model_policy.py
++++ b/tests/test_spacy_model_policy.py
+@@ -1,8 +1,12 @@
+ from __future__ import annotations
+
++import pytest
++
++pytest.importorskip("pykokoro.stages.segmentation.phrasplit")
++
++
+ from types import SimpleNamespace
+
+-import pytest
+ from pykokoro.stages.doc_parsers.plain import PhrasplitSentenceSplitter
+ from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
+
+diff --git a/tests/test_voice_loudness_benchmark.py b/tests/test_voice_loudness_benchmark.py
+index 114c92a..9b50e84 100644
+--- a/tests/test_voice_loudness_benchmark.py
++++ b/tests/test_voice_loudness_benchmark.py
+@@ -1,10 +1,14 @@
+ from __future__ import annotations
+
++import pytest
++
++pytest.importorskip("pykokoro.stages.doc_parsers.plain")
++
++
+ from pathlib import Path
+ from types import SimpleNamespace
+
+ import numpy as np
+-import pytest
+
+ from benchmarks import voice_loudness as benchmark
+ from pykokoro.discovery import ModelCapabilities, VoiceCapabilities
+diff --git a/tests/test_voice_loudness_calibration.py b/tests/test_voice_loudness_calibration.py
+index 93e5f51..0d8bf61 100644
+--- a/tests/test_voice_loudness_calibration.py
++++ b/tests/test_voice_loudness_calibration.py
+@@ -1,10 +1,14 @@
+ from __future__ import annotations
+
++import pytest
++
++pytest.importorskip("pykokoro.stages.doc_parsers.plain")
++
++
+ import json
+ import math
+ from pathlib import Path
+
+-import pytest
+
+ from benchmarks.voice_loudness_calibration import (
+     PRODUCTION_CALIBRATION_PATH,

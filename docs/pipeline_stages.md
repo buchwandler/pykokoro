@@ -38,16 +38,20 @@ token IDs, speed, and a seed when supported to OnnxVoice.
 
 ## Atomic inference and capacity
 
-Each request is one indivisible inference unit. After G2P, PyKokoro checks its
-model-token count against the resolved profile. Oversized input raises
-`SynthesisInputTooLongError` with the source-text length, actual token count, maximum,
-and model identity. PyKokoro never splits or chunks a request; the caller owns
-segmentation and composition.
+One public synthesis request always returns one `RenderedSegment`. After G2P, PyKokoro
+checks the model-token count against the resolved profile. By default,
+`long_text_split="none"` raises `SynthesisInputTooLongError` when the request exceeds
+capacity and does not import PhraseSplit.
 
-`SynthesisConfig.long_text_split` remains only as a migration surface. It accepts
-`"none"`; explicit `"sentence"` or `"token"` values raise `ConfigurationError`.
-
-Short-sentence handling is also explicit and disabled when no short-sentence
+Set `SynthesisConfig.long_text_split="sentence"` to enable internal splitting only for
+oversized requests. PhraseSplit loads lazily and packs source-aligned sentence spans
+into model-safe chunks, falling back to clauses and safe word boundaries for an
+oversized sentence. The chunks are rendered in order and joined into the same request
+result. A single word that cannot fit safely still raises `SynthesisInputTooLongError`.
+`long_text_use_spacy=False` selects PhraseSplit's simple mode; `None` permits a
+compatible local spaCy model with regex fallback, and `True` requires spaCy and a
+compatible model. Caller-owned composition still applies between separate synthesis
+requests. Short-sentence handling is also explicit and disabled when no short-sentence
 configuration or enable override is supplied. Callers can opt in with
 `GenerationConfig(enable_short_sentence=True)` or `ShortSentenceConfig`. It may use
 context and retry inference internally, but returned text, phonemes, and timings remain

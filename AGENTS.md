@@ -1,142 +1,78 @@
-# Agent Guide for pykokoro
+# Agent Guide for PyKokoro
 
-This file is for coding agents working in this repository. It summarizes how to build,
-test, lint, and follow the project's coding style.
-
-No Cursor or Copilot instruction files were found in this repo.
+This guide describes the current request-centric PyKokoro architecture and the
+repository workflows.
 
 ## Repository layout
 
-- `pykokoro/`: library source
-- `tests/`: pytest suite
-- `examples/`: runnable demos
-- `docs/`: documentation
+- `pykokoro/`: synthesis API, request rendering, integrations, and runtime-facing
+  adapters
+- `tests/`: pytest suite, including public API type checks
+- `examples/`: maintained runnable examples
+- `docs/`: user and API documentation
 
-## Environment setup
+## Architecture and ownership
 
-- Python: 3.10+ (see `pyproject.toml`)
-- Install editable:
-  - `uv pip install -e .` (runtime only)
+- `SynthesisSegment` (an alias of `SynthesisRequest`) carries prepared text, explicit
+  language, voice, ID, and optional source-aligned context.
+- `SynthesisConfig` and `GenerationConfig` hold immutable renderer and inference
+  configuration. Use `dataclasses.replace` when overriding an existing configuration.
+- `KokoroSynthesizer` coordinates requests. `RequestRenderer` performs prepared-text
+  G2P, token-capacity handling, model and voice preparation, inference, and result
+  construction.
+- KokoroG2P owns prepared-text phonemization. OnnxVoice owns model resolution and ONNX
+  session management. AudioSig owns DSP primitives.
+- PyKokoro returns one `RenderedSegment` per request. The caller owns document parsing,
+  planning, and composition between separate requests.
+- `PronunciationOverride` and `LinguisticToken` offsets refer to the exact request text.
+  `annotations` is a compatibility alias for `tokens`.
+- `long_text_split="none"` is the default. It does not load PhraseSplit and raises
+  `SynthesisInputTooLongError` when the model token limit is exceeded. The opt-in
+  `long_text_split="sentence"` mode loads PhraseSplit lazily, splits only oversized
+  requests, and joins internal chunk audio into one result. spaCy is not required by
+  default.
 
-## Test commands
+Do not add document parsing, editorial effects, or cross-request audio composition to
+the engine. Keep the runtime boundary with KokoroG2P, OnnxVoice, and AudioSig intact.
 
-Pytest config lives in `pyproject.toml`.
+## Environment and validation
 
-- Run all tests:
-  - `python -m pytest`
-- Run a single file:
-  - `python -m pytest tests/test_splitter_offsets.py`
-- Run a single test:
-  - `python -m pytest tests/test_splitter_offsets.py::test_phrasplit_splitter_handles_missing_offsets`
-- Run by keyword:
-  - `python -m pytest -k "splitter"`
-- Skip slow tests:
-  - `python -m pytest -m "not slow"`
-- Coverage (if `pytest-cov` installed):
-  - `python -m pytest --cov=pykokoro --cov-report=term-missing`
+Python 3.10 or newer is required. A development environment can be installed with:
 
-## Lint/format/type-check commands
+```bash
+python -m pip install -e ".[cpu,dev]"
+```
 
-Ruff and mypy are configured in `pyproject.toml`. Pre-commit is configured in
-`.pre-commit-config.yaml`.
+Common checks:
 
-- Ruff lint:
-  - `ruff check .`
-- Ruff autofix (safe fixes):
-  - `ruff check . --fix`
-- Mypy:
-  - `mypy pykokoro`
-- pre-commit:
-  - `pre-commit run --all-files`
+```bash
+python -m pytest
+python -m pytest -m "not slow"
+ruff check .
+python -m mypy --config-file tests/typecheck/mypy.ini tests/typecheck/public_api.py
+pre-commit run --all-files
+```
 
-There is no dedicated formatter configured; follow existing style and Ruff line-length
-(100).
+For a focused change, run the relevant test module first. Tests should be deterministic
+and should not download models or access the network unless the test explicitly covers
+that integration.
 
-## Code style guidelines
+## Code style
 
-### Imports
+- Follow existing Python conventions and keep lines within Ruff's 100-character limit.
+- Put `from __future__ import annotations` first in new modules. Order standard-library,
+  third-party, then local imports.
+- Use `typing.TYPE_CHECKING` for type-only imports when runtime laziness matters.
+- Add annotations to public APIs and important internal helpers. Prefer straightforward
+  code and narrow exception handling.
+- Use module loggers in library code. Examples may print for clarity.
 
-- Use `from __future__ import annotations` at the top of new Python modules.
-- Order imports: standard library, third-party, local.
-- Prefer explicit imports over wildcard.
-- Use `typing.TYPE_CHECKING` to avoid heavy optional imports at runtime.
+## Packaging and generated files
 
-### Formatting
-
-- Max line length: 100 (see Ruff).
-- Use f-strings for interpolation.
-- Prefer double quotes for strings (matches existing files).
-- Keep small helpers near usage; larger helpers at module bottom.
-
-### Types
-
-- Use type hints on public functions/classes and key internal helpers.
-- Use `dataclasses` for simple data containers.
-- Use `| None` and `list[str]` style annotations (Python 3.10+).
-- Follow mypy config: incomplete defs disallowed, but fully untyped defs are allowed
-  when integration with third-party libs makes typing noisy.
-
-### Naming conventions
-
-- `snake_case` for functions/variables.
-- `PascalCase` for classes.
-- `ALL_CAPS` for constants.
-- Use descriptive names that map to pipeline stages (doc/segment/g2p/synth).
-
-### Error handling and warnings
-
-- Raise clear exceptions when required dependencies are missing.
-- Prefer `Trace.warnings` for recoverable runtime issues.
-- Log via module-level `logger = logging.getLogger(__name__)`.
-- Avoid swallowing exceptions; catch narrowly and emit context.
-
-### Logging
-
-- Use `logger.debug/info/warning` rather than `print` in library code.
-- Examples may print directly for clarity.
-- Debug flags are commonly via env vars (e.g. `PYKOKORO_DEBUG_SEGMENTS`).
-
-### Segmentation and offsets
-
-- Segment offsets should always refer to `doc.clean_text`.
-- `Segment.text` should match `clean_text[char_start:char_end]`.
-- Keep segments monotonic and non-overlapping.
-
-### Pipeline conventions
-
-- Stages follow the order: doc parse (includes segmentation) -> g2p -> synth.
-- `PipelineConfig` and `GenerationConfig` are immutable dataclasses; use
-  `dataclasses.replace` when overriding.
-- New stages should match the protocols in `pykokoro/stages/protocols.py`.
-
-### Tests
-
-- Use pytest functions prefixed with `test_`.
-- Keep tests deterministic; avoid network or model downloads where possible.
-- Prefer targeted unit tests in `tests/` over new integration tests.
-- Use fixtures from `tests/conftest.py` when available.
-
-## Files to be careful with
-
-- `pykokoro/_version.py` is generated by setuptools_scm.
-- Large binary artifacts (e.g., WAVs) should not be added without need.
-- Keep docs concise; prefer README for user-facing updates.
-
-## Common workflows
-
-- Update a document parser/segmentation or g2p behavior:
-
-  - Adjust stage in `pykokoro/stages/...`
-  - Add or update regression tests in `tests/`
-  - Run `python -m pytest tests/<file>.py`
-
-- Add a new example:
-  - Add script under `examples/`
-  - Keep it runnable from repo root
-  - Avoid hardcoding large assets
-
-## Notes for agentic changes
-
-- Keep changes scoped; avoid touching unrelated files.
-- Avoid modifying generated or downloaded artifacts.
-- Align new code with existing conventions (type hints, dataclasses, logging).
+- `pykokoro/_version.py` is generated by setuptools-scm. Do not edit it manually.
+- Keep `pykokoro/py.typed` and packaging metadata aligned with the public API and
+  supported companion-library floors.
+- `docs/changelog.md` is generated by Releaseledger. Update release entries with its CLI
+  and rebuild the changelog rather than editing generated release text by hand.
+- Do not create or publish a release or tag unless the task explicitly requests it.
+- Avoid adding generated audio, downloaded models, caches, or build artifacts.

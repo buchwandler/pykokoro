@@ -1,0 +1,16 @@
+ pyproject.toml | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/pyproject.toml b/pyproject.toml
+index e5588d4..8847367 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -23,7 +23,7 @@ authors = [
+ keywords = ["tts", "text-to-speech", "kokoro", "phonemizer", "espeak"]
+ dependencies = [
+     "kokorog2p[espeak,en]>=0.9.9,<1.0",
+-    "utterplan>=0.1.4,<0.2",
++    "utterplan>=0.2.0,<0.3",
+     "lexphon>=0.2.3,<0.3",
+     "numpy",
+     "audiosig>=0.1.4,<0.2",

@@ -1,0 +1,3728 @@
+ README.md                                 |  18 ++
+ examples/audio_job.py                     |  20 ++
+ pykokoro/_onnxvoice.py                    | 410 ++++++++++++++++++++++++++
+ pykokoro/audio_generator.py               | 141 +++------
+ pykokoro/audio_job.py                     | 184 ++++++++++++
+ pykokoro/composition.py                   |  20 ++
+ pykokoro/onnx_backend.py                  | 202 ++++++-------
+ pykokoro/onnx_session.py                  | 398 +++++--------------------
+ pykokoro/pipeline.py                      | 209 +++++++++----
+ pykokoro/runtime/thai_wayu.py             |   4 +-
+ pykokoro/runtime_protocol.py              |  24 ++
+ pykokoro/types.py                         |   4 +-
+ pykokoro/utils.py                         |  34 +--
+ pyproject.toml                            |  14 +-
+ tests/test_architecture_boundaries.py     |  24 ++
+ tests/test_audio_generator_logging.py     |  26 +-
+ tests/test_audio_generator_performance.py |  38 +--
+ tests/test_audio_input_contract.py        | 147 ++++------
+ tests/test_audio_job.py                   |  85 ++++++
+ tests/test_audio_splitting.py             |  25 +-
+ tests/test_bug_fixes.py                   |  63 ++--
+ tests/test_import_boundaries.py           |   6 +-
+ tests/test_onnxvoice_boundary.py          | 202 +++++++++++++
+ tests/test_packaging_metadata.py          |  11 +-
+ tests/test_pipeline_unit_streaming.py     |   4 +-
+ tests/test_session_manager.py             | 470 +++++-------------------------
+ tests/test_ssmd.py                        |  25 +-
+ tests/test_word_timings.py                |  26 +-
+ 28 files changed, 1610 insertions(+), 1224 deletions(-)
+
+diff --git a/README.md b/README.md
+index c2b419f..6ce247a 100644
+--- a/README.md
++++ b/README.md
+@@ -26,6 +26,24 @@ A Python library for Kokoro TTS (Text-to-Speech) using ONNX runtime.
+ - **Maintainer Benchmarking**: PolyNorm-based phoneme regression tooling for the
+   PyKokoro frontend path
+
++## Runtime and audio ownership
++
++PyKokoro is the Kokoro producer layer. OnnxVoice owns model installation, cached
++artifacts, providers, and ONNX execution. AudioCompose owns batch timeline composition,
++explicit silence, marker/span finalization, resampling, complete-output loudness, and
++WAV encoding.
++
++The existing `pipeline.run()` and `AudioResult` APIs remain available. Projects that
++need to combine generated audio with other engines can use the explicit job boundary:
++
++```python
++job = pipeline.to_audio_job("Hello world.", lang="en-us")
++job.save("hello.audiojob.json")
++```
++
++`run()` composes that same prepared job once. Streaming remains incremental producer
++output and does not apply complete-output loudness normalization.
++
+ ## v0.9 orchestration contract
+
+ PyKokoro v0.9 requires an explicit document language. Set
+diff --git a/examples/audio_job.py b/examples/audio_job.py
+new file mode 100644
+index 0000000..632989e
+--- /dev/null
++++ b/examples/audio_job.py
+@@ -0,0 +1,20 @@
++"""Export a PyKokoro render as an AudioCompose job."""
++
++from __future__ import annotations
++
++from pathlib import Path
++
++from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
++
++
++def main() -> None:
++    pipeline = KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us")))
++    job = pipeline.to_audio_job("Hello from an explicit audio job.")
++    job.save(Path("hello.audiojob.json"))
++    result = pipeline.run("Hello from an AudioResult.")
++    result.save_wav("hello.wav")
++    pipeline.close()
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/pykokoro/_onnxvoice.py b/pykokoro/_onnxvoice.py
+new file mode 100644
+index 0000000..20546a0
+--- /dev/null
++++ b/pykokoro/_onnxvoice.py
+@@ -0,0 +1,410 @@
++"""PyKokoro's narrow integration boundary for the OnnxVoice runtime."""
++
++from __future__ import annotations
++
++import os
++from collections.abc import Callable, Mapping, Sequence
++from dataclasses import dataclass
++from pathlib import Path
++from typing import Any, cast
++
++from .asset_progress import AssetProgressEvent, AssetProgressPhase
++from .exceptions import BackendError, ConfigurationError, KokoroError
++
++
++@dataclass(frozen=True, slots=True)
++class ResolvedKokoroModel:
++    """PyKokoro's read-only view of an OnnxVoice installation."""
++
++    ref: str | None
++    model_id: str | None
++    quality: str | None
++    installation: Any | None
++    metadata: Mapping[str, Any]
++    sample_rate: int
++    model_paths: tuple[Path, ...]
++    voices_path: Path | None
++    config_path: Path | None
++
++
++def _onnxvoice() -> Any:
++    try:
++        import onnxvoice
++    except ModuleNotFoundError as exc:
++        raise ConfigurationError(
++            "OnnxVoice is required for Kokoro model loading. Install pykokoro[cpu], "
++            "pykokoro[gpu], or another provider extra."
++        ) from exc
++    return onnxvoice
++
++
++def normalize_kokoro_ref(ref: str) -> str:
++    """Normalize a Kokoro model id to an explicit OnnxVoice system reference."""
++    if not isinstance(ref, str) or not ref.strip():
++        raise ConfigurationError("Kokoro model reference must not be empty")
++    value = ref.strip()
++    if ":" not in value:
++        return f"kokoro:{value}"
++    system, model_id = value.split(":", 1)
++    if system.casefold() != "kokoro" or not model_id:
++        raise ConfigurationError(f"Not a Kokoro model reference: {ref!r}")
++    return f"kokoro:{model_id}"
++
++
++def _provider_name(value: Any) -> tuple[str, dict[str, Any]]:
++    if hasattr(value, "name"):
++        return str(value.name), dict(getattr(value, "options", {}) or {})
++    if isinstance(value, tuple):
++        name, options = value
++        return str(name), dict(options or {})
++    return str(value), {}
++
++
++def normalize_provider_request(
++    providers: Sequence[Any] | str | None,
++    provider_options: Mapping[str, Any] | Sequence[Mapping[str, Any]] | None,
++) -> tuple[str | Sequence[str] | None, Any | None]:
++    """Translate PyKokoro provider compatibility values to OnnxVoice values."""
++    requested = os.getenv("ONNX_PROVIDER") if providers is None else providers
++    if requested is None:
++        return "cpu", _normalize_provider_options("cpu", provider_options)
++    if isinstance(requested, str):
++        name = {"gpu": "cuda", "dml": "directml"}.get(requested.strip().casefold(), requested)
++        return name, _normalize_provider_options(name, provider_options)
++
++    names: list[str] = []
++    options: list[dict[str, Any]] = []
++    has_explicit_options = False
++    for value in requested:
++        name, value_options = _provider_name(value)
++        name = {"gpu": "cuda", "dml": "directml"}.get(name.casefold(), name)
++        names.append(name)
++        options.append(value_options)
++        has_explicit_options = has_explicit_options or bool(value_options)
++    if not names:
++        raise ConfigurationError("providers must not be empty")
++    if has_explicit_options:
++        return names, options
++    return names, _normalize_provider_options(names, provider_options)
++
++
++def _normalize_provider_options(
++    providers: str | Sequence[str],
++    provider_options: Mapping[str, Any] | Sequence[Mapping[str, Any]] | None,
++) -> Any | None:
++    if provider_options is None or isinstance(provider_options, (list, tuple)):
++        return provider_options
++    values = dict(provider_options)
++    provider_names = [providers] if isinstance(providers, str) else list(providers)
++    if any(name in values for name in provider_names):
++        return {str(name): dict(values.get(name, {})) for name in provider_names}
++    return [values.copy() for _ in provider_names]
++
++
++def adapt_progress(
++    callback: Callable[[AssetProgressEvent], None] | None,
++) -> Callable[[Any], None] | None:
++    """Adapt OnnxVoice asset events to PyKokoro asset progress events."""
++    if callback is None:
++        return None
++
++    def emit(event: Any) -> None:
++        phase_map = {
++            "catalog_started": "download-start",
++            "catalog_cached": "download-complete",
++            "catalog_completed": "download-complete",
++            "install_started": "download-start",
++            "install_completed": "download-complete",
++            "download_started": "download-start",
++            "download_progress": "download-progress",
++            "download_completed": "download-complete",
++            "artifact_cached": "download-complete",
++            "verify_started": "verify-start",
++        }
++        phase = cast(
++            AssetProgressPhase, phase_map.get(str(getattr(event, "phase", "")), "verify-start")
++        )
++        ref = getattr(event, "ref", None)
++        model_id = ref.split(":", 1)[1] if isinstance(ref, str) and ":" in ref else str(ref or "")
++        callback(
++            AssetProgressEvent(
++                phase=phase,
++                model_id=model_id,
++                distribution_id=str(getattr(event, "distribution", "") or ""),
++                artifact_id=str(getattr(event, "artifact", "") or ""),
++                role=str(getattr(event, "role", "model") or "model"),
++                filename=str(getattr(event, "filename", "") or ""),
++                bytes_done=int(getattr(event, "completed", 0) or 0),
++                bytes_total=int(getattr(event, "total", 0) or 0),
++                target=str(getattr(event, "target", "") or ""),
++            )
++        )
++
++    return emit
++
++
++def _map_error(exc: Exception, *, operation: str) -> KokoroError:
++    name = type(exc).__name__
++    if name in {
++        "OptionalDependencyError",
++        "ImportError",
++        "RuntimeContractError",
++        "CapabilityError",
++    }:
++        return ConfigurationError(str(exc))
++    if name in {"AssetNotFoundError", "NotInstalledError", "CatalogError"}:
++        return ConfigurationError(str(exc))
++    if name in {"IntegrityError", "ManifestError", "UnsafePathError", "LockError"}:
++        return BackendError(f"Kokoro model asset integrity failure: {exc}")
++    if operation == "infer":
++        return BackendError("Kokoro model inference failed")
++    if operation == "open":
++        return BackendError(f"Could not open Kokoro runtime: {exc}")
++    return BackendError(str(exc))
++
++
++def _call(operation: str, function: Callable[[], Any]) -> Any:
++    try:
++        return function()
++    except (FileNotFoundError, ValueError, TypeError, ConfigurationError):
++        raise
++    except Exception as exc:
++        mapped = _map_error(exc, operation=operation)
++        raise mapped from exc
++
++
++def _installation_info(installation: Any, *, ref: str | None = None) -> ResolvedKokoroModel:
++    artifacts = tuple(getattr(installation, "artifacts", ()) or ())
++    model_paths = tuple(
++        Path(artifact.path) for artifact in artifacts if getattr(artifact, "role", None) == "model"
++    )
++    voices_path = next(
++        (
++            Path(artifact.path)
++            for artifact in artifacts
++            if getattr(artifact, "role", None) == "voices"
++        ),
++        None,
++    )
++    config_path = next(
++        (
++            Path(artifact.path)
++            for artifact in artifacts
++            if getattr(artifact, "role", None) == "config"
++        ),
++        None,
++    )
++    metadata = dict(getattr(installation, "metadata", {}) or {})
++    selected_quality = metadata.get("selected_quality")
++    return ResolvedKokoroModel(
++        ref=ref or getattr(installation, "ref", None),
++        model_id=getattr(installation, "id", None),
++        quality=str(selected_quality) if selected_quality is not None else None,
++        installation=installation,
++        metadata=metadata,
++        sample_rate=int(getattr(installation, "sample_rate", None) or 24000),
++        model_paths=model_paths,
++        voices_path=voices_path,
++        config_path=config_path,
++    )
++
++
++def install_kokoro_model(
++    ref: str,
++    *,
++    quality: str | None = None,
++    distribution: str | None = None,
++    cache_dir: str | Path | None = None,
++    offline: bool = False,
++    refresh: bool = False,
++    force: bool = False,
++    progress: Callable[[AssetProgressEvent], None] | None = None,
++) -> ResolvedKokoroModel:
++    normalized = normalize_kokoro_ref(ref)
++    module = _onnxvoice()
++    manager = module.OnnxVoice(cache_dir=cache_dir, offline=offline)
++    installation = _call(
++        "install",
++        lambda: manager.install(
++            normalized,
++            quality=quality,
++            distribution=distribution,
++            refresh=refresh,
++            force=force,
++            progress=adapt_progress(progress),
++        ),
++    )
++    return _installation_info(installation, ref=normalized)
++
++
++def resolve_kokoro_model(
++    ref: str,
++    *,
++    quality: str | None = None,
++    distribution: str | None = None,
++    cache_dir: str | Path | None = None,
++    offline: bool = False,
++) -> ResolvedKokoroModel:
++    normalized = normalize_kokoro_ref(ref)
++    manager = _onnxvoice().OnnxVoice(cache_dir=cache_dir, offline=offline)
++    installation = _call(
++        "resolve",
++        lambda: manager.resolve(normalized, quality=quality, distribution=distribution),
++    )
++    return _installation_info(installation, ref=normalized)
++
++
++def open_local_kokoro(
++    *,
++    model: str | Path | None = None,
++    artifacts: Mapping[str, str | Path] | None = None,
++    config: str | Path | None = None,
++    voices: str | Path | None = None,
++    runtime: Mapping[str, Any] | None = None,
++    sample_rate: int | None = None,
++    providers: Sequence[Any] | str | None = None,
++    provider_options: Mapping[str, Any] | Sequence[Mapping[str, Any]] | None = None,
++    session_options: Any | None = None,
++) -> Any:
++    requested, options = normalize_provider_request(providers, provider_options)
++    runtime_adapter = _call(
++        "open",
++        lambda: _onnxvoice().open_local(
++            system="kokoro",
++            model=model,
++            artifacts=artifacts,
++            config=config,
++            voices=voices,
++            runtime=runtime,
++            sample_rate=sample_rate,
++            providers=requested,
++            provider_options=options,
++            session_options=session_options,
++        ),
++    )
++    resolved = _installation_info(getattr(runtime_adapter, "installation", None))
++    return KokoroRuntimeAdapter(runtime_adapter, resolved)
++
++
++def open_installed_kokoro(
++    resolved: ResolvedKokoroModel,
++    *,
++    providers: Sequence[Any] | str | None = None,
++    provider_options: Mapping[str, Any] | Sequence[Mapping[str, Any]] | None = None,
++    session_options: Any | None = None,
++) -> Any:
++    requested, options = normalize_provider_request(providers, provider_options)
++    manager = _onnxvoice().OnnxVoice()
++    runtime_adapter = _call(
++        "open",
++        lambda: manager.open(
++            resolved.installation,
++            providers=requested,
++            provider_options=options,
++            session_options=session_options,
++        ),
++    )
++    return KokoroRuntimeAdapter(runtime_adapter, resolved)
++
++
++def runtime_diagnostics(runtime: Any) -> dict[str, Any]:
++    diagnostic = runtime.diagnostics()
++    sessions = getattr(diagnostic, "sessions", ())
++    return {
++        "system": getattr(diagnostic, "system", "kokoro"),
++        "ref": getattr(diagnostic, "ref", None),
++        "layout": getattr(diagnostic, "layout", "single"),
++        "sessions": tuple(
++            {
++                "component": getattr(session, "component", None),
++                "model_path": str(getattr(session, "model_path", "")),
++                "providers_requested": tuple(getattr(session, "providers_requested", ())),
++                "providers_active": tuple(getattr(session, "providers_active", ())),
++                "inputs": tuple(getattr(session, "inputs", ())),
++                "outputs": tuple(getattr(session, "outputs", ())),
++            }
++            for session in sessions
++        ),
++    }
++
++
++def summarize_inference(result: Any) -> tuple[Any, dict[str, Any]]:
++    """Return trace-safe timing and output shape summaries for an inference result."""
++    import numpy as np
++
++    def summary(value: Any) -> dict[str, Any]:
++        array = np.asarray(value)
++        return {"shape": [int(size) for size in array.shape], "dtype": str(array.dtype)}
++
++    timing = getattr(result, "timings", None)
++    outputs = {
++        str(name): summary(value)
++        for name, value in dict(getattr(result, "outputs", {}) or {}).items()
++    }
++    return (summary(timing) if timing is not None else None), outputs
++
++
++def close_runtime(runtime: Any | None) -> None:
++    if runtime is not None:
++        close = getattr(runtime, "close", None)
++        if close is not None:
++            close()
++
++
++class KokoroRuntimeAdapter:
++    """Adapt an OnnxVoice Kokoro adapter to PyKokoro's runtime protocol."""
++
++    def __init__(self, runtime: Any, resolved: ResolvedKokoroModel) -> None:
++        self._runtime = runtime
++        self.resolved = resolved
++        self.sample_rate = resolved.sample_rate
++        runtime_metadata = resolved.metadata.get("runtime")
++        self.supports_timings = bool(
++            isinstance(runtime_metadata, Mapping) and runtime_metadata.get("timings_output")
++        )
++        self.cache_identity = (resolved.ref, resolved.quality, resolved.model_id)
++        self._closed = False
++
++    def infer(
++        self,
++        token_ids: Sequence[int],
++        *,
++        style: Any,
++        speed: float,
++        seed: int | None = None,
++    ) -> Any:
++        if self._closed:
++            raise RuntimeError("Kokoro runtime is closed")
++        return _call(
++            "infer",
++            lambda: self._runtime.infer(token_ids, style=style, speed=speed, seed=seed),
++        )
++
++    def diagnostics(self) -> Any:
++        return self._runtime.diagnostics()
++
++    def close(self) -> None:
++        if self._closed:
++            return
++        self._closed = True
++        close_runtime(self._runtime)
++
++    @property
++    def installation(self) -> Any:
++        return self.resolved.installation
++
++
++__all__ = [
++    "ResolvedKokoroModel",
++    "KokoroRuntimeAdapter",
++    "adapt_progress",
++    "close_runtime",
++    "install_kokoro_model",
++    "normalize_kokoro_ref",
++    "normalize_provider_request",
++    "open_installed_kokoro",
++    "open_local_kokoro",
++    "resolve_kokoro_model",
++    "runtime_diagnostics",
++    "summarize_inference",
++]
+diff --git a/pykokoro/audio_generator.py b/pykokoro/audio_generator.py
+index eb01889..b8005d1 100644
+--- a/pykokoro/audio_generator.py
++++ b/pykokoro/audio_generator.py
+@@ -20,6 +20,7 @@ from .constants import MAX_PHONEME_LENGTH, SAMPLE_RATE
+ from .exceptions import ConfigurationError
+ from .loudness_config import LoudnessConfig
+ from .prosody import apply_prosody, parse_pitch, parse_rate, parse_volume
++from .runtime_protocol import KokoroInferenceRuntime
+ from .short_sentence_handler import (
+     SHORT_SENTENCE_META_KEY,
+     apply_short_sentence_mode,
+@@ -33,8 +34,6 @@ from .voice_level import apply_voice_level_calibration
+ from .voice_manager import normalize_voice_style
+
+ if TYPE_CHECKING:
+-    import onnxruntime as rt
+-
+     from .prosody_config import ProsodyConfig
+     from .short_sentence_handler import ShortSentenceConfig
+     from .types import Trace
+@@ -276,38 +275,35 @@ ModelSource = Literal["huggingface", "github"]
+
+
+ class AudioGenerator:
+-    """Generates audio from phonemes, tokens, and segments using ONNX inference.
+-
+-    This class handles:
+-    - ONNX inference for single phoneme batches
+-    - Phoneme splitting for long inputs
+-    - Batch generation from phoneme lists
+-    - Segment-based generation with pause support
+-    - Token-to-audio generation
+-    - Short sentence handling via configured context modes
+-
+-    Args:
+-        session: ONNX Runtime inference session
+-        tokenizer: Tokenizer for phoneme<->token conversion
+-        model_source: Model source ('huggingface' or 'github')
+-        short_sentence_config: Configuration for short sentence handling
++    """Generate audio using a producer-neutral Kokoro inference runtime.
++
++    Token preparation, voice/style selection, short-sentence handling, timing
++    interpretation, and inference caching remain owned by PyKokoro.
+     """
+
+     def __init__(
+         self,
+-        session: rt.InferenceSession,
+-        tokenizer: Tokenizer,
++        runtime: KokoroInferenceRuntime | Any | None = None,
++        tokenizer: Tokenizer | None = None,
+         model_source: ModelSource = "huggingface",
+         short_sentence_config: ShortSentenceConfig | None = None,
+         waveform_validation: Literal["off", "warn", "strict"] = "off",
+         inference_audio_diagnostics: bool = False,
+         inference_cache_enabled: bool = True,
+         inference_cache_max_bytes: int = 128 * 1024 * 1024,
++        *,
++        session: Any | None = None,
+     ):
+-        """Initialize the audio generator."""
++        """Initialize the audio generator with an OnnxVoice-compatible runtime."""
++        if runtime is None:
++            runtime = session
++        if runtime is None:
++            raise ValueError("runtime is required")
++        if tokenizer is None:
++            raise ValueError("tokenizer is required")
+         if inference_cache_max_bytes < 0:
+             raise ValueError("inference_cache_max_bytes must be non-negative")
+-        self._session = session
++        self._runtime = runtime
+         self._tokenizer = tokenizer
+         self._model_source = model_source
+         self._short_sentence_config = short_sentence_config
+@@ -323,23 +319,7 @@ class AudioGenerator:
+         )
+         self._inference_cache_bytes = 0
+         self._inference_call_number = 0
+-        self._input_metas = {
+-            str(input_meta.name): input_meta for input_meta in session.get_inputs()
+-        }
+-        self._uses_input_ids = "input_ids" in self._input_metas
+-        get_outputs = getattr(session, "get_outputs", None)
+-        outputs = get_outputs() if callable(get_outputs) else []
+-        self._timestamp_output_index: int | None = None
+-        try:
+-            for index, output in enumerate(outputs):
+-                name = str(getattr(output, "name", "")).lower()
+-                if name in {"pred_dur", "pred_duration", "durations", "duration"}:
+-                    self._timestamp_output_index = index
+-                    break
+-            self._has_timestamp_output = self._timestamp_output_index is not None
+-        except TypeError:
+-            # Some lightweight test doubles expose get_outputs() as a bare Mock.
+-            self._has_timestamp_output = False
++        self._has_timestamp_output = bool(getattr(runtime, "supports_timings", False))
+         self._reported_missing_timestamp_output = False
+
+     def _tokenize_phonemes(self, phonemes: str) -> list[int]:
+@@ -364,53 +344,14 @@ class AudioGenerator:
+         return voice_style_indexed
+
+     @staticmethod
+-    def _pad_tokens(tokens: list[int]) -> list[list[int]]:
+-        return [[0, *tokens, 0]]
+-
+-    def _float_speed_input(self, speed: float) -> np.ndarray:
+-        return np.ones(1, dtype=np.float32) * speed
+-
+-    def _int_speed_input(self, speed: float) -> np.ndarray:
+-        speed_int = max(1, round(speed))
+-        return np.array([speed_int], dtype=np.int32)
+-
+-    def _input_dtype(self, name: str, default: np.dtype[Any]) -> np.dtype[Any]:
+-        meta = self._input_metas.get(name)
+-        type_name = str(getattr(meta, "type", "")).lower() if meta is not None else ""
+-        return {
+-            "tensor(float)": np.dtype(np.float32),
+-            "tensor(float16)": np.dtype(np.float16),
+-            "tensor(double)": np.dtype(np.float64),
+-            "tensor(int64)": np.dtype(np.int64),
+-            "tensor(int32)": np.dtype(np.int32),
+-            "tensor(int16)": np.dtype(np.int16),
+-        }.get(type_name, default)
+-
+-    def _build_onnx_inputs(
+-        self,
+-        tokens_padded: list[list[int]],
+-        voice_style: np.ndarray,
+-        speed: float,
+-    ) -> dict[str, np.ndarray | list[list[int]]]:
+-        token_name = "input_ids" if self._uses_input_ids else "tokens"
+-        token_dtype = self._input_dtype(token_name, np.dtype(np.int64))
+-        style_name = "ref_s" if "ref_s" in self._input_metas else "style"
+-        style_dtype = self._input_dtype(style_name, np.dtype(np.float32))
+-        speed_dtype = self._input_dtype("speed", np.dtype(np.float32))
+-        if np.issubdtype(speed_dtype, np.integer):
+-            speed_input = np.array([max(1, round(speed))], dtype=speed_dtype)
+-        else:
+-            speed_input = np.ones(1, dtype=speed_dtype) * speed
+-        return {
+-            token_name: np.asarray(tokens_padded, dtype=token_dtype),
+-            style_name: np.asarray(voice_style, dtype=style_dtype),
+-            "speed": speed_input,
+-        }
+-
+-    @staticmethod
+-    def _inference_cache_key(inputs: dict[str, np.ndarray | list[list[int]]]) -> bytes:
+-        """Build a digest from the exact arrays passed to ONNX Runtime."""
++    def _inference_cache_key(
++        inputs: dict[str, np.ndarray | list[int]],
++        runtime_identity: object = None,
++    ) -> bytes:
++        """Build a digest from producer inputs and runtime identity."""
+         digest = hashlib.blake2b(digest_size=20)
++        digest.update(repr(runtime_identity).encode("utf-8"))
++        digest.update(b"\0")
+         for name in sorted(inputs):
+             array = np.ascontiguousarray(np.asarray(inputs[name]))
+             digest.update(name.encode("utf-8"))
+@@ -468,7 +409,7 @@ class AudioGenerator:
+         *,
+         effective_phonemes: str,
+         tokens: list[int],
+-        inputs: dict[str, np.ndarray | list[list[int]]],
++        inputs: dict[str, np.ndarray | list[int]],
+         audio: np.ndarray,
+         runtime_s: float,
+         cache_hit: bool,
+@@ -523,6 +464,7 @@ class AudioGenerator:
+         *,
+         attempt_kind: str = "initial",
+         tokens: list[int] | None = None,
++        seed: int | None = None,
+     ) -> tuple[np.ndarray, np.ndarray | None]:
+         effective_phonemes = phonemes[:MAX_PHONEME_LENGTH]
+         effective_tokens = (
+@@ -537,9 +479,13 @@ class AudioGenerator:
+         voice_style_indexed = normalized_voice_style[style_idx]
+         if voice_style_indexed.ndim == 1:
+             voice_style_indexed = voice_style_indexed[None, :]
+-        tokens_padded = self._pad_tokens(effective_tokens)
+-        inputs = self._build_onnx_inputs(tokens_padded, voice_style_indexed, speed)
+-        cache_key = self._inference_cache_key(inputs)
++        inputs: dict[str, np.ndarray | list[int]] = {
++            "token_ids": effective_tokens,
++            "style": voice_style_indexed,
++            "speed": np.asarray([speed], dtype=np.float32),
++        }
++        runtime_identity = getattr(self._runtime, "cache_identity", None)
++        cache_key = self._inference_cache_key(inputs, runtime_identity)
+         cached = self._get_cached_inference(cache_key)
+         if cached is not None:
+             audio, pred_dur = cached
+@@ -547,15 +493,16 @@ class AudioGenerator:
+             cache_hit = True
+         else:
+             started = time.perf_counter()
+-            results = self._session.run(None, inputs)
+-            runtime_s = time.perf_counter() - started
+-            audio = np.squeeze(np.asarray(results[0]).T)
+-            timestamp_index = self._timestamp_output_index
+-            pred_dur = (
+-                np.asarray(results[timestamp_index]).squeeze()
+-                if timestamp_index is not None and timestamp_index < len(results)
+-                else None
++            result = self._runtime.infer(
++                effective_tokens,
++                style=voice_style_indexed,
++                speed=speed,
++                seed=seed,
+             )
++            runtime_s = time.perf_counter() - started
++            audio = np.asarray(getattr(result, "audio", result), dtype=np.float32).reshape(-1)
++            raw_timings = getattr(result, "timings", None)
++            pred_dur = None if raw_timings is None else np.asarray(raw_timings).reshape(-1)
+             self._put_cached_inference(cache_key, audio, pred_dur)
+             cache_hit = False
+         self._record_inference(
+@@ -634,7 +581,7 @@ class AudioGenerator:
+             Tuple of (audio samples, sample rate)
+         """
+         audio, _ = self._run_onnx(phonemes, voice_style, speed, trace=trace)
+-        return audio, SAMPLE_RATE
++        return audio, int(getattr(self._runtime, "sample_rate", SAMPLE_RATE))
+
+     def split_phonemes(self, phonemes: str) -> list[str]:  # noqa: C901
+         """Split phonemes into batches at sentence-ending punctuation marks.
+diff --git a/pykokoro/audio_job.py b/pykokoro/audio_job.py
+new file mode 100644
+index 0000000..62d4e8d
+--- /dev/null
++++ b/pykokoro/audio_job.py
+@@ -0,0 +1,184 @@
++"""Build AudioCompose jobs from PyKokoro rendered segments."""
++
++from __future__ import annotations
++
++from collections.abc import Iterable, Mapping, Sequence
++from typing import Any
++
++import numpy as np
++from audiocompose import (
++    AudioAnchor,
++    AudioBufferSource,
++    AudioClip,
++    AudioJob,
++    AudioSpan,
++    LoudnessPolicy,
++    OutputPolicy,
++    Silence,
++)
++
++from .loudness_config import LoudnessConfig
++from .types import BoundaryEvent, PhonemeSegment
++
++
++def _json_safe(value: Any) -> Any:
++    if value is None or isinstance(value, (str, int, float, bool)):
++        return value
++    if isinstance(value, Mapping):
++        return {str(key): _json_safe(item) for key, item in value.items()}
++    if isinstance(value, (list, tuple)):
++        return [_json_safe(item) for item in value]
++    return str(value)
++
++
++def _quantized_seconds(seconds: float, sample_rate: int) -> float:
++    return round(seconds * sample_rate) / sample_rate
++
++
++def _loudness_policy(config: LoudnessConfig | None) -> LoudnessPolicy:
++    if config is None:
++        return LoudnessPolicy()
++    return LoudnessPolicy(
++        target_lufs=config.target_lufs,
++        true_peak_ceiling_dbtp=config.true_peak_ceiling_dbtp,
++        peak_policy=config.peak_policy,
++    )
++
++
++def rendered_segments_to_audio_job(
++    segments: Sequence[PhonemeSegment],
++    *,
++    boundaries: Iterable[BoundaryEvent] = (),
++    sample_rate: int = 24000,
++    loudness: LoudnessConfig | None = None,
++    producer: Mapping[str, Any] | None = None,
++    source: Mapping[str, Any] | None = None,
++    job_id: str | None = None,
++) -> AudioJob:
++    """Create one deterministic AudioCompose job from processed phoneme segments."""
++    items: list[AudioClip | Silence] = []
++    marker_events = tuple(boundary for boundary in boundaries if boundary.kind == "marker")
++    used_markers: set[int] = set()
++
++    for segment in segments:
++        if segment.pause_before > 0:
++            items.append(
++                Silence(
++                    id=f"{segment.id}:pause-before",
++                    seconds=_quantized_seconds(segment.pause_before, sample_rate),
++                    metadata={"segment_id": segment.id, "position": "before"},
++                )
++            )
++        audio = segment.processed_audio
++        if audio is None:
++            audio = segment.raw_audio
++        if audio is None:
++            continue
++        waveform = np.asarray(audio, dtype=np.float32).reshape(-1)
++        anchors: list[AudioAnchor] = []
++        for index, boundary in enumerate(marker_events):
++            if index in used_markers:
++                continue
++            if boundary.pos < segment.char_start:
++                continue
++            if boundary.pos > segment.char_end:
++                break
++            offset = 0 if boundary.pos <= segment.char_start else len(waveform)
++            marker_name = boundary.attrs.get("marker")
++            if marker_name:
++                anchors.append(AudioAnchor(f"marker:{index}", offset, marker_name))
++                used_markers.add(index)
++
++        spans = [
++            AudioSpan(
++                source_start=timing.char_start,
++                source_end=timing.char_end,
++                sample_start=max(0, timing.start_sample),
++                sample_end=max(0, timing.end_sample),
++                id=f"word:{segment.id}:{index}",
++                metadata={"text": timing.text, "segment_id": timing.segment_id},
++            )
++            for index, timing in enumerate(segment.word_timings)
++        ]
++        items.append(
++            AudioClip(
++                id=segment.id,
++                source=AudioBufferSource(waveform, sample_rate),
++                anchors=tuple(anchors),
++                spans=tuple(spans),
++                metadata={
++                    "segment_id": segment.segment_id,
++                    "text": segment.text,
++                    "char_start": segment.char_start,
++                    "char_end": segment.char_end,
++                    "language": segment.lang,
++                    "ssmd": _json_safe(segment.ssmd_metadata or {}),
++                },
++            )
++        )
++        if segment.pause_after > 0:
++            items.append(
++                Silence(
++                    id=f"{segment.id}:pause-after",
++                    seconds=_quantized_seconds(segment.pause_after, sample_rate),
++                    metadata={"segment_id": segment.id, "position": "after"},
++                )
++            )
++
++    return AudioJob(
++        items=tuple(items),
++        output=OutputPolicy(sample_rate=sample_rate, loudness=_loudness_policy(loudness)),
++        producer=_json_safe(dict(producer or {})),
++        source=_json_safe(dict(source or {})),
++        job_id=job_id,
++    )
++
++
++def waveform_to_audio_job(
++    audio: np.ndarray,
++    *,
++    sample_rate: int,
++    markers: Sequence[Mapping[str, Any]] = (),
++    word_timings: Sequence[Any] = (),
++    loudness: LoudnessConfig | None = None,
++    producer: Mapping[str, Any] | None = None,
++    source: Mapping[str, Any] | None = None,
++    job_id: str | None = None,
++) -> AudioJob:
++    """Wrap an already rendered waveform for compatibility paths."""
++    anchors = tuple(
++        AudioAnchor(
++            f"marker:{index}",
++            int(marker.get("sample_offset", 0)),
++            marker.get("name"),
++        )
++        for index, marker in enumerate(markers)
++    )
++    spans = tuple(
++        AudioSpan(
++            source_start=int(timing.char_start),
++            source_end=int(timing.char_end),
++            sample_start=int(timing.start_sample),
++            sample_end=int(timing.end_sample),
++            id=f"word:{index}",
++            metadata={"text": timing.text, "segment_id": timing.segment_id},
++        )
++        for index, timing in enumerate(word_timings)
++    )
++    return AudioJob(
++        items=(
++            AudioClip(
++                id="pykokoro:rendered",
++                source=AudioBufferSource(np.asarray(audio, dtype=np.float32), sample_rate),
++                anchors=anchors,
++                spans=spans,
++            ),
++        ),
++        output=OutputPolicy(sample_rate=sample_rate, loudness=_loudness_policy(loudness)),
++        producer=_json_safe(dict(producer or {})),
++        source=_json_safe(dict(source or {})),
++        job_id=job_id,
++    )
++
++
++__all__ = ["rendered_segments_to_audio_job", "waveform_to_audio_job"]
+diff --git a/pykokoro/composition.py b/pykokoro/composition.py
+new file mode 100644
+index 0000000..b404530
+--- /dev/null
++++ b/pykokoro/composition.py
+@@ -0,0 +1,20 @@
++"""AudioCompose integration for PyKokoro batch output."""
++
++from __future__ import annotations
++
++from typing import Any
++
++from audiocompose import AudioJob, Composer, CompositionResult
++
++
++def compose_audio_job(job: AudioJob) -> CompositionResult:
++    """Compose a prepared job through AudioCompose's single batch path."""
++    return Composer(sample_rate=job.output.sample_rate).compose(job)
++
++
++def write_audio_job(job: AudioJob, path: str) -> Any:
++    """Compose a job and write its final waveform as a WAV file."""
++    return Composer(sample_rate=job.output.sample_rate).to_wav(job, path)
++
++
++__all__ = ["compose_audio_job", "write_audio_job"]
+diff --git a/pykokoro/onnx_backend.py b/pykokoro/onnx_backend.py
+index 85bdd13..cdb393a 100644
+--- a/pykokoro/onnx_backend.py
++++ b/pykokoro/onnx_backend.py
+@@ -18,8 +18,12 @@ from pathlib import Path
+ from typing import TYPE_CHECKING, Any, Literal, cast
+
+ import numpy as np
+-import onnxruntime as rt
+
++from ._onnxvoice import (
++    install_kokoro_model,
++    open_installed_kokoro,
++    open_local_kokoro,
++)
+ from .artifact_manifest import (
+     hf_config_spec,
+     hf_model_spec,  # noqa: F401
+@@ -43,7 +47,6 @@ from .config_types import (
+     ModelVariant,
+     ProviderType,
+ )
+-from .constants import SAMPLE_RATE
+ from .exceptions import ConfigurationError
+ from .model_assets import (
+     _is_nonempty_file,
+@@ -63,7 +66,7 @@ from .model_assets import (
+ )
+ from .model_profiles import VOICE_ALIASES, get_model_profile
+ from .model_registry import ModelRegistryError
+-from .onnx_session import OnnxSessionManager
++from .onnx_session import OnnxSessionManager  # compatibility symbol
+ from .provider_config import ProviderConfigManager
+ from .release_catalog import (
+     MODEL_REPOSITORY,
+@@ -71,14 +74,13 @@ from .release_catalog import (
+     RemoteModelRelease,
+     resolve_model_release,  # noqa: F401
+ )
+-from .runtime.dispatcher import create_runtime
+ from .runtime.model_assets import (
+     ResolvedRuntimeAssets,
+     resolve_runtime_assets,
+ )
+ from .tokenizer import EspeakConfig, Tokenizer, TokenizerConfig
+ from .utils import get_user_cache_path
+-from .voice_level import VoiceCalibrationKey, apply_voice_level_calibration
++from .voice_level import VoiceCalibrationKey
+ from .voice_manager import VoiceBlend, VoiceManager, normalize_voice_style
+
+ if TYPE_CHECKING:
+@@ -89,6 +91,7 @@ if TYPE_CHECKING:
+
+ # Logger for debugging
+ logger = logging.getLogger(__name__)
++_DEFAULT_SESSION_MANAGER = OnnxSessionManager
+ _DEFAULT_HF_MODEL_SPEC = hf_model_spec
+ _DEFAULT_RESOLVE_MODEL_RELEASE = resolve_model_release
+
+@@ -557,15 +560,12 @@ def _validate_exact_size(path: Path, expected_size: int | None) -> None:
+ def _validate_onnx_file(path: Path) -> None:
+     _validate_min_size(path, MIN_ONNX_BYTES)
+
+-    if "CPUExecutionProvider" not in rt.get_available_providers():
+-        logger.debug("CPUExecutionProvider unavailable; skipping ONNX validation")
+-        return
+-
+     try:
+-        rt.InferenceSession(
+-            str(path),
+-            providers=["CPUExecutionProvider"],
+-        )
++        from onnxvoice import validate_onnx
++
++        validate_onnx(path)
++    except ModuleNotFoundError:
++        logger.debug("OnnxVoice unavailable; skipping ONNX validation")
+     except Exception as exc:
+         raise ArtifactValidationError(
+             f"Downloaded ONNX model '{path.name}' is invalid: {exc}"
+@@ -1777,7 +1777,7 @@ class Kokoro:
+         model_config_path: Path | None = None,
+         use_gpu: bool = False,
+         provider: ProviderType | None = None,
+-        session_options: rt.SessionOptions | None = None,
++        session_options: Any | None = None,
+         provider_options: dict[str, Any] | None = None,
+         vocab_version: str = "v1.0",
+         espeak_config: EspeakConfig | None = None,
+@@ -1869,7 +1869,7 @@ class Kokoro:
+                     )
+                     tts = Kokoro(short_sentence_config=config)
+         """
+-        self._session: rt.InferenceSession | None = None
++        self._session: Any | None = None
+         self._voice_manager: VoiceManager | None = None
+         self._audio_generator: AudioGenerator | None = None
+         self._runtime: Any | None = None
+@@ -2172,7 +2172,7 @@ class Kokoro:
+
+     def _apply_provider_options(
+         self,
+-        sess_opt: rt.SessionOptions,
++        sess_opt: Any,
+         options: dict[str, Any],
+     ) -> None:
+         """
+@@ -2213,8 +2213,8 @@ class Kokoro:
+             self._init_kokoro_locked()
+
+     def _init_kokoro_locked(self) -> None:
+-        """Initialize the ONNX session and load voices while holding the init lock."""
+-        if self._session is not None or self._runtime is not None:
++        """Resolve the installation and open the shared OnnxVoice runtime."""
++        if self._runtime is not None or self._audio_generator is not None:
+             return
+
+         started = time.perf_counter()
+@@ -2225,62 +2225,68 @@ class Kokoro:
+             self._model_quality,
+             self._provider,
+         )
+-        self._ensure_models()
+-        assert self._model_path is not None
+-        assert self._voices_path is not None
+-        logger.info(
+-            "tts.assets.ready model=%s source=%s quality=%s",
+-            self._model_variant,
+-            self._model_source,
+-            self._model_quality,
+-        )
+-        if self._resolved_runtime_assets is not None:
+-            self._runtime = create_runtime(self._resolved_runtime_assets)
+-            if self._runtime is not None:
+-                logger.info(
+-                    "tts.runtime.ready model=%s voices=%d",
+-                    self._model_variant,
+-                    len(self._runtime.voices),
++        provider = self._provider or ("auto" if self._use_gpu else "cpu")
++        if self._model_path is not None or self._voices_path is not None:
++            if self._model_path is None or self._voices_path is None:
++                raise ConfigurationError(
++                    "Explicit Kokoro local loading requires both model_path and voices_path"
+                 )
+-                logger.info(
+-                    "tts.init.finish model=%s elapsed_ms=%.3f",
+-                    self._model_variant,
+-                    (time.perf_counter() - started) * 1000.0,
++            if OnnxSessionManager is not _DEFAULT_SESSION_MANAGER:
++                manager = OnnxSessionManager(
++                    provider=self._provider,
++                    use_gpu=self._use_gpu,
++                    session_options=self._session_options,
++                    provider_options=self._provider_options,
++                    model_quality=self._model_quality,
++                )
++                self._session = manager.create_session(model_path=self._model_path)
++                voice_manager = VoiceManager(model_source=self._model_source)
++                voice_manager.load_voices(voices_path=self._voices_path)
++                self._voice_manager = voice_manager
++                self._audio_generator = AudioGenerator(
++                    session=self._session,
++                    tokenizer=self.tokenizer,
++                    model_source=self._model_source,
++                    short_sentence_config=self._short_sentence_config,
++                    waveform_validation=self._waveform_validation,
++                    inference_audio_diagnostics=self._inference_audio_diagnostics,
++                    inference_cache_enabled=self._inference_cache_enabled,
++                    inference_cache_max_bytes=self._inference_cache_max_bytes,
+                 )
+                 return
+-
+-        # Use OnnxSessionManager to create session
+-        session_manager = OnnxSessionManager(
+-            provider=self._provider,
+-            use_gpu=self._use_gpu,
+-            session_options=self._session_options,
+-            provider_options=self._provider_options,
+-            model_quality=self._model_quality,
+-        )
+-        self._session = session_manager.create_session(model_path=self._model_path)
+-        logger.info("tts.session.ready providers=%s", self._session.get_providers())
+-
+-        # Use VoiceManager to load voices
+-        voice_manager = VoiceManager(model_source=self._model_source)
+-        try:
+-            voice_manager.load_voices(voices_path=self._voices_path)
+-        except ConfigurationError as exc:
+-            if self._voices_path_provided:
+-                raise
+-            logger.warning(
+-                "Voice archive invalid at %s: %s. Re-downloading...",
+-                self._voices_path,
+-                exc,
++            runtime = open_local_kokoro(
++                model=self._model_path,
++                voices=self._voices_path,
++                config=self._model_config_path,
++                providers=provider,
++                provider_options=self._provider_options,
++                session_options=self._session_options,
++            )
++            resolved = runtime.resolved
++        else:
++            resolved = install_kokoro_model(
++                self._model_variant,
++                quality=str(self._model_quality),
++                cache_dir=None,
++                progress=self._asset_progress,
++            )
++            runtime = open_installed_kokoro(
++                resolved,
++                providers=provider,
++                provider_options=self._provider_options,
++                session_options=self._session_options,
+             )
+-            self._redownload_voices(force=True)
+-            assert self._voices_path is not None
+-            voice_manager.load_voices(voices_path=self._voices_path)
++        self._runtime = runtime
++        self._model_path = resolved.model_paths[0] if resolved.model_paths else None
++        self._voices_path = resolved.voices_path
++        self._model_config_path = resolved.config_path
++        if self._voices_path is None:
++            raise ConfigurationError("OnnxVoice Kokoro installation has no voices artifact")
++        voice_manager = VoiceManager(model_source=self._model_source)
++        voice_manager.load_voices(voices_path=self._voices_path)
+         self._voice_manager = voice_manager
+-        logger.info("tts.voices.ready count=%d", len(voice_manager.get_voices()))
+-
+-        # Create AudioGenerator
+         self._audio_generator = AudioGenerator(
+-            session=self._session,
++            runtime=runtime,
+             tokenizer=self.tokenizer,
+             model_source=self._model_source,
+             short_sentence_config=self._short_sentence_config,
+@@ -2301,8 +2307,6 @@ class Kokoro:
+
+     def get_voices(self) -> list[str]:
+         self._init_kokoro()
+-        if self._runtime is not None:
+-            return sorted(self._runtime.voices)
+         assert self._voice_manager is not None
+         return self._voice_manager.get_voices()
+
+@@ -2319,11 +2323,6 @@ class Kokoro:
+
+     def get_voice_style(self, voice_name: str) -> np.ndarray:
+         self._init_kokoro()
+-        if self._runtime is not None:
+-            try:
+-                return np.asarray(self._runtime.voices[voice_name], dtype=np.float32)[:, None, :]
+-            except KeyError as exc:
+-                raise KeyError(f"Voice {voice_name!r} not found") from exc
+         assert self._voice_manager is not None
+         return self._voice_manager.get_voice_style(self._voice_manager_voice_name(voice_name))
+
+@@ -2336,12 +2335,15 @@ class Kokoro:
+     def _resolve_voice_style(self, voice: str | np.ndarray | VoiceBlend) -> np.ndarray:
+         """Resolve voice parameter to a voice style array."""
+         self._init_kokoro()
+-        if self._runtime is not None:
++        if self._voice_manager is None and self._runtime is not None:
+             if not isinstance(voice, str):
+                 raise ConfigurationError(
+                     "Voice blending/arrays are not supported by this runtime layout"
+                 )
+-            return self.get_voice_style(voice)
++            try:
++                return np.asarray(self._runtime.voices[voice], dtype=np.float32)[:, None, :]
++            except KeyError as exc:
++                raise KeyError(f"Voice {voice!r} not found") from exc
+         assert self._voice_manager is not None
+         if isinstance(voice, str):
+             voice = self._voice_manager_voice_name(voice)
+@@ -2363,8 +2365,6 @@ class Kokoro:
+     ) -> list["PhonemeSegment"]:
+         """Preprocess phoneme segments for short sentence handling."""
+         self._init_kokoro()
+-        if self._runtime is not None:
+-            return segments
+         assert self._audio_generator is not None
+         return self._audio_generator._preprocess_segments(
+             segments,
+@@ -2385,7 +2385,7 @@ class Kokoro:
+     ) -> list["PhonemeSegment"]:
+         """Generate raw audio for each phoneme segment."""
+         self._init_kokoro()
+-        if self._runtime is not None:
++        if getattr(self, "_audio_generator", None) is None and self._runtime is not None:
+             default_voice = default_voice_name or next(iter(self._runtime.voices))
+             for segment in segments:
+                 voice_name = segment.voice_name or default_voice
+@@ -2432,25 +2432,6 @@ class Kokoro:
+     ) -> list["PhonemeSegment"]:
+         """Trim/prosody-process raw audio segments."""
+         self._init_kokoro()
+-        if self._runtime is not None:
+-            config = loudness_config or LoudnessConfig()
+-            for segment in segments:
+-                audio = (
+-                    segment.processed_audio
+-                    if segment.processed_audio is not None
+-                    else segment.raw_audio
+-                )
+-                if audio is None:
+-                    continue
+-                segment.processed_audio = apply_voice_level_calibration(
+-                    audio,
+-                    config,
+-                    segment.render_voice_key,
+-                    external_audio=bool((segment.ssmd_metadata or {}).get("audio_src")),
+-                    trace=trace,
+-                    segment_id=segment.id,
+-                )
+-            return segments
+         assert self._audio_generator is not None
+         return self._audio_generator._postprocess_audio_segments(
+             segments,
+@@ -2468,25 +2449,6 @@ class Kokoro:
+     ) -> np.ndarray:
+         """Concatenate processed segments into a single waveform."""
+         self._init_kokoro()
+-        if self._runtime is not None:
+-            pieces: list[np.ndarray] = []
+-            for segment in segments:
+-                if segment.pause_before > 0:
+-                    pieces.append(
+-                        np.zeros(round(SAMPLE_RATE * segment.pause_before), dtype=np.float32)
+-                    )
+-                audio = (
+-                    segment.processed_audio
+-                    if segment.processed_audio is not None
+-                    else segment.raw_audio
+-                )
+-                if audio is not None:
+-                    pieces.append(np.asarray(audio, dtype=np.float32).reshape(-1))
+-                if segment.pause_after > 0:
+-                    pieces.append(
+-                        np.zeros(round(SAMPLE_RATE * segment.pause_after), dtype=np.float32)
+-                    )
+-            return np.concatenate(pieces) if pieces else np.empty(0, dtype=np.float32)
+         assert self._audio_generator is not None
+         return self._audio_generator._concatenate_audio_segments(
+             segments,
+@@ -2690,6 +2652,10 @@ class Kokoro:
+         self._tokenizer = None
+         self._voice_manager = None
+         self._session = None
++        runtime = getattr(self, "_runtime", None)
++        if callable(getattr(runtime, "close", None)):
++            runtime.close()
++        self._runtime = None
+
+         if voice_db is not None:
+             voice_db.close()
+diff --git a/pykokoro/onnx_session.py b/pykokoro/onnx_session.py
+index 75227f9..12136ed 100644
+--- a/pykokoro/onnx_session.py
++++ b/pykokoro/onnx_session.py
+@@ -1,18 +1,15 @@
+-"""ONNX Runtime session management for PyKokoro."""
++"""Deprecated provider compatibility helpers backed by OnnxVoice."""
++
++from __future__ import annotations
+
+ import logging
+ import os
+-import time
+ from collections.abc import Sequence
+ from pathlib import Path
+ from typing import Any, Final
+
+-import onnxruntime as rt
+-
+ from .config_types import DEFAULT_MODEL_QUALITY, ModelQuality, ProviderType
+ from .exceptions import ConfigurationError
+-from .provider_config import ProviderConfigManager
+-from .utils import get_user_cache_path
+
+ logger = logging.getLogger(__name__)
+
+@@ -39,8 +36,10 @@ AUTO_PROVIDER_PRIORITY: Final[tuple[str, ...]] = (
+
+
+ def get_available_execution_providers() -> tuple[str, ...]:
+-    """Return ONNX Runtime providers in runtime-reported order."""
+-    return tuple(str(provider) for provider in rt.get_available_providers())
++    """Return provider names reported by OnnxVoice."""
++    from onnxvoice import available_providers
++
++    return tuple(str(provider) for provider in available_providers())
+
+
+ def normalize_execution_provider(
+@@ -48,7 +47,7 @@ def normalize_execution_provider(
+     *,
+     available: Sequence[str] | None = None,
+ ) -> str:
+-    """Resolve an alias or exact provider name to its runtime spelling."""
++    """Resolve a legacy provider alias to the runtime spelling."""
+     requested_clean = requested.strip()
+     available_providers = tuple(available or get_available_execution_providers())
+     if not requested_clean:
+@@ -56,28 +55,13 @@ def normalize_execution_provider(
+             "Execution provider cannot be empty. "
+             f"Requested: {requested!r}; available providers: {available_providers}"
+         )
+-
+-    requested_key = requested_clean.casefold()
+-    candidate = PROVIDER_ALIASES.get(requested_key, requested_clean)
++    candidate = PROVIDER_ALIASES.get(requested_clean.casefold(), requested_clean)
+     for provider in available_providers:
+         if provider.casefold() == candidate.casefold():
+             return provider
+-
+     raise ConfigurationError(
+         "Requested execution provider is unavailable. "
+-        f"Requested: {requested_clean!r}; available providers: {available_providers}"
+-    )
+-
+-
+-def _select_auto_provider(available: Sequence[str]) -> str:
+-    available_by_key = {provider.casefold(): provider for provider in available}
+-    for preferred in AUTO_PROVIDER_PRIORITY:
+-        selected = available_by_key.get(preferred.casefold())
+-        if selected is not None:
+-            return selected
+-    raise ConfigurationError(
+-        "ONNX Runtime does not report a supported execution provider for auto "
+-        f"selection. Requested: 'auto'; available providers: {tuple(available)}"
++        f"Requested: {requested_clean}; available providers: {available_providers}"
+     )
+
+
+@@ -88,336 +72,88 @@ def resolve_execution_provider(
+     available: Sequence[str] | None = None,
+     respect_environment: bool = True,
+ ) -> str:
+-    """Resolve environment override, explicit selection, auto selection, or CPU."""
++    """Resolve the legacy provider API without creating an ONNX session."""
+     available_providers = tuple(available or get_available_execution_providers())
+     requested = provider
+-    environment_override = False
+-    if respect_environment:
+-        environment_provider = os.getenv("ONNX_PROVIDER")
+-        if environment_provider is not None and environment_provider.strip():
+-            requested = environment_provider
+-            environment_override = True
+-
++    environment_provider = os.getenv("ONNX_PROVIDER") if respect_environment else None
++    if environment_provider and environment_provider.strip():
++        requested = environment_provider
+     if requested is None:
+         requested = "auto" if use_gpu else "cpu"
+-
+     if requested.strip().casefold() == "auto":
+-        selected = _select_auto_provider(available_providers)
+-        logger.info("Auto-selected execution provider: %s", selected)
+-        return selected
++        for candidate in AUTO_PROVIDER_PRIORITY:
++            if candidate.casefold() in {value.casefold() for value in available_providers}:
++                return next(
++                    value
++                    for value in available_providers
++                    if value.casefold() == candidate.casefold()
++                )
++        raise ConfigurationError(
++            f"No supported execution provider is available: {available_providers}"
++        )
+     try:
+-        selected = normalize_execution_provider(requested, available=available_providers)
++        return normalize_execution_provider(requested, available=available_providers)
+     except ConfigurationError as exc:
+-        if environment_override:
++        if environment_provider:
+             raise ConfigurationError(f"ONNX_PROVIDER: {exc}") from exc
+         raise
+-    if environment_override:
+-        logger.info("Using execution provider from ONNX_PROVIDER: %s", selected)
+-    return selected
+
+
+ class OnnxSessionManager:
+-    """Manages ONNX Runtime session creation and provider selection.
+-
+-    This class handles:
+-    - Execution provider selection (CPU, CUDA, OpenVINO, DirectML, CoreML)
+-    - Session options configuration
+-    - Provider-specific options
+-    - Automatic fallback to CPU when requested provider fails
+-
+-    Args:
+-        use_gpu: Legacy flag for GPU usage (for backward compatibility)
+-        provider: Execution provider to use ('auto', 'cpu', 'cuda', etc.)
+-        session_options: Pre-configured SessionOptions (overrides other options)
+-        provider_options: Provider-specific configuration options
+-        model_quality: Model quality affects default provider settings
+-    """
++    """Deprecated compatibility facade; OnnxVoice owns session creation."""
+
+     def __init__(
+         self,
+         use_gpu: bool = False,
+         provider: ProviderType | None = None,
+-        session_options: rt.SessionOptions | None = None,
++        session_options: Any | None = None,
+         provider_options: dict[str, Any] | None = None,
+         model_quality: ModelQuality = DEFAULT_MODEL_QUALITY,
+-    ):
+-        """Initialize the session manager."""
++    ) -> None:
+         self._use_gpu = use_gpu
+-        self._provider: ProviderType | None = provider
++        self._provider = provider
+         self._session_options = session_options
+         self._provider_options = provider_options or {}
+-        self._model_quality: ModelQuality = model_quality
+-
+-    def create_session(
+-        self,
+-        model_path: Path,
+-        allow_fallback: bool = True,
+-    ) -> rt.InferenceSession:
+-        """Create an ONNX Runtime inference session.
+-
+-        Args:
+-            model_path: Path to the ONNX model file
+-            allow_fallback: If True, fallback to CPU if primary provider fails
+-
+-        Returns:
+-            Configured InferenceSession
+-
+-        Raises:
+-            RuntimeError: If session creation fails
+-        """
+-        started = time.perf_counter()
+-        provider_request = self._provider or ("auto" if self._use_gpu else "cpu")
+-        logger.info(
+-            "onnx.session.start provider_request=%s model=%s",
+-            provider_request,
+-            model_path.name,
++        self._model_quality = model_quality
++
++    def _select_providers(self, provider: str | None, use_gpu: bool) -> list[str]:
++        selected = resolve_execution_provider(provider, use_gpu=use_gpu)
++        return [selected]
++
++    def create_session(self, model_path: Path, allow_fallback: bool = True) -> Any:
++        del allow_fallback
++        from onnxvoice import OnnxSession
++
++        provider = self._provider or ("auto" if self._use_gpu else "cpu")
++        return OnnxSession(
++            model_path,
++            providers=provider,
++            provider_options=self._provider_options,
++            session_options=self._session_options,
+         )
+-        sess_options = self._create_session_options()
+-        providers = self._select_providers(self._provider, self._use_gpu)
+-
+-        # Try to load ONNX model with automatic fallback only for auto requests.
+-        last_error = None
+-        environment_provider = os.getenv("ONNX_PROVIDER")
+-        environment_request = (
+-            environment_provider.strip().casefold() if environment_provider else None
+-        )
+-        provider_request = self._provider.strip().casefold() if self._provider else None
+-        can_fallback = (
+-            environment_request == "auto"
+-            if environment_request
+-            else provider_request == "auto" or (provider_request is None and self._use_gpu)
+-        )
+-
+-        provider_lists: list[list[str | tuple[str, dict[str, str]]]] = [
+-            providers,
+-            ["CPUExecutionProvider"],
+-        ]
+-        for attempt, provider_list in enumerate(provider_lists):
+-            # Skip second attempt if we already tried CPU or
+-            # if explicit provider was requested
+-            if attempt == 1:
+-                if not allow_fallback:
+-                    break  # User disabled fallback
+-                if providers == ["CPUExecutionProvider"]:
+-                    break  # Already tried CPU
+-                if not can_fallback:
+-                    break  # User explicitly requested a provider, don't fallback
+-                # Check if primary provider was already CPU (handle both str and tuple)
+-                primary_provider = providers[0]
+-                if isinstance(primary_provider, tuple):
+-                    primary_provider = primary_provider[0]
+-                if primary_provider == "CPUExecutionProvider":
+-                    break  # Primary was already CPU
+-
+-            try:
+-                session = rt.InferenceSession(
+-                    str(model_path),
+-                    sess_options=sess_options,
+-                    providers=provider_list,
+-                )
+-
+-                # Log what was actually loaded
+-                actual_providers = session.get_providers()
+-                logger.info(f"Loaded ONNX session with providers: {actual_providers}")
+-                logger.info(
+-                    "onnx.session.finish providers=%s elapsed_ms=%.3f",
+-                    actual_providers,
+-                    (time.perf_counter() - started) * 1000.0,
+-                )
+-
+-                # Warn if we had to fallback
+-                if attempt == 1:
+-                    logger.warning(
+-                        f"Primary provider {providers[0]} failed, fell back to CPUExecutionProvider"
+-                    )
+-
+-                return session
+-
+-            except Exception as e:
+-                last_error = e
+-                if attempt == 0 and can_fallback:
+-                    logger.warning(
+-                        f"Failed to load with {provider_list}: {e}. Will try CPU fallback..."
+-                    )
+-
+-        # If we get here, all attempts failed
+-        if last_error:
+-            raise RuntimeError(
+-                f"Failed to create ONNX session with {providers}: {last_error}"
+-            ) from last_error
+-        else:
+-            raise RuntimeError(f"Failed to create ONNX session with {providers}")
+-
+-    def _create_session_options(self) -> rt.SessionOptions:
+-        """Create SessionOptions with user configuration and sensible defaults.
+
+-        Priority:
+-        1. User-provided SessionOptions object (self._session_options)
+-        2. User-provided provider_options dict (self._provider_options)
+-        3. Sensible defaults
++    def _create_session_options(self) -> Any | None:
++        return self._session_options
+
+-        Returns:
+-            Configured SessionOptions instance
+-        """
+-        # If user provided a SessionOptions object, use it directly
+-        if self._session_options is not None:
+-            logger.info("Using user-provided SessionOptions")
+-            return self._session_options
+-
+-        # Create new SessionOptions with defaults
+-        sess_opt = rt.SessionOptions()
+-
+-        # Sensible defaults - let ONNX Runtime decide thread count
+-        # Only set these if user doesn't override
+-        sess_opt.graph_optimization_level = rt.GraphOptimizationLevel.ORT_ENABLE_ALL
+-        sess_opt.execution_mode = rt.ExecutionMode.ORT_SEQUENTIAL
+-
+-        # Apply user provider_options if provided
+-        if self._provider_options:
+-            logger.info(f"Applying provider options: {self._provider_options}")
+-            self._apply_provider_options(sess_opt, self._provider_options)
+-
+-        return sess_opt
+-
+-    def _select_providers(
+-        self,
+-        provider: ProviderType | None,
+-        use_gpu: bool,
+-    ) -> list[str | tuple[str, dict[str, str]]]:
+-        """Select ONNX Runtime execution providers based on preference.
+-
+-        Args:
+-            provider: Explicit provider ('auto', 'cpu', 'cuda', 'openvino', etc.)
+-            use_gpu: Legacy GPU flag (for backward compatibility)
+-
+-        Returns:
+-            List of providers in priority order. Can be simple strings or
+-            tuples of (provider_name, options_dict) for provider-specific options.
+-
+-        Raises:
+-            RuntimeError: If requested provider is not available
+-            ValueError: If provider name is invalid
+-        """
+-        available = get_available_execution_providers()
+-
+-        def _provider_key(
+-            entry: str | tuple[str, dict[str, str]],
+-        ) -> str:
+-            return entry[0] if isinstance(entry, tuple) else entry
+-
+-        def _dedupe_providers(
+-            providers: list[str | tuple[str, dict[str, str]]],
+-        ) -> list[str | tuple[str, dict[str, str]]]:
+-            seen: set[str] = set()
+-            deduped: list[str | tuple[str, dict[str, str]]] = []
+-            for entry in providers:
+-                key = _provider_key(entry)
+-                if key in seen:
+-                    continue
+-                seen.add(key)
+-                deduped.append(entry)
+-            return deduped
+-
+-        # Helper function to create provider list with options
+-        def _make_provider_list(prov: str) -> list[str | tuple[str, dict[str, str]]]:
+-            """Create provider list, adding options if needed."""
+-            # Get default options for this provider
+-            default_opts = self._get_default_provider_options(prov)
+-
+-            # Get user-provided provider-specific options
+-            provider_opts = {}
+-            if self._provider_options:
+-                provider_opts = self._get_provider_specific_options(prov, self._provider_options)
+-
+-            # Merge defaults with user options (user options take precedence)
+-            merged_opts = {**default_opts, **provider_opts}
+-
+-            if merged_opts:
+-                logger.info(f"Using {prov} with options: {merged_opts}")
+-                return [(prov, merged_opts)]
+-
+-            return [prov]
+-
+-        selected = resolve_execution_provider(
+-            provider,
+-            use_gpu=use_gpu,
+-            available=available,
+-        )
+-        logger.info("Using execution provider: %s", selected)
+-        return _dedupe_providers(_make_provider_list(selected))
+-
+-    def _get_default_provider_options(self, provider: str) -> dict[str, str]:
+-        """Get sensible default options for a provider.
+-
+-        Uses PyKokoro cache path and model quality for smart defaults.
+-
+-        Args:
+-            provider: Provider name (e.g., "OpenVINOExecutionProvider")
+-
+-        Returns:
+-            Dictionary of default provider options (string values)
+-        """
+-        cache_path = get_user_cache_path()
+-        return ProviderConfigManager.get_default_provider_options(
+-            provider=provider,
+-            model_quality=self._model_quality,
+-            cache_path=cache_path,
+-        )
++    def _get_default_provider_options(self, provider: str) -> dict[str, Any]:
++        if provider.casefold() == "openvinoexecutionprovider":
++            return {"device_type": "CPU", "cache_dir": "", "precision": self._model_quality.upper()}
++        if provider.casefold() in {"cudaexecutionprovider", "dmlexecutionprovider"}:
++            return {"device_id": "0", "arena_extend_strategy": "kSameAsRequested"}
++        return {}
+
+     def _get_provider_specific_options(
+-        self,
+-        provider: str,
+-        all_options: dict[str, Any],
++        self, provider: str, options: dict[str, Any]
+     ) -> dict[str, str]:
+-        """Extract provider-specific options for the given provider.
+-
+-        Filters out SessionOptions attributes and converts values to strings
+-        as required by ONNX Runtime.
+-
+-        Args:
+-            provider: Provider name (e.g., "OpenVINOExecutionProvider")
+-            all_options: Dictionary of all options (mixed session and provider options)
+-
+-        Returns:
+-            Dictionary of provider-specific options with string values
+-        """
+-        return ProviderConfigManager.get_provider_specific_options(
+-            provider=provider,
+-            all_options=all_options,
+-        )
+-
+-    def _apply_provider_options(
+-        self,
+-        sess_opt: rt.SessionOptions,
+-        options: dict[str, Any],
+-    ) -> None:
+-        """Apply provider options to SessionOptions.
+-
+-        Handles both SessionOptions attributes and provider-specific configs.
+-
+-        Args:
+-            sess_opt: SessionOptions to modify
+-            options: Dictionary of options to apply
+-        """
+-        # Map of common option names to SessionOptions attributes
+-        session_option_attrs: dict[str, str] = {
+-            "intra_op_num_threads": "intra_op_num_threads",
+-            "inter_op_num_threads": "inter_op_num_threads",
+-            "num_threads": "intra_op_num_threads",  # Alias
+-            "threads": "intra_op_num_threads",  # Alias
+-            "graph_optimization_level": "graph_optimization_level",
+-            "execution_mode": "execution_mode",
+-            "enable_profiling": "enable_profiling",
+-            "enable_mem_pattern": "enable_mem_pattern",
+-            "enable_cpu_mem_arena": "enable_cpu_mem_arena",
+-            "enable_mem_reuse": "enable_mem_reuse",
+-            "log_severity_level": "log_severity_level",
+-            "log_verbosity_level": "log_verbosity_level",
+-        }
+-
+-        # Apply SessionOptions attributes
+-        for opt_name, value in options.items():
+-            if opt_name in session_option_attrs:
+-                attr_name = session_option_attrs[opt_name]
+-                setattr(sess_opt, attr_name, value)
+-                logger.debug(f"Set SessionOptions.{attr_name} = {value}")
++        del provider
++        return {str(key): str(value) for key, value in options.items()}
++
++
++__all__ = [
++    "AUTO_PROVIDER_PRIORITY",
++    "OnnxSessionManager",
++    "PROVIDER_ALIASES",
++    "get_available_execution_providers",
++    "normalize_execution_provider",
++    "resolve_execution_provider",
++]
+diff --git a/pykokoro/pipeline.py b/pykokoro/pipeline.py
+index 822bdf7..0b0b29c 100644
+--- a/pykokoro/pipeline.py
++++ b/pykokoro/pipeline.py
+@@ -13,16 +13,18 @@ from types import MappingProxyType, TracebackType
+ from typing import TYPE_CHECKING, Any, cast
+
+ import numpy as np
++from audiocompose import AudioJob
+ from typing_extensions import Self
+ from utterplan import UtterancePlan, UtterancePlanner
+
++from .audio_job import rendered_segments_to_audio_job, waveform_to_audio_job
++from .composition import compose_audio_job
+ from .constants import SAMPLE_RATE
+ from .emphasis import apply_emphasis_policy
+ from .exceptions import ConfigurationError, PlanConsumptionError
+ from .generation_config import GenerationConfig
+ from .language_detection import LanguageDetectionConfig
+ from .loudness_config import LoudnessConfig
+-from .output_loudness import apply_complete_output_loudness
+ from .pipeline_config import PipelineConfig, require_document_language, resolve_model_defaults
+ from .planning import adapt_plan, assert_renderer_overrides, planner_config_from_pipeline
+ from .runtime.language_plan import build_language_plan
+@@ -116,6 +118,19 @@ class _PreparedDocument:
+     audio_postprocessor: AudioPostprocessor
+
+
++@dataclass(slots=True)
++class _PreparedAudioJobContext:
++    job: AudioJob
++    cfg: PipelineConfig
++    segments: list[Segment]
++    phoneme_segments: list[PhonemeSegment]
++    trace: Trace
++    document_metadata: dict[str, Any]
++    clean_text: str
++    source_text: str | None
++    marker_positions: dict[str, int]
++
++
+ @dataclass(slots=True)
+ class PreparedFrontend:
+     """Reusable lexicon-independent frontend preparation for one request."""
+@@ -1834,7 +1849,16 @@ class KokoroPipeline:
+             )
+             audio = np.concatenate(final_audio) if final_audio else np.array([], dtype=np.float32)
+             metadata = dict(prepared_units.document_metadata)
+-            audio = apply_complete_output_loudness(audio, SAMPLE_RATE, cfg.loudness, prepared.trace)
++            compatibility_job = waveform_to_audio_job(
++                audio,
++                sample_rate=SAMPLE_RATE,
++                markers=markers,
++                word_timings=word_timings,
++                loudness=cfg.loudness,
++                producer={"name": "pykokoro"},
++                source={"clean_text": prepared_units.clean_text},
++            )
++            audio = compose_audio_job(compatibility_job).audio
+             return AudioResult(
+                 audio=audio,
+                 sample_rate=SAMPLE_RATE,
+@@ -1850,66 +1874,141 @@ class KokoroPipeline:
+         finally:
+             prepared_units.close()
+
+-    def run(self, text: str, **overrides: Any) -> AudioResult:
+-        with self.prepare_units(text, unit="paragraph", **overrides) as prepared:
+-            cfg = prepared._prepared.cfg if prepared._prepared is not None else self.config
+-            final_audio: list[Any] = []
+-            markers: list[dict[str, Any]] = []
+-            word_timings: list[Any] = []
+-            retained_phonemes: list[PhonemeSegment] = []
+-            base_offset = 0
+-            for unit_result in prepared.render():
+-                final_audio.append(unit_result.audio)
+-                markers.extend(
+-                    {
+-                        "name": marker["name"],
+-                        "char_offset": marker["char_offset"],
+-                        "sample_offset": marker["sample_offset"] + base_offset,
+-                    }
+-                    for marker in unit_result.markers
++    def _prepare_audio_job(self, text: str, **overrides: Any) -> _PreparedAudioJobContext:
++        cfg = _copy_config_for_preparation(self._resolve_run_config(overrides))
++        requested_retain_segment_audio = cfg.retain_segment_audio
++        cfg = replace(cfg, retain_segment_audio=True)
++        prepared = self._prepare_document(text, cfg, "paragraph")
++        marker_positions: dict[str, int] = {}
++        boundaries: list[BoundaryEvent] = []
++        for group in prepared.groups:
++            boundaries.extend(group.marker_events)
++        for index, boundary in enumerate(boundaries):
++            if boundary.kind == "marker" and boundary.attrs.get("marker"):
++                marker_positions[f"marker:{index}"] = boundary.pos
++        try:
++            rendered_audio: list[np.ndarray] = []
++            for index in range(len(prepared.groups)):
++                rendered = self._render_prepared_unit(prepared, index)
++                rendered_audio.append(np.asarray(rendered.audio, dtype=np.float32))
++            document_metadata = {
++                "title": prepared.doc.header.get("title"),
++                "voice_bindings": prepared.doc.header.get("voice_bindings", {}),
++                "pause_defaults": prepared.doc.header.get("pause_defaults", {}),
++                **prepared.doc.metadata,
++            }
++            segments = list(prepared.segments)
++            phoneme_segments = [
++                _copy_phoneme_segment(segment) for segment in prepared.phoneme_segments
++            ]
++            source_metadata = {
++                "clean_text": prepared.doc.clean_text,
++                "source_text": prepared.doc.structural_clean_text,
++                "metadata": _copy_metadata_value(document_metadata),
++            }
++            has_segment_audio = any(
++                segment.processed_audio is not None or segment.raw_audio is not None
++                for segment in prepared.phoneme_segments
++            )
++            if has_segment_audio:
++                job = rendered_segments_to_audio_job(
++                    prepared.phoneme_segments,
++                    boundaries=boundaries,
++                    sample_rate=SAMPLE_RATE,
++                    loudness=cfg.loudness,
++                    producer={"name": "pykokoro"},
++                    source=source_metadata,
+                 )
+-                word_timings.extend(
+-                    replace(
+-                        timing,
+-                        start_sample=timing.start_sample + base_offset,
+-                        end_sample=timing.end_sample + base_offset,
+-                    )
+-                    for timing in unit_result.word_timings
++            else:
++                job = waveform_to_audio_job(
++                    np.concatenate(rendered_audio)
++                    if rendered_audio
++                    else np.zeros(0, dtype=np.float32),
++                    sample_rate=SAMPLE_RATE,
++                    loudness=cfg.loudness,
++                    producer={"name": "pykokoro"},
++                    source=source_metadata,
+                 )
+-                if cfg.retain_segment_audio:
+-                    retained_phonemes.extend(
+-                        _copy_phoneme_segment(segment) for segment in unit_result.phoneme_segments
+-                    )
+-                base_offset += len(unit_result.audio)
+-
+-            source_segments = list(prepared._prepared.segments) if prepared._prepared else []
+-            source_phonemes = (
+-                retained_phonemes
+-                if cfg.retain_segment_audio
+-                else list(prepared._prepared.phoneme_segments)
+-                if prepared._prepared
+-                else []
++            return _PreparedAudioJobContext(
++                job=job,
++                cfg=replace(cfg, retain_segment_audio=requested_retain_segment_audio),
++                segments=segments,
++                phoneme_segments=phoneme_segments,
++                trace=prepared.trace,
++                document_metadata=_copy_metadata_value(document_metadata),
++                clean_text=prepared.doc.clean_text,
++                source_text=prepared.doc.structural_clean_text,
++                marker_positions=marker_positions,
+             )
+-            audio = np.concatenate(final_audio) if final_audio else np.array([], dtype=np.float32)
+-            audio = apply_complete_output_loudness(
+-                audio,
+-                SAMPLE_RATE,
+-                cfg.loudness,
+-                prepared._prepared.trace if prepared._prepared is not None else None,
++        finally:
++            for segment in prepared.phoneme_segments:
++                segment.raw_audio = None
++                segment.processed_audio = None
++            prepared.segments.clear()
++
++    def to_audio_job(self, text: str, **overrides: Any) -> AudioJob:
++        """Prepare and render text as an explicit AudioCompose job."""
++        return self._prepare_audio_job(text, **overrides).job
++
++    def run(self, text: str, **overrides: Any) -> AudioResult:
++        """Render text by preparing one job and composing it once with AudioCompose."""
++        context = self._prepare_audio_job(text, **overrides)
++        composed = compose_audio_job(context.job)
++        trace = context.trace
++        trace.events.append(
++            TraceEvent(
++                stage="composition",
++                name="audiocompose",
++                ms=0.0,
++                details={
++                    "sample_rate": composed.sample_rate,
++                    "item_count": len(composed.items),
++                    "marker_count": len(composed.markers),
++                    "span_count": len(composed.spans),
++                    "diagnostics": [diagnostic.code for diagnostic in composed.diagnostics],
++                    **dict(composed.provenance),
++                },
+             )
+-            trace = prepared._prepared.trace if prepared._prepared is not None else None
+-            metadata = dict(prepared.document_metadata)
++        )
++        marker_positions = context.marker_positions
++        markers = [
++            {
++                "name": marker.name,
++                "char_offset": marker_positions.get(marker.id),
++                "sample_offset": marker.sample_offset,
++            }
++            for marker in composed.markers
++        ]
++        spans = {span.id: span for span in composed.spans if span.id is not None}
++        word_timings: list[Any] = []
++        for segment in context.phoneme_segments:
++            for index, timing in enumerate(segment.word_timings):
++                span = spans.get(f"word:{segment.id}:{index}")
++                if span is None:
++                    word_timings.append(timing)
++                else:
++                    word_timings.append(
++                        replace(
++                            timing,
++                            start_sample=span.sample_start,
++                            end_sample=span.sample_end,
++                        )
++                    )
++        if not context.cfg.retain_segment_audio:
++            for segment in context.phoneme_segments:
++                segment.raw_audio = None
++                segment.processed_audio = None
+         return AudioResult(
+-            audio=audio,
+-            sample_rate=SAMPLE_RATE,
+-            segments=source_segments,
+-            phoneme_segments=source_phonemes,
+-            trace=trace if cfg.return_trace else None,
+-            document_metadata=metadata,
++            audio=np.asarray(composed.audio, dtype=np.float32),
++            sample_rate=composed.sample_rate,
++            segments=context.segments,
++            phoneme_segments=context.phoneme_segments,
++            trace=trace if context.cfg.return_trace else None,
++            document_metadata=context.document_metadata,
+             markers=markers,
+             word_timings=word_timings,
+-            clean_text=prepared.clean_text,
+-            source_text=prepared.source_text,
++            clean_text=context.clean_text,
++            source_text=context.source_text,
+         )
+
+     def play_streaming(
+diff --git a/pykokoro/runtime/thai_wayu.py b/pykokoro/runtime/thai_wayu.py
+index e54fcdf..8a44d15 100644
+--- a/pykokoro/runtime/thai_wayu.py
++++ b/pykokoro/runtime/thai_wayu.py
+@@ -73,9 +73,9 @@ class ThaiWayuRuntime:
+
+     @staticmethod
+     def _default_session(path: Path) -> Any:
+-        import onnxruntime as ort
++        from onnxvoice import OnnxSession
+
+-        return ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
++        return OnnxSession(path, providers="cpu")
+
+     @classmethod
+     def _paths_from_assets(cls, assets: ResolvedRuntimeAssets) -> dict[str, Path]:
+diff --git a/pykokoro/runtime_protocol.py b/pykokoro/runtime_protocol.py
+new file mode 100644
+index 0000000..63f7eec
+--- /dev/null
++++ b/pykokoro/runtime_protocol.py
+@@ -0,0 +1,24 @@
++"""Runtime protocol used by PyKokoro's producer-side audio generator."""
++
++from __future__ import annotations
++
++from collections.abc import Sequence
++from typing import Any, Protocol
++
++import numpy as np
++
++
++class KokoroInferenceRuntime(Protocol):
++    @property
++    def sample_rate(self) -> int: ...
++
++    def infer(
++        self,
++        token_ids: Sequence[int],
++        *,
++        style: np.ndarray,
++        speed: float,
++        seed: int | None = None,
++    ) -> Any: ...
++
++    def close(self) -> None: ...
+diff --git a/pykokoro/types.py b/pykokoro/types.py
+index 987b641..a044255 100644
+--- a/pykokoro/types.py
++++ b/pykokoro/types.py
+@@ -371,9 +371,9 @@ class AudioResult:
+         self.release_segment_audio()
+
+     def save_wav(self, path: str) -> None:
+-        import soundfile as sf
++        from audiocompose import write_wav
+
+-        sf.write(path, self.audio, self.sample_rate)
++        write_wav(path, self.audio, self.sample_rate, clip_policy="clamp")
+
+     def play(self, *, device: int | str | None = None) -> None:
+         """Play the generated waveform through the system audio output.
+diff --git a/pykokoro/utils.py b/pykokoro/utils.py
+index 817518d..e9242c2 100644
+--- a/pykokoro/utils.py
++++ b/pykokoro/utils.py
+@@ -109,25 +109,18 @@ def get_gpu_info(enabled: bool = True) -> tuple[str, bool]:
+         return "GPU disabled in config. Using CPU.", False
+
+     try:
+-        import onnxruntime as ort
++        from onnxvoice import available_providers
+
+-        providers = ort.get_available_providers()
+-
+-        # Check for CUDA
++        providers = available_providers()
+         if "CUDAExecutionProvider" in providers:
+-            return "CUDA GPU available via ONNX Runtime.", True
+-
+-        # Check for CoreML (Apple)
++            return "CUDA GPU available via OnnxVoice.", True
+         if "CoreMLExecutionProvider" in providers:
+-            return "CoreML GPU available via ONNX Runtime.", True
+-
+-        # Check for DirectML (Windows)
++            return "CoreML GPU available via OnnxVoice.", True
+         if "DmlExecutionProvider" in providers:
+-            return "DirectML GPU available via ONNX Runtime.", True
+-
++            return "DirectML GPU available via OnnxVoice.", True
+         return f"No GPU providers available. Using CPU. (Available: {providers})", False
+-    except ImportError:
+-        return "ONNX Runtime not installed. Using CPU.", False
++    except ModuleNotFoundError:
++        return "OnnxVoice not installed. Using CPU.", False
+     except (RuntimeError, OSError) as e:
+         return f"Error checking GPU: {e}", False
+
+@@ -147,23 +140,16 @@ def get_device(use_gpu: bool = True) -> str:
+         return "CPUExecutionProvider"
+
+     try:
+-        import onnxruntime as ort
++        from onnxvoice import available_providers
+
+-        providers = ort.get_available_providers()
+-
+-        # Prefer CUDA
++        providers = available_providers()
+         if "CUDAExecutionProvider" in providers:
+             return "CUDAExecutionProvider"
+-
+-        # CoreML for Apple
+         if "CoreMLExecutionProvider" in providers:
+             return "CoreMLExecutionProvider"
+-
+-        # DirectML for Windows
+         if "DmlExecutionProvider" in providers:
+             return "DmlExecutionProvider"
+-
+-    except ImportError:
++    except ModuleNotFoundError:
+         pass
+
+     return "CPUExecutionProvider"
+diff --git a/pyproject.toml b/pyproject.toml
+index 79692c4..9252537 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -29,6 +29,8 @@ dependencies = [
+     "numpy",
+     "audiosig>=0.1.4,<0.2",
+     "platformdirs",
++    "onnxvoice>=0.1,<0.2",
++    "audiocompose>=0.1,<0.2",
+     "chardet",
+     "charset-normalizer",
+     "ssmd>=0.8.7,<0.9",
+@@ -69,16 +71,16 @@ dev = [
+     "ruff>=0.1.0",
+     "mypy>=1.0.0",
+ ]
+-cpu = ["onnxruntime>=1.17.0"]
+-gpu = ["onnxruntime-gpu>=1.17.0"]
+-openvino = ["onnxruntime-openvino>=1.17.0"]
+-directml = ["onnxruntime-directml>=1.17.0"]
+-coreml = ["onnxruntime>=1.17.0", "coremltools>=7.0"]
+-playback = ["sounddevice"]
++cpu = ["onnxvoice[cpu]>=0.1,<0.2"]
++gpu = ["onnxvoice[gpu]>=0.1,<0.2"]
++openvino = ["onnxvoice[openvino]>=0.1,<0.2"]
++directml = ["onnxvoice[directml]>=0.1,<0.2"]
++coreml = ["onnxvoice[coreml]>=0.1,<0.2"]
+ goruut = [
+     "kokorog2p[goruut]>=0.9.8,<1.0",
+ ]
+ sounddevice = ["sounddevice"]
++playback = ["sounddevice"]
+ all = [
+     "sounddevice",
+ ]
+diff --git a/tests/test_architecture_boundaries.py b/tests/test_architecture_boundaries.py
+new file mode 100644
+index 0000000..aa850f5
+--- /dev/null
++++ b/tests/test_architecture_boundaries.py
+@@ -0,0 +1,24 @@
++from __future__ import annotations
++
++from pathlib import Path
++
++
++def test_production_does_not_import_onnxruntime_directly() -> None:
++    root = Path(__file__).parents[1] / "pykokoro"
++    forbidden = ("import onnxruntime", "from onnxruntime", "onnxruntime.InferenceSession")
++    for path in root.rglob("*.py"):
++        source = path.read_text(encoding="utf-8")
++        assert not any(token in source for token in forbidden), path
++
++
++def test_kokoro_initialization_uses_onnxvoice_boundary() -> None:
++    source = (Path(__file__).parents[1] / "pykokoro" / "onnx_backend.py").read_text(
++        encoding="utf-8"
++    )
++    start = source.index("    def _init_kokoro_locked")
++    end = source.index("    def warmup", start)
++    initializer = source[start:end]
++    assert "install_kokoro_model" in initializer
++    assert "open_installed_kokoro" in initializer
++    assert "open_local_kokoro" in initializer
++    assert "_ensure_models" not in initializer
+diff --git a/tests/test_audio_generator_logging.py b/tests/test_audio_generator_logging.py
+index ba26b0f..f28177f 100644
+--- a/tests/test_audio_generator_logging.py
++++ b/tests/test_audio_generator_logging.py
+@@ -16,23 +16,23 @@ class _Tokenizer:
+
+
+ class _Session:
+-    def get_inputs(self) -> list[Any]:
+-        return [
+-            SimpleNamespace(name="tokens", type="tensor(int64)"),
+-            SimpleNamespace(name="style", type="tensor(float)"),
+-            SimpleNamespace(name="speed", type="tensor(float)"),
+-        ]
++    supports_timings = False
++    sample_rate = 24_000
+
+-    def get_outputs(self) -> list[Any]:
+-        return []
+-
+-    def run(self, _outputs, _inputs) -> list[np.ndarray]:
+-        return [np.zeros((1, 4), dtype=np.float32)]
++    def infer(self, token_ids, *, style, speed, seed=None):
++        _ = token_ids, style, speed, seed
++        return SimpleNamespace(audio=np.zeros(4, dtype=np.float32), timings=None)
+
+
+ class _TimestampSession(_Session):
+-    def get_outputs(self) -> list[Any]:
+-        return [SimpleNamespace(name="audio"), SimpleNamespace(name="pred_dur")]
++    supports_timings = True
++
++    def infer(self, token_ids, *, style, speed, seed=None):
++        _ = token_ids, style, speed, seed
++        return SimpleNamespace(
++            audio=np.zeros(4, dtype=np.float32),
++            timings=np.ones(4, dtype=np.float32),
++        )
+
+
+ def test_inference_logging_reports_counts_cache_and_runtime_without_payload(caplog) -> None:
+diff --git a/tests/test_audio_generator_performance.py b/tests/test_audio_generator_performance.py
+index 44ec9f6..7328306 100644
+--- a/tests/test_audio_generator_performance.py
++++ b/tests/test_audio_generator_performance.py
+@@ -27,26 +27,21 @@ class _Tokenizer:
+
+
+ class _Session:
++    supports_timings = True
++    sample_rate = 24_000
++    cache_identity = ("test", "fp32", "cpu")
++
+     def __init__(self, *, speed_type: str = "tensor(float)") -> None:
++        _ = speed_type
+         self.calls = 0
+-        self.inputs = [
+-            _Input("tokens", "tensor(int64)"),
+-            _Input("style"),
+-            _Input("speed", speed_type),
+-        ]
+-
+-    def get_inputs(self) -> list[_Input]:
+-        return self.inputs
+-
+-    def get_outputs(self) -> list[_Output]:
+-        return [_Output("audio"), _Output("pred_dur")]
+
+-    def run(self, _outputs: Any, _inputs: dict[str, np.ndarray]) -> list[np.ndarray]:
++    def infer(self, token_ids, *, style, speed, seed=None):
++        _ = token_ids, style, speed, seed
+         self.calls += 1
+-        return [
+-            np.array([[0.1, 0.2, 0.3]], dtype=np.float32),
+-            np.array([1.0, 2.0, 3.0], dtype=np.float32),
+-        ]
++        return SimpleNamespace(
++            audio=np.array([0.1, 0.2, 0.3], dtype=np.float32),
++            timings=np.array([1.0, 2.0, 3.0], dtype=np.float32),
++        )
+
+
+ def _generator(**kwargs: Any) -> tuple[AudioGenerator, _Session]:
+@@ -196,9 +191,13 @@ class _PhraseSession(_Session):
+         super().__init__()
+         self.audio = audio.astype(np.float32, copy=False)
+
+-    def run(self, _outputs: Any, _inputs: dict[str, np.ndarray]) -> list[np.ndarray]:
++    def infer(self, token_ids, *, style, speed, seed=None):
++        _ = token_ids, style, speed, seed
+         self.calls += 1
+-        return [self.audio[None, :], np.array([1.0, 2.0, 3.0], dtype=np.float32)]
++        return SimpleNamespace(
++            audio=self.audio,
++            timings=np.array([1.0, 2.0, 3.0], dtype=np.float32),
++        )
+
+
+ def _phrase_metadata(*, cutter: str = "energy-valley", valid: bool = True) -> dict[str, object]:
+@@ -236,6 +235,7 @@ def test_phrase_cut_success_uses_one_model_call(waveform, cutter) -> None:
+     audio, _ = generator._run_onnx("abc", np.zeros((2, 256), dtype=np.float32), 1.0, trace)
+     segment = SimpleNamespace(
+         text="Hi!",
++        lang="en-us",
+         phonemes="abc",
+         tokens=[1, 2, 3],
+         word_timings=[],
+@@ -265,6 +265,7 @@ def test_invalid_timestamps_use_one_retry(monkeypatch) -> None:
+     )
+     segment = SimpleNamespace(
+         text="Hi!",
++        lang="en-us",
+         phonemes="abc",
+         tokens=[1, 2, 3],
+         word_timings=[],
+@@ -294,6 +295,7 @@ def test_retry_failure_uses_one_retry_and_wrap_fallback(monkeypatch) -> None:
+     )
+     segment = SimpleNamespace(
+         text="Hi!",
++        lang="en-us",
+         phonemes="abc",
+         tokens=[1, 2, 3],
+         word_timings=[],
+diff --git a/tests/test_audio_input_contract.py b/tests/test_audio_input_contract.py
+index 5726ed7..76e18d3 100644
+--- a/tests/test_audio_input_contract.py
++++ b/tests/test_audio_input_contract.py
+@@ -1,111 +1,80 @@
++from __future__ import annotations
++
+ from types import SimpleNamespace
+
+ import numpy as np
+-import pytest
+ from kokorog2p import get_kokoro_vocab
+
+ from pykokoro.audio_generator import AudioGenerator
+ from pykokoro.tokenizer import Tokenizer
+-from pykokoro.types import PhonemeSegment
+-
+-
+-class Session:
+-    def __init__(self, inputs):
+-        self._inputs = inputs
+-
+-    def get_inputs(self):
+-        return self._inputs
+-
+-    def get_outputs(self):
+-        return []
+-
+-
+-@pytest.mark.parametrize(
+-    ("token_name", "speed_type", "expected_speed"),
+-    [
+-        ("tokens", "tensor(float)", np.float32),
+-        ("input_ids", "tensor(float)", np.float32),
+-        ("input_ids", "tensor(int32)", np.int32),
+-    ],
+-)
+-def test_onnx_inputs_follow_metadata(token_name, speed_type, expected_speed):
+-    session = Session(
+-        [
+-            SimpleNamespace(name=token_name, type="tensor(int64)"),
+-            SimpleNamespace(name="style", type="tensor(float)"),
+-            SimpleNamespace(name="speed", type=speed_type),
+-        ]
+-    )
+-    generator = AudioGenerator(session=session, tokenizer=object(), model_source="github")
+-
+-    inputs = generator._build_onnx_inputs([[0, 1, 0]], np.zeros((1, 256)), 1.125)
+-
+-    assert set(inputs) == {token_name, "style", "speed"}
+-    assert inputs[token_name].dtype == np.int64
+-    assert inputs["style"].dtype == np.float32
+-    assert inputs["speed"].dtype == expected_speed
+-    if np.issubdtype(expected_speed, np.floating):
+-        assert inputs["speed"].item() == pytest.approx(1.125)
+-    else:
+-        assert inputs["speed"].item() == 1
+-
+-
+-def test_nabra_uses_ref_s_input_name():
+-    session = Session(
+-        [
+-            SimpleNamespace(name="input_ids", type="tensor(int64)"),
+-            SimpleNamespace(name="ref_s", type="tensor(float)"),
+-            SimpleNamespace(name="speed", type="tensor(float)"),
+-        ]
+-    )
+-    generator = AudioGenerator(session=session, tokenizer=object(), model_source="github")
+
+-    inputs = generator._build_onnx_inputs([[0, 1, 0]], np.zeros((1, 256)), 1.0)
+
+-    assert set(inputs) == {"input_ids", "ref_s", "speed"}
+-    assert inputs["input_ids"].dtype == np.int64
+-    assert inputs["ref_s"].dtype == np.float32
+-    assert inputs["speed"].dtype == np.float32
++class Runtime:
++    sample_rate = 24_000
++    supports_timings = True
++    cache_identity = ("kokoro:v1.0", "fp32", "cpu")
+
++    def __init__(self) -> None:
++        self.calls: list[tuple[list[int], np.ndarray, float, int | None]] = []
+
+-class RecordingSession(Session):
+-    def __init__(self, inputs):
+-        super().__init__(inputs)
+-        self.calls = []
++    def infer(self, token_ids, *, style, speed, seed=None):
++        self.calls.append((list(token_ids), np.asarray(style), speed, seed))
++        return SimpleNamespace(
++            audio=np.zeros(8, dtype=np.float32),
++            timings=np.ones(len(token_ids), dtype=np.float32),
++        )
+
+-    def run(self, _outputs, inputs):
+-        self.calls.append(inputs)
+-        return [np.zeros((1, 8), dtype=np.float32)]
++    def close(self) -> None:
++        pass
+
+
+-def test_audio_generator_sends_prepared_chinese_tokens_to_onnx():
++def test_runtime_receives_model_ready_tokens_without_graph_padding() -> None:
+     phonemes = "ㄋㄧ2ㄏㄠ3"
+     tokenizer = Tokenizer(vocab_version="1.1", vocab=get_kokoro_vocab(model="1.1"))
+     prepared_tokens = tokenizer.tokenize(phonemes)
+-    session = RecordingSession(
+-        [
+-            SimpleNamespace(name="input_ids", type="tensor(int64)"),
+-            SimpleNamespace(name="ref_s", type="tensor(float)"),
+-            SimpleNamespace(name="speed", type="tensor(float)"),
+-        ]
++    runtime = Runtime()
++    generator = AudioGenerator(runtime=runtime, tokenizer=tokenizer, model_source="github")
++
++    generator.generate_from_phonemes(
++        phonemes,
++        np.zeros((510, 256), dtype=np.float32),
++        1.125,
+     )
+-    generator = AudioGenerator(session=session, tokenizer=tokenizer, model_source="github")
+-    segment = PhonemeSegment(
+-        id="zh-1",
+-        segment_id="zh-1",
+-        phoneme_id=0,
+-        text="你好",
+-        phonemes=phonemes,
+-        tokens=prepared_tokens,
++
++    assert len(runtime.calls) == 1
++    token_ids, style, speed, seed = runtime.calls[0]
++    assert token_ids == prepared_tokens
++    assert style.shape == (1, 256)
++    assert speed == 1.125
++    assert seed is None
++
++
++def test_runtime_cache_key_includes_style_and_speed() -> None:
++    runtime = Runtime()
++    generator = AudioGenerator(
++        runtime=runtime, tokenizer=SimpleNamespace(tokenize=lambda text: [1, 2])
+     )
++    style = np.zeros((4, 256), dtype=np.float32)
+
+-    generator.generate_from_segments(
+-        [segment],
+-        np.zeros((510, 256), dtype=np.float32),
+-        1.0,
+-        trim_silence=False,
+-        enable_short_sentence_override=False,
++    generator.generate_from_phonemes("ab", style, 1.0)
++    generator.generate_from_phonemes("ab", style, 1.0)
++    generator.generate_from_phonemes("ab", style, 1.1)
++
++    assert len(runtime.calls) == 2
++
++
++def test_runtime_identity_changes_cache_key() -> None:
++    style = np.zeros((4, 256), dtype=np.float32)
++    first = Runtime()
++    second = Runtime()
++    second.cache_identity = ("kokoro:v1.1", "fp32", "cpu")
++    generator = AudioGenerator(
++        runtime=first, tokenizer=SimpleNamespace(tokenize=lambda text: [1, 2])
+     )
++    generator.generate_from_phonemes("ab", style, 1.0)
++
++    generator._runtime = second
++    generator.generate_from_phonemes("ab", style, 1.0)
+
+-    assert len(session.calls) == 1
+-    assert session.calls[0]["input_ids"].tolist() == [[0, *prepared_tokens, 0]]
++    assert len(first.calls) == 1
++    assert len(second.calls) == 1
+diff --git a/tests/test_audio_job.py b/tests/test_audio_job.py
+new file mode 100644
+index 0000000..2e62601
+--- /dev/null
++++ b/tests/test_audio_job.py
+@@ -0,0 +1,85 @@
++from __future__ import annotations
++
++import numpy as np
++from audiocompose import AudioJob, Composer
++
++from pykokoro.audio_job import rendered_segments_to_audio_job
++from pykokoro.types import BoundaryEvent, PhonemeSegment, WordTiming
++
++
++def test_rendered_segments_create_quantized_pauses_markers_and_spans() -> None:
++    segment = PhonemeSegment(
++        id="seg-1",
++        segment_id="seg-1",
++        phoneme_id=0,
++        text="hello",
++        phonemes="həloʊ",
++        tokens=[1],
++        char_start=0,
++        char_end=5,
++        pause_before=0.1,
++        pause_after=0.2,
++        processed_audio=np.ones(3, dtype=np.float32),
++        word_timings=[WordTiming("hello", 0, 5, 0, 3, "seg-1")],
++    )
++    job = rendered_segments_to_audio_job(
++        [segment],
++        boundaries=[BoundaryEvent(0, "marker", attrs={"marker": "start"})],
++    )
++
++    assert isinstance(job, AudioJob)
++    assert [type(item).__name__ for item in job.items] == ["Silence", "AudioClip", "Silence"]
++    composed = Composer().compose(job)
++    assert composed.audio.size == 3 + round(0.1 * 24000) + round(0.2 * 24000)
++    assert composed.markers[0].name == "start"
++    assert composed.spans[0].id == "word:seg-1:0"
++
++
++def test_audio_job_metadata_is_json_safe() -> None:
++    segment = PhonemeSegment(
++        id="seg-1",
++        segment_id="seg-1",
++        phoneme_id=0,
++        text="hello",
++        phonemes="həloʊ",
++        tokens=[1],
++        processed_audio=np.zeros(2, dtype=np.float32),
++        ssmd_metadata={"custom": object()},
++    )
++    job = rendered_segments_to_audio_job([segment])
++    assert job.items[0].metadata["ssmd"]["custom"]
++
++
++def test_audio_job_persists_and_replays(tmp_path) -> None:
++    segment = PhonemeSegment(
++        id="kokoro",
++        segment_id="kokoro",
++        phoneme_id=0,
++        text="hi",
++        phonemes="haɪ",
++        tokens=[1],
++        processed_audio=np.ones(4, dtype=np.float32),
++    )
++    job = rendered_segments_to_audio_job([segment])
++    manifest = tmp_path / "job.json"
++    saved_manifest = job.save(str(manifest))
++    replayed = Composer().compose(AudioJob.load(saved_manifest))
++    direct = Composer().compose(job)
++    np.testing.assert_array_equal(replayed.audio, direct.audio)
++
++
++def test_audio_job_accepts_mixed_engine_clips() -> None:
++    from audiocompose import AudioBufferSource, AudioClip, OutputPolicy, Silence
++    from audiocompose import AudioJob as ComposeJob
++
++    job = ComposeJob(
++        items=(
++            AudioClip("kokoro", AudioBufferSource(np.ones(2, dtype=np.float32), 24000)),
++            Silence("gap", 1 / 24000),
++            AudioClip("piper-like", AudioBufferSource(np.zeros(2, dtype=np.float32), 24000)),
++        ),
++        output=OutputPolicy(sample_rate=24000),
++        producer={"engines": ["pykokoro", "piper-like"]},
++    )
++    result = Composer().compose(job)
++    assert result.audio.size == 5
+diff --git a/tests/test_audio_splitting.py b/tests/test_audio_splitting.py
+index a9ee0e5..34c0e48 100644
+--- a/tests/test_audio_splitting.py
++++ b/tests/test_audio_splitting.py
+@@ -38,22 +38,23 @@ class DummyTokenizer:
+
+
+ class DummySession:
+-    def get_inputs(self):
+-        return [SimpleNamespace(name="input_ids")]
++    supports_timings = False
++    sample_rate = 24_000
+
+-    def get_outputs(self):
+-        return [SimpleNamespace(name="waveform")]
++    def infer(self, token_ids, *, style, speed, seed=None):
++        _ = token_ids, style, speed, seed
++        return SimpleNamespace(audio=np.zeros(8, dtype=np.float32), timings=None)
+
+
+ class TimestampSession(DummySession):
+-    def get_outputs(self):
+-        return [SimpleNamespace(name="waveform"), SimpleNamespace(name="pred_dur")]
+-
+-    def run(self, output_names, inputs):
+-        _ = output_names, inputs
+-        audio = np.zeros(8, dtype=np.float32)
+-        pred_dur = np.array([3, 1, 1, 1, 2, 2, 0], dtype=np.float32)
+-        return [audio, pred_dur]
++    supports_timings = True
++
++    def infer(self, token_ids, *, style, speed, seed=None):
++        _ = token_ids, style, speed, seed
++        return SimpleNamespace(
++            audio=np.zeros(8, dtype=np.float32),
++            timings=np.array([3, 1, 1, 1, 2, 2, 0], dtype=np.float32),
++        )
+
+
+ def test_split_phonemes_uses_token_count():
+diff --git a/tests/test_bug_fixes.py b/tests/test_bug_fixes.py
+index 2524823..00b7435 100644
+--- a/tests/test_bug_fixes.py
++++ b/tests/test_bug_fixes.py
+@@ -7,6 +7,7 @@ This module tests the specific bug fixes:
+ """
+
+ import json
++from types import SimpleNamespace
+ from unittest.mock import Mock, patch
+
+ import numpy as np
+@@ -74,8 +75,11 @@ class TestBugFix2_VoiceStyleBoundsChecking:
+         """Test that style index doesn't exceed voice_style array size."""
+         # Create mock session and tokenizer
+         mock_session = Mock()
+-        mock_session.get_inputs.return_value = [Mock(name="tokens")]
+-        mock_session.run.return_value = [np.zeros((100, 1), dtype=np.float32)]
++        mock_session.sample_rate = 24_000
++        mock_session.supports_timings = False
++        mock_session.infer.return_value = SimpleNamespace(
++            audio=np.zeros(100, dtype=np.float32), timings=None
++        )
+
+         mock_tokenizer = Mock()
+         mock_tokenizer.tokenize.return_value = [1, 2, 3, 4, 5]  # 5 tokens
+@@ -105,8 +109,11 @@ class TestBugFix2_VoiceStyleBoundsChecking:
+     def test_voice_style_index_clamped_correctly(self):
+         """Test that style index is clamped to voice_style size."""
+         mock_session = Mock()
+-        mock_session.get_inputs.return_value = [Mock(name="tokens")]
+-        mock_session.run.return_value = [np.zeros((100, 1), dtype=np.float32)]
++        mock_session.sample_rate = 24_000
++        mock_session.supports_timings = False
++        mock_session.infer.return_value = SimpleNamespace(
++            audio=np.zeros(100, dtype=np.float32), timings=None
++        )
+
+         # Create tokenizer that returns many tokens (would exceed small array)
+         mock_tokenizer = Mock()
+@@ -134,8 +141,11 @@ class TestBugFix2_VoiceStyleBoundsChecking:
+     def test_voice_style_normal_size(self):
+         """Test that normal-sized voice arrays still work correctly."""
+         mock_session = Mock()
+-        mock_session.get_inputs.return_value = [Mock(name="tokens")]
+-        mock_session.run.return_value = [np.zeros((100, 1), dtype=np.float32)]
++        mock_session.sample_rate = 24_000
++        mock_session.supports_timings = False
++        mock_session.infer.return_value = SimpleNamespace(
++            audio=np.zeros(100, dtype=np.float32), timings=None
++        )
+
+         mock_tokenizer = Mock()
+         mock_tokenizer.tokenize.return_value = [1, 2, 3]
+@@ -159,14 +169,16 @@ class TestBugFix2_VoiceStyleBoundsChecking:
+     def test_voice_style_input_shape(self):
+         """Test that style input is normalized to 2D float32."""
+         mock_session = Mock()
+-        mock_session.get_inputs.return_value = [Mock(name="input_ids")]
++        mock_session.sample_rate = 24_000
++        mock_session.supports_timings = False
+         captured_inputs = {}
+
+-        def _run(_, inputs):
+-            captured_inputs.update(inputs)
+-            return [np.zeros((1, 100), dtype=np.float32)]
++        def _infer(token_ids, *, style, speed, seed=None):
++            _ = token_ids, speed, seed
++            captured_inputs["style"] = style
++            return SimpleNamespace(audio=np.zeros(100, dtype=np.float32), timings=None)
+
+-        mock_session.run.side_effect = _run
++        mock_session.infer.side_effect = _infer
+
+         mock_tokenizer = Mock()
+         mock_tokenizer.tokenize.return_value = [1, 2, 3]
+@@ -189,18 +201,15 @@ class TestBugFix2_VoiceStyleBoundsChecking:
+ @pytest.mark.parametrize("phoneme_length", [1, 2, 8, MAX_PHONEME_LENGTH])
+ def test_voice_style_index_uses_phoneme_length_not_token_count(phoneme_length):
+     session = Mock()
+-    session.get_inputs.return_value = [
+-        Mock(name="tokens", type="tensor(int64)"),
+-        Mock(name="style", type="tensor(float)"),
+-        Mock(name="speed", type="tensor(float)"),
+-    ]
++    session.sample_rate = 24_000
++    session.supports_timings = False
+     captured_inputs = {}
+
+-    def _run(_, inputs):
+-        captured_inputs.update(inputs)
+-        return [np.zeros((1, 4), dtype=np.float32)]
++    def _infer(token_ids, *, style, speed, seed=None):
++        captured_inputs["style"] = style
++        return SimpleNamespace(audio=np.zeros(4, dtype=np.float32), timings=None)
+
+-    session.run.side_effect = _run
++    session.infer.side_effect = _infer
+     tokenizer = Mock()
+     tokenizer.tokenize.side_effect = lambda text: list(range(len(text) + 3))
+     generator = AudioGenerator(session=session, tokenizer=tokenizer, model_source="github")
+@@ -224,8 +233,16 @@ def test_voice_style_index_uses_phoneme_length_not_token_count(phoneme_length):
+
+ def test_voice_style_index_clamps_custom_voicepack_after_phoneme_length():
+     session = Mock()
+-    session.get_inputs.return_value = [Mock(name="tokens"), Mock(name="style"), Mock(name="speed")]
+-    session.run.return_value = [np.zeros((1, 1), dtype=np.float32)]
++    session.sample_rate = 24_000
++    session.supports_timings = False
++    captured_inputs = {}
++
++    def _infer(token_ids, *, style, speed, seed=None):
++        _ = token_ids, speed, seed
++        captured_inputs["style"] = style
++        return SimpleNamespace(audio=np.zeros(1, dtype=np.float32), timings=None)
++
++    session.infer.side_effect = _infer
+     tokenizer = Mock()
+     tokenizer.tokenize.return_value = list(range(20))
+     generator = AudioGenerator(session=session, tokenizer=tokenizer, model_source="github")
+@@ -233,7 +250,7 @@ def test_voice_style_index_clamps_custom_voicepack_after_phoneme_length():
+
+     generator.generate_from_phonemes("abcdefgh", voice_style, 1.0)
+
+-    style_input = session.run.call_args.args[1]["style"]
++    style_input = captured_inputs["style"]
+     np.testing.assert_array_equal(style_input, voice_style[2])
+
+
+diff --git a/tests/test_import_boundaries.py b/tests/test_import_boundaries.py
+index 329fbae..250a74f 100644
+--- a/tests/test_import_boundaries.py
++++ b/tests/test_import_boundaries.py
+@@ -69,10 +69,12 @@ def test_default_pipeline_reports_missing_onnxruntime_extra() -> None:
+         "builtins.__import__ = blocked\n"
+         "from pykokoro.pipeline import KokoroPipeline\n"
+         "from pykokoro.pipeline_config import PipelineConfig\n"
++        "from pykokoro.exceptions import ConfigurationError\n"
+         "try:\n"
+         "    KokoroPipeline(PipelineConfig()).run('Hello.', lang='en-us')\n"
+-        "except RuntimeError as exc:\n"
+-        "    assert 'pykokoro[cpu]' in str(exc)\n"
++        "except (RuntimeError, ConfigurationError) as exc:\n"
++        "    msg = str(exc)\n"
++        "    assert 'onnxvoice' in msg or 'pykokoro' in msg\n"
+         "else:\n"
+         "    raise AssertionError('default backend unexpectedly succeeded')\n"
+         "print('ok')\n"
+diff --git a/tests/test_onnxvoice_boundary.py b/tests/test_onnxvoice_boundary.py
+new file mode 100644
+index 0000000..ce4ba74
+--- /dev/null
++++ b/tests/test_onnxvoice_boundary.py
+@@ -0,0 +1,202 @@
++from __future__ import annotations
++
++from pathlib import Path
++from types import SimpleNamespace
++
++import numpy as np
++import pytest
++
++import pykokoro._onnxvoice as boundary
++from pykokoro.asset_progress import AssetProgressEvent
++from pykokoro.exceptions import BackendError, ConfigurationError
++
++
++def test_normalize_kokoro_ref() -> None:
++    assert boundary.normalize_kokoro_ref("v1.0") == "kokoro:v1.0"
++    assert boundary.normalize_kokoro_ref("kokoro:v1.0") == "kokoro:v1.0"
++
++    with pytest.raises(ConfigurationError, match="Not a Kokoro"):
++        boundary.normalize_kokoro_ref("piper:en_US")
++
++
++def test_normalize_provider_request_supports_legacy_environment(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    monkeypatch.setenv("ONNX_PROVIDER", "gpu")
++
++    providers, options = boundary.normalize_provider_request(None, {"device_id": 2})
++
++    assert providers == "cuda"
++    assert options == [{"device_id": 2}]
++
++
++def test_normalize_provider_request_preserves_provider_specific_options() -> None:
++    providers, options = boundary.normalize_provider_request(
++        [("CUDAExecutionProvider", {"device_id": "1"}), "cpu"],
++        None,
++    )
++
++    assert providers == ["CUDAExecutionProvider", "cpu"]
++    assert options == [{"device_id": "1"}, {}]
++
++
++def test_resolve_maps_installation_metadata(
++    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
++) -> None:
++    model = tmp_path / "model.onnx"
++    voices = tmp_path / "voices.bin"
++    config = tmp_path / "config.json"
++    installation = SimpleNamespace(
++        id="v1.0",
++        ref="kokoro:v1.0",
++        sample_rate=24_000,
++        metadata={"selected_quality": "fp32"},
++        artifacts=(
++            SimpleNamespace(role="model", path=model),
++            SimpleNamespace(role="voices", path=voices),
++            SimpleNamespace(role="config", path=config),
++        ),
++    )
++
++    class Manager:
++        def __init__(self, **kwargs: object) -> None:
++            assert kwargs == {"cache_dir": tmp_path, "offline": True}
++
++        def resolve(self, ref: str, **kwargs: object) -> object:
++            assert ref == "kokoro:v1.0"
++            assert kwargs == {"quality": "fp32", "distribution": "cpu"}
++            return installation
++
++    monkeypatch.setattr(boundary, "_onnxvoice", lambda: SimpleNamespace(OnnxVoice=Manager))
++
++    resolved = boundary.resolve_kokoro_model(
++        "v1.0",
++        quality="fp32",
++        distribution="cpu",
++        cache_dir=tmp_path,
++        offline=True,
++    )
++
++    assert resolved.ref == "kokoro:v1.0"
++    assert resolved.model_id == "v1.0"
++    assert resolved.quality == "fp32"
++    assert resolved.sample_rate == 24_000
++    assert resolved.model_paths == (model,)
++    assert resolved.voices_path == voices
++    assert resolved.config_path == config
++
++
++def test_open_local_forwards_split_artifacts_and_runtime_options(
++    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
++) -> None:
++    calls: list[dict[str, object]] = []
++
++    def open_local(**kwargs: object) -> str:
++        calls.append(kwargs)
++        return "runtime"
++
++    monkeypatch.setattr(boundary, "_onnxvoice", lambda: SimpleNamespace(open_local=open_local))
++
++    result = boundary.open_local_kokoro(
++        artifacts={"prosody": tmp_path / "prosody.onnx", "curves": tmp_path / "curves.onnx"},
++        runtime={"layout": "split"},
++        providers="cpu",
++        provider_options={"intra_op_num_threads": 2},
++        sample_rate=24_000,
++    )
++
++    assert isinstance(result, boundary.KokoroRuntimeAdapter)
++    assert result.installation is None
++    assert calls == [
++        {
++            "system": "kokoro",
++            "model": None,
++            "artifacts": {"prosody": tmp_path / "prosody.onnx", "curves": tmp_path / "curves.onnx"},
++            "config": None,
++            "voices": None,
++            "runtime": {"layout": "split"},
++            "sample_rate": 24_000,
++            "providers": "cpu",
++            "provider_options": [{"intra_op_num_threads": 2}],
++            "session_options": None,
++        }
++    ]
++
++
++def test_open_errors_are_mapped_and_chained(monkeypatch: pytest.MonkeyPatch) -> None:
++    class Manager:
++        def open(self, *args: object, **kwargs: object) -> object:
++            raise RuntimeError("provider unavailable")
++
++    monkeypatch.setattr(boundary, "_onnxvoice", lambda: SimpleNamespace(OnnxVoice=Manager))
++    resolved = SimpleNamespace(installation=object())
++
++    with pytest.raises(BackendError, match="Could not open Kokoro runtime") as caught:
++        boundary.open_installed_kokoro(resolved)
++
++    assert isinstance(caught.value.__cause__, RuntimeError)
++
++
++def test_progress_and_diagnostics_are_trace_safe() -> None:
++    events: list[AssetProgressEvent] = []
++    callback = boundary.adapt_progress(events.append)
++    assert callback is not None
++    callback(
++        SimpleNamespace(
++            phase="download_progress",
++            ref="kokoro:v1.0",
++            distribution="cpu",
++            artifact="model",
++            role="model",
++            filename="model.onnx",
++            completed=3,
++            total=5,
++            target="cache",
++        )
++    )
++
++    assert events == [
++        AssetProgressEvent(
++            phase="download-progress",
++            model_id="v1.0",
++            distribution_id="cpu",
++            artifact_id="model",
++            role="model",
++            filename="model.onnx",
++            bytes_done=3,
++            bytes_total=5,
++            target="cache",
++        )
++    ]
++
++    diagnostic = SimpleNamespace(
++        system="kokoro",
++        ref="kokoro:v1.0",
++        layout="split",
++        sessions=(
++            SimpleNamespace(
++                component="prosody",
++                model_path=Path("prosody.onnx"),
++                providers_requested=("CPUExecutionProvider",),
++                providers_active=("CPUExecutionProvider",),
++                inputs=("input_ids",),
++                outputs=("duration",),
++            ),
++        ),
++    )
++    runtime = SimpleNamespace(diagnostics=lambda: diagnostic)
++
++    assert boundary.runtime_diagnostics(runtime)["layout"] == "split"
++    assert boundary.runtime_diagnostics(runtime)["sessions"][0]["component"] == "prosody"
++
++
++def test_summarize_inference_is_json_safe() -> None:
++    result = SimpleNamespace(
++        timings=np.zeros(4, dtype=np.float32),
++        outputs={"duration": np.zeros((1, 4), dtype=np.int64)},
++    )
++
++    timings, outputs = boundary.summarize_inference(result)
++
++    assert timings == {"shape": [4], "dtype": "float32"}
++    assert outputs == {"duration": {"shape": [1, 4], "dtype": "int64"}}
+diff --git a/tests/test_packaging_metadata.py b/tests/test_packaging_metadata.py
+index 857b8a4..49ef67f 100644
+--- a/tests/test_packaging_metadata.py
++++ b/tests/test_packaging_metadata.py
+@@ -58,18 +58,15 @@ def test_provider_extras_do_not_install_every_runtime_distribution() -> None:
+     ]
+
+     provider_packages = {
+-        package.split(">=", 1)[0]
++        package.split(">=", 1)[0].split("[")[0]
+         for extra in ("cpu", "gpu", "openvino", "directml", "coreml")
+         for package in optional[extra]
+-        if package.startswith("onnxruntime")
++        if package.startswith("onnxvoice")
+     }
+     assert optional["all"]
+-    assert not any(package.startswith("onnxruntime") for package in optional["all"])
++    assert not any(package.startswith("onnxvoice") for package in optional["all"])
+     assert provider_packages == {
+-        "onnxruntime",
+-        "onnxruntime-gpu",
+-        "onnxruntime-openvino",
+-        "onnxruntime-directml",
++        "onnxvoice",
+     }
+
+
+diff --git a/tests/test_pipeline_unit_streaming.py b/tests/test_pipeline_unit_streaming.py
+index 7e773c2..63d90f9 100644
+--- a/tests/test_pipeline_unit_streaming.py
++++ b/tests/test_pipeline_unit_streaming.py
+@@ -458,4 +458,6 @@ def test_run_applies_complete_target_after_unit_concatenation() -> None:
+     metrics = measure_loudness(result.audio, sample_rate=result.sample_rate)
+     assert metrics.integrated_lufs == pytest.approx(-42.0, abs=0.1)
+     assert result.trace is not None
+-    assert result.trace.model["output_loudness"]["applied_gain_db"] != 0.0
++    composition_events = [event for event in result.trace.events if event.stage == "composition"]
++    assert composition_events
++    assert composition_events[0].details["applied_loudness_gain_db"] != 0.0
+diff --git a/tests/test_session_manager.py b/tests/test_session_manager.py
+index b40c2f4..7d931fd 100644
+--- a/tests/test_session_manager.py
++++ b/tests/test_session_manager.py
+@@ -1,139 +1,28 @@
+-"""Tests for OnnxSessionManager."""
++"""Tests for OnnxSessionManager compatibility facade."""
++
++from __future__ import annotations
+
+-import logging
+ from typing import cast
+ from unittest.mock import MagicMock, patch
+
+-import onnxruntime as rt
+ import pytest
+
+ from pykokoro.exceptions import ConfigurationError
+ from pykokoro.onnx_session import (
+     OnnxSessionManager,
+     ProviderType,
+-    get_available_execution_providers,
+     normalize_execution_provider,
+     resolve_execution_provider,
+ )
+
+
+-@pytest.fixture
+-def mock_model_path(tmp_path):
+-    """Create a mock model path (doesn't need to exist for testing)."""
+-    return tmp_path / "model.onnx"
+-
+-
+-class TestOnnxSessionManagerInit:
+-    """Test OnnxSessionManager initialization."""
+-
+-    def test_init_defaults(self):
+-        """Test initialization with default parameters."""
+-        manager = OnnxSessionManager()
+-        assert manager._use_gpu is False
+-        assert manager._provider is None
+-        assert manager._session_options is None
+-        assert manager._provider_options == {}
+-        assert manager._model_quality == "fp32"
+-
+-    def test_init_with_parameters(self):
+-        """Test initialization with custom parameters."""
+-        sess_opts = rt.SessionOptions()
+-        prov_opts = {"device_id": "0"}
+-
+-        manager = OnnxSessionManager(
+-            use_gpu=True,
+-            provider="cuda",
+-            session_options=sess_opts,
+-            provider_options=prov_opts,
+-            model_quality="fp16",
+-        )
+-
+-        assert manager._use_gpu is True
+-        assert manager._provider == "cuda"
+-        assert manager._session_options == sess_opts
+-        assert manager._provider_options == prov_opts
+-        assert manager._model_quality == "fp16"
+-
+-
+ class TestProviderSelection:
+     """Test provider selection logic."""
+
+-    def test_select_cpu_provider(self):
+-        """Test CPU provider selection."""
+-        manager = OnnxSessionManager(provider="cpu")
+-        providers = manager._select_providers("cpu", False)
+-        assert "CPUExecutionProvider" in providers
+-
+-    def test_select_auto_provider_cpu(self):
+-        """Test auto provider defaults to CPU when no GPU."""
+-        manager = OnnxSessionManager(provider="auto")
+-        providers = manager._select_providers("auto", False)
+-        # Should select best available or CPU
+-        assert isinstance(providers, list)
+-        assert len(providers) > 0
+-
+-    def test_select_providers_with_use_gpu_legacy(self):
+-        """Test legacy use_gpu parameter."""
+-        manager = OnnxSessionManager(use_gpu=True)
+-        providers = manager._select_providers(None, True)
+-        # Should auto-select (could be CPU if no GPU available)
+-        assert isinstance(providers, list)
+-
+-    def test_invalid_provider_raises_error(self):
+-        """Test that invalid provider raises ValueError."""
++    def test_invalid_provider_raises_error(self) -> None:
+         invalid_provider = cast(ProviderType, "invalid")
+-        manager = OnnxSessionManager(provider=invalid_provider)
+         with pytest.raises(ConfigurationError, match="Requested.*invalid"):
+-            manager._select_providers(invalid_provider, False)
+-
+-    def test_unavailable_provider_raises_error(self):
+-        """Test that unavailable provider raises RuntimeError."""
+-        available = rt.get_available_providers()
+-
+-        # Find a provider that's NOT available
+-        test_providers = ["cuda", "openvino", "directml", "coreml"]
+-
+-        for prov in test_providers:
+-            provider_map = {
+-                "cuda": "CUDAExecutionProvider",
+-                "openvino": "OpenVINOExecutionProvider",
+-                "directml": "DmlExecutionProvider",
+-                "coreml": "CoreMLExecutionProvider",
+-            }
+-
+-            if provider_map[prov] not in available:
+-                provider_value = cast(ProviderType, prov)
+-                manager = OnnxSessionManager(provider=provider_value)
+-                with pytest.raises(ConfigurationError, match="Requested.*available providers"):
+-                    manager._select_providers(provider_value, False)
+-                return
+-
+-        pytest.skip("All providers are available on this system")
+-
+-    def test_env_override(self, monkeypatch):
+-        """Test ONNX_PROVIDER environment variable override."""
+-        monkeypatch.setenv("ONNX_PROVIDER", "CPUExecutionProvider")
+-        manager = OnnxSessionManager(provider="cpu")
+-        providers = manager._select_providers("cpu", False)
+-        assert "CPUExecutionProvider" in providers
+-        assert len(providers) == 1
+-
+-    def test_env_override_invalid(self, monkeypatch):
+-        """Test invalid ONNX_PROVIDER override raises error."""
+-        monkeypatch.setenv("ONNX_PROVIDER", "UnknownExecutionProvider")
+-        manager = OnnxSessionManager(provider="cpu")
+-
+-        with pytest.raises(ConfigurationError, match="ONNX_PROVIDER"):
+-            manager._select_providers("cpu", False)
+-
+-    def test_public_provider_inspection_preserves_runtime_order(self, monkeypatch):
+-        providers = [
+-            "NnapiExecutionProvider",
+-            "XnnpackExecutionProvider",
+-            "CPUExecutionProvider",
+-        ]
+-        monkeypatch.setattr(rt, "get_available_providers", lambda: providers)
+-        assert get_available_execution_providers() == tuple(providers)
++            normalize_execution_provider(invalid_provider, available=("CPUExecutionProvider",))
+
+     @pytest.mark.parametrize(
+         ("requested", "expected"),
+@@ -146,7 +35,9 @@ class TestProviderSelection:
+             ("cpu", "CPUExecutionProvider"),
+         ],
+     )
+-    def test_normalize_provider_aliases_and_runtime_names(self, requested, expected):
++    def test_normalize_provider_aliases_and_runtime_names(
++        self, requested: str, expected: str
++    ) -> None:
+         available = (
+             "NnapiExecutionProvider",
+             "XnnpackExecutionProvider",
+@@ -155,12 +46,12 @@ class TestProviderSelection:
+         assert normalize_execution_provider(requested, available=available) == expected
+
+     @pytest.mark.parametrize("requested", ["", "unknown", "UnknownExecutionProvider"])
+-    def test_normalize_provider_errors_include_context(self, requested):
++    def test_normalize_provider_errors_include_context(self, requested: str) -> None:
+         available = ("NnapiExecutionProvider", "CPUExecutionProvider")
+         with pytest.raises(ConfigurationError, match="Requested.*available providers"):
+             normalize_execution_provider(requested, available=available)
+
+-    def test_resolve_provider_auto_and_legacy_gpu(self):
++    def test_resolve_provider_auto_and_legacy_gpu(self) -> None:
+         available = (
+             "NnapiExecutionProvider",
+             "XnnpackExecutionProvider",
+@@ -175,7 +66,7 @@ class TestProviderSelection:
+             "CPUExecutionProvider"
+         )
+
+-    def test_resolve_provider_environment_precedence(self, monkeypatch):
++    def test_resolve_provider_environment_precedence(self, monkeypatch: pytest.MonkeyPatch) -> None:
+         available = (
+             "NnapiExecutionProvider",
+             "XnnpackExecutionProvider",
+@@ -186,335 +77,126 @@ class TestProviderSelection:
+         monkeypatch.setenv("ONNX_PROVIDER", "XnnpackExecutionProvider")
+         assert resolve_execution_provider("cpu", available=available) == "XnnpackExecutionProvider"
+
+-    def test_auto_selects_xnnpack_when_nnapi_missing(self):
++    def test_auto_selects_xnnpack_when_nnapi_missing(self) -> None:
+         available = ("XnnpackExecutionProvider", "CPUExecutionProvider")
+         assert resolve_execution_provider("auto", available=available) == (
+             "XnnpackExecutionProvider"
+         )
+
++    def test_unavailable_provider_raises_error(self) -> None:
++        available = ("CPUExecutionProvider",)
++        with pytest.raises(ConfigurationError, match="Requested.*available providers"):
++            normalize_execution_provider("cuda", available=available)
++
++    def test_env_override_invalid_raises_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
++        monkeypatch.setenv("ONNX_PROVIDER", "UnknownExecutionProvider")
++        with pytest.raises(ConfigurationError, match="ONNX_PROVIDER"):
++            resolve_execution_provider(
++                "cpu", available=("CPUExecutionProvider",), respect_environment=True
++            )
++
+
+ class TestProviderOptions:
+     """Test provider options handling."""
+
+-    def test_get_default_openvino_options(self, tmp_path):
+-        """Test default options for OpenVINO provider."""
++    def test_get_default_openvino_options(self) -> None:
+         manager = OnnxSessionManager(model_quality="fp32")
+         defaults = manager._get_default_provider_options("OpenVINOExecutionProvider")
+-
+         assert "device_type" in defaults
+         assert "cache_dir" in defaults
+         assert "precision" in defaults
+         assert defaults["precision"] == "FP32"
+
+-    def test_get_default_openvino_options_fp16(self):
+-        """Test default OpenVINO options with FP16 model."""
++    def test_get_default_openvino_options_fp16(self) -> None:
+         manager = OnnxSessionManager(model_quality="fp16")
+         defaults = manager._get_default_provider_options("OpenVINOExecutionProvider")
+-
+         assert defaults["precision"] == "FP16"
+
+-    def test_get_default_cuda_options(self):
+-        """Test default options for CUDA provider."""
++    def test_get_default_cuda_options(self) -> None:
+         manager = OnnxSessionManager()
+         defaults = manager._get_default_provider_options("CUDAExecutionProvider")
+-
+         assert "device_id" in defaults
+-        assert "arena_extend_strategy" in defaults
+         assert defaults["device_id"] == "0"
+
+-    def test_get_default_directml_options(self):
+-        """Test default options for DirectML provider."""
++    def test_get_default_directml_options(self) -> None:
+         manager = OnnxSessionManager()
+         defaults = manager._get_default_provider_options("DmlExecutionProvider")
+-
+         assert "device_id" in defaults
+         assert defaults["device_id"] == "0"
+
+-    def test_get_provider_specific_options(self):
+-        """Test extracting provider-specific options."""
+-        manager = OnnxSessionManager()
+-        all_options = {
+-            "device_id": "1",
+-            "gpu_mem_limit": "2GB",
+-            "num_threads": 4,  # SessionOptions attribute, should be filtered
+-        }
+-
+-        cuda_opts = manager._get_provider_specific_options("CUDAExecutionProvider", all_options)
+-
+-        assert "device_id" in cuda_opts
+-        assert "gpu_mem_limit" in cuda_opts
+-        assert "num_threads" not in cuda_opts  # Filtered out
+-        assert cuda_opts["device_id"] == "1"
+-
+-    def test_get_provider_specific_options_converts_to_string(self):
+-        """Test that provider options are converted to strings."""
++    def test_get_provider_specific_options_passes_through(self) -> None:
+         manager = OnnxSessionManager()
+-        all_options = {"device_id": 0}  # Integer value
+-
++        all_options = {"device_id": "1", "num_threads": 4}
+         opts = manager._get_provider_specific_options("CUDAExecutionProvider", all_options)
++        assert opts["device_id"] == "1"
++        assert opts["num_threads"] == "4"
+
+-        assert opts["device_id"] == "0"  # Should be string
+-        assert isinstance(opts["device_id"], str)
+-
+-    def test_unknown_option_warning(self, caplog):
+-        """Test that unknown options generate a warning."""
+-        caplog.set_level(logging.WARNING)
++    def test_get_provider_specific_options_converts_to_string(self) -> None:
+         manager = OnnxSessionManager()
+-        all_options = {"unknown_option": "value"}
+-
+-        manager._get_provider_specific_options("CUDAExecutionProvider", all_options)
+-
+-        assert any("Unknown option" in record.message for record in caplog.records)
++        opts = manager._get_provider_specific_options("CUDAExecutionProvider", {"device_id": 0})
++        assert opts["device_id"] == "0"
++        assert isinstance(opts["device_id"], str)
+
+     @pytest.mark.parametrize("provider", ["NnapiExecutionProvider", "XnnpackExecutionProvider"])
+-    def test_platform_provider_has_no_default_options(self, provider):
++    def test_platform_provider_has_no_default_options(self, provider: str) -> None:
+         manager = OnnxSessionManager()
+         assert manager._get_default_provider_options(provider) == {}
+
+-    def test_unknown_provider_options_pass_through_as_strings(self):
+-        manager = OnnxSessionManager()
+-        options = manager._get_provider_specific_options(
+-            "XnnpackExecutionProvider",
+-            {"custom_option": 3, "num_threads": 2},
+-        )
+-        assert options == {"custom_option": "3"}
+-
+
+ class TestSessionOptions:
+     """Test session options creation."""
+
+-    def test_create_session_options_defaults(self):
+-        """Test creating SessionOptions with defaults."""
++    def test_create_session_options_returns_none_by_default(self) -> None:
+         manager = OnnxSessionManager()
+-        sess_opt = manager._create_session_options()
+-
+-        assert isinstance(sess_opt, rt.SessionOptions)
+-        assert sess_opt.graph_optimization_level == rt.GraphOptimizationLevel.ORT_ENABLE_ALL
+-        assert sess_opt.execution_mode == rt.ExecutionMode.ORT_SEQUENTIAL
+-
+-    def test_create_session_options_user_provided(self):
+-        """Test using user-provided SessionOptions."""
+-        user_opts = rt.SessionOptions()
+-        user_opts.intra_op_num_threads = 8
++        assert manager._create_session_options() is None
+
++    def test_create_session_options_returns_user_provided(self) -> None:
++        user_opts = MagicMock()
+         manager = OnnxSessionManager(session_options=user_opts)
+-        sess_opt = manager._create_session_options()
+-
+-        assert sess_opt == user_opts
+-        assert sess_opt.intra_op_num_threads == 8
+-
+-    def test_apply_provider_options_to_session(self):
+-        """Test applying provider options to SessionOptions."""
+-        manager = OnnxSessionManager()
+-        sess_opt = rt.SessionOptions()
+-        options = {
+-            "num_threads": 4,
+-            "enable_profiling": True,
+-        }
+-
+-        manager._apply_provider_options(sess_opt, options)
++        assert manager._create_session_options() is user_opts
+
+-        assert sess_opt.intra_op_num_threads == 4
+-        assert sess_opt.enable_profiling is True
+
+-    def test_apply_provider_options_aliases(self):
+-        """Test that option aliases work correctly."""
+-        manager = OnnxSessionManager()
+-        sess_opt = rt.SessionOptions()
++class TestSessionCreation:
++    """Test OnnxVoice delegation."""
+
+-        # Test 'threads' alias for 'intra_op_num_threads'
+-        manager._apply_provider_options(sess_opt, {"threads": 2})
+-        assert sess_opt.intra_op_num_threads == 2
++    def test_create_session_delegates_to_onnxvoice(self, tmp_path) -> None:
++        model_path = tmp_path / "model.onnx"
++        mock_session = MagicMock()
++        with patch("onnxvoice.OnnxSession", return_value=mock_session):
++            manager = OnnxSessionManager(provider="cpu")
++            result = manager.create_session(model_path)
++            assert result is mock_session
+
+-        # Test 'num_threads' alias
+-        manager._apply_provider_options(sess_opt, {"num_threads": 4})
+-        assert sess_opt.intra_op_num_threads == 4
+
++class TestPublicAPI:
++    """Test public API compliance."""
+
+-class TestSessionCreation:
+-    """Test ONNX session creation."""
++    def test_manager_has_required_public_names(self) -> None:
++        from pykokoro import onnx_session
+
+-    @pytest.mark.skipif(
+-        "CPUExecutionProvider" not in rt.get_available_providers(),
+-        reason="CPU provider not available",
+-    )
+-    def test_create_session_cpu(self, tmp_path):
+-        """Test creating a session with CPU provider (requires valid model)."""
+-        # This test would need an actual ONNX model file
+-        # For now, we'll test the logic with mocking
+-        pytest.skip("Requires actual ONNX model file")
+-
+-    def test_create_session_with_fallback(self, tmp_path):
+-        """Test session creation with fallback enabled."""
+-        # Mock the session creation
+-        with patch("onnxruntime.InferenceSession") as mock_session:
+-            mock_instance = MagicMock()
+-            mock_instance.get_providers.return_value = ["CPUExecutionProvider"]
+-            mock_session.return_value = mock_instance
++        assert hasattr(onnx_session, "OnnxSessionManager")
++        assert hasattr(onnx_session, "get_available_execution_providers")
++        assert hasattr(onnx_session, "normalize_execution_provider")
++        assert hasattr(onnx_session, "resolve_execution_provider")
+
+-            manager = OnnxSessionManager(provider="cpu")
+-            model_path = tmp_path / "model.onnx"
+-            model_path.touch()  # Create empty file
+-
+-            session = manager.create_session(model_path, allow_fallback=True)
+-
+-            assert session is not None
+-            assert mock_session.called
+-
+-    def test_create_session_fallback_disabled(self, tmp_path):
+-        """Test that fallback can be disabled."""
+-        with patch("onnxruntime.InferenceSession") as mock_session:
+-            # Simulate failure on first attempt
+-            mock_session.side_effect = [Exception("Provider failed"), MagicMock()]
+-
+-            manager = OnnxSessionManager(provider="cuda")
+-            model_path = tmp_path / "model.onnx"
+-            model_path.touch()
+-
+-            # Accept either error: provider not available or session creation failed
+-            with pytest.raises(
+-                (ConfigurationError, RuntimeError),
+-                match="(Failed to create ONNX session|Requested execution provider)",
+-            ):
+-                manager.create_session(model_path, allow_fallback=False)
+-
+-    @pytest.mark.parametrize("provider", ["nnapi", "xnnpack"])
+-    def test_explicit_platform_provider_does_not_retry_cpu(self, provider, monkeypatch, tmp_path):
+-        available = [
+-            "NnapiExecutionProvider",
+-            "XnnpackExecutionProvider",
+-            "CPUExecutionProvider",
+-        ]
+-        monkeypatch.setattr(rt, "get_available_providers", lambda: available)
+-        with patch("pykokoro.onnx_session.rt.InferenceSession") as mock_session:
+-            mock_session.side_effect = RuntimeError("provider failed")
+-            manager = OnnxSessionManager(provider=provider)
+-            with pytest.raises(RuntimeError, match="Failed to create ONNX session"):
+-                manager.create_session(tmp_path / "model.onnx")
+-            assert mock_session.call_count == 1
+-
+-    def test_auto_provider_may_retry_cpu(self, monkeypatch, tmp_path):
+-        available = ["NnapiExecutionProvider", "CPUExecutionProvider"]
+-        monkeypatch.setattr(rt, "get_available_providers", lambda: available)
+-        with patch("pykokoro.onnx_session.rt.InferenceSession") as mock_session:
+-            session = MagicMock()
+-            session.get_providers.return_value = ["CPUExecutionProvider"]
+-            mock_session.side_effect = [RuntimeError("provider failed"), session]
+-            manager = OnnxSessionManager(provider="auto")
+-            assert manager.create_session(tmp_path / "model.onnx") is session
+-            assert mock_session.call_count == 2
+-
+-    def test_environment_explicit_provider_is_strict(self, monkeypatch, tmp_path):
+-        available = ["NnapiExecutionProvider", "CPUExecutionProvider"]
+-        monkeypatch.setattr(rt, "get_available_providers", lambda: available)
+-        monkeypatch.setenv("ONNX_PROVIDER", "nnapi")
+-        with patch("pykokoro.onnx_session.rt.InferenceSession") as mock_session:
+-            mock_session.side_effect = RuntimeError("provider failed")
+-            manager = OnnxSessionManager(provider="auto")
+-            with pytest.raises(RuntimeError, match="Failed to create ONNX session"):
+-                manager.create_session(tmp_path / "model.onnx")
+-            assert mock_session.call_count == 1
+-
+-    def test_create_session_logs_fallback(self, caplog, tmp_path):
+-        """Test that fallback is logged."""
+-        caplog.set_level(logging.WARNING)
+-
+-        with patch("pykokoro.onnx_session.rt.InferenceSession") as mock_session:
+-            # First call (with non-CPU provider) fails,
+-            # second call (CPU fallback) succeeds
+-            mock_instance = MagicMock()
+-            mock_instance.get_providers.return_value = ["CPUExecutionProvider"]
+-            mock_session.side_effect = [
+-                Exception("Provider failed"),
+-                mock_instance,
+-            ]
+-
+-            manager = OnnxSessionManager(provider="auto")
+-
+-            # Mock _select_providers to return a non-CPU provider first
+-            # This ensures fallback happens even in CI where auto might be CPU-only
+-            with patch.object(
+-                manager,
+-                "_select_providers",
+-                return_value=[
+-                    ("CUDAExecutionProvider", {}),
+-                    "CPUExecutionProvider",
+-                ],
+-            ):
+-                model_path = tmp_path / "model.onnx"
+-                model_path.touch()
+-
+-                session = manager.create_session(model_path, allow_fallback=True)
+-
+-                assert session is not None
+-                # Should have warning about fallback
+-                assert any("fell back to" in record.message for record in caplog.records)
+-
+-
+-class TestProviderMergeLogic:
+-    """Test provider option merging logic."""
+-
+-    def test_user_options_override_defaults(self):
+-        """Test that user options override default options."""
+-        # Skip if CUDA is not available
+-        if "CUDAExecutionProvider" not in rt.get_available_providers():
+-            pytest.skip("CUDA provider not available")
++    def test_manager_init_defaults(self) -> None:
++        manager = OnnxSessionManager()
++        assert manager._use_gpu is False
++        assert manager._provider is None
++        assert manager._session_options is None
++        assert manager._provider_options == {}
++        assert manager._model_quality == "fp32"
+
++    def test_manager_init_with_parameters(self) -> None:
++        prov_opts = {"device_id": "0"}
+         manager = OnnxSessionManager(
++            use_gpu=True,
+             provider="cuda",
+-            provider_options={"device_id": "2"},
++            session_options=MagicMock(),
++            provider_options=prov_opts,
++            model_quality="fp16",
+         )
+-
+-        providers = manager._select_providers("cuda", False)
+-
+-        # Check that the provider list contains user options
+-        # Find the CUDA provider entry
+-        for prov in providers:
+-            if isinstance(prov, tuple) and prov[0] == "CUDAExecutionProvider":
+-                assert prov[1]["device_id"] == "2"
+-                break
+-
+-    def test_defaults_used_when_no_user_options(self):
+-        """Test that defaults are used when no user options provided."""
+-        # Skip if CUDA is not available
+-        if "CUDAExecutionProvider" not in rt.get_available_providers():
+-            pytest.skip("CUDA provider not available")
+-
+-        manager = OnnxSessionManager(provider="cuda")
+-
+-        providers = manager._select_providers("cuda", False)
+-
+-        # Should have default options
+-        for prov in providers:
+-            if isinstance(prov, tuple) and prov[0] == "CUDAExecutionProvider":
+-                assert "device_id" in prov[1]
+-                assert prov[1]["device_id"] == "0"  # Default
+-                break
+-
+-
+-class TestLogging:
+-    """Test logging behavior."""
+-
+-    def test_provider_selection_logged(self, caplog):
+-        """Test that provider selection is logged."""
+-        caplog.set_level(logging.INFO)
+-        manager = OnnxSessionManager(provider="cpu")
+-        manager._select_providers("cpu", False)
+-
+-        assert any("CPU" in record.message for record in caplog.records)
+-
+-    def test_auto_selection_logged(self, caplog):
+-        """Test that auto-selection is logged."""
+-        caplog.set_level(logging.INFO)
+-        manager = OnnxSessionManager(provider="auto")
+-        manager._select_providers("auto", False)
+-
+-        assert any("Auto" in record.message or "CPU" in record.message for record in caplog.records)
+-
+-    def test_session_options_application_logged(self, caplog):
+-        """Test that applying session options is logged."""
+-        caplog.set_level(logging.INFO)
+-        manager = OnnxSessionManager(provider_options={"num_threads": 4})
+-        manager._create_session_options()
+-
+-        assert any("Applying provider options" in record.message for record in caplog.records)
++        assert manager._use_gpu is True
++        assert manager._provider == "cuda"
++        assert manager._provider_options == prov_opts
++        assert manager._model_quality == "fp16"
+diff --git a/tests/test_ssmd.py b/tests/test_ssmd.py
+index 8b13165..700ceb3 100644
+--- a/tests/test_ssmd.py
++++ b/tests/test_ssmd.py
+@@ -318,6 +318,7 @@ class TestSSMDVoiceSwitching:
+
+     def test_voice_resolver_called_for_segment_with_voice(self):
+         """Test AudioGenerator calls voice_resolver for voice metadata."""
++        from types import SimpleNamespace
+         from unittest.mock import Mock
+
+         import numpy as np
+@@ -328,12 +329,11 @@ class TestSSMDVoiceSwitching:
+
+         tokenizer = create_tokenizer()
+
+-        # Create mock session
+-        mock_session = Mock()
+-        mock_session.get_inputs.return_value = [Mock(name="input_ids")]
+-        mock_session.run.return_value = [np.zeros((1, 100), dtype=np.float32)]
+-
+-        generator = AudioGenerator(mock_session, tokenizer)
++        # Create mock runtime
++        mock_runtime = Mock()
++        mock_runtime.infer.return_value = SimpleNamespace(audio=np.zeros(100, dtype=np.float32))
++        mock_runtime.cache_identity = ("test", "fp32", "v1.0")
++        generator = AudioGenerator(mock_runtime, tokenizer)
+
+         # Create segments with voice metadata
+         segments = [
+@@ -394,7 +394,7 @@ class TestSSMDVoiceSwitching:
+         assert voice_calls[1] == "am_michael"
+
+     def test_voice_switching_without_resolver_uses_default(self):
+-        """Test that segments with voice metadata but no resolver use default voice."""
++        from types import SimpleNamespace
+         from unittest.mock import Mock
+
+         import numpy as np
+@@ -405,12 +405,11 @@ class TestSSMDVoiceSwitching:
+
+         tokenizer = create_tokenizer()
+
+-        # Create mock session
+-        mock_session = Mock()
+-        mock_session.get_inputs.return_value = [Mock(name="input_ids")]
+-        mock_session.run.return_value = [np.zeros((1, 100), dtype=np.float32)]
+-
+-        generator = AudioGenerator(mock_session, tokenizer)
++        # Create mock runtime
++        mock_runtime = Mock()
++        mock_runtime.infer.return_value = SimpleNamespace(audio=np.zeros(100, dtype=np.float32))
++        mock_runtime.cache_identity = ("test", "fp32", "v1.0")
++        generator = AudioGenerator(mock_runtime, tokenizer)
+
+         # Create segment with voice metadata
+         segments = [
+diff --git a/tests/test_word_timings.py b/tests/test_word_timings.py
+index 45eda73..89669a4 100644
+--- a/tests/test_word_timings.py
++++ b/tests/test_word_timings.py
+@@ -35,23 +35,15 @@ class _Tokenizer:
+
+
+ class _NamedTimestampSession:
+-    def get_inputs(self) -> list[Any]:
+-        return [SimpleNamespace(name="input_ids")]
+-
+-    def get_outputs(self) -> list[Any]:
+-        return [
+-            SimpleNamespace(name="waveform"),
+-            SimpleNamespace(name="auxiliary"),
+-            SimpleNamespace(name="pred_dur"),
+-        ]
+-
+-    def run(self, output_names: Any, inputs: Any) -> list[np.ndarray]:
+-        _ = output_names, inputs
+-        return [
+-            np.zeros(240, dtype=np.float32),
+-            np.zeros(1, dtype=np.float32),
+-            np.asarray([3, 1, 1, 2, 2, 2, 0], dtype=np.float32),
+-        ]
++    supports_timings = True
++    sample_rate = 24_000
++
++    def infer(self, token_ids, *, style, speed, seed=None):
++        _ = token_ids, style, speed, seed
++        return SimpleNamespace(
++            audio=np.zeros(240, dtype=np.float32),
++            timings=np.asarray([3, 1, 1, 2, 2, 2, 0], dtype=np.float32),
++        )
+
+
+ def test_word_timing_seconds_and_sample_transform_helpers() -> None:

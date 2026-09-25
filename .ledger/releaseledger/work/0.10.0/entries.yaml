@@ -1,0 +1,130 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: 0.10.0
+git_base_ref: c347d3bcc90443781c24f99b053762c865d67e4b
+git_base_sha: c347d3bcc90443781c24f99b053762c865d67e4b
+git_head_ref: 35a9c05a06d835b11641e0b4038bd05ad0a3a6de
+git_head_sha: 35a9c05a06d835b11641e0b4038bd05ad0a3a6de
+include_merges: nontrivial
+entries:
+  - kind: changed
+    summary: Changed PyKokoro to render prepared requests as independent results
+    body: >-
+      Removed KokoroPipeline, PipelineConfig, UtterPlan planning, AudioCompose
+      composition, and SSMD parsing from PyKokoro. Callers now provide prepared text,
+      explicit language, voice, and optional source-aligned context; they own document
+      orchestration and cross-request composition.
+    status: accepted
+    breaking: true
+    source_refs:
+      - "git:7824a27c37ff13b422e7e11933b0cd62f3fca579"
+      - "git:35a9c05a06d835b11641e0b4038bd05ad0a3a6de"
+    paths:
+      - README.md
+      - docs/breaking-change-0.10.0.md
+      - pykokoro/synthesizer.py
+      - pykokoro/synthesis_types.py
+    sources: []
+    prs: []
+    issues: []
+    contributors: []
+  - kind: added
+    summary:
+      Added opt-in token-safe splitting for oversized requests with one rendered result
+    body: >-
+      The default long_text_split="none" path does not import PhraseSplit and raises
+      SynthesisInputTooLongError when the model limit is exceeded. With
+      long_text_split="sentence", PhraseSplit loads lazily only for oversized input,
+      packs sentence spans into token-safe chunks, then falls back to clauses and safe
+      word boundaries. Pronunciation overrides and linguistic annotations are rebased,
+      trace metadata reports actual chunking, and the chunks are joined into one
+      RenderedSegment. SpaCy is optional; a single word that cannot fit safely still
+      raises SynthesisInputTooLongError.
+    status: accepted
+    source_refs:
+      - "git:7a9ce60fd9d44a84bc9f58dfb86ed5db7f00a231"
+    paths:
+      - pykokoro/request_renderer.py
+      - pykokoro/synthesis_config.py
+      - tests/test_long_text_splitting.py
+    sources:
+      - "tl:task-0112"
+    prs: []
+    issues: []
+    contributors: []
+  - kind: changed
+    summary: Changed model and ONNX session management to use OnnxVoice
+    body: >-
+      OnnxVoice owns managed model installation, resolution, local opening, provider
+      normalization, and session lifecycle. KokoroG2P owns prepared-text phonemization
+      and AudioSig supplies DSP primitives. PyKokoro retains request rendering, model
+      and voice profile selection, and request-local timing metadata. Metadata-only
+      discover_models() and discover_lexicons() inspection remains available without
+      loading an inference session.
+    status: accepted
+    source_refs:
+      - "git:825a49a7b6b90d7308eb7d9a672dbcc745f576be"
+      - "git:0e22b45622154ad005302d8daa8df38c2df4d2c0"
+      - "git:9a496a82e9972cdc689df604abcf46d0cca74907"
+      - "git:36606f5bf85993924952da71b48c0536fb9388b1"
+    paths:
+      - pykokoro/_onnxvoice.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/audio_generator.py
+      - pykokoro/prepared_g2p.py
+      - pykokoro/discovery.py
+      - pykokoro/lexicon_discovery.py
+    sources:
+      - "git:7824a27c37ff13b422e7e11933b0cd62f3fca579"
+      - "tl:task-0112"
+    prs: []
+    issues: []
+    contributors: []
+  - kind: docs
+    summary:
+      Documented the request migration, long-text controls, and retained compatibility
+      aliases
+    body: >-
+      Updated the README, quickstart, API reference, and migration note with the request
+      API, long-text behavior, migration examples, supported dependency floors, and the
+      deliberate SynthesisSegment and annotations compatibility aliases.
+    status: accepted
+    source_refs: []
+    paths:
+      - README.md
+      - docs/index.md
+      - docs/quickstart.md
+      - docs/basic_usage.md
+      - docs/api_reference.md
+      - docs/breaking-change-0.10.0.md
+    sources:
+      - "git:7824a27c37ff13b422e7e11933b0cd62f3fca579"
+      - "git:35a9c05a06d835b11641e0b4038bd05ad0a3a6de"
+      - "tl:task-0112"
+    prs: []
+    issues: []
+    contributors: []
+  - kind: changed
+    summary: Changed and validated the supported companion-library minimum versions
+    body: >-
+      The supported floors are KokoroG2P 0.9.9, Lexphon 0.2.3, PhraseSplit 0.3.9,
+      AudioSig 0.1.4, and OnnxVoice 0.1.7. Lower-bound CI pins OnnxVoice's CPU extra and
+      exercises its model, provider, voice, and timing integration contracts;
+      package-artifact checks validate the dependency floors in built metadata.
+    status: accepted
+    source_refs:
+      - "tl:task-0112"
+    paths:
+      - pyproject.toml
+      - .github/workflows/tests.yml
+      - .github/workflows/python-publish.yml
+      - tests/test_packaging_metadata.py
+    sources:
+      - "git:7a9ce60fd9d44a84bc9f58dfb86ed5db7f00a231"
+      - "git:825a49a7b6b90d7308eb7d9a672dbcc745f576be"
+      - "git:7824a27c37ff13b422e7e11933b0cd62f3fca579"
+    prs: []
+    issues: []
+    contributors: []

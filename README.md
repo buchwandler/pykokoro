@@ -74,20 +74,17 @@ handling, inference, timing reconstruction, waveform validation, tracing, and op
 voice-level calibration. `discover_models()` and `discover_lexicons()` inspect supported
 runtime capabilities and lexicon metadata without loading a synthesis session.
 
-Each call renders one atomic request with exactly the supplied text. PyKokoro runs its
-frontend on that text, then checks the resulting model-token count. Oversized requests
-raise `SynthesisInputTooLongError` with text length, token count, model capacity, and
-model identity. PyKokoro never divides an oversized request. The caller owns text
-splitting and composition.
-
-`SynthesisConfig.long_text_split` is retained only for migration and accepts `"none"`;
-explicit legacy `"sentence"` and `"token"` values raise `ConfigurationError`. A missing
-`short_sentence_config` leaves short-sentence processing disabled. Enable it explicitly
-with `GenerationConfig(enable_short_sentence=True)` or a `ShortSentenceConfig`. Results
-expose their resolved synthesis identity and structured voice-level application
-metadata. See
-[caller-owned request sizing](docs/basic_usage.md#caller-owned-request-sizing) for
-details.
+Each call returns one request-local `RenderedSegment`. By default,
+`long_text_split="none"` keeps the exact-text path and raises
+`SynthesisInputTooLongError` when the prepared text exceeds the model token limit. Set
+`SynthesisConfig.long_text_split="sentence"` to enable internal model-safe splitting
+only when the request is oversized. PhraseSplit is imported lazily for that path; it
+splits on sentence boundaries, then clauses or safe word boundaries as needed, and joins
+the audio chunks into one result while preserving the original request text and
+source-aligned context. `long_text_use_spacy=False` is the default, so spaCy is not
+required. Separate caller requests remain separate results, and cross-request
+composition stays with the caller. See
+[long-text configuration](docs/basic_usage.md#render-longer-text) for details.
 
 ## Installation
 
@@ -113,7 +110,7 @@ dependency. Install `espeak-ng` when selecting an eSpeak frontend or fallback.
 - [API reference](docs/api_reference.md)
 - [Language and model profiles](docs/languages.md)
 - [Maintained examples](examples/README.md)
-- [Breaking change and migration note for the planned 0.10.0 boundary](docs/breaking-change-0.10.0.md)
+- [Breaking change and migration note for v0.10.0](docs/breaking-change-0.10.0.md)
 - [Historical changelog](docs/changelog.md)
 
 Run the request-centric examples from the repository root with

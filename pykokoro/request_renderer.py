@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -19,13 +20,20 @@ from .model_profiles import get_model_profile
 from .prepared_g2p import PreparedSynthesis
 from .synthesis_config import SynthesisConfig, resolve_synthesis_config
 from .synthesis_identity import build_synthesis_identity
-from .synthesis_types import RenderedSegment, SynthesisSegment
+from .synthesis_types import (
+    RenderedSegment,
+    SynthesisSegment,
+)
 from .types import PhonemeSegment, Trace, WordTiming
 from .voice_level import resolve_voice_level_application
 
 
 class _RequestG2PAdapter(Protocol):
     def phonemize_context(self, text: str, language: str, config: SynthesisConfig) -> Any: ...
+
+    def phonemize(
+        self, segment: SynthesisSegment, config: SynthesisConfig
+    ) -> PreparedSynthesis: ...
 
 
 class OnnxRequestRenderer:
@@ -103,20 +111,21 @@ class OnnxRequestRenderer:
             random_seed=resolved.generation.random_seed,
             context_phonemizer=context_phonemizer,
         )
-        postprocessed_token_count = sum(len(segment.tokens) for segment in phoneme_segments)
-        if postprocessed_token_count > profile.max_tokens:
+        oversized_segment = next(
+            (segment for segment in phoneme_segments if len(segment.tokens) > profile.max_tokens),
+            None,
+        )
+        if oversized_segment is not None:
             raise SynthesisInputTooLongError(
-                text_length=len(request.text),
-                token_count=postprocessed_token_count,
+                text_length=len(oversized_segment.text),
+                token_count=len(oversized_segment.tokens),
                 max_tokens=profile.max_tokens,
                 model_id=identity.model_id,
             )
-        if len(phoneme_segments) != 1:
-            raise BackendError(
-                f"short-sentence preprocessing must preserve one request segment; "
-                f"received {len(phoneme_segments)}"
-            )
-
+        if not phoneme_segments:
+            raise BackendError(f"request {request.id!r} produced no acoustic chunks")
+        if trace is not None:
+            trace.model["acoustic_chunk_count"] = len(phoneme_segments)
         raw_segments = backend.generate_raw_audio_segments(
             phoneme_segments,
             voice_style,
@@ -131,9 +140,10 @@ class OnnxRequestRenderer:
             trace=trace,
             voice_level_config=resolved.voice_level,
         )
-        if len(processed_segments) != 1:
+        if len(processed_segments) != len(phoneme_segments):
             raise BackendError(
-                f"postprocessing must preserve one request segment; received {len(processed_segments)}"
+                "postprocessing must preserve acoustic chunks; "
+                f"received {len(processed_segments)} for {len(phoneme_segments)} input chunks"
             )
         audio_parts: list[np.ndarray] = []
         word_timings: list[WordTiming] = []
@@ -261,10 +271,28 @@ class OnnxRequestRenderer:
         max_tokens: int,
         trace: Trace | None = None,
     ) -> list[PhonemeSegment]:
+        if request.voice is None and config.voice is not None:
+            request = replace(request, voice=config.voice)
         token_ids = list(prepared.token_ids)
         if not token_ids:
             raise BackendError(f"frontend produced no model tokens for request {request.id!r}")
-        if len(token_ids) > max_tokens:
+        if len(token_ids) <= max_tokens:
+            segments = [
+                self._phoneme_segment_from_prepared(
+                    request, prepared, start=0, end=len(request.text), phoneme_id=0
+                )
+            ]
+        elif config.long_text_split == "sentence":
+            if request.phonemes is not None:
+                raise SynthesisInputTooLongError(
+                    "whole-request phonemes cannot be split while preserving source alignment",
+                    text_length=len(request.text),
+                    token_count=len(token_ids),
+                    max_tokens=max_tokens,
+                    model_id=config.model_identity,
+                )
+            segments = self._split_oversized_request(request, config, max_tokens)
+        else:
             model_id = config.model_identity or (
                 f"{config.model_source}:{config.model_variant}:{config.model_quality}"
             )
@@ -278,26 +306,224 @@ class OnnxRequestRenderer:
         if trace is not None:
             trace.model.update(
                 {
-                    "model_token_count": len(token_ids),
+                    "model_token_count": sum(len(segment.tokens) for segment in segments),
                     "model_max_tokens": max_tokens,
-                    "acoustic_chunk_count": 1,
+                    "model_chunk_token_counts": [len(segment.tokens) for segment in segments],
+                    "acoustic_chunk_count": len(segments),
                 }
             )
+        return segments
 
-        voice = config.voice
-        voice_name = voice if isinstance(voice, str) else None
-        return [
-            PhonemeSegment(
-                id=f"{request.id}:phoneme:0",
-                segment_id=request.id,
-                phoneme_id=0,
-                text=request.text,
-                phonemes=prepared.phonemes,
-                tokens=token_ids,
-                lang=request.language,
-                char_start=0,
-                char_end=len(request.text),
-                voice_name=voice_name,
-                alignment_tokens=list(prepared.alignment_tokens),
+    def _split_oversized_request(
+        self, request: SynthesisSegment, config: SynthesisConfig, max_tokens: int
+    ) -> list[PhonemeSegment]:
+        prepared_spans: dict[tuple[int, int], PreparedSynthesis] = {}
+
+        def phonemize_span(start: int, end: int) -> PreparedSynthesis:
+            key = (start, end)
+            if key not in prepared_spans:
+                prepared_spans[key] = self._phonemize_source_span(
+                    request, config, start=start, end=end
+                )
+            return prepared_spans[key]
+
+        sentence_spans = self._split_source_spans(
+            request, config, start=0, end=len(request.text), mode="sentence"
+        )
+        safe_spans: list[tuple[int, int]] = []
+        for sentence_start, sentence_end in sentence_spans:
+            sentence_prepared = phonemize_span(sentence_start, sentence_end)
+            if len(sentence_prepared.token_ids) <= max_tokens:
+                safe_spans.append((sentence_start, sentence_end))
+                continue
+
+            clause_spans = self._split_source_spans(
+                request,
+                config,
+                start=sentence_start,
+                end=sentence_end,
+                mode="clause",
             )
+            if len(clause_spans) == 1 and clause_spans[0] == (sentence_start, sentence_end):
+                clause_spans = self._word_source_spans(
+                    request, start=sentence_start, end=sentence_end
+                )
+            for clause_start, clause_end in clause_spans:
+                clause_prepared = phonemize_span(clause_start, clause_end)
+                if len(clause_prepared.token_ids) <= max_tokens:
+                    safe_spans.append((clause_start, clause_end))
+                    continue
+
+                word_spans = self._word_source_spans(request, start=clause_start, end=clause_end)
+                for word_start, word_end in word_spans:
+                    word_prepared = phonemize_span(word_start, word_end)
+                    if len(word_prepared.token_ids) > max_tokens:
+                        model_id = config.model_identity or (
+                            f"{config.model_source}:{config.model_variant}:{config.model_quality}"
+                        )
+                        raise SynthesisInputTooLongError(
+                            "a single word exceeds the model token limit and cannot be split safely",
+                            text_length=word_end - word_start,
+                            token_count=len(word_prepared.token_ids),
+                            max_tokens=max_tokens,
+                            model_id=model_id,
+                        )
+                    safe_spans.append((word_start, word_end))
+
+        if not safe_spans:
+            raise BackendError(f"PhraseSplit produced no usable spans for request {request.id!r}")
+
+        packed: list[tuple[int, int, PreparedSynthesis]] = []
+        chunk_start, chunk_end = safe_spans[0]
+        chunk_prepared = phonemize_span(chunk_start, chunk_end)
+        for next_start, next_end in safe_spans[1:]:
+            candidate = phonemize_span(chunk_start, next_end)
+            if len(candidate.token_ids) <= max_tokens:
+                chunk_end = next_end
+                chunk_prepared = candidate
+                continue
+            packed.append((chunk_start, chunk_end, chunk_prepared))
+            chunk_start, chunk_end = next_start, next_end
+            chunk_prepared = phonemize_span(chunk_start, chunk_end)
+        packed.append((chunk_start, chunk_end, chunk_prepared))
+
+        return [
+            self._phoneme_segment_from_prepared(
+                request, prepared, start=start, end=end, phoneme_id=index
+            )
+            for index, (start, end, prepared) in enumerate(packed)
         ]
+
+    def _phonemize_source_span(
+        self,
+        request: SynthesisSegment,
+        config: SynthesisConfig,
+        *,
+        start: int,
+        end: int,
+    ) -> PreparedSynthesis:
+        text = request.text[start:end]
+        overrides = tuple(
+            replace(
+                override,
+                start=max(start, override.start) - start,
+                end=min(end, override.end) - start,
+            )
+            for override in request.pronunciation_overrides
+            if override.start < end and override.end > start
+        )
+        tokens = tuple(
+            replace(
+                token,
+                start=overlap_start - start,
+                end=overlap_end - start,
+                text=request.text[overlap_start:overlap_end] if token.text is not None else None,
+            )
+            for token in request.tokens
+            if (overlap_start := max(start, token.start)) < (overlap_end := min(end, token.end))
+        )
+        child_request = SynthesisSegment(
+            id=f"{request.id}:long:{start}-{end}",
+            text=text,
+            language=request.language,
+            voice=request.voice,
+            pronunciation_overrides=overrides,
+            tokens=tokens,
+        )
+        return self._g2p_adapter.phonemize(child_request, config)
+
+    def _split_source_spans(
+        self,
+        request: SynthesisSegment,
+        config: SynthesisConfig,
+        *,
+        start: int,
+        end: int,
+        mode: str,
+    ) -> list[tuple[int, int]]:
+        from phrasplit import split_with_offsets
+
+        text = request.text[start:end]
+        split_segments = split_with_offsets(
+            text,
+            mode=mode,
+            use_spacy=config.long_text_use_spacy,
+            language=request.language,
+        )
+        spans: list[tuple[int, int]] = []
+        cursor = 0
+        for split_segment in split_segments:
+            split_end = min(len(text), split_segment.char_end)
+            if split_end <= cursor:
+                continue
+            spans.append((start + cursor, start + split_end))
+            cursor = split_end
+        if cursor < len(text):
+            spans.append((start + cursor, end))
+        if not spans:
+            spans.append((start, end))
+        return self._merge_override_boundaries(spans, request)
+
+    @staticmethod
+    def _word_source_spans(
+        request: SynthesisSegment, *, start: int, end: int
+    ) -> list[tuple[int, int]]:
+        text = request.text[start:end]
+        spans: list[tuple[int, int]] = []
+        cursor = 0
+        for match in re.finditer(r"\S+\s*", text):
+            if match.end() > cursor:
+                spans.append((start + cursor, start + match.end()))
+                cursor = match.end()
+        if cursor < len(text):
+            spans.append((start + cursor, end))
+        if not spans:
+            spans.append((start, end))
+        return OnnxRequestRenderer._merge_override_boundaries(spans, request)
+
+    @staticmethod
+    def _merge_override_boundaries(
+        spans: list[tuple[int, int]], request: SynthesisSegment
+    ) -> list[tuple[int, int]]:
+        merged: list[tuple[int, int]] = []
+        for start, end in spans:
+            if merged and any(
+                override.phonemes is not None and override.start < merged[-1][1] < override.end
+                for override in request.pronunciation_overrides
+            ):
+                merged[-1] = (merged[-1][0], end)
+            else:
+                merged.append((start, end))
+        return merged
+
+    @staticmethod
+    def _phoneme_segment_from_prepared(
+        request: SynthesisSegment,
+        prepared: PreparedSynthesis,
+        *,
+        start: int,
+        end: int,
+        phoneme_id: int,
+    ) -> PhonemeSegment:
+        voice_name = request.voice if isinstance(request.voice, str) else None
+        alignment_tokens = [
+            replace(
+                token,
+                char_start=token.char_start + start if token.char_start is not None else None,
+                char_end=token.char_end + start if token.char_end is not None else None,
+            )
+            for token in prepared.alignment_tokens
+        ]
+        return PhonemeSegment(
+            id=f"{request.id}:phoneme:{phoneme_id}",
+            segment_id=request.id,
+            phoneme_id=phoneme_id,
+            text=request.text[start:end],
+            phonemes=prepared.phonemes,
+            tokens=list(prepared.token_ids),
+            lang=request.language,
+            char_start=start,
+            char_end=end,
+            voice_name=voice_name,
+            alignment_tokens=alignment_tokens,
+        )

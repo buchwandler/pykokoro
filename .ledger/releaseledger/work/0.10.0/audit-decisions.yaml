@@ -1,0 +1,333 @@
+rows:
+  - sha: f8ff25efa9e3ad870ebee1c5675f8fb2ffbe9170
+    inspected: true
+    inspected_paths:
+      - pykokoro/pipeline.py
+      - pyproject.toml
+    observed_behavior:
+      "Introduced a document-planning adapter and UtterPlan dependency; these APIs and
+      the dependency are absent at the v0.10.0 boundary."
+    public_impact: public
+    decision: grouped
+    target_entry_key: null
+    target_entry_id: null
+    notes:
+      "Grouped under entry-0001 for the net removal of the document and planning APIs."
+    stale: false
+  - sha: 825a49a7b6b90d7308eb7d9a672dbcc745f576be
+    inspected: true
+    inspected_paths:
+      - pykokoro/_onnxvoice.py
+      - pykokoro/onnx_backend.py
+      - pyproject.toml
+    observed_behavior:
+      "Established the OnnxVoice installation, resolution, local-open, and
+      provider-normalization boundary used by the managed runtime."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes:
+      "Covered by the release entry describing model and session ownership delegated to
+      OnnxVoice; AudioCompose from this transitional commit is not retained."
+    stale: false
+  - sha: 0e22b45622154ad005302d8daa8df38c2df4d2c0
+    inspected: true
+    inspected_paths:
+      - pykokoro/_onnxvoice.py
+      - pykokoro/asset_progress.py
+      - tests/test_onnxvoice_boundary.py
+    observed_behavior:
+      "Improved asset-progress adaptation and model resolution, and preserved
+      timing-support metadata through the OnnxVoice runtime adapter."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: "Covered by the OnnxVoice runtime and request-local timing release entry."
+    stale: false
+  - sha: b436299354407edcf98ac24850747726ca6dfbac
+    inspected: true
+    inspected_paths:
+      - pykokoro/pipeline.py
+      - tests/test_audio_job_from_plan.py
+    observed_behavior:
+      "Added UtterancePlan-to-AudioJob orchestration to the legacy pipeline; the
+      pipeline and plan API are later removed."
+    public_impact: public
+    decision: grouped
+    target_entry_key: null
+    target_entry_id: null
+    notes:
+      "Grouped under entry-0001; the plan-to-AudioJob helper is absent from the final
+      request API."
+    stale: false
+  - sha: 4c55705ff3fd6f477ecff6a04d638cd89d31b6b5
+    inspected: true
+    inspected_paths:
+      - pykokoro/onnx_backend.py
+      - pykokoro/pipeline.py
+      - pykokoro/stages/g2p/kokorog2p.py
+    observed_behavior:
+      "Removed legacy document parsing and local asset/runtime code in an intermediate
+      cleanup that was followed by restoration and a later final refactor."
+    public_impact: public
+    decision: grouped
+    target_entry_key: null
+    target_entry_id: null
+    notes:
+      "Grouped under entry-0001; this transitional cleanup is evidence for the final
+      removal boundary."
+    stale: false
+  - sha: dd8a26e0956551d9250167b3c30db199cc0b61a5
+    inspected: true
+    inspected_paths:
+      - pykokoro/model_profiles.py
+      - pykokoro/model_assets.py
+      - pykokoro/output_loudness.py
+    observed_behavior:
+      "Restored runtime/model utilities and expanded quality tooling after an
+      intermediate cleanup; no separate supported API is defined by this snapshot."
+    public_impact: internal
+    decision: grouped
+    target_entry_key: null
+    target_entry_id: null
+    notes:
+      "Grouped under entry-0006 for integration and benchmark quality; temporary runtime
+      restoration is not a separate feature."
+    stale: false
+  - sha: b94802a3c5884050f07621359f4eda82fd94931c
+    inspected: true
+    inspected_paths:
+      - pykokoro/model_profiles.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/output_loudness.py
+    observed_behavior:
+      "Removed transitional runtime/asset modules and updated quality checks; the
+      user-facing companion boundary is captured by the later request-centric refactor."
+    public_impact: internal
+    decision: grouped
+    target_entry_key: null
+    target_entry_id: null
+    notes:
+      "Grouped under entry-0006 for test and runtime-boundary quality; no standalone
+      product behavior changed."
+    stale: false
+  - sha: 03fb98c121f44ca759672e81cf39028e0781e89d
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/pipeline_stages.md
+      - examples/pipeline_g2p_onnx_minimal.py
+    observed_behavior:
+      "Updated documentation and examples for the prior pipeline architecture; those
+      pages and examples are superseded by the request-centric rewrite."
+    public_impact: docs
+    decision: grouped
+    target_entry_key: null
+    target_entry_id: null
+    notes:
+      "Grouped under entry-0004; earlier pipeline documentation was replaced by the
+      final migration guidance."
+    stale: false
+  - sha: 63346451da51c3f4a0585e9a40a1830c8760613f
+    inspected: true
+    inspected_paths:
+      - benchmarks/hard_cases/frontend.py
+      - examples/contractions_advanced.py
+      - tests/test_pipeline_refactor.py
+    observed_behavior:
+      "Applied import ordering and a test/example reference correction without changing
+      user-facing behavior."
+    public_impact: internal
+    decision: grouped
+    target_entry_key: null
+    target_entry_id: null
+    notes:
+      "Grouped under entry-0006 for test and benchmark quality work; this commit has no
+      standalone product behavior."
+    stale: false
+  - sha: 6792b81f979cdda044eb27d92b4de754a2a50ffe
+    inspected: true
+    inspected_paths:
+      - tests/test_clausal_comma_pauses.py
+      - tests/test_german_segmentation.py
+    observed_behavior:
+      "Adjusted test zip behavior to permit the final unmatched sequence item; no
+      product code changed."
+    public_impact: internal
+    decision: grouped
+    target_entry_key: null
+    target_entry_id: null
+    notes:
+      "Grouped under entry-0006 for integration-test quality; no standalone product
+      behavior changed."
+    stale: false
+  - sha: d6767c8f661c3ea33b995d44e92e167622ca3cd9
+    inspected: true
+    inspected_paths:
+      - pykokoro/pipeline.py
+    observed_behavior:
+      "Changed legacy pipeline provenance metadata handling; the pipeline is removed
+      from the final public API."
+    public_impact: public
+    decision: grouped
+    target_entry_key: null
+    target_entry_id: null
+    notes:
+      "Grouped under entry-0001 because the provenance change applies only to the
+      pipeline API removed in v0.10.0."
+    stale: false
+  - sha: 9a496a82e9972cdc689df604abcf46d0cca74907
+    inspected: true
+    inspected_paths:
+      - pykokoro/_onnxvoice.py
+      - pykokoro/audio_generator.py
+      - tests/test_onnxvoice_boundary.py
+    observed_behavior:
+      "Added timing-support detection and a controlled fallback when an ONNX runtime
+      lacks timing output."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes:
+      "Covered by the release entry for OnnxVoice timing metadata and request-local
+      results."
+    stale: false
+  - sha: 36606f5bf85993924952da71b48c0536fb9388b1
+    inspected: true
+    inspected_paths:
+      - pykokoro/_onnxvoice.py
+      - pykokoro/audio_generator.py
+      - pykokoro/onnx_backend.py
+      - tests/test_word_timings.py
+    observed_behavior:
+      "Added layout-aware timing payloads and inference-result handling for model timing
+      arrays."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes:
+      "Covered by the release entry for request-local inference and timing metadata."
+    stale: false
+  - sha: 2741b94e51fe9b2e4a520ccbf088dd310e6861bd
+    inspected: true
+    inspected_paths:
+      - pykokoro/stages/g2p/kokorog2p.py
+      - tests/test_utterplan_integration.py
+    observed_behavior:
+      "Changed span metadata forwarding in the staged UtterPlan G2P path, which is
+      removed from the final request-centric API."
+    public_impact: public
+    decision: grouped
+    target_entry_key: null
+    target_entry_id: null
+    notes:
+      "Grouped under entry-0001; this staged G2P span behavior is removed with the
+      legacy document pipeline."
+    stale: false
+  - sha: f0833aae4a7b4a277199f7c003c149bd7ec80608
+    inspected: true
+    inspected_paths:
+      - pykokoro/planning/utterplan_adapter.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pyproject.toml
+    observed_behavior:
+      "Updated UtterPlan schema, annotation propagation, cache keys, and dependency
+      metadata for the legacy planning integration."
+    public_impact: public
+    decision: grouped
+    target_entry_key: null
+    target_entry_id: null
+    notes:
+      "Grouped under entry-0001; the UtterPlan schema and annotation support are absent
+      from the final package."
+    stale: false
+  - sha: 6550f14c4f5c1cacbe69c6d3b6aad7be06fdaf9f
+    inspected: true
+    inspected_paths:
+      - pykokoro/__init__.py
+      - pykokoro/pipeline.py
+      - tests/test_utterplan_integration.py
+    observed_behavior:
+      "Added further public pipeline and plan-rendering helpers that are absent from the
+      final request-centric API."
+    public_impact: public
+    decision: grouped
+    target_entry_key: null
+    target_entry_id: null
+    notes:
+      "Grouped under entry-0001 for the net removal of the temporary pipeline exports."
+    stale: false
+  - sha: 219229ec6980cbedd0f141e44468f290a2e75476
+    inspected: true
+    inspected_paths:
+      - pyproject.toml
+    observed_behavior:
+      "Raised the UtterPlan dependency minimum during the temporary planning
+      integration; UtterPlan is not a final runtime dependency."
+    public_impact: public
+    decision: grouped
+    target_entry_key: null
+    target_entry_id: null
+    notes:
+      "Grouped under entry-0001; the UtterPlan minimum was temporary and the dependency
+      is removed."
+    stale: false
+  - sha: 7824a27c37ff13b422e7e11933b0cd62f3fca579
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/breaking-change-0.10.0.md
+      - pyproject.toml
+      - pykokoro/__init__.py
+      - pykokoro/pipeline.py
+    observed_behavior:
+      "Removed the document-planning and composition layer and its dependencies,
+      establishing prepared synthesis requests and independent rendered results."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: "Covered by the breaking request-centric API entry."
+    stale: false
+  - sha: 7a9ce60fd9d44a84bc9f58dfb86ed5db7f00a231
+    inspected: true
+    inspected_paths:
+      - pykokoro/request_renderer.py
+      - pykokoro/synthesis_config.py
+      - pyproject.toml
+      - tests/test_long_text_splitting.py
+    observed_behavior:
+      "Added optional PhraseSplit-based model-limit splitting and regression coverage;
+      the final configuration keeps sentence mode opt-in and defaults to no splitting."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes:
+      "Covered by the long-text entry together with the final refinements recorded under
+      tl:task-0112."
+    stale: false
+  - sha: 35a9c05a06d835b11641e0b4038bd05ad0a3a6de
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/api_reference.md
+      - pykokoro/__init__.py
+      - pykokoro/synthesizer.py
+      - pykokoro/synthesis_identity.py
+      - pykokoro/synthesis_types.py
+    observed_behavior:
+      "Established the public request/result/configuration API and request-local
+      synthesis identity, timing, tracing, and voice-level metadata."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes:
+      "Covered by the breaking request-centric API entry; documentation also records the
+      deliberate compatibility aliases."
+    stale: false

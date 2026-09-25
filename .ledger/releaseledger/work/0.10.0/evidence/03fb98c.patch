@@ -1,0 +1,3112 @@
+ .github/workflows/tests.yml                      |   4 +-
+ README.md                                        |  42 ++-
+ benchmarks/__init__.py                           |  42 +--
+ benchmarks/benchmark_martin_cpu.py               |  30 +-
+ benchmarks/hard_cases/frontend.py                |  21 +-
+ benchmarks/polynorm_eval.py                      |  19 +-
+ docs/pipeline_stages.md                          |  92 +++---
+ examples/abbreviations.py                        |   4 -
+ examples/contractions_advanced.py                |  10 +-
+ examples/optimal_phoneme_length_demo.py          |  13 +-
+ examples/pipeline_g2p_onnx_minimal.py            |  33 +-
+ examples/repro_dup_words.py                      |  12 +-
+ examples/split_and_phonemize_demo.py             |  37 +--
+ pykokoro/pipeline.py                             |  12 +-
+ pykokoro/stages/doc_parsers/__init__.py          |   3 -
+ pykokoro/stages/segmentation/__init__.py         |   5 -
+ pykokoro/stages/text_preparation/__init__.py     |   5 -
+ tests/test_auto_pause_mode.py                    | 116 ++-----
+ tests/test_clausal_comma_pauses.py               | 275 ++---------------
+ tests/test_emphasis_policy.py                    |  26 +-
+ tests/test_german_segmentation.py                |  45 +--
+ tests/test_maintainer_review4_reproductions.py   |  20 --
+ tests/test_packaging_metadata.py                 |  14 +-
+ tests/test_parenthetical_pauses.py               | 375 ++---------------------
+ tests/test_phoneme_dictionary.py                 |  36 ++-
+ tests/test_pipeline_logging.py                   |   8 +-
+ tests/test_pipeline_paragraphs.py                |  42 +--
+ tests/test_pipeline_phoneme_consistency.py       |  21 +-
+ tests/test_pipeline_refactor.py                  | 361 ++++------------------
+ tests/test_pipeline_result_retention.py          |  51 ++-
+ tests/test_pipeline_unit_streaming.py            |  45 +--
+ tests/test_short_sentence_benchmark_reporting.py |   4 -
+ tests/test_short_sentence_diagnostics.py         |   4 -
+ tests/test_short_sentence_parameter_sweep.py     |   2 -
+ tests/test_spacy_model_policy.py                 | 326 +-------------------
+ tests/test_voice_loudness_benchmark.py           |   2 -
+ tests/test_voice_loudness_calibration.py         |   2 -
+ 37 files changed, 367 insertions(+), 1792 deletions(-)
+
+diff --git a/.github/workflows/tests.yml b/.github/workflows/tests.yml
+index 27c2984..55f9684 100644
+--- a/.github/workflows/tests.yml
++++ b/.github/workflows/tests.yml
+@@ -123,9 +123,7 @@ jobs:
+         python -m pip install \
+           "kokorog2p[all]==0.9.9" \
+           "lexphon==0.2.3" \
+-          "phrasplit==0.3.9" \
+-          "ssmd==0.8.7" \
+-          "spokenform==0.4.3" \
++          "utterplan==0.1.2" \
+           "audiosig==0.1.4" \
+           platformdirs
+         python -m pip install -e .
+diff --git a/README.md b/README.md
+index 6ce247a..09923a9 100644
+--- a/README.md
++++ b/README.md
+@@ -144,9 +144,8 @@ only the cached registry and forbids network access. `refresh=True` refreshes re
+ metadata only, never model or voice assets; the two options cannot be combined.
+ `registry_source` and `cache_fallback` describe where the inventory came from.
+
+-This API is distinct from `available_model_releases()`: discovery describes capabilities
+-the installed PyKokoro runtime can use, while the release catalog describes published
+-model artifacts.
++`discover_models()` describes the capabilities and inventory available to the installed
++PyKokoro runtime.
+
+ ### Public pipeline configuration resolution
+
+@@ -384,22 +383,30 @@ waveform before advancing the iterator because advancing releases the previous r
+ The pipeline is built from composable stages so you can swap behavior without rewriting
+ the whole flow:
+
+-`doc_parser (SSMD structure) -> text_preparer (Spokenform) -> sentence_segmenter (Phrasplit) -> g2p (prepared mode) -> phoneme_processing -> audio_generation -> audio_postprocessing`
++`UtterancePlanner -> UtterancePlan adapter -> g2p -> phoneme_processing -> audio_generation -> audio_postprocessing`
+
+-Stages can be replaced with no-op adapters when you want to disable behavior. The
+-snippet below shows a small stage-injection example.
++UtterPlan owns SSMD and plain-text parsing, Spokenform preparation, phrase segmentation,
++pauses, markers, and directives. PyKokoro owns rendering after the plan is adapted.
++No-op adapters can still replace downstream renderer stages:
+
+ ```python
+ from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
+-from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
++from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
++from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
+
+ pipe = KokoroPipeline(
+     PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_sarah"),
+-    doc_parser=PlainTextDocumentParser(),
++    audio_generation=NoopAudioGenerationAdapter(seconds_per_segment=0.0),
++    audio_postprocessing=NoopAudioPostprocessingAdapter(),
+ )
+ res = pipe.run("First paragraph.\n\nSecond paragraph.")
+ ```
+
++For an explicitly configured plan, create an `UtterancePlanner`, call
++`planner.plan(text)`, and pass the result to `pipe.run_plan(plan)`. The regular
++`run(text)` path derives the effective planner configuration from `PipelineConfig`;
++`run_plan()` is the handoff for plans compiled elsewhere.
++
+ ### Migration
+
+ Old (removed):
+@@ -1304,18 +1311,21 @@ capability.
+
+ ### Runtime capabilities versus published releases
+
+-- `discover_models()` answers what this PyKokoro runtime can use.
+-- `available_model_releases()` answers which compatible release artifacts are published.
+-- `resolve_model_release()` selects one compatible published release.
+-- `download_model_release()` explicitly downloads and verifies one selected release.
++- `discover_models()` answers what this PyKokoro runtime can use, including model IDs,
++  distributions, providers, qualities, voices, and runtime availability.
++- Lower-level published model catalog inspection belongs to OnnxVoice, for example
++  `OnnxVoice().list("kokoro")`.
++- Use `ModelCapabilities` and `ModelDiscoveryResult` for the structured PyKokoro
++  discovery result.
+
+-For example, inspect published releases without downloading them:
++For example, inspect the installed capability inventory without network access:
+
+ ```python
+-from pykokoro import available_model_releases
++from pykokoro import discover_models
+
+-for release in available_model_releases(offline=True):
+-    print(release.profile, release.release_tag, release.model_version)
++result = discover_models(offline=True)
++for model in result.models:
++    print(model.model_id, model.distribution_id, model.provider, model.qualities)
+ ```
+
+ ### v1.0 and v1.1-zh examples
+diff --git a/benchmarks/__init__.py b/benchmarks/__init__.py
+index 3e02bd5..44d4066 100644
+--- a/benchmarks/__init__.py
++++ b/benchmarks/__init__.py
+@@ -1,41 +1 @@
+-from __future__ import annotations
+-
+-from .polynorm_data import (
+-    POLYNORM_COMMIT,
+-    POLYNORM_LICENSE,
+-    POLYNORM_REPOSITORY,
+-    POLYNORM_TO_PYKOKORO_LANGUAGE,
+-    PolyNormCase,
+-    PolyNormDataError,
+-    PolyNormLicenseError,
+-    default_cache_root,
+-    ensure_locale_dataset,
+-    load_cases,
+-)
+-from .polynorm_eval import (
+-    CaseEvaluation,
+-    PhonemeObservation,
+-    PyKokoroPhonemeHarness,
+-    aggregate_results,
+-    evaluate_case,
+-    semantic_phoneme_key,
+-)
+-
+-__all__ = [
+-    "POLYNORM_COMMIT",
+-    "POLYNORM_LICENSE",
+-    "POLYNORM_REPOSITORY",
+-    "POLYNORM_TO_PYKOKORO_LANGUAGE",
+-    "CaseEvaluation",
+-    "PhonemeObservation",
+-    "PolyNormCase",
+-    "PolyNormDataError",
+-    "PolyNormLicenseError",
+-    "PyKokoroPhonemeHarness",
+-    "aggregate_results",
+-    "default_cache_root",
+-    "ensure_locale_dataset",
+-    "evaluate_case",
+-    "load_cases",
+-    "semantic_phoneme_key",
+-]
++"""Benchmark modules are imported explicitly by their consumers."""
+diff --git a/benchmarks/benchmark_martin_cpu.py b/benchmarks/benchmark_martin_cpu.py
+index 3558591..d045fc0 100644
+--- a/benchmarks/benchmark_martin_cpu.py
++++ b/benchmarks/benchmark_martin_cpu.py
+@@ -122,7 +122,6 @@ def _run_case(
+     repeat: int,
+     warmup: bool,
+     cache_enabled: bool,
+-    single_segment: bool = False,
+     provider_options: dict[str, Any],
+ ) -> None:
+     text, make_config = _german_assets()
+@@ -133,12 +132,7 @@ def _run_case(
+         provider_options=provider_options,
+         inference_cache_enabled=cache_enabled,
+     )
+-    if single_segment:
+-        from examples.pipeline_g2p_onnx_minimal import PlainDocumentParser
+-
+-        pipeline = KokoroPipeline(config, doc_parser=PlainDocumentParser())
+-    else:
+-        pipeline = KokoroPipeline(config)
++    pipeline = KokoroPipeline(config)
+     with pipeline:
+         if warmup:
+             pipeline.run("Warmup.")
+@@ -228,9 +222,6 @@ def main() -> None:
+         "--execution-mode", choices=("sequential", "parallel"), default="sequential"
+     )
+     parser.add_argument("--matrix", action="store_true", help="Run the Martin CPU option matrix")
+-    parser.add_argument(
+-        "--control", action="store_true", help="Compare normal and single-segment document paths"
+-    )
+     args = parser.parse_args()
+     if args.repeat < 1:
+         parser.error("--repeat must be at least 1")
+@@ -268,25 +259,6 @@ def main() -> None:
+         memory_enabled=None,
+     )
+     print(f"Provider/session options: {options}")
+-    if args.control:
+-        _run_case(
+-            "normal",
+-            lexicon=args.lexicon,
+-            repeat=args.repeat,
+-            warmup=not args.no_warmup,
+-            cache_enabled=args.cache,
+-            provider_options=options,
+-        )
+-        _run_case(
+-            "single-segment",
+-            lexicon=args.lexicon,
+-            repeat=args.repeat,
+-            warmup=not args.no_warmup,
+-            cache_enabled=args.cache,
+-            provider_options=options,
+-            single_segment=True,
+-        )
+-        return
+
+     _run_case(
+         "Martin",
+diff --git a/benchmarks/hard_cases/frontend.py b/benchmarks/hard_cases/frontend.py
+index c4ea49f..cda1660 100644
+--- a/benchmarks/hard_cases/frontend.py
++++ b/benchmarks/hard_cases/frontend.py
+@@ -1,18 +1,15 @@
+ from __future__ import annotations
+
+ from collections.abc import Mapping
+-from dataclasses import dataclass, field
+-from typing import Any
++from dataclasses import dataclass, field, replace
+
+-from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
+-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
+-from pykokoro.stages.segmentation.phrasplit import PhrasplitSentenceSegmenter
+-from pykokoro.stages.text_preparation.spokenform import SpokenformTextPreparer
++from utterplan import UtterancePlanner
+
+ from pykokoro.generation_config import GenerationConfig
+ from pykokoro.pipeline import KokoroPipeline
+ from pykokoro.pipeline_config import PipelineConfig
+ from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
++from pykokoro.planning import planner_config_from_pipeline
+ from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
+ from pykokoro.stages.phoneme_processing.noop import NoopPhonemeProcessorAdapter
+ from pykokoro.tokenizer import TokenizerConfig
+@@ -73,18 +70,21 @@ class NoOnnxFrontend:
+         )
+         self.locale = locale
+         self.variant = selected
++        planner_config = replace(
++            planner_config_from_pipeline(config, unit="paragraph"),
++            document_format="ssmd" if ssmd else "plain",
++        )
++        self.planner = UtterancePlanner(planner_config)
+         self.pipeline = KokoroPipeline(
+             config,
+-            doc_parser=SsmdDocumentParser() if ssmd else PlainTextDocumentParser(),
+-            text_preparer=SpokenformTextPreparer(),
+-            sentence_segmenter=PhrasplitSentenceSegmenter(),
+             phoneme_processing=NoopPhonemeProcessorAdapter(),
+             audio_generation=NoopAudioGenerationAdapter(seconds_per_segment=0.0),
+             audio_postprocessing=NoopAudioPostprocessingAdapter(),
+         )
+
+     def run(self, text: str) -> FrontendResult:
+-        result = self.pipeline.run(text)
++        plan = self.planner.plan(text)
++        result = self.pipeline.run_plan(plan)
+         return FrontendResult(
+             text=text,
+             clean_text=result.clean_text,
+@@ -99,6 +99,7 @@ class NoOnnxFrontend:
+
+     def close(self) -> None:
+         self.pipeline.close()
++        self.planner.close()
+
+     def __enter__(self) -> NoOnnxFrontend:
+         return self
+diff --git a/benchmarks/polynorm_eval.py b/benchmarks/polynorm_eval.py
+index d39c5b2..819bd32 100644
+--- a/benchmarks/polynorm_eval.py
++++ b/benchmarks/polynorm_eval.py
+@@ -11,14 +11,14 @@ from importlib import metadata
+ from pathlib import Path
+ from typing import Any
+
+-from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
+-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
++from utterplan import UtterancePlanner
+
+ from pykokoro import __version__ as pykokoro_version
+ from pykokoro.constants import SUPPORTED_LANGUAGES
+ from pykokoro.generation_config import GenerationConfig
+ from pykokoro.pipeline import KokoroPipeline
+ from pykokoro.pipeline_config import PipelineConfig, resolve_model_defaults
++from pykokoro.planning import planner_config_from_pipeline
+ from pykokoro.spacy_models import make_spacy_model_request
+ from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
+ from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
+@@ -115,17 +115,25 @@ class PyKokoroPhonemeHarness:
+         )
+         self.resolved_config = resolve_model_defaults(self.config)
+
+-        parser = SsmdDocumentParser() if ssmd else PlainTextDocumentParser()
++        base_planner_config = planner_config_from_pipeline(
++            self.resolved_config,
++            unit="paragraph",
++        )
++        self.planner_config = replace(
++            base_planner_config,
++            document_format="ssmd" if ssmd else "plain",
++        )
++        self.planner = UtterancePlanner(self.planner_config)
+         self.pipeline = KokoroPipeline(
+             self.config,
+-            doc_parser=parser,
+             phoneme_processing=NoopPhonemeProcessorAdapter(),
+             audio_generation=NoopAudioGenerationAdapter(seconds_per_segment=0.0),
+             audio_postprocessing=NoopAudioPostprocessingAdapter(),
+         )
+
+     def phonemize(self, text: str) -> PhonemeObservation:
+-        result = self.pipeline.run(text)
++        plan = self.planner.plan(text)
++        result = self.pipeline.run_plan(plan)
+         phonemes = " ".join(
+             segment.phonemes for segment in result.phoneme_segments if segment.phonemes
+         )
+@@ -141,6 +149,7 @@ class PyKokoroPhonemeHarness:
+
+     def close(self) -> None:
+         self.pipeline.close()
++        self.planner.close()
+
+     def __enter__(self) -> PyKokoroPhonemeHarness:
+         return self
+diff --git a/docs/pipeline_stages.md b/docs/pipeline_stages.md
+index c9195cb..b9803bb 100644
+--- a/docs/pipeline_stages.md
++++ b/docs/pipeline_stages.md
+@@ -1,18 +1,20 @@
+ # Pipeline Usage and Stages
+
+-`KokoroPipeline` is the configurable engine behind the high-level `Kokoro` class. Use it
+-when you want to swap parsing/segmentation stages, run custom G2P logic, or control
+-model loading at a lower level.
++`KokoroPipeline` is the configurable renderer behind the high-level `Kokoro` class. Use
++it to swap G2P, phoneme processing, audio generation, or audio postprocessing stages, or
++to render an `UtterancePlan` compiled by UtterPlan.
+
+ ## Pipeline overview
+
+ The default pipeline wiring is:
+
+-`doc_parser -> g2p -> phoneme_processing -> audio_generation -> audio_postprocessing`
++`UtterancePlanner -> UtterancePlan adapter -> g2p -> phoneme_processing -> audio_generation -> audio_postprocessing`
+
+-Default stage classes:
++UtterPlan owns document parsing, Spokenform preparation, phrase segmentation, pauses,
++markers, and directives. PyKokoro owns rendering after plan adaptation.
++
++Default renderer stage classes:
+
+-- `SsmdDocumentParser`
+ - `KokoroG2PAdapter`
+ - `OnnxPhonemeProcessorAdapter`
+ - `OnnxAudioGenerationAdapter`
+@@ -157,45 +159,36 @@ result = pipeline.run("Quick test", model_quality="q8")
+
+ ## Stage behavior
+
+-### SSMD document parser
+-
+-`SsmdDocumentParser` uses the SSMD 0.8 public front-matter parser and body-only
+-segmentation to turn SSMD markup into clean text plus metadata spans, pause boundaries,
+-and sentence/paragraph segments. Explicit break durations retain their processor
+-mapping; implicit document defaults are reduced before G2P.
+-
+-Supported SSMD features include:
+-
+-- Break markers: `...c`, `...s`, `...p`, `...500ms`
+-- Language overrides: `[Bonjour]{lang="fr"}`
+-- IPA phoneme overrides: `[tomato]{ipa="təˈmeɪtoʊ"}`
+-- Prosody annotations: `[text]{rate="fast" pitch="high" volume="loud"}`
+-- Inline voice annotations and `<div voice="af_sarah">` directives
+-
+-The parser attaches SSMD metadata to annotation spans so later stages can select
+-per-segment language, voices, phonemes, and prosody. Sentence-level `<div>` language,
+-voice, and prosody directives are inherited by contained segments, while inline
+-annotations override individual fields.
+-
+-### Plain text sentence splitting
+-
+-`PlainTextDocumentParser` uses Phrasplit 0.3.8's offset-preserving detailed split API
+-for sentence splitting. In automatic mode, the prepared linguistic analysis is also
+-passed to Phrasplit's high-confidence clausal-comma detector; list commas and
+-shared-subject continuations are not treated as deterministic clause pauses. The
+-returned diagnostics come from the same operation that produced the segments, so
+-sentence-model metadata does not require a separate model-resolution pass. When
+-`phrasplit` is unavailable, it falls back to a single segment. PhraseSplit may resolve
+-once per hard range; PyKokoro does not claim one resolution for the whole document. The
+-language model is derived from `generation.lang` using spaCy package naming rules (for
+-example `en_core_web_sm` for English). Split boundaries are forced at SSMD pause
+-boundaries and at spans that contain phoneme overrides so those overrides are kept
+-intact. Set `PYKOKORO_DEBUG_SEGMENTS=1` to log segment offsets.
+-
+-The prepared-text flow is: prepared analysis -> sentence segmentation -> Phrasplit
+-clausal-comma detection -> structural refinement -> deterministic boundary event -> G2P
+-pause propagation. Detection reuses the existing prepared document and does not run
+-spaCy again.
++### UtterPlan frontend
++
++`UtterancePlanner` is the planning frontend. It handles SSMD and plain-text parsing,
++Spokenform preparation, phrase segmentation, markers, pauses, and directives. The
++resulting immutable `UtterancePlan` is adapted into PyKokoro's renderer-side
++`DocumentResult` and segments before G2P runs.
++
++For normal applications, use `KokoroPipeline.run(text)`. For a precompiled plan, call
++`KokoroPipeline.run_plan(plan)`. Build an explicit planner when a caller needs a
++different planning configuration:
++
++```python
++from dataclasses import replace
++from utterplan import UtterancePlanner
++from pykokoro import KokoroPipeline
++from pykokoro.planning import planner_config_from_pipeline
++
++planner_config = replace(
++    planner_config_from_pipeline(config, unit="paragraph"),
++    document_format="plain",  # or "ssmd"
++)
++planner = UtterancePlanner(planner_config)
++try:
++    plan = planner.plan(text)
++    result = pipeline.run_plan(plan)
++finally:
++    planner.close()
++```
++
++Detailed parser and segmenter behavior belongs to UtterPlan documentation.
+
+ ### Kokoro G2P adapter
+
+@@ -252,10 +245,9 @@ script demonstrates multiple wiring styles:
+ Example with explicit stage wiring:
+
+ ```python
+-from pykokoro import GenerationConfig, PipelineConfig, build_pipeline
++from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
+ from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
+ from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
+-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
+ from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
+ from pykokoro.stages.phoneme_processing.noop import NoopPhonemeProcessorAdapter
+
+@@ -263,14 +255,14 @@ cfg = PipelineConfig(
+     voice="af_heart",
+     generation=GenerationConfig(lang="en-us"),
+ )
+-pipeline = build_pipeline(
+-    config=cfg,
+-    doc_parser=SsmdDocumentParser(),
++pipeline = KokoroPipeline(
++    cfg,
+     g2p=KokoroG2PAdapter(),
+     phoneme_processing=NoopPhonemeProcessorAdapter(),
+     audio_generation=NoopAudioGenerationAdapter(),
+     audio_postprocessing=NoopAudioPostprocessingAdapter(),
+ )
++result = pipeline.run("Hello from the renderer.")
+ ```
+
+ ### SSMD 0.8 document controls
+diff --git a/examples/abbreviations.py b/examples/abbreviations.py
+index cdeaf4a..bb95683 100644
+--- a/examples/abbreviations.py
++++ b/examples/abbreviations.py
+@@ -20,7 +20,6 @@ try:
+ except ImportError:
+     from _output import artifact_path
+
+-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
+
+ from pykokoro import KokoroPipeline, PipelineConfig
+ from pykokoro.debug.segment_invariants import check_segment_invariants
+@@ -115,8 +114,6 @@ def main() -> None:
+     generation = GenerationConfig(lang=args.lang, pause_mode=args.pause_mode)
+     cfg = PipelineConfig(voice=args.voice, generation=generation, return_trace=True)
+
+-    doc_parser = SsmdDocumentParser()
+-
+     noop_synth = args.noop_synth
+     if args.noop_g2p and not args.noop_synth:
+         print("Forcing no-op synth because no-op g2p omits tokens.")
+@@ -128,7 +125,6 @@ def main() -> None:
+
+     pipeline = KokoroPipeline(
+         cfg,
+-        doc_parser=doc_parser,
+         g2p=g2p,
+         audio_generation=audio_generation,
+         audio_postprocessing=audio_postprocessing,
+diff --git a/examples/contractions_advanced.py b/examples/contractions_advanced.py
+index 87abe25..6e23073 100644
+--- a/examples/contractions_advanced.py
++++ b/examples/contractions_advanced.py
+@@ -30,9 +30,8 @@ from pykokoro.debug.segment_invariants import check_segment_invariants
+ from pykokoro.generation_config import GenerationConfig
+ from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
+ from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
+-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
+ from pykokoro.stages.g2p.noop import NoopG2PAdapter
+-from pykokoro.types import Segment, Trace
++from pykokoro.types import Segment
+
+ # Extensive text with lots of direct speech and contractions
+ TEXT = """
+@@ -371,8 +370,6 @@ def main() -> None:
+     generation = GenerationConfig(lang=args.lang, pause_mode=args.pause_mode, pause_paragraph=0.9)
+     cfg = PipelineConfig(voice=args.voice, generation=generation, return_trace=True)
+
+-    doc_parser = SsmdDocumentParser()
+-
+     noop_synth = args.noop_synth
+     if args.noop_g2p and not args.noop_synth:
+         print("Forcing no-op synth because no-op g2p omits tokens.")
+@@ -384,7 +381,6 @@ def main() -> None:
+
+     pipeline = KokoroPipeline(
+         cfg,
+-        doc_parser=doc_parser,
+         g2p=g2p,
+         audio_generation=audio_generation,
+         audio_postprocessing=audio_postprocessing,
+@@ -413,9 +409,7 @@ def main() -> None:
+     result = pipeline.run(TEXT)
+     result.save_wav(output_file)
+
+-    doc = doc_parser.parse(TEXT, cfg, Trace())
+-
+-    print(f"clean_text length: {len(doc.clean_text)}")
++    print(f"clean_text length: {len(result.clean_text)}")
+     print_segments(result.segments)
+     print_phoneme_segments(result.phoneme_segments)
+     check_segment_invariants(result.segments, doc.clean_text)
+diff --git a/examples/optimal_phoneme_length_demo.py b/examples/optimal_phoneme_length_demo.py
+index b7565ee..f9e8cc1 100644
+--- a/examples/optimal_phoneme_length_demo.py
++++ b/examples/optimal_phoneme_length_demo.py
+@@ -31,11 +31,8 @@ try:
+ except ImportError:
+     from _output import artifact_path
+
+-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
+
+ from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
+-from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
+-from pykokoro.types import Trace
+
+ # Dialogue with mix of very short and normal sentences
+ DIALOGUE_TEXT = """
+@@ -147,15 +144,11 @@ def main():
+
+     # Analyze the text to show which segments are short
+     print_separator("Analyzing Text Segments")
+-    trace = Trace()
+-    doc = SsmdDocumentParser().parse(DIALOGUE_TEXT, cfg, trace)
+-    segments = KokoroG2PAdapter().phonemize(doc.segments, doc, cfg, trace)
+-    stats = analyze_segments(segments, "Segment Analysis (pause_mode='tts')")
+-
+-    # Generate audio with automatic short sentence handling
+-    print_separator("Generating Audio")
++    print_separator("Generating Audio and Analyzing Text Segments")
+     print("\nShort segments will automatically use short-sentence handling...")
+     result = pipe.run(DIALOGUE_TEXT)
++    segments = result.phoneme_segments
++    stats = analyze_segments(segments, "Segment Analysis (pause_mode='tts')")
+     samples = result.audio
+     sample_rate = result.sample_rate
+
+diff --git a/examples/pipeline_g2p_onnx_minimal.py b/examples/pipeline_g2p_onnx_minimal.py
+index 7f868f8..bf68883 100644
+--- a/examples/pipeline_g2p_onnx_minimal.py
++++ b/examples/pipeline_g2p_onnx_minimal.py
+@@ -20,27 +20,6 @@ except ImportError:
+     from _output import artifact_path
+
+ from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
+-from pykokoro.stages.protocols import DocumentResult
+-from pykokoro.types import Segment, Trace
+-
+-
+-class PlainDocumentParser:
+-    def parse(self, text: str, cfg: PipelineConfig, trace: Trace) -> DocumentResult:
+-        _ = (cfg, trace)
+-        return DocumentResult(
+-            clean_text=text,
+-            segments=[
+-                Segment(
+-                    id="p0_s0_c0_seg0",
+-                    text=text,
+-                    char_start=0,
+-                    char_end=len(text),
+-                    paragraph_idx=0,
+-                    sentence_idx=0,
+-                    clause_idx=0,
+-                )
+-            ],
+-        )
+
+
+ def main() -> None:
+@@ -61,7 +40,6 @@ def main() -> None:
+     )
+     pipeline = KokoroPipeline(
+         cfg,
+-        doc_parser=PlainDocumentParser(),
+     )
+     result = pipeline.run(text)
+     output_path = artifact_path("pipeline_g2p_onnx_minimal.wav")
+@@ -79,13 +57,12 @@ def main() -> None:
+             for event in trace.events:
+                 print(f"- {event.stage}:{event.name} {event.ms:.2f}ms")
+
+-    doc = pipeline.doc_parser.parse(text, cfg, Trace())
+-    segments = doc.segments
+-    print(segments)
+-    phoneme_segments = pipeline.g2p.phonemize(segments, doc, cfg, Trace())
+-    print(f"Text: {text}")
++    print(f"Text: {result.clean_text}")
++    print("Segments:")
++    for segment in result.segments:
++        print(segment)
+     print("Phonemes:")
+-    for segment in phoneme_segments:
++    for segment in result.phoneme_segments:
+         print(segment.phonemes)
+
+
+diff --git a/examples/repro_dup_words.py b/examples/repro_dup_words.py
+index f880296..10ea417 100644
+--- a/examples/repro_dup_words.py
++++ b/examples/repro_dup_words.py
+@@ -11,7 +11,6 @@ try:
+ except ImportError:
+     from _output import artifact_path
+
+-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
+
+ from pykokoro import KokoroPipeline, PipelineConfig
+ from pykokoro.debug.segment_invariants import check_segment_invariants
+@@ -19,7 +18,7 @@ from pykokoro.generation_config import GenerationConfig
+ from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
+ from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
+ from pykokoro.stages.g2p.noop import NoopG2PAdapter
+-from pykokoro.types import Segment, Trace
++from pykokoro.types import Segment
+
+
+ def parse_args() -> argparse.Namespace:
+@@ -80,8 +79,6 @@ def main() -> None:
+     generation = GenerationConfig(lang=args.lang, pause_mode=args.pause_mode)
+     cfg = PipelineConfig(voice=args.voice, generation=generation, return_trace=True)
+
+-    doc_parser = SsmdDocumentParser()
+-
+     noop_synth = args.noop_synth
+     if args.noop_g2p and not args.noop_synth:
+         print("Forcing no-op synth because no-op g2p omits tokens.")
+@@ -93,7 +90,6 @@ def main() -> None:
+
+     pipeline = KokoroPipeline(
+         cfg,
+-        doc_parser=doc_parser,
+         g2p=g2p,
+         audio_generation=audio_generation,
+         audio_postprocessing=audio_postprocessing,
+@@ -102,12 +98,10 @@ def main() -> None:
+     result = pipeline.run(args.text)
+     result.save_wav(args.out)
+
+-    doc = doc_parser.parse(args.text, cfg, Trace())
+-
+-    print(f"clean_text length: {len(doc.clean_text)}")
++    print(f"clean_text length: {len(result.clean_text)}")
+     print_segments(result.segments)
+     print_phoneme_segments(result.phoneme_segments)
+-    check_segment_invariants(result.segments, doc.clean_text)
++    check_segment_invariants(result.segments, result.clean_text)
+
+     if result.trace and result.trace.warnings:
+         print("Warnings:")
+diff --git a/examples/split_and_phonemize_demo.py b/examples/split_and_phonemize_demo.py
+index 149dd4f..4d74116 100755
+--- a/examples/split_and_phonemize_demo.py
++++ b/examples/split_and_phonemize_demo.py
+@@ -1,11 +1,9 @@
+ #!/usr/bin/env python3
+ """Demonstrate span-based splitting + phonemization with the pipeline stages."""
+
+-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
+-
+-from pykokoro import PipelineConfig
+-from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
+-from pykokoro.types import Trace
++from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
++from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
++from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
+
+
+ def print_separator(title: str) -> None:
+@@ -50,15 +48,19 @@ People walk to work. Cars fill the streets. The city comes alive."""
+     print(text)
+     print("-" * 80)
+
+-    cfg = PipelineConfig(voice="af_bella")
+-    trace = Trace()
+-    parser = SsmdDocumentParser()
+-    g2p = KokoroG2PAdapter()
++    cfg = PipelineConfig(
++        voice="af_bella",
++        generation=GenerationConfig(lang="en-us"),
++    )
++    pipeline = KokoroPipeline(
++        cfg,
++        audio_generation=NoopAudioGenerationAdapter(seconds_per_segment=0.0),
++        audio_postprocessing=NoopAudioPostprocessingAdapter(),
++    )
+
+     try:
+-        doc = parser.parse(text, cfg, trace)
+-        text_segments = doc.segments
+-        phoneme_segments = g2p.phonemize(text_segments, doc, cfg, trace)
++        result = pipeline.run(text)
++        phoneme_segments = result.phoneme_segments
+
+         print_segments(phoneme_segments)
+
+@@ -72,14 +74,13 @@ People walk to work. Cars fill the streets. The city comes alive."""
+         print(f"  Total tokens:     {total_tokens}")
+         print(f"  Avg chars/seg:    {total_chars / len(phoneme_segments):.1f}")
+         print(f"  Avg phonemes/seg: {total_phonemes / len(phoneme_segments):.1f}")
+-
+     except ImportError as e:
+-        print(f"\n⚠️  Error: {e}")
+-        print("   Sentence/clause splitting requires spaCy.")
+-        print("   Install with: pip install spacy")
+-        print("   Then: python -m spacy download en_core_web_sm")
++        print(f"\nError: {e}")
++        print("   Install the required G2P dependencies.")
+     except Exception as e:
+-        print(f"\n❌ Error processing text: {e}")
++        print(f"\nError processing text: {e}")
++    finally:
++        pipeline.close()
+
+
+ if __name__ == "__main__":
+diff --git a/pykokoro/pipeline.py b/pykokoro/pipeline.py
+index 946a4d8..8ade0d1 100644
+--- a/pykokoro/pipeline.py
++++ b/pykokoro/pipeline.py
+@@ -624,10 +624,12 @@ def build_pipeline(
+
+     Stage overrides (advanced)
+     --------------------------
+-    You may pass custom stage instances (``doc_parser``, ``g2p``,
+-    ``phoneme_processing``,
+-    ``audio_generation``, ``audio_postprocessing``) for testing
+-    or experimentation.
++    You may pass custom ``planner``, ``g2p``, ``phoneme_processing``,
++    ``audio_generation``, and ``audio_postprocessing`` instances for testing or
++    experimentation. The planner is used by the normal ``run(text)`` path, but
++    PyKokoro derives the effective planner configuration from ``PipelineConfig`` on
++    each call. Build an explicit ``UtterancePlan`` and use ``run_plan()`` when the
++    plan configuration must differ from the pipeline configuration.
+     Unspecified stages fall back to the library defaults.
+
+     Examples
+@@ -661,7 +663,7 @@ def build_pipeline(
+             to bind ONNX stages to.
+         eager: If true (and no ``backend`` is supplied), eagerly create/own
+             backend and default stages.
+-        doc_parser: Optional document parser stage.
++        planner: Optional UtterancePlanner used by the normal ``run(text)`` planning path.
+         g2p: Optional grapheme-to-phoneme stage.
+         phoneme_processing: Optional phoneme processing stage.
+         audio_generation: Optional audio generation stage.
+diff --git a/pykokoro/stages/doc_parsers/__init__.py b/pykokoro/stages/doc_parsers/__init__.py
+deleted file mode 100644
+index 8610062..0000000
+--- a/pykokoro/stages/doc_parsers/__init__.py
++++ /dev/null
+@@ -1,3 +0,0 @@
+-"""Internal package."""
+-
+-from __future__ import annotations
+diff --git a/pykokoro/stages/segmentation/__init__.py b/pykokoro/stages/segmentation/__init__.py
+deleted file mode 100644
+index 95bfdeb..0000000
+--- a/pykokoro/stages/segmentation/__init__.py
++++ /dev/null
+@@ -1,5 +0,0 @@
+-"""Sentence segmentation stages."""
+-
+-from .phrasplit import PhrasplitSentenceSegmenter
+-
+-__all__ = ["PhrasplitSentenceSegmenter"]
+diff --git a/pykokoro/stages/text_preparation/__init__.py b/pykokoro/stages/text_preparation/__init__.py
+deleted file mode 100644
+index 628902a..0000000
+--- a/pykokoro/stages/text_preparation/__init__.py
++++ /dev/null
+@@ -1,5 +0,0 @@
+-"""Speech-text preparation stages."""
+-
+-from .spokenform import SpokenformTextPreparer
+-
+-__all__ = ["SpokenformTextPreparer"]
+diff --git a/tests/test_auto_pause_mode.py b/tests/test_auto_pause_mode.py
+index 02c118c..858baf2 100644
+--- a/tests/test_auto_pause_mode.py
++++ b/tests/test_auto_pause_mode.py
+@@ -1,104 +1,34 @@
+-import pytest
++from __future__ import annotations
+
+-pytest.importorskip("pykokoro.stages.doc_parsers.plain")
+-pytest.importorskip("pykokoro.stages.doc_parsers.ssmd")
+-
+-import sys
+-import types
+-
+-import pytest
+-from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
+-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
++from utterplan import UtterancePlanner
+
++from pykokoro import PipelineConfig
+ from pykokoro.generation_config import GenerationConfig
+-from pykokoro.pipeline_config import PipelineConfig
+-from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
+-from pykokoro.stages.protocols import DocumentResult
+-from pykokoro.types import Segment, Trace
+-
+-
+-def test_plain_parser_auto_sentence_boundaries(monkeypatch):
+-    text = "Hello world. Another sentence."
+-
+-    class FakeSegment:
+-        def __init__(self, text: str, start: int, end: int, sentence_idx: int) -> None:
+-            self.text = text
+-            self.start = start
+-            self.end = end
+-            self.sentence = sentence_idx
+-            self.paragraph = 0
+-
+-    first_end = len("Hello world.")
+-    second_start = text.index("Another")
+-    first = FakeSegment("Hello world.", 0, first_end, 0)
+-    second = FakeSegment("Another sentence.", second_start, len(text), 1)
+-
+-    dummy_module = types.SimpleNamespace(
+-        split_with_offsets=lambda *_args, **_kwargs: [first, second]
+-    )
+-    monkeypatch.setitem(sys.modules, "phrasplit", dummy_module)
+-
+-    cfg = PipelineConfig(generation=GenerationConfig(pause_mode="auto"))
+-    doc = PlainTextDocumentParser().parse(text, cfg, Trace())
+-
+-    expected_pos = first_end - 1
+-    sentence_boundaries = [
+-        boundary
+-        for boundary in doc.boundary_events
+-        if boundary.kind == "pause" and boundary.attrs.get("strength") == "s"
+-    ]
+-    assert any(boundary.pos == expected_pos for boundary in sentence_boundaries)
+-
+-
+-def test_ssmd_parser_auto_sentence_boundaries():
+-    text = "Hello world. Another sentence."
+-    cfg = PipelineConfig(generation=GenerationConfig(pause_mode="auto"))
+-    doc = SsmdDocumentParser().parse(text, cfg, Trace())
+-
+-    assert all(segment.sentence_idx is None for segment in doc.segments)
+-    assert not [
+-        boundary
+-        for boundary in doc.boundary_events
+-        if boundary.kind == "pause" and boundary.attrs.get("strength") == "s"
+-    ]
++from pykokoro.planning import planner_config_from_pipeline
+
+
+-def test_auto_clause_pause_in_g2p(monkeypatch):
+-    fake_g2p = types.SimpleNamespace(__version__="0.0")
++def _plan(text: str):
++    config = PipelineConfig(generation=GenerationConfig(lang="en-us", pause_mode="auto"))
++    planner = UtterancePlanner(planner_config_from_pipeline(config, unit="paragraph"))
++    try:
++        return planner.plan(text)
++    finally:
++        planner.close()
+
+-    def phonemes_to_ids(phonemes, model=None):
+-        _ = model
+-        return list(range(len(phonemes)))
+
+-    def ids_to_phonemes(ids, model=None):
+-        _ = model
+-        return "a" * len(ids)
++def test_plain_text_auto_sentence_boundaries() -> None:
++    plan = _plan("First sentence. Second sentence.")
++    assert len(plan.segments) == 2
++    assert any(boundary.kind == "sentence" for boundary in plan.boundaries)
+
+-    fake_g2p.phonemes_to_ids = phonemes_to_ids
+-    fake_g2p.ids_to_phonemes = ids_to_phonemes
+-    monkeypatch.setitem(sys.modules, "kokorog2p", fake_g2p)
+
+-    text = "a" * 300 + "," + "b" * 300 + "," + "c" * 300
+-    generation = GenerationConfig(
+-        lang="en-us", is_phonemes=True, pause_mode="auto", pause_clause=0.25
+-    )
+-    cfg = PipelineConfig(generation=generation)
+-    doc = DocumentResult(clean_text=text)
+-    segments = [
+-        Segment(
+-            id="seg_0",
+-            text=text,
+-            char_start=0,
+-            char_end=len(text),
+-            paragraph_idx=0,
+-            sentence_idx=0,
+-            clause_idx=0,
+-        )
+-    ]
++def test_ssmd_auto_sentence_boundaries() -> None:
++    plan = _plan("First sentence.\n\nSecond sentence.")
++    assert len(plan.segments) == 2
++    assert plan.segments[0].spoken_end <= plan.segments[1].spoken_start
+
+-    phoneme_segments = KokoroG2PAdapter().phonemize(segments, doc, cfg, Trace())
+
+-    assert len(phoneme_segments) == 3
+-    assert phoneme_segments[0].pause_after == pytest.approx(generation.pause_clause)
+-    assert phoneme_segments[1].pause_after == pytest.approx(generation.pause_clause)
+-    assert phoneme_segments[2].pause_after == pytest.approx(0.0)
++def test_auto_pause_plan_is_renderer_independent() -> None:
++    plan = _plan("A sentence.")
++    assert plan.diagnostics
++    assert plan.diagnostics[-1].code == "planning.complete"
+diff --git a/tests/test_clausal_comma_pauses.py b/tests/test_clausal_comma_pauses.py
+index 7847eb3..bf93486 100644
+--- a/tests/test_clausal_comma_pauses.py
++++ b/tests/test_clausal_comma_pauses.py
+@@ -1,260 +1,43 @@
+ from __future__ import annotations
+
+-import pytest
+-
+-pytest.importorskip("pykokoro.stages.segmentation.phrasplit")
+-
+-
+-import sys
+-import types
+-
+-import pytest
+-from pykokoro.stages.segmentation.phrasplit import PhrasplitSentenceSegmenter
++from utterplan import UtterancePlanner
+
++from pykokoro import PipelineConfig
+ from pykokoro.generation_config import GenerationConfig
+-from pykokoro.pipeline_config import PipelineConfig
+-from pykokoro.runtime.language_plan import LanguageRun
+-from pykokoro.runtime.linguistics import LinguisticRequestState, PreparedRunAnalysis
+-from pykokoro.runtime.spans import slice_boundaries
+-from pykokoro.stages.protocols import DocumentResult
+-from pykokoro.types import BoundaryEvent, Trace
+-
+-TEXT = "It had picked up the sound of a explosion, direction suggested it was behind."
+-COMMA = TEXT.index(",")
+-
+-
+-def _boundary() -> types.SimpleNamespace:
+-    return types.SimpleNamespace(
+-        text=",",
+-        char_start=COMMA,
+-        char_end=COMMA + 1,
+-        kind="clausal_comma",
+-        meta={},
+-    )
+-
+-
+-def _run_case(monkeypatch, generation: GenerationConfig, detected=None, *, existing=None):
+-    calls: list[tuple[str, str, object]] = []
+-    detector_calls = 0
+-
+-    def split_with_offsets(text: str, *args, **kwargs):
+-        _ = args, kwargs
+-        return [(text, 0, len(text), 0, 0, 0)]
+-
+-    def detect_clause_boundaries(text: str, *, language: str, doc: object):
+-        nonlocal detector_calls
+-        detector_calls += 1
+-        calls.append((text, language, doc))
+-        return [] if detected is None else detected
+-
+-    fake_module = types.SimpleNamespace(
+-        split_with_offsets=split_with_offsets,
+-        detect_clause_boundaries=detect_clause_boundaries,
+-    )
+-    monkeypatch.setitem(sys.modules, "phrasplit", fake_module)
+-
+-    run = LanguageRun(char_start=0, char_end=len(TEXT), language="en-us")
+-    analysis_doc = object()
+-    analysis = PreparedRunAnalysis(run=run, text=TEXT, doc=analysis_doc, annotations=())
+-    state = LinguisticRequestState(prepared_plan=(run,), prepared_analysis=[analysis])
+-    doc = DocumentResult(clean_text=TEXT, linguistic_state=state)
+-    if existing:
+-        doc.boundary_events.extend(existing)
+-    trace = Trace()
+-
+-    segments = PhrasplitSentenceSegmenter().split(doc, PipelineConfig(generation=generation), trace)
+-    return doc, trace, segments, detector_calls, calls, analysis_doc
+-
+-
+-def test_auto_clausal_comma_creates_owned_pause_and_cut(monkeypatch):
+-    generation = GenerationConfig(lang="en-us", pause_mode="auto", pause_clause=0.25)
+-    doc, trace, segments, detector_calls, calls, analysis_doc = _run_case(
+-        monkeypatch, generation, [_boundary()]
+-    )
+-
+-    assert detector_calls == 1
+-    assert calls == [(TEXT, "en-us", analysis_doc)]
+-    assert [segment.text for segment in segments] == [TEXT[: COMMA + 1], TEXT[COMMA + 1 :]]
+-    assert segments[0].char_end == COMMA + 1
+-    assert segments[1].char_start == COMMA + 1
+-
+-    events = [
+-        event
+-        for event in doc.boundary_events
+-        if event.attrs.get("boundary_kind") == "clausal_comma"
+-    ]
+-    assert len(events) == 1
+-    event = events[0]
+-    assert event.pos == COMMA
+-    assert event.duration_s == pytest.approx(0.25)
+-    assert event.attrs == {
+-        "strength": "c",
+-        "anchor": "after",
+-        "source": "pipeline_default",
+-        "detector": "phrasplit",
+-        "boundary_kind": "clausal_comma",
+-    }
+-    diagnostic = next(item for item in trace.events if item.name == "clausal_comma_boundaries")
+-    assert diagnostic.details == {
+-        "detected": 1,
+-        "added": 1,
+-        "deduplicated": 0,
+-        "runs_with_analysis": 1,
+-        "runs_without_analysis": 0,
+-    }
+-    assert doc.metadata["segmentation"]["clausal_comma_boundaries"] == 1
+-
+-
+-def test_clausal_comma_pause_is_owned_by_preceding_g2p_segment(monkeypatch):
+-    generation = GenerationConfig(lang="en-us", pause_mode="auto", pause_clause=0.25)
+-    doc, _trace, segments, _detector_calls, _calls, _analysis_doc = _run_case(
+-        monkeypatch, generation, [_boundary()]
+-    )
+-
+-    sliced = [
+-        slice_boundaries(
+-            doc.boundary_events, segment.char_start, segment.char_end, doc_end=len(TEXT)
+-        )
+-        for segment in segments
+-    ]
+-    assert [boundary.pos for boundary in sliced[0]] == [COMMA]
+-    assert sliced[1] == []
+-    from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
+-
+-    adapter = KokoroG2PAdapter()
+-    assert adapter._resolve_pauses(sliced[0], generation) == (0.0, pytest.approx(0.25))
+-    assert adapter._resolve_pauses(sliced[1], generation) == (0.0, 0.0)
++from pykokoro.planning import planner_config_from_pipeline
+
+
+-@pytest.mark.parametrize("pause_mode", ["tts", "manual"])
+-def test_non_auto_modes_do_not_add_clausal_pause(monkeypatch, pause_mode):
+-    generation = GenerationConfig(lang="en-us", pause_mode=pause_mode, pause_clause=0.25)
+-    doc, _trace, segments, detector_calls, _calls, _analysis_doc = _run_case(
+-        monkeypatch, generation, [_boundary()]
+-    )
+-
+-    assert detector_calls == 0
+-    assert len(segments) == 1
+-    assert not [event for event in doc.boundary_events if event.attrs.get("boundary_kind")]
+-
+-
+-def test_zero_clause_pause_does_not_split(monkeypatch):
+-    generation = GenerationConfig(lang="en-us", pause_mode="auto", pause_clause=0.0)
+-    doc, _trace, segments, detector_calls, _calls, _analysis_doc = _run_case(
+-        monkeypatch, generation, [_boundary()]
+-    )
+-
+-    assert detector_calls == 0
+-    assert len(segments) == 1
+-    assert not doc.boundary_events
+-
+-
+-def test_explicit_pause_wins_at_comma(monkeypatch):
+-    explicit = BoundaryEvent(
+-        pos=COMMA,
+-        kind="pause",
+-        duration_s=0.9,
+-        attrs={"strength": "s", "source": "explicit"},
+-    )
+-    generation = GenerationConfig(lang="en-us", pause_mode="auto", pause_clause=0.25)
+-    doc, trace, segments, _detector_calls, _calls, _analysis_doc = _run_case(
+-        monkeypatch, generation, [_boundary()], existing=[explicit]
+-    )
+-
+-    assert len(segments) == 2
+-    at_comma = [event for event in doc.boundary_events if event.pos == COMMA]
+-    assert at_comma == [explicit]
+-    diagnostic = next(item for item in trace.events if item.name == "clausal_comma_boundaries")
+-    assert diagnostic.details["deduplicated"] == 1
+-
+-
+-def test_no_analysis_skips_detector_without_crashing(monkeypatch):
+-    calls = 0
++def _plan(text: str):
++    config = PipelineConfig(generation=GenerationConfig(lang="en-us", pause_mode="auto"))
++    planner = UtterancePlanner(planner_config_from_pipeline(config, unit="paragraph"))
++    try:
++        return planner.plan(text)
++    finally:
++        planner.close()
+
+-    def detect(*args, **kwargs):
+-        nonlocal calls
+-        calls += 1
+-        raise AssertionError("detector must not run without a prepared document")
+
+-    fake_module = types.SimpleNamespace(
+-        split_with_offsets=lambda text, *args, **kwargs: [(text, 0, len(text), 0, 0, 0)],
+-        detect_clause_boundaries=detect,
++def test_clausal_comma_plan_keeps_clean_offsets() -> None:
++    plan = _plan("When the sun rises, the birds sing.")
++    assert plan.texts.spoken == "When the sun rises, the birds sing."
++    assert all(
++        segment.text == plan.texts.spoken[segment.spoken_start : segment.spoken_end]
++        for segment in plan.segments
+     )
+-    monkeypatch.setitem(sys.modules, "phrasplit", fake_module)
+-    run = LanguageRun(0, len(TEXT), "en-us")
+-    analysis = PreparedRunAnalysis(run=run, text=TEXT, doc=None, annotations=())
+-    state = LinguisticRequestState(prepared_plan=(run,), prepared_analysis=[analysis])
+-    doc = DocumentResult(clean_text=TEXT, linguistic_state=state)
+-    trace = Trace()
+
+-    segments = PhrasplitSentenceSegmenter().split(
+-        doc, PipelineConfig(generation=GenerationConfig(lang="en-us", pause_mode="auto")), trace
+-    )
+-
+-    assert calls == 0
+-    assert len(segments) == 1
+-    assert not doc.boundary_events
+-    diagnostic = next(item for item in trace.events if item.name == "clausal_comma_boundaries")
+-    assert diagnostic.details["runs_without_analysis"] == 1
+-
+-
+-def test_list_and_shared_subject_commas_remain_unsplit(monkeypatch):
+-    for text in (
+-        "It picked up sound, light, smoke, and debris.",
+-        "I opened the door, looked inside, and walked away.",
+-    ):
+-        run = LanguageRun(0, len(text), "en-us")
+-        analysis = PreparedRunAnalysis(run=run, text=text, doc=object(), annotations=())
+-        state = LinguisticRequestState(prepared_plan=(run,), prepared_analysis=[analysis])
+-        doc = DocumentResult(clean_text=text, linguistic_state=state)
+-        fake_module = types.SimpleNamespace(
+-            split_with_offsets=lambda value, *args, **kwargs: [(value, 0, len(value), 0, 0, 0)],
+-            detect_clause_boundaries=lambda *args, **kwargs: [],
+-        )
+-        monkeypatch.setitem(sys.modules, "phrasplit", fake_module)
+
+-        segments = PhrasplitSentenceSegmenter().split(
+-            doc,
+-            PipelineConfig(generation=GenerationConfig(lang="en-us", pause_mode="auto")),
+-            Trace(),
+-        )
++def test_non_auto_planning_still_produces_renderer_segments() -> None:
++    config = PipelineConfig(generation=GenerationConfig(lang="en-us", pause_mode="manual"))
++    planner = UtterancePlanner(planner_config_from_pipeline(config, unit="paragraph"))
++    try:
++        plan = planner.plan("A list, with commas, remains valid.")
++    finally:
++        planner.close()
++    assert plan.segments
+
+-        assert len(segments) == 1
+-        assert not doc.boundary_events
+
+-
+-def test_malformed_boundary_is_ignored_with_warning(monkeypatch):
+-    malformed = types.SimpleNamespace(
+-        text="wrong",
+-        char_start=COMMA,
+-        char_end=COMMA + 1,
+-        kind="clausal_comma",
+-    )
+-    generation = GenerationConfig(lang="en-us", pause_mode="auto", pause_clause=0.25)
+-    doc, trace, segments, _detector_calls, _calls, _analysis_doc = _run_case(
+-        monkeypatch, generation, [malformed]
++def test_clausal_planning_has_no_overlapping_segments() -> None:
++    plan = _plan("The cat sat, and the dog slept.")
++    assert all(
++        left.spoken_end <= right.spoken_start
++        for left, right in zip(plan.segments, plan.segments[1:])
+     )
+-
+-    assert len(segments) == 1
+-    assert not doc.boundary_events
+-    assert any("mismatched clean_text slice" in warning for warning in trace.warnings)
+-
+-
+-def test_stale_phrasplit_without_detector_warns_and_falls_back(monkeypatch):
+-    fake_module = types.SimpleNamespace(
+-        split_with_offsets=lambda text, *args, **kwargs: [(text, 0, len(text), 0, 0, 0)]
+-    )
+-    monkeypatch.setitem(sys.modules, "phrasplit", fake_module)
+-    run = LanguageRun(0, len(TEXT), "en-us")
+-    analysis = PreparedRunAnalysis(run=run, text=TEXT, doc=object(), annotations=())
+-    state = LinguisticRequestState(prepared_plan=(run,), prepared_analysis=[analysis])
+-    doc = DocumentResult(clean_text=TEXT, linguistic_state=state)
+-    trace = Trace()
+-
+-    segments = PhrasplitSentenceSegmenter().split(
+-        doc, PipelineConfig(generation=GenerationConfig(lang="en-us", pause_mode="auto")), trace
+-    )
+-
+-    assert len(segments) == 1
+-    assert not doc.boundary_events
+-    assert any("detect_clause_boundaries is unavailable" in warning for warning in trace.warnings)
+diff --git a/tests/test_emphasis_policy.py b/tests/test_emphasis_policy.py
+index 06433c1..bf23607 100644
+--- a/tests/test_emphasis_policy.py
++++ b/tests/test_emphasis_policy.py
+@@ -2,15 +2,12 @@ from __future__ import annotations
+
+ import pytest
+
+-pytest.importorskip("pykokoro.ssmd_parser")
+-
+
+ import math
+ from types import SimpleNamespace
+
+ import numpy as np
+ import pytest
+-from pykokoro.ssmd_parser import parse_ssmd_document
+
+ from pykokoro.emphasis import apply_emphasis_policy, resolve_emphasis
+ from pykokoro.exceptions import CapabilityError
+@@ -19,8 +16,7 @@ from pykokoro.pipeline import KokoroPipeline
+ from pykokoro.pipeline_config import PipelineConfig
+ from pykokoro.prosody import apply_volume
+ from pykokoro.ssmd_config import SSMDRenderConfig
+-from pykokoro.stages.protocols import DocumentResult
+-from pykokoro.types import PhonemeSegment, Segment, Trace
++from pykokoro.types import PhonemeSegment, Trace
+
+
+ def _segment(
+@@ -191,30 +187,11 @@ def test_error_rejects_before_generation() -> None:
+         apply_emphasis_policy([_segment("strong")], _cfg("error", scale=1.5), Trace())
+
+
+-def test_ssmd_parser_emphasis_reaches_policy_metadata() -> None:
+-    parsed = parse_ssmd_document('[important]{emphasis="moderate"}')
+-    assert parsed.segments[0].metadata.emphasis == "moderate"
+-
+-    segment = _segment(parsed.segments[0].metadata.emphasis)
+-    apply_emphasis_policy([segment], _cfg("approximate"), Trace())
+-
+-    assert segment.ssmd_metadata["prosody_volume"] == "+3dB"
+-
+-
+ def test_invalid_mode_is_rejected_by_configuration() -> None:
+     with pytest.raises(ValueError, match="emphasis_mode"):
+         SSMDRenderConfig(emphasis_mode="invalid")  # type: ignore[arg-type]
+
+
+-class _Doc:
+-    def parse(self, text, cfg, trace):
+-        _ = cfg, trace
+-        return DocumentResult(
+-            clean_text=text,
+-            segments=[Segment("source-1", text, 0, len(text))],
+-        )
+-
+-
+ class _G2P:
+     def phonemize(self, segments, doc, cfg, trace):
+         _ = doc, trace
+@@ -250,7 +227,6 @@ def test_error_policy_runs_before_audio_generation() -> None:
+             generation=GenerationConfig(lang="en-us"),
+             ssmd=SSMDRenderConfig(emphasis_mode="error"),
+         ),
+-        doc_parser=_Doc(),
+         g2p=_G2P(),
+         phoneme_processing=_Processor(),
+         audio_generation=generator,
+diff --git a/tests/test_german_segmentation.py b/tests/test_german_segmentation.py
+index 927ec63..efd8625 100644
+--- a/tests/test_german_segmentation.py
++++ b/tests/test_german_segmentation.py
+@@ -1,37 +1,22 @@
+ from __future__ import annotations
+
+-import pytest
+-
+-pytest.importorskip("pykokoro.stages.doc_parsers.plain")
+-pytest.importorskip("pykokoro.stages.segmentation.phrasplit")
+-pytest.importorskip("pykokoro.stages.text_preparation.spokenform")
+-
+-
+-from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
+-from pykokoro.stages.segmentation.phrasplit import PhrasplitSentenceSegmenter
+-from pykokoro.stages.text_preparation.spokenform import SpokenformTextPreparer
++from utterplan import UtterancePlanner
+
++from pykokoro import PipelineConfig
+ from pykokoro.generation_config import GenerationConfig
+-from pykokoro.pipeline_config import PipelineConfig
+-from pykokoro.types import Trace
++from pykokoro.planning import planner_config_from_pipeline
+
+
+-def test_german_abbreviations_and_ordinals_do_not_create_false_boundaries():
+-    text = (
+-        "Prof. Klein sagt: Bitte stelle die Form auf die 2. Schiene, backe alles für "
+-        "45 Min. und lass es danach 1 Min. ruhen. Die Kosten liegen bei ca. "
+-        "12,80 EUR zzgl. Pfand."
+-    )
+-    cfg = PipelineConfig(generation=GenerationConfig(lang="de"))
+-    trace = Trace()
+-    doc = PlainTextDocumentParser().parse(text, cfg, trace)
+-    SpokenformTextPreparer().prepare(doc, cfg, trace)
+-    doc.segments = PhrasplitSentenceSegmenter().split(doc, cfg, trace)
+-    assert len(doc.segments) == 2
+-    assert doc.segments[0].text.endswith("eine Minute ruhen.")
+-    assert (
+-        doc.segments[1].text
+-        == "Die Kosten liegen bei zirka zwölf Euro achtzig Cent zuzüglich Pfand."
++def test_german_abbreviations_and_ordinals_keep_monotonic_offsets() -> None:
++    config = PipelineConfig(generation=GenerationConfig(lang="de"))
++    planner = UtterancePlanner(planner_config_from_pipeline(config, unit="paragraph"))
++    try:
++        plan = planner.plan("Dr. Schmidt kommt am 5. März. Das ist gut.")
++    finally:
++        planner.close()
++
++    assert plan.segments
++    assert all(
++        left.spoken_end <= right.spoken_start
++        for left, right in zip(plan.segments, plan.segments[1:])
+     )
+-    for segment in doc.segments:
+-        assert segment.text == doc.clean_text[segment.char_start : segment.char_end]
+diff --git a/tests/test_maintainer_review4_reproductions.py b/tests/test_maintainer_review4_reproductions.py
+index aa72d01..cfa7a4c 100644
+--- a/tests/test_maintainer_review4_reproductions.py
++++ b/tests/test_maintainer_review4_reproductions.py
+@@ -17,25 +17,6 @@ from pykokoro.tokenizer import TokenizerConfig
+ from pykokoro.types import PhonemeSegment, Segment
+
+
+-class _DocParser:
+-    def parse(self, text: str, cfg: PipelineConfig, trace: Any) -> DocumentResult:
+-        _ = (cfg, trace)
+-        return DocumentResult(
+-            clean_text=text,
+-            segments=[
+-                Segment(
+-                    id="segment-0",
+-                    text=text,
+-                    char_start=0,
+-                    char_end=len(text),
+-                    paragraph_idx=0,
+-                    sentence_idx=0,
+-                    clause_idx=0,
+-                )
+-            ],
+-        )
+-
+-
+ class _RecordingG2P:
+     def __init__(self) -> None:
+         self.configs: list[PipelineConfig] = []
+@@ -86,7 +67,6 @@ def _pipeline(g2p: _RecordingG2P) -> KokoroPipeline:
+     stage = _PassthroughStage()
+     return KokoroPipeline(
+         PipelineConfig(),
+-        doc_parser=_DocParser(),
+         g2p=g2p,
+         phoneme_processing=stage,
+         audio_generation=stage,
+diff --git a/tests/test_packaging_metadata.py b/tests/test_packaging_metadata.py
+index 49ef67f..9f840bf 100644
+--- a/tests/test_packaging_metadata.py
++++ b/tests/test_packaging_metadata.py
+@@ -42,8 +42,8 @@ def test_companion_dependency_floors_match_current_integration_contract() -> Non
+     ]
+
+     assert "kokorog2p[espeak,en]>=0.9.9,<1.0" in dependencies
++    assert "utterplan>=0.1.2,<0.2" in dependencies
+     assert "lexphon>=0.2.3,<0.3" in dependencies
+-    assert "phrasplit>=0.3.9,<0.4" in dependencies
+
+
+ def test_test_requirements_keep_kokorog2p_in_supported_window() -> None:
+@@ -78,12 +78,14 @@ def test_goruut_extra_uses_companion_provider_contract() -> None:
+     assert optional["goruut"] == ["kokorog2p[goruut]>=0.9.8,<1.0"]
+
+
+-def test_ssmd_dependency_targets_current_contract() -> None:
++def test_planning_dependency_targets_current_contract() -> None:
+     dependencies = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+         "dependencies"
+     ]
+-    assert "ssmd>=0.8.7,<0.9" in dependencies
+-    assert "spokenform>=0.4.3,<0.5" in dependencies
++    assert "utterplan>=0.1.2,<0.2" in dependencies
++    assert not any(requirement.startswith("phrasplit") for requirement in dependencies)
++    assert not any(requirement.startswith("ssmd") for requirement in dependencies)
++    assert not any(requirement.startswith("spokenform") for requirement in dependencies)
+
+
+ def test_audiosig_is_the_only_declared_dsp_backend() -> None:
+@@ -181,9 +183,7 @@ def test_lower_bound_workflow_pins_match_project_floors() -> None:
+     expected_packages = {
+         "kokorog2p",
+         "lexphon",
+-        "phrasplit",
+-        "ssmd",
+-        "spokenform",
++        "utterplan",
+         "audiosig",
+     }
+
+diff --git a/tests/test_parenthetical_pauses.py b/tests/test_parenthetical_pauses.py
+index 5baf763..0509bb2 100644
+--- a/tests/test_parenthetical_pauses.py
++++ b/tests/test_parenthetical_pauses.py
+@@ -1,366 +1,33 @@
+ from __future__ import annotations
+
+-import pytest
+-
+-pytest.importorskip("pykokoro.stages.segmentation.phrasplit")
+-
+-
+-import sys
+-import types
+-
+-import pytest
+-from pykokoro.stages.segmentation.phrasplit import PhrasplitSentenceSegmenter
++from utterplan import UtterancePlanner
+
++from pykokoro import PipelineConfig
+ from pykokoro.generation_config import GenerationConfig
+-from pykokoro.pipeline_config import PipelineConfig
+-from pykokoro.runtime.language_plan import LanguageRun
+-from pykokoro.runtime.linguistics import LinguisticRequestState, PreparedRunAnalysis
+-from pykokoro.runtime.spans import slice_boundaries
+-from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
+-from pykokoro.stages.protocols import DocumentResult
+-from pykokoro.types import BoundaryEvent, Segment, Trace
+-
+-FINAL_TEXT = "They changed out their clothes (stained with blood)."
+-MEDIAL_TEXT = "They changed clothes (stained with blood) before leaving."
+-
+-
+-def _boundary(text: str, kind: str, position: int) -> types.SimpleNamespace:
+-    return types.SimpleNamespace(
+-        text=text[position : position + 1],
+-        char_start=position,
+-        char_end=position + 1,
+-        kind=kind,
+-        meta={"confidence": 1.0, "reason": "test"},
+-    )
+-
+-
+-def _run_case(
+-    monkeypatch: pytest.MonkeyPatch,
+-    text: str,
+-    boundaries: list[object],
+-    *,
+-    analysis_doc: object | None = object(),
+-    existing: list[BoundaryEvent] | None = None,
+-    pause_parenthetical: float = 0.15,
+-):
+-    calls: list[tuple[str, str | None]] = []
+-
+-    fake_module = types.SimpleNamespace(
+-        split_with_offsets=lambda value, *args, **kwargs: [(value, 0, len(value), 0, 0, 0)],
+-        detect_clause_boundaries=lambda *args, **kwargs: [],
+-    )
+-
+-    def detect_parenthetical_boundaries(value: str, *, language: str | None = None):
+-        calls.append((value, language))
+-        return boundaries
+-
+-    fake_module.detect_parenthetical_boundaries = detect_parenthetical_boundaries
+-    monkeypatch.setitem(sys.modules, "phrasplit", fake_module)
+-
+-    run = LanguageRun(0, len(text), "en-us")
+-    analysis = PreparedRunAnalysis(run=run, text=text, doc=analysis_doc, annotations=())
+-    state = LinguisticRequestState(prepared_plan=(run,), prepared_analysis=[analysis])
+-    doc = DocumentResult(clean_text=text, linguistic_state=state)
+-    if existing:
+-        doc.boundary_events.extend(existing)
+-    trace = Trace()
+-    generation = GenerationConfig(
+-        lang="en-us",
+-        pause_mode="auto",
+-        pause_parenthetical=pause_parenthetical,
+-        pause_variance=0.0,
+-    )
+-    segments = PhrasplitSentenceSegmenter().split(doc, PipelineConfig(generation=generation), trace)
+-    return doc, trace, segments, calls, generation
+-
+-
+-def test_auto_parenthetical_opening_creates_owned_pause_and_cut(monkeypatch):
+-    position = FINAL_TEXT.index("(")
+-    doc, trace, segments, calls, _generation = _run_case(
+-        monkeypatch,
+-        FINAL_TEXT,
+-        [_boundary(FINAL_TEXT, "parenthetical_open", position)],
+-    )
+-
+-    assert calls == [(FINAL_TEXT, "en-us")]
+-    assert [segment.text for segment in segments] == [FINAL_TEXT[:position], FINAL_TEXT[position:]]
+-    events = [
+-        event for event in doc.boundary_events if event.attrs.get("pause_kind") == "parenthetical"
+-    ]
+-    assert len(events) == 1
+-    event = events[0]
+-    assert event.pos == position
+-    assert event.duration_s == pytest.approx(0.15)
+-    assert event.attrs == {
+-        "strength": "w",
+-        "anchor": "before",
+-        "source": "pipeline_default",
+-        "detector": "phrasplit",
+-        "pause_kind": "parenthetical",
+-        "boundary_kind": "parenthetical_open",
+-        "confidence": "1.0",
+-        "reason": "test",
+-    }
+-    diagnostic = next(item for item in trace.events if item.name == "parenthetical_boundaries")
+-    assert diagnostic.details == {
+-        "detected": 1,
+-        "open_detected": 1,
+-        "close_detected": 0,
+-        "added": 1,
+-        "deduplicated": 0,
+-        "malformed_skipped": 0,
+-    }
+-    assert doc.metadata["segmentation"]["parenthetical_boundaries"] == 1
+-
+-
+-def test_final_parenthetical_has_no_generated_close_pause(monkeypatch):
+-    position = FINAL_TEXT.index("(")
+-    doc, _trace, _segments, _calls, _generation = _run_case(
+-        monkeypatch,
+-        FINAL_TEXT,
+-        [_boundary(FINAL_TEXT, "parenthetical_open", position)],
+-    )
+-
+-    assert not [
+-        event
+-        for event in doc.boundary_events
+-        if event.attrs.get("boundary_kind") == "parenthetical_close"
+-    ]
+-
+-
+-def test_medial_parenthetical_maps_open_and_close_coordinates(monkeypatch):
+-    opening = MEDIAL_TEXT.index("(")
+-    closing = MEDIAL_TEXT.index(")")
+-    doc, _trace, segments, _calls, _generation = _run_case(
+-        monkeypatch,
+-        MEDIAL_TEXT,
+-        [
+-            _boundary(MEDIAL_TEXT, "parenthetical_open", opening),
+-            _boundary(MEDIAL_TEXT, "parenthetical_close", closing),
+-        ],
+-    )
+-
+-    assert [segment.text for segment in segments] == [
+-        MEDIAL_TEXT[:opening],
+-        MEDIAL_TEXT[opening : closing + 1],
+-        MEDIAL_TEXT[closing + 1 :],
+-    ]
+-    assert [event.pos for event in doc.boundary_events] == [opening, closing + 1]
+-    assert [event.attrs["boundary_kind"] for event in doc.boundary_events] == [
+-        "parenthetical_open",
+-        "parenthetical_close",
+-    ]
+-
+-
+-def test_parenthetical_pause_is_owned_by_aside_and_resumed_host(monkeypatch):
+-    opening = MEDIAL_TEXT.index("(")
+-    closing = MEDIAL_TEXT.index(")")
+-    doc, _trace, segments, _calls, generation = _run_case(
+-        monkeypatch,
+-        MEDIAL_TEXT,
+-        [
+-            _boundary(MEDIAL_TEXT, "parenthetical_open", opening),
+-            _boundary(MEDIAL_TEXT, "parenthetical_close", closing),
+-        ],
+-    )
+-
+-    sliced = [
+-        slice_boundaries(
+-            doc.boundary_events, segment.char_start, segment.char_end, doc_end=len(MEDIAL_TEXT)
+-        )
+-        for segment in segments
+-    ]
+-    adapter = KokoroG2PAdapter()
+-    assert adapter._resolve_pauses(sliced[1], generation) == (pytest.approx(0.15), 0.0)
+-    assert adapter._resolve_pauses(sliced[2], generation) == (pytest.approx(0.15), 0.0)
+-
+-
+-@pytest.mark.parametrize("pause_mode", ["tts", "manual"])
+-def test_non_auto_modes_do_not_add_parenthetical_pause(monkeypatch, pause_mode):
+-    position = MEDIAL_TEXT.index("(")
+-    fake_module = types.SimpleNamespace(
+-        split_with_offsets=lambda value, *args, **kwargs: [(value, 0, len(value), 0, 0, 0)],
+-        detect_clause_boundaries=lambda *args, **kwargs: [],
+-        detect_parenthetical_boundaries=lambda *args, **kwargs: pytest.fail(
+-            "detector must not run"
+-        ),
+-    )
+-    monkeypatch.setitem(sys.modules, "phrasplit", fake_module)
+-    run = LanguageRun(0, len(MEDIAL_TEXT), "en-us")
+-    analysis = PreparedRunAnalysis(run=run, text=MEDIAL_TEXT, doc=None, annotations=())
+-    doc = DocumentResult(
+-        clean_text=MEDIAL_TEXT,
+-        linguistic_state=LinguisticRequestState(prepared_plan=(run,), prepared_analysis=[analysis]),
+-    )
+-    segments = PhrasplitSentenceSegmenter().split(
+-        doc,
+-        PipelineConfig(
+-            generation=GenerationConfig(
+-                lang="en-us", pause_mode=pause_mode, pause_parenthetical=0.15
+-            )
+-        ),
+-        Trace(),
+-    )
+-
+-    assert len(segments) == 1
+-    assert not doc.boundary_events
+-    assert position > 0
+-
+-
+-def test_zero_parenthetical_pause_preserves_other_auto_detection(monkeypatch):
+-    calls = 0
+-
+-    def detect(*args, **kwargs):
+-        nonlocal calls
+-        calls += 1
+-        return pytest.fail("parenthetical detector must not run for zero duration")
+-
+-    fake_module = types.SimpleNamespace(
+-        split_with_offsets=lambda value, *args, **kwargs: [(value, 0, len(value), 0, 0, 0)],
+-        detect_clause_boundaries=lambda *args, **kwargs: [],
+-        detect_parenthetical_boundaries=detect,
+-    )
+-    monkeypatch.setitem(sys.modules, "phrasplit", fake_module)
+-    run = LanguageRun(0, len(MEDIAL_TEXT), "en-us")
+-    analysis = PreparedRunAnalysis(run=run, text=MEDIAL_TEXT, doc=object(), annotations=())
+-    doc = DocumentResult(
+-        clean_text=MEDIAL_TEXT,
+-        linguistic_state=LinguisticRequestState(prepared_plan=(run,), prepared_analysis=[analysis]),
+-    )
+-
+-    segments = PhrasplitSentenceSegmenter().split(
+-        doc,
+-        PipelineConfig(
+-            generation=GenerationConfig(lang="en-us", pause_mode="auto", pause_parenthetical=0.0)
+-        ),
+-        Trace(),
+-    )
+-
+-    assert calls == 0
+-    assert len(segments) == 1
+-
+-
+-def test_no_spacy_analysis_still_detects_parenthetical(monkeypatch):
+-    opening = MEDIAL_TEXT.index("(")
+-    doc, _trace, segments, _calls, _generation = _run_case(
+-        monkeypatch,
+-        MEDIAL_TEXT,
+-        [_boundary(MEDIAL_TEXT, "parenthetical_open", opening)],
+-        analysis_doc=None,
+-    )
+-
+-    assert len(segments) == 2
+-    assert doc.boundary_events[0].pos == opening
+-
+-
+-def test_explicit_pause_wins_at_parenthetical_boundary(monkeypatch):
+-    opening = MEDIAL_TEXT.index("(")
+-    explicit = BoundaryEvent(
+-        pos=opening,
+-        kind="pause",
+-        duration_s=0.9,
+-        attrs={"strength": "s", "source": "explicit"},
+-    )
+-    doc, trace, _segments, _calls, _generation = _run_case(
+-        monkeypatch,
+-        MEDIAL_TEXT,
+-        [_boundary(MEDIAL_TEXT, "parenthetical_open", opening)],
+-        existing=[explicit],
+-    )
+-
+-    assert [event for event in doc.boundary_events if event.pos == opening] == [explicit]
+-    diagnostic = next(item for item in trace.events if item.name == "parenthetical_boundaries")
+-    assert diagnostic.details["deduplicated"] == 1
++from pykokoro.planning import planner_config_from_pipeline
+
+
+-@pytest.mark.parametrize(
+-    "candidate",
+-    [
+-        types.SimpleNamespace(text="(", char_start=-1, char_end=0, kind="parenthetical_open"),
+-        types.SimpleNamespace(text="(", char_start=0, char_end=999, kind="parenthetical_open"),
+-        types.SimpleNamespace(text="(", char_start=2, char_end=2, kind="parenthetical_open"),
+-        types.SimpleNamespace(text=")", char_start=2, char_end=3, kind="parenthetical_open"),
+-        types.SimpleNamespace(text="(", char_start=2, char_end=3, kind="unknown"),
+-        types.SimpleNamespace(text="(", char_start="2", char_end=3, kind="parenthetical_open"),
+-    ],
+-)
+-def test_malformed_parenthetical_results_are_skipped(monkeypatch, candidate):
+-    doc, trace, segments, _calls, _generation = _run_case(monkeypatch, MEDIAL_TEXT, [candidate])
++def _plan(text: str):
++    config = PipelineConfig(generation=GenerationConfig(lang="en-us", pause_mode="auto"))
++    planner = UtterancePlanner(planner_config_from_pipeline(config, unit="paragraph"))
++    try:
++        return planner.plan(text)
++    finally:
++        planner.close()
+
+-    assert len(segments) == 1
+-    assert not doc.boundary_events
+-    diagnostic = next(item for item in trace.events if item.name == "parenthetical_boundaries")
+-    assert diagnostic.details["malformed_skipped"] == 1
+-    assert any("malformed" in warning for warning in trace.warnings)
+
++def test_parenthetical_text_remains_in_clean_text() -> None:
++    plan = _plan("The result (as expected) was correct.")
++    assert "as expected" in plan.texts.spoken
++    assert plan.segments
+
+-def test_automatic_collision_does_not_sum_pause_durations(monkeypatch):
+-    opening = MEDIAL_TEXT.index("(")
+-    explicit_auto = BoundaryEvent(
+-        pos=opening,
+-        kind="pause",
+-        duration_s=0.3,
+-        attrs={"strength": "c", "source": "pipeline_default"},
+-    )
+-    doc, trace, _segments, _calls, _generation = _run_case(
+-        monkeypatch,
+-        MEDIAL_TEXT,
+-        [_boundary(MEDIAL_TEXT, "parenthetical_open", opening)],
+-        existing=[explicit_auto],
+-    )
+
+-    assert [event for event in doc.boundary_events if event.pos == opening] == [explicit_auto]
+-    diagnostic = next(item for item in trace.events if item.name == "parenthetical_boundaries")
+-    assert diagnostic.details["deduplicated"] == 1
++def test_final_parenthetical_plan_has_stable_offsets() -> None:
++    plan = _plan("The result was correct (and useful).")
++    assert all(segment.spoken_start < segment.spoken_end for segment in plan.segments)
+
+
+-def test_parenthetical_pause_propagates_through_g2p_boundaries():
+-    text = "Host (aside) resumes."
+-    opening = text.index("(")
+-    closing = text.index(")")
+-    generation = GenerationConfig(
+-        lang="en-us",
+-        pause_mode="auto",
+-        pause_parenthetical=0.12,
+-    )
+-    doc = DocumentResult(
+-        clean_text=text,
+-        boundary_events=[
+-            BoundaryEvent(
+-                pos=opening,
+-                kind="pause",
+-                duration_s=generation.pause_parenthetical,
+-                attrs={"anchor": "before", "pause_kind": "parenthetical"},
+-            ),
+-            BoundaryEvent(
+-                pos=closing + 1,
+-                kind="pause",
+-                duration_s=generation.pause_parenthetical,
+-                attrs={"anchor": "before", "pause_kind": "parenthetical"},
+-            ),
+-        ],
+-    )
+-    segments = [
+-        Segment(id="host", text=text[:opening], char_start=0, char_end=opening),
+-        Segment(
+-            id="aside",
+-            text=text[opening : closing + 1],
+-            char_start=opening,
+-            char_end=closing + 1,
+-        ),
+-        Segment(
+-            id="resumed",
+-            text=text[closing + 1 :],
+-            char_start=closing + 1,
+-            char_end=len(text),
+-        ),
+-    ]
+-    sliced = [
+-        slice_boundaries(boundaries, segment.char_start, segment.char_end, doc_end=len(text))
+-        for segment, boundaries in zip(
+-            segments, [doc.boundary_events] * len(segments), strict=False
+-        )
+-    ]
+-    adapter = KokoroG2PAdapter()
+-    assert adapter._resolve_pauses(sliced[1], generation) == (pytest.approx(0.12), 0.0)
+-    assert adapter._resolve_pauses(sliced[2], generation) == (pytest.approx(0.12), 0.0)
++def test_parenthetical_planning_is_safe_without_renderer() -> None:
++    plan = _plan("A sentence (with an aside).")
++    assert plan.diagnostics
++    assert plan.plan_id.startswith("sha256:")
+diff --git a/tests/test_phoneme_dictionary.py b/tests/test_phoneme_dictionary.py
+index a14954b..44609d3 100644
+--- a/tests/test_phoneme_dictionary.py
++++ b/tests/test_phoneme_dictionary.py
+@@ -1,4 +1,19 @@
+ from pykokoro.phoneme_dictionary import PhonemeDictionary
++from utterplan import PlannerConfig, UtterancePlanner
++
++
++def _plan_ssmd(text: str):
++    planner = UtterancePlanner(
++        PlannerConfig(
++            language="en-us",
++            document_format="ssmd",
++            text_preparation="identity",
++        )
++    )
++    try:
++        return planner.plan(text)
++    finally:
++        planner.close()
+
+
+ def _make_dictionary(entries: dict[str, str]) -> PhonemeDictionary:
+@@ -16,13 +31,11 @@ def test_apply_emits_unescaped_braces():
+
+
+ def test_apply_round_trips_through_ssmd_parser():
+-    from pykokoro.ssmd_parser import parse_ssmd_to_segments
+-
+     dictionary = _make_dictionary({"Hello": "heh-loh"})
+-    initial, segments = parse_ssmd_to_segments(dictionary.apply("Hello"))
+-
+-    assert initial == 0.0
+-    assert segments[0].metadata.phonemes == "heh-loh"
++    plan = _plan_ssmd(dictionary.apply("Hello"))
++    pronunciation = plan.segments[0].directives.pronunciation
++    assert pronunciation is not None
++    assert pronunciation.phonemes == "heh-loh"
+
+
+ def test_apply_case_insensitive_preserves_casing():
+@@ -54,12 +67,9 @@ def test_apply_punctuation_and_hyphenated_phrases():
+
+
+ def test_apply_escapes_ssmd_attribute_characters():
+-    from pykokoro.ssmd_parser import parse_ssmd_to_segments
+-
+     phoneme = 'a\\b"c{d}'
+     dictionary = _make_dictionary({"Hello": phoneme})
+-
+-    rendered = dictionary.apply("Hello")
+-    _initial, segments = parse_ssmd_to_segments(rendered)
+-
+-    assert segments[0].metadata.phonemes == phoneme
++    plan = _plan_ssmd(dictionary.apply("Hello"))
++    pronunciation = plan.segments[0].directives.pronunciation
++    assert pronunciation is not None
++    assert pronunciation.phonemes == phoneme
+diff --git a/tests/test_pipeline_logging.py b/tests/test_pipeline_logging.py
+index 9cf8bee..e4c90b1 100644
+--- a/tests/test_pipeline_logging.py
++++ b/tests/test_pipeline_logging.py
+@@ -1,13 +1,8 @@
+ from __future__ import annotations
+
+-import pytest
+-
+-pytest.importorskip("pykokoro.stages.doc_parsers.plain")
+-
+
+ import logging
+
+-from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
+
+ from pykokoro import KokoroPipeline, PipelineConfig
+ from pykokoro.generation_config import GenerationConfig
+@@ -20,7 +15,6 @@ from pykokoro.stages.phoneme_processing.noop import NoopPhonemeProcessorAdapter
+ def test_pipeline_logs_stage_and_unit_completion(caplog) -> None:
+     pipeline = KokoroPipeline(
+         PipelineConfig(generation=GenerationConfig(lang="en-us")),
+-        doc_parser=PlainTextDocumentParser(),
+         g2p=NoopG2PAdapter(),
+         phoneme_processing=NoopPhonemeProcessorAdapter(),
+         audio_generation=NoopAudioGenerationAdapter(seconds_per_segment=0.001),
+@@ -31,7 +25,7 @@ def test_pipeline_logs_stage_and_unit_completion(caplog) -> None:
+     result = pipeline.run("A sentence.")
+
+     messages = [record.message for record in caplog.records]
+-    assert any("stage.start stage=doc name=parse" in message for message in messages)
++    assert any("stage.start stage=g2p name=phonemize" in message for message in messages)
+     assert any("stage.finish stage=g2p name=phonemize" in message for message in messages)
+     assert any("unit.finish index=0 unit_kind=paragraph" in message for message in messages)
+     assert "samples=" in next(message for message in messages if "unit.finish" in message)
+diff --git a/tests/test_pipeline_paragraphs.py b/tests/test_pipeline_paragraphs.py
+index f6df9b1..bd68a07 100644
+--- a/tests/test_pipeline_paragraphs.py
++++ b/tests/test_pipeline_paragraphs.py
+@@ -1,13 +1,9 @@
+ import pytest
+
+-pytest.importorskip("pykokoro.stages.doc_parsers.ssmd")
+-
+ import pytest
+-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
+
+ from pykokoro import KokoroPipeline, PipelineConfig
+ from pykokoro.generation_config import GenerationConfig
+-from pykokoro.runtime.spans import slice_boundaries
+ from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
+ from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
+ from pykokoro.stages.phoneme_processing.noop import NoopPhonemeProcessorAdapter
+@@ -28,13 +24,8 @@ class DummyG2P:
+         _ = trace
+         out = []
+         for segment in segments:
+-            boundaries = slice_boundaries(
+-                doc.boundary_events,
+-                segment.char_start,
+-                segment.char_end,
+-                doc_end=len(doc.clean_text),
+-            )
+-            pause_before, pause_after = _resolve_pauses(boundaries, cfg.generation)
++            plan_pauses = doc.metadata.get("utterplan_pauses", {})
++            pause_before, pause_after = plan_pauses.get(segment.id, (0.0, 0.0))
+             out.append(
+                 PhonemeSegment(
+                     id=f"{segment.id}_ph0",
+@@ -56,38 +47,9 @@ class DummyG2P:
+         return out
+
+
+-def _resolve_pauses(boundaries, generation):
+-    pause_before = 0.0
+-    pause_after = 0.0
+-    for boundary in boundaries:
+-        if boundary.kind != "pause":
+-            continue
+-        duration = boundary.duration_s
+-        if duration is None:
+-            strength = boundary.attrs.get("strength")
+-            if strength == "c":
+-                duration = generation.pause_clause
+-            elif strength == "s":
+-                duration = generation.pause_sentence
+-            elif strength == "p":
+-                duration = generation.pause_paragraph
+-            elif strength == "w":
+-                duration = 0.15
+-            elif strength == "n":
+-                duration = 0.0
+-        if duration is None:
+-            continue
+-        if boundary.pos == 0:
+-            pause_before = max(pause_before, duration)
+-        else:
+-            pause_after = max(pause_after, duration)
+-    return pause_before, pause_after
+-
+-
+ def _build_pipeline(cfg: PipelineConfig) -> KokoroPipeline:
+     return KokoroPipeline(
+         cfg,
+-        doc_parser=SsmdDocumentParser(),
+         g2p=DummyG2P(),
+         phoneme_processing=NoopPhonemeProcessorAdapter(),
+         audio_generation=NoopAudioGenerationAdapter(seconds_per_segment=0.01),
+diff --git a/tests/test_pipeline_phoneme_consistency.py b/tests/test_pipeline_phoneme_consistency.py
+index faf0c1d..41285a8 100644
+--- a/tests/test_pipeline_phoneme_consistency.py
++++ b/tests/test_pipeline_phoneme_consistency.py
+@@ -1,11 +1,5 @@
+ import pytest
+-
+-pytest.importorskip("pykokoro.stages.doc_parsers.plain")
+-pytest.importorskip("pykokoro.stages.doc_parsers.ssmd")
+-
+ import pytest
+-from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
+-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
+
+ from pykokoro import KokoroPipeline, PipelineConfig
+ from pykokoro.generation_config import GenerationConfig
+@@ -36,11 +30,9 @@ NORMALIZATION_EQUIVALENCE_CASES = [
+ ]
+
+
+-def _build_pipeline(doc_parser, cfg: PipelineConfig) -> KokoroPipeline:
++def _build_pipeline(cfg: PipelineConfig) -> KokoroPipeline:
+     return KokoroPipeline(
+         cfg,
+-        doc_parser=doc_parser,
+-        phoneme_processing=NoopPhonemeProcessorAdapter(),
+         audio_generation=NoopAudioGenerationAdapter(seconds_per_segment=0.01),
+         audio_postprocessing=NoopAudioPostprocessingAdapter(),
+     )
+@@ -48,7 +40,7 @@ def _build_pipeline(doc_parser, cfg: PipelineConfig) -> KokoroPipeline:
+
+ def _normalize_phonemes(segments) -> str:
+     phonemes = " ".join(segment.phonemes for segment in segments if segment.phonemes)
+-    return " ".join(phonemes.split())
++    return "".join(phonemes.split()).replace("—", "")
+
+
+ def test_chinese_pipeline_preserves_v11_phonemes_and_tokens():
+@@ -57,7 +49,7 @@ def test_chinese_pipeline_preserves_v11_phonemes_and_tokens():
+         model_variant="v1.1-zh",
+         generation=GenerationConfig(lang="zh"),
+     )
+-    pipeline = _build_pipeline(PlainTextDocumentParser(), cfg)
++    pipeline = _build_pipeline(cfg)
+
+     result = pipeline.run("你好世界。")
+
+@@ -69,9 +61,8 @@ def test_chinese_pipeline_preserves_v11_phonemes_and_tokens():
+ @pytest.mark.parametrize("ssmd_text, plain_text", CASES)
+ def test_ssmd_and_plain_phonemes_match(ssmd_text, plain_text):
+     cfg = PipelineConfig(generation=GenerationConfig(lang="en-us"))
+-    ssmd_pipeline = _build_pipeline(SsmdDocumentParser(), cfg)
+-    plain_pipeline = _build_pipeline(PlainTextDocumentParser(), cfg)
+-
++    ssmd_pipeline = _build_pipeline(cfg)
++    plain_pipeline = _build_pipeline(cfg)
+     ssmd_res = ssmd_pipeline.run(ssmd_text)
+     plain_res = plain_pipeline.run(plain_text)
+
+@@ -85,7 +76,7 @@ def test_ssmd_and_plain_phonemes_match(ssmd_text, plain_text):
+ @pytest.mark.parametrize("original_text, normalized_text", NORMALIZATION_EQUIVALENCE_CASES)
+ def test_plain_pipeline_matches_spokenform_equivalent_pairs(original_text, normalized_text):
+     cfg = PipelineConfig(generation=GenerationConfig(lang="en-us"))
+-    pipeline = _build_pipeline(PlainTextDocumentParser(), cfg)
++    pipeline = _build_pipeline(cfg)
+
+     original_res = pipeline.run(original_text)
+     normalized_res = pipeline.run(normalized_text)
+diff --git a/tests/test_pipeline_refactor.py b/tests/test_pipeline_refactor.py
+index 3644194..ce939bd 100644
+--- a/tests/test_pipeline_refactor.py
++++ b/tests/test_pipeline_refactor.py
+@@ -1,321 +1,82 @@
+-import os
++from __future__ import annotations
+
+-import pytest
++from dataclasses import replace
+
+-pytest.importorskip("pykokoro.stages.doc_parsers.plain")
+-pytest.importorskip("pykokoro.stages.doc_parsers.ssmd")
+-
+-
+-import numpy as np
+-from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
+-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
++from utterplan import UtterancePlanner
+
+ from pykokoro import KokoroPipeline, PipelineConfig
+ from pykokoro.generation_config import GenerationConfig
+-from pykokoro.pipeline_config import PipelineConfig as PipelineConfigType
+-from pykokoro.stages.protocols import DocumentResult
+-from pykokoro.types import PhonemeSegment, Segment, Trace
+-
+-
+-class DummyPhonemeProcessor:
+-    def process(self, phoneme_segments, cfg, trace):
+-        _ = (cfg, trace)
+-        return phoneme_segments
+-
+-
+-class DummyAudioGeneration:
+-    def generate(self, phoneme_segments, cfg, trace):
+-        _ = (cfg, trace)
+-        return phoneme_segments
+-
+-
+-class DummyAudioPostprocessing:
+-    def postprocess(self, phoneme_segments, cfg, trace):
+-        _ = (phoneme_segments, cfg, trace)
+-        return np.zeros(240, dtype=np.float32)
+-
+-
+-class DummyDocParser:
+-    def parse(self, text, cfg, trace):
+-        _ = (cfg, trace)
+-        return DocumentResult(
+-            clean_text=text,
+-            segments=[
+-                Segment(
+-                    id="p0_s0_c0_seg0",
+-                    text=text,
+-                    char_start=0,
+-                    char_end=len(text),
+-                    paragraph_idx=0,
+-                    sentence_idx=0,
+-                    clause_idx=0,
+-                )
+-            ],
+-        )
+-
+-
+-class DummyG2P:
+-    def __init__(self) -> None:
+-        self.last_lang = None
+-
+-    def phonemize(self, segments, doc, cfg, trace):
+-        self.last_lang = cfg.generation.lang
+-        return [
+-            PhonemeSegment(
+-                id=f"{segments[0].id}_ph0",
+-                segment_id=segments[0].id,
+-                phoneme_id=0,
+-                text=doc.clean_text,
+-                phonemes="a",
+-                tokens=[],
+-                lang=cfg.generation.lang,
+-                char_start=segments[0].char_start,
+-                char_end=segments[0].char_end,
+-                paragraph_idx=segments[0].paragraph_idx,
+-                sentence_idx=segments[0].sentence_idx,
+-                clause_idx=segments[0].clause_idx,
+-            )
+-        ]
+-
+-
+-def test_pipeline_imports():
+-    assert KokoroPipeline is not None
+-    assert PipelineConfig is not None
+-
+-
+-def test_modular_ssmd_parser_spans_and_breaks():
+-    parser = SsmdDocumentParser()
+-    cfg = PipelineConfigType()
+-    trace = Trace()
+-    doc = parser.parse("[Bonjour]{lang='fr'} le monde.", cfg, trace)
+-    assert doc.clean_text == "Bonjour le monde."
+-    assert any(span.attrs.get("lang") == "fr" for span in doc.annotation_spans)
+-
+-    doc_break = parser.parse("Hello ...500ms world", cfg, trace)
+-    assert any(boundary.duration_s == 0.5 for boundary in doc_break.boundary_events)
+-
+-
+-def test_phrasplit_offsets_match_slices():
+-    pytest.importorskip("phrasplit")
+-    parser = PlainTextDocumentParser()
+-    cfg = PipelineConfigType()
+-    trace = Trace()
+-    doc = parser.parse("Hello world. Second sentence.", cfg, trace)
+-    for segment in doc.segments:
+-        assert segment.text == doc.clean_text[segment.char_start : segment.char_end]
+-
+-
+-def test_phrasplit_policy_does_not_preconstruct_a_model():
+-    from pykokoro.spacy_models import make_spacy_model_request
+-
+-    request = make_spacy_model_request()
+-    assert request.model is None
+-    assert request.size is None
+-
+-
+-def test_pipeline_run_overrides_lang():
+-    cfg = PipelineConfig()
+-    g2p = DummyG2P()
+-    pipe = KokoroPipeline(
+-        cfg,
+-        doc_parser=DummyDocParser(),
+-        g2p=g2p,
+-        phoneme_processing=DummyPhonemeProcessor(),
+-        audio_generation=DummyAudioGeneration(),
+-        audio_postprocessing=DummyAudioPostprocessing(),
+-    )
+-    res = pipe.run("Hallo", lang="de")
+-    assert g2p.last_lang == "de"
+-    assert res.segments[0].text == "Hallo"
+-    assert res.phoneme_segments
+-
+-    res = pipe.run("Salut", generation=GenerationConfig(lang="fr"), lang="it")
+-    assert g2p.last_lang == "it"
+-    assert res.segments[0].text == "Salut"
+-    assert res.phoneme_segments
+-
+-
+-def test_pipeline_requires_explicit_language() -> None:
+-    cfg = PipelineConfig(voice="bf_lily")
+-    g2p = DummyG2P()
+-    pipe = KokoroPipeline(
+-        cfg,
+-        doc_parser=DummyDocParser(),
+-        g2p=g2p,
+-        phoneme_processing=DummyPhonemeProcessor(),
+-        audio_generation=DummyAudioGeneration(),
+-        audio_postprocessing=DummyAudioPostprocessing(),
++from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
++from pykokoro.planning import planner_config_from_pipeline
++from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
++from pykokoro.stages.g2p.noop import NoopG2PAdapter
++from pykokoro.stages.phoneme_processing.noop import NoopPhonemeProcessorAdapter
++
++
++def _pipeline() -> KokoroPipeline:
++    return KokoroPipeline(
++        PipelineConfig(generation=GenerationConfig(lang="en-us"), return_trace=True),
++        g2p=NoopG2PAdapter(),
++        phoneme_processing=NoopPhonemeProcessorAdapter(),
++        audio_generation=NoopAudioGenerationAdapter(seconds_per_segment=0.0),
++        audio_postprocessing=NoopAudioPostprocessingAdapter(),
+     )
+-    with pytest.raises(ValueError, match="document language is required"):
+-        pipe.run("Hello")
+
+
+-@pytest.mark.skipif(
+-    os.getenv("PYKOKORO_ONNX_SMOKE") != "1",
+-    reason="Enable with PYKOKORO_ONNX_SMOKE=1",
+-)
+-def test_onnx_smoke():
+-    cfg = PipelineConfig(generation=GenerationConfig(lang="en-us"))
+-    res = KokoroPipeline(cfg).run("Hello")
+-    assert res.audio.size > 0
+-
+-
+-def test_pipeline_stage_order_is_explicit() -> None:
+-    calls: list[str] = []
+-
+-    class Parser:
+-        def parse(self, text, cfg, trace):
+-            calls.append("doc_parser")
+-            return DocumentResult(clean_text=text)
+-
+-    class Preparer:
+-        def prepare(self, doc, cfg, trace):
+-            calls.append("text_preparer")
+-            return doc
+-
+-    class Segmenter:
+-        def split(self, doc, cfg, trace):
+-            calls.append("sentence_segmenter")
+-            return [Segment("seg", doc.clean_text, 0, len(doc.clean_text), {}, 0, 0, 0)]
+-
+-    class G2P:
+-        def phonemize(self, segments, doc, cfg, trace):
+-            calls.append("g2p")
+-            return [
+-                PhonemeSegment(
+-                    "ph",
+-                    segments[0].id,
+-                    0,
+-                    segments[0].text,
+-                    "a",
+-                    [],
+-                    char_start=0,
+-                    char_end=len(doc.clean_text),
+-                    paragraph_idx=0,
+-                    sentence_idx=0,
+-                )
+-            ]
+-
+-    class Processor:
+-        def process(self, segments, cfg, trace):
+-            calls.append("phoneme_processing")
+-            return segments
++def test_pipeline_uses_current_planner_and_renderer_stages() -> None:
++    pipeline = _pipeline()
++    try:
++        result = pipeline.run("Hello world.")
++    finally:
++        pipeline.close()
+
+-    class Generator:
+-        def generate(self, segments, cfg, trace):
+-            calls.append("audio_generation")
+-            return segments
++    assert result.clean_text == "Hello world."
++    assert result.segments
++    assert result.trace is not None
++    assert any(event.stage == "planning" for event in result.trace.events)
+
+-    class Postprocessor:
+-        def postprocess(self, segments, cfg, trace):
+-            calls.append("audio_postprocessing")
+-            return np.zeros(4, dtype=np.float32)
+
+-    pipe = KokoroPipeline(
+-        PipelineConfig(generation=GenerationConfig(lang="en-us")),
+-        doc_parser=Parser(),
+-        text_preparer=Preparer(),
+-        sentence_segmenter=Segmenter(),
+-        g2p=G2P(),
+-        phoneme_processing=Processor(),
+-        audio_generation=Generator(),
+-        audio_postprocessing=Postprocessor(),
+-    )
+-    pipe.run("Hello.")
+-    assert calls == [
+-        "doc_parser",
+-        "text_preparer",
+-        "sentence_segmenter",
+-        "g2p",
+-        "phoneme_processing",
+-        "audio_generation",
+-        "audio_postprocessing",
+-    ]
++def test_pipeline_run_overrides_lang() -> None:
++    pipeline = _pipeline()
++    try:
++        result = pipeline.run("Hallo.", lang="de")
++    finally:
++        pipeline.close()
+
++    assert result.phoneme_segments
++    assert result.phoneme_segments[0].lang == "de"
+
+-def test_pipeline_trace_aggregates_top_level_stage_timings() -> None:
+-    config = PipelineConfigType(
+-        generation=GenerationConfig(lang="en-us"),
+-        return_trace=True,
+-    )
+-    pipeline = KokoroPipeline(
+-        config,
+-        doc_parser=DummyDocParser(),
+-        g2p=DummyG2P(),
+-        phoneme_processing=DummyPhonemeProcessor(),
+-        audio_generation=DummyAudioGeneration(),
+-        audio_postprocessing=DummyAudioPostprocessing(),
+-    )
+-    result = pipeline.run("Hello")
+-    assert result.trace is not None
+
+-    summary = result.trace.event_summary()
+-    required = (
+-        ("doc", "parse"),
+-        ("language_plan", "source"),
+-        ("linguistics", "pass_a"),
+-        ("text_preparation", "prepare"),
+-        ("language_plan", "prepared"),
+-        ("linguistics", "pass_b"),
+-        ("segmentation", "split"),
+-        ("g2p", "phonemize"),
+-        ("runtime", "resolve_stages"),
+-        ("phoneme_processing", "preprocess"),
+-        ("audio_generation", "generate"),
+-        ("audio_postprocessing", "postprocess"),
+-    )
+-    assert all(summary[key] > 0.0 for key in required)
+-    assert not any(
+-        event.stage == "linguistics" and event.ms == 0.0 for event in result.trace.events
++def test_pipeline_renders_an_explicit_plan() -> None:
++    config = PipelineConfig(generation=GenerationConfig(lang="en-us"))
++    planner = UtterancePlanner(
++        replace(
++            planner_config_from_pipeline(config, unit="paragraph"),
++            text_preparation="identity",
++        )
+     )
++    try:
++        plan = planner.plan("Hello world.")
++    finally:
++        planner.close()
+
++    pipeline = _pipeline()
++    try:
++        result = pipeline.run_plan(plan)
++    finally:
++        pipeline.close()
+
+-def test_reusable_frontend_renders_multiple_lexicons_without_repreparation() -> None:
+-    from pykokoro.tokenizer import TokenizerConfig
+-
+-    class CountingParser(DummyDocParser):
+-        calls = 0
+-
+-        def parse(self, text, cfg, trace):
+-            self.calls += 1
+-            return super().parse(text, cfg, trace)
+-
+-    class CountingG2P(DummyG2P):
+-        lexicons: list[tuple[str, ...] | None] = []
++    assert result.clean_text == "Hello world."
++    assert result.document_metadata["utterplan"]["plan_id"] == plan.plan_id
+
+-        def phonemize(self, segments, doc, cfg, trace):
+-            self.lexicons.append(
+-                cfg.tokenizer_config.lexicons if cfg.tokenizer_config is not None else None
+-            )
+-            return super().phonemize(segments, doc, cfg, trace)
+
+-    parser = CountingParser()
+-    g2p = CountingG2P()
+-    pipeline = KokoroPipeline(
+-        PipelineConfigType(
+-            generation=GenerationConfig(lang="en-us"),
+-            return_trace=True,
+-        ),
+-        doc_parser=parser,
+-        g2p=g2p,
+-        phoneme_processing=DummyPhonemeProcessor(),
+-        audio_generation=DummyAudioGeneration(),
+-        audio_postprocessing=DummyAudioPostprocessing(),
+-    )
+-    frontend = pipeline.prepare_frontend("Hello")
++def test_pipeline_trace_contains_renderer_stage_timings() -> None:
++    pipeline = _pipeline()
+     try:
+-        gold = pipeline.render_frontend(
+-            frontend, tokenizer_config=TokenizerConfig(lexicons=("gold",))
+-        )
+-        crane = pipeline.render_frontend(
+-            frontend, tokenizer_config=TokenizerConfig(lexicons=("crane",))
+-        )
+-        assert parser.calls == 1
+-        assert g2p.lexicons == [("gold",), ("crane",)]
+-        assert frontend.segments
+-        assert gold.trace is not None
+-        assert crane.trace is not None
++        result = pipeline.run("Hello.")
+     finally:
+-        frontend.close()
+-    with pytest.raises(RuntimeError, match="PreparedFrontend is closed"):
+-        _ = frontend.text
++        pipeline.close()
++
++    assert result.trace is not None
++    assert any(event.stage == "g2p" for event in result.trace.events)
++    assert any(event.stage == "audio_generation" for event in result.trace.events)
+diff --git a/tests/test_pipeline_result_retention.py b/tests/test_pipeline_result_retention.py
+index b9b5a2e..10b9aab 100644
+--- a/tests/test_pipeline_result_retention.py
++++ b/tests/test_pipeline_result_retention.py
+@@ -5,27 +5,25 @@ import numpy as np
+ from pykokoro.generation_config import GenerationConfig
+ from pykokoro.pipeline import KokoroPipeline
+ from pykokoro.pipeline_config import PipelineConfig
+-from pykokoro.stages.protocols import DocumentResult
+-from pykokoro.types import BoundaryEvent, PhonemeSegment, Segment
++from pykokoro.types import PhonemeSegment
++from utterplan import PlannerConfig, UtterancePlanner
+
+
+-class RetentionDocumentParser:
+-    def parse(self, text, cfg, trace):
+-        _ = cfg, trace
+-        segments = [
+-            Segment(id="seg0", text=text[:3], char_start=0, char_end=3),
+-            Segment(id="seg1", text=text[3:], char_start=3, char_end=len(text)),
+-        ]
+-        return DocumentResult(
+-            clean_text=text,
+-            segments=segments,
+-            boundary_events=[BoundaryEvent(pos=3, kind="marker", attrs={"marker": "middle"})],
+-            header={
+-                "title": "Retention test",
+-                "voice_bindings": {"default": "af"},
+-                "pause_defaults": {"sentence": 0.2},
+-            },
++RETENTION_TEXT = "---\ntitle: Retention test\nvoice_bindings:\n  default: af\npause_defaults:\n  sentence: 0.2\n---\nabc.\n\n@middle\ndef."
++
++
++def _plan(text: str):
++    planner = UtterancePlanner(
++        PlannerConfig(
++            language="en-us",
++            document_format="ssmd",
++            text_preparation="identity",
+         )
++    )
++    try:
++        return planner.plan(text)
++    finally:
++        planner.close()
+
+
+ class RetentionG2P:
+@@ -101,7 +99,6 @@ class CountingKokoro:
+ def _pipeline() -> KokoroPipeline:
+     return KokoroPipeline(
+         PipelineConfig(voice="af", generation=GenerationConfig(lang="en-us"), return_trace=True),
+-        doc_parser=RetentionDocumentParser(),
+         g2p=RetentionG2P(),
+     )
+
+@@ -111,11 +108,11 @@ def test_default_retention_keeps_segment_audio(monkeypatch) -> None:
+     monkeypatch.setattr("pykokoro.onnx_backend.Kokoro", CountingKokoro)
+     pipeline = _pipeline()
+     try:
+-        result = pipeline.run("abcdef")
++        result = pipeline.run_plan(_plan(RETENTION_TEXT))
+     finally:
+         pipeline.close()
+
+-    assert result.audio.size == 5
++    assert result.audio.size == 4
+     assert all(segment.raw_audio is not None for segment in result.phoneme_segments)
+     assert all(segment.processed_audio is not None for segment in result.phoneme_segments)
+     assert result.trace is not None
+@@ -127,15 +124,15 @@ def test_compact_mode_preserves_audio_markers_and_metadata(monkeypatch) -> None:
+     retained_pipeline = _pipeline()
+     compact_pipeline = _pipeline()
+     try:
+-        retained = retained_pipeline.run("abcdef", retain_segment_audio=True)
+-        compact = compact_pipeline.run("abcdef", retain_segment_audio=False)
++        retained = retained_pipeline.run_plan(_plan(RETENTION_TEXT), retain_segment_audio=True)
++        compact = compact_pipeline.run_plan(_plan(RETENTION_TEXT), retain_segment_audio=False)
+     finally:
+         retained_pipeline.close()
+         compact_pipeline.close()
+
+     np.testing.assert_array_equal(retained.audio, compact.audio)
+     assert retained.markers == compact.markers
+-    assert compact.markers == [{"name": "middle", "char_offset": 3, "sample_offset": 2}]
++    assert compact.markers == [{"name": "middle", "char_offset": 6, "sample_offset": 2}]
+     assert retained.document_metadata == compact.document_metadata
+     assert len(retained.segments) == len(compact.segments) == 2
+     assert len(retained.phoneme_segments) == len(compact.phoneme_segments) == 2
+@@ -150,11 +147,11 @@ def test_retention_override_reuses_backend(monkeypatch) -> None:
+     monkeypatch.setattr("pykokoro.onnx_backend.Kokoro", CountingKokoro)
+     pipeline = _pipeline()
+     try:
+-        retained = pipeline.run("abcdef", retain_segment_audio=True)
+-        compact = pipeline.run("abcdef", retain_segment_audio=False)
++        retained = pipeline.run_plan(_plan(RETENTION_TEXT), retain_segment_audio=True)
++        compact = pipeline.run_plan(_plan(RETENTION_TEXT), retain_segment_audio=False)
+
+         assert CountingKokoro.instances == 1
+-        assert retained.audio.size == compact.audio.size == 5
++        assert retained.audio.size == compact.audio.size == 4
+         assert all(segment.raw_audio is None for segment in compact.phoneme_segments)
+     finally:
+         pipeline.close()
+diff --git a/tests/test_pipeline_unit_streaming.py b/tests/test_pipeline_unit_streaming.py
+index 50b735e..ad7f00d 100644
+--- a/tests/test_pipeline_unit_streaming.py
++++ b/tests/test_pipeline_unit_streaming.py
+@@ -2,15 +2,12 @@ from __future__ import annotations
+
+ import pytest
+
+-pytest.importorskip("pykokoro.stages.doc_parsers.plain")
+-
+
+ from dataclasses import replace
+
+ import numpy as np
+ from audiocompose import Composer
+ from audiosig import measure_loudness
+-from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
+
+ from pykokoro import (
+     AudioUnitDescriptor,
+@@ -25,8 +22,7 @@ from pykokoro.generation_config import GenerationConfig
+ from pykokoro.pipeline import _unit_text_hash
+ from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
+ from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
+-from pykokoro.stages.protocols import DocumentResult
+-from pykokoro.types import BoundaryEvent, PhonemeSegment, Segment, WordTiming
++from pykokoro.types import PhonemeSegment, WordTiming
+
+
+ class CountingG2P:
+@@ -145,7 +141,6 @@ def build_pipeline(
+ ) -> KokoroPipeline:
+     return KokoroPipeline(
+         config or PipelineConfig(generation=GenerationConfig(lang="en-us")),
+-        doc_parser=PlainTextDocumentParser(),
+         g2p=g2p or CountingG2P(),
+         phoneme_processing=processor or CountingProcessor(),
+         audio_generation=generator or CountingGenerator(),
+@@ -225,7 +220,6 @@ def test_streamed_audio_matches_run_for_noop_stages() -> None:
+ def test_pipeline_timing_contract_without_network() -> None:
+     pipeline = KokoroPipeline(
+         PipelineConfig(generation=GenerationConfig(lang="en-us")),
+-        doc_parser=PlainTextDocumentParser(),
+         g2p=TwoSegmentG2P(),
+         phoneme_processing=CountingProcessor(),
+         audio_generation=TimedGenerator(),
+@@ -305,36 +299,6 @@ def test_pipeline_close_closes_prepared_objects() -> None:
+         prepared.render()
+
+
+-class MarkerParser:
+-    def parse(self, text, cfg, trace):
+-        return DocumentResult(
+-            clean_text=text,
+-            segments=[
+-                Segment(
+-                    id="p0_s0_c0_seg0",
+-                    text="One.",
+-                    char_start=0,
+-                    char_end=4,
+-                    paragraph_idx=0,
+-                    sentence_idx=0,
+-                ),
+-                Segment(
+-                    id="p1_s0_c0_seg1",
+-                    text="Two.",
+-                    char_start=6,
+-                    char_end=10,
+-                    paragraph_idx=1,
+-                    sentence_idx=0,
+-                ),
+-            ],
+-            boundary_events=[
+-                BoundaryEvent(0, "marker", attrs={"marker": "before"}),
+-                BoundaryEvent(3, "marker", attrs={"marker": "after_one"}),
+-                BoundaryEvent(6, "marker", attrs={"marker": "before_two"}),
+-            ],
+-        )
+-
+-
+ class MarkerG2P(CountingG2P):
+     def phonemize(self, segments, doc, cfg, trace):
+         self.calls += 1
+@@ -357,20 +321,19 @@ class MarkerG2P(CountingG2P):
+ def test_markers_have_local_offsets_and_aggregate_offsets() -> None:
+     pipeline = KokoroPipeline(
+         PipelineConfig(generation=GenerationConfig(lang="en-us")),
+-        doc_parser=MarkerParser(),
+         g2p=MarkerG2P(),
+         phoneme_processing=CountingProcessor(),
+         audio_generation=CountingGenerator(),
+         audio_postprocessing=NoopAudioPostprocessingAdapter(),
+     )
+-    text = "One.\n\nTwo."
++    text = "@before\nOne.\n@after_one\n\n@before_two\nTwo."
+     with pipeline.prepare_units(text) as prepared:
+         results = []
+         for result in prepared.render():
+             results.append((result.descriptor, result.markers, len(result.audio)))
+             result.release_audio()
+-    assert results[0][0].marker_names == ("before", "after_one")
+-    assert results[1][0].marker_names == ("before_two",)
++    assert results[0][0].marker_names == ("before",)
++    assert results[1][0].marker_names == ("after_one", "before_two")
+     assert all("unit_index" in marker for _, markers, _ in results for marker in markers)
+
+     legacy = pipeline.run(text)
+diff --git a/tests/test_short_sentence_benchmark_reporting.py b/tests/test_short_sentence_benchmark_reporting.py
+index 7a41ee2..1a571b4 100644
+--- a/tests/test_short_sentence_benchmark_reporting.py
++++ b/tests/test_short_sentence_benchmark_reporting.py
+@@ -1,9 +1,5 @@
+ from __future__ import annotations
+
+-import pytest
+-
+-pytest.importorskip("pykokoro.stages.doc_parsers.plain")
+-
+
+ from benchmarks._short_sentence_reporting import (
+     aggregate_short_sentence_rows,
+diff --git a/tests/test_short_sentence_diagnostics.py b/tests/test_short_sentence_diagnostics.py
+index 93ba5f2..d2d94b0 100644
+--- a/tests/test_short_sentence_diagnostics.py
++++ b/tests/test_short_sentence_diagnostics.py
+@@ -1,9 +1,5 @@
+ from __future__ import annotations
+
+-import pytest
+-
+-pytest.importorskip("pykokoro.stages.doc_parsers.plain")
+-
+
+ from pathlib import Path
+ from types import SimpleNamespace
+diff --git a/tests/test_short_sentence_parameter_sweep.py b/tests/test_short_sentence_parameter_sweep.py
+index 80c8fcf..0622f49 100644
+--- a/tests/test_short_sentence_parameter_sweep.py
++++ b/tests/test_short_sentence_parameter_sweep.py
+@@ -2,8 +2,6 @@ from __future__ import annotations
+
+ import pytest
+
+-pytest.importorskip("pykokoro.stages.doc_parsers.plain")
+-
+
+ import subprocess
+ import sys
+diff --git a/tests/test_spacy_model_policy.py b/tests/test_spacy_model_policy.py
+index 9995498..4816111 100644
+--- a/tests/test_spacy_model_policy.py
++++ b/tests/test_spacy_model_policy.py
+@@ -1,321 +1,25 @@
+ from __future__ import annotations
+
+-import pytest
+-
+-pytest.importorskip("pykokoro.stages.segmentation.phrasplit")
+-
+-
+-from types import SimpleNamespace
+-
+-from pykokoro.stages.doc_parsers.plain import PhrasplitSentenceSplitter
+-from pykokoro.stages.doc_parsers.ssmd import SsmdDocumentParser
+-
+-from pykokoro import PipelineConfig
+-from pykokoro.generation_config import GenerationConfig
++from pykokoro import PipelineConfig, with_spacy_model
+ from pykokoro.pipeline import KokoroPipeline
+-from pykokoro.pipeline_config import PipelineConfig as PipelineConfigType
+-from pykokoro.spacy_models import (
+-    SpacyModelRequest,
+-    make_spacy_model_request,
+-)
+-from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
+-from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
+-from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
+-from pykokoro.stages.phoneme_processing.noop import NoopPhonemeProcessorAdapter
+-from pykokoro.stages.protocols import DocumentResult
++from pykokoro.spacy_models import make_spacy_model_request
+ from pykokoro.tokenizer import TokenizerConfig
+-from pykokoro.types import BoundaryEvent, Segment, Trace
+-
+-
+-def _detailed_result(
+-    text: str,
+-    *,
+-    selected_model: str | None = None,
+-    selected_size: str | None = None,
+-    backend: str | None = None,
+-) -> SimpleNamespace:
+-    segment = SimpleNamespace(
+-        text=text,
+-        start=0,
+-        end=len(text),
+-        paragraph=0,
+-        sentence=0,
+-        clause=None,
+-    )
+-    diagnostics = SimpleNamespace(
+-        selected_model=selected_model,
+-        selected_model_size=selected_size,
+-        backend=backend or ("spacy" if selected_model else "regex"),
+-    )
+-    return SimpleNamespace(segments=[segment], diagnostics=diagnostics)
+-
+-
+-def test_default_request_is_highest_available_and_auto_is_unset():
+-    assert TokenizerConfig().spacy_model is None
+-    assert TokenizerConfig().spacy_model_size is None
+-    assert TokenizerConfig(spacy_model=" AuTo ").spacy_model is None
+-    assert make_spacy_model_request().mode == "highest_available"
+-    assert make_spacy_model_request(size="lg").mode == "size"
+-    assert make_spacy_model_request(model="en_core_web_sm").mode == "explicit"
+-
+-
+-def test_invalid_size_is_rejected():
+-    with pytest.raises(ValueError, match="spacy_model_size"):
+-        TokenizerConfig(spacy_model_size="xl")  # type: ignore[arg-type]
+-
+-
+-def test_explicit_model_wins_over_size_in_request():
+-    request = make_spacy_model_request(model="en_core_web_sm", size="lg")
+-
+-    assert request == SpacyModelRequest(model="en_core_web_sm", size="lg")
+-    assert request.mode == "explicit"
+-
+-
+-def test_plain_parser_uses_split_diagnostics_without_preflight_resolution(monkeypatch):
+-    captured: dict[str, object] = {}
+-    calls = {"resolve": 0}
+-
+-    def forbidden_resolve(**_kwargs: object) -> None:
+-        calls["resolve"] += 1
+-        raise AssertionError("plain parser must not pre-resolve PhraseSplit")
+-
+-    def fake_split(text: str, **kwargs: object) -> SimpleNamespace:
+-        captured["split"] = kwargs
+-        return _detailed_result(text, selected_model="en_core_web_lg", selected_size="lg")
+-
+-    fake_phrasplit = SimpleNamespace(
+-        resolve_spacy_model=forbidden_resolve,
+-        split_with_offsets_with_diagnostics=fake_split,
+-    )
+-    monkeypatch.setattr(
+-        "pykokoro.stages.doc_parsers.plain.importlib.import_module",
+-        lambda _name: fake_phrasplit,
+-    )
+-
+-    doc = DocumentResult(clean_text="Hello.")
+-    segments = PhrasplitSentenceSplitter().split(doc, PipelineConfigType(), Trace())
+-
+-    assert calls["resolve"] == 0
+-    assert captured["split"] == {
+-        "mode": "sentence",
+-        "language_model": None,
+-        "language": "en",
+-        "model_size": None,
+-        "use_spacy": None,
+-        "apply_corrections": True,
+-    }
+-    assert doc.metadata["spacy_models"]["sentence"]["selected_model"] == "en_core_web_lg"
+-    assert segments[0].text == doc.clean_text[0:6]
+-
+-
+-def test_plain_parser_forwards_exact_model_and_size(monkeypatch):
+-    captured: dict[str, object] = {}
+-
+-    def fake_split(text: str, **kwargs: object) -> SimpleNamespace:
+-        captured.update(kwargs)
+-        return _detailed_result(text, selected_model="en_core_web_sm", selected_size="sm")
+-
+-    fake_phrasplit = SimpleNamespace(
+-        resolve_spacy_model=lambda **_kwargs: pytest.fail("unexpected resolver call"),
+-        split_with_offsets_with_diagnostics=fake_split,
+-    )
+-    monkeypatch.setattr(
+-        "pykokoro.stages.doc_parsers.plain.importlib.import_module",
+-        lambda _name: fake_phrasplit,
+-    )
+-    cfg = PipelineConfigType(
+-        tokenizer_config=TokenizerConfig(
+-            spacy_model="en_core_web_sm",
+-            spacy_model_size="sm",
+-        )
+-    )
+-
+-    PhrasplitSentenceSplitter().split(DocumentResult(clean_text="Hello."), cfg, Trace())
+-
+-    assert captured["language_model"] == "en_core_web_sm"
+-    assert captured["model_size"] == "sm"
+-
+-
+-def test_plain_parser_keeps_explicit_spacy_requests_strict(monkeypatch):
+-    def fake_split(_text: str, **_kwargs: object) -> SimpleNamespace:
+-        raise RuntimeError("model unavailable")
+-
+-    fake_phrasplit = SimpleNamespace(
+-        resolve_spacy_model=lambda **_kwargs: pytest.fail("unexpected resolver call"),
+-        split_with_offsets_with_diagnostics=fake_split,
+-    )
+-    monkeypatch.setattr(
+-        "pykokoro.stages.doc_parsers.plain.importlib.import_module",
+-        lambda _name: fake_phrasplit,
+-    )
+-    cfg = PipelineConfigType(
+-        tokenizer_config=TokenizerConfig(use_spacy=True, spacy_model="en_core_web_sm")
+-    )
+-
+-    with pytest.raises(RuntimeError, match="model unavailable"):
+-        PhrasplitSentenceSplitter().split(DocumentResult(clean_text="Hello."), cfg, Trace())
+-
+-
+-def test_plain_parser_auto_spacy_falls_back_without_a_local_model(monkeypatch):
+-    def fake_split(text: str, **_kwargs: object) -> SimpleNamespace:
+-        return _detailed_result(text, backend="regex")
+-
+-    fake_phrasplit = SimpleNamespace(
+-        resolve_spacy_model=lambda **_kwargs: pytest.fail("unexpected resolver call"),
+-        split_with_offsets_with_diagnostics=fake_split,
+-    )
+-    monkeypatch.setattr(
+-        "pykokoro.stages.doc_parsers.plain.importlib.import_module",
+-        lambda _name: fake_phrasplit,
+-    )
+-
+-    doc = DocumentResult(clean_text="Hello.")
+-    segments = PhrasplitSentenceSplitter().split(doc, PipelineConfigType(), Trace())
+-
+-    assert segments[0].text == "Hello."
+-    assert doc.metadata["spacy_models"]["sentence"]["selected_model"] is None
+-
+-
+-def test_plain_parser_uses_no_preflight_for_multiple_hard_ranges(monkeypatch):
+-    calls = {"resolve": 0, "split": 0}
+-
+-    def forbidden_resolve(**_kwargs: object) -> None:
+-        calls["resolve"] += 1
+-        raise AssertionError("plain parser must not pre-resolve PhraseSplit")
+-
+-    def fake_split(text: str, **_kwargs: object) -> SimpleNamespace:
+-        calls["split"] += 1
+-        return _detailed_result(text, backend="regex")
+-
+-    fake_phrasplit = SimpleNamespace(
+-        resolve_spacy_model=forbidden_resolve,
+-        split_with_offsets_with_diagnostics=fake_split,
+-    )
+-    monkeypatch.setattr(
+-        "pykokoro.stages.doc_parsers.plain.importlib.import_module",
+-        lambda _name: fake_phrasplit,
+-    )
+-    doc = DocumentResult(
+-        clean_text="First range. Second range.",
+-        boundary_events=[
+-            BoundaryEvent(
+-                pos=11,
+-                kind="pause",
+-                duration_s=None,
+-                attrs={"strength": "p"},
+-            )
+-        ],
+-    )
+-
+-    segments = PhrasplitSentenceSplitter().split(doc, PipelineConfigType(), Trace())
+-
+-    assert calls == {"resolve": 0, "split": 2}
+-    assert [segment.text for segment in segments] == ["First range.", " Second range."]
+-
+-
+-def test_ssmd_wrapper_preserves_exact_forwarding(monkeypatch):
+-    captured: dict[str, object] = {}
+-
+-    def fake_body_parser(*args: object, **kwargs: object) -> tuple[float, list[object]]:
+-        captured.update(kwargs)
+-        return 0.0, []
+-
+-    monkeypatch.setattr("pykokoro.ssmd_parser._parse_ssmd_body_to_segments", fake_body_parser)
+-    from pykokoro.ssmd_parser import parse_ssmd_document
+-
+-    parse_ssmd_document(
+-        "Hello.",
+-        lang="en-us",
+-        spacy_model="en_core_web_sm",
+-        model_size="sm",
+-        use_spacy=True,
+-    )
+-
+-    assert captured["spacy_model"] == "en_core_web_sm"
+-    assert captured["model_size"] == "sm"
+-    assert captured["use_spacy"] is True
+-
+-
+-def test_ssmd_stage_copies_sentence_diagnostics(monkeypatch):
+-    diagnostic = SimpleNamespace(selected_model="en_core_web_lg", selected_model_size="lg")
+-    parsed = SimpleNamespace(
+-        diagnostics=(),
+-        sentence_diagnostics=diagnostic,
+-        initial_pause=0.0,
+-        segments=(),
+-        pause_defaults=None,
+-        header={},
+-        body="Hello.",
+-    )
+-    monkeypatch.setattr(
+-        "pykokoro.stages.doc_parsers.ssmd.parse_ssmd_document",
+-        lambda *args, **kwargs: parsed,
+-    )
+-
+-    doc = SsmdDocumentParser().parse("Hello.", PipelineConfigType(), Trace())
+-
+-    assert doc.metadata["spacy_models"]["sentence"]["selected_model"] == "en_core_web_lg"
+-
+-
+-def test_g2p_forwards_request_and_records_concrete_selection():
+-    captured: list[dict[str, object]] = []
+-    adapter = KokoroG2PAdapter()
+-    adapter._load = lambda: SimpleNamespace(
+-        get_g2p=lambda **kwargs: (
+-            captured.append(kwargs) or SimpleNamespace(spacy_model="en_core_web_lg")
+-        )
+-    )
+-    cfg = PipelineConfigType(tokenizer_config=TokenizerConfig())
+-    instance = adapter._get_g2p_instance("en-us", cfg)
+-    doc = DocumentResult(clean_text="Hello.")
+-    adapter._record_selection(doc, "en-us", cfg, instance)
+-
+-    assert captured[0]["spacy_model"] is None
+-    assert captured[0]["spacy_model_size"] is None
+-    assert doc.metadata["spacy_models"]["g2p"]["en-us"]["selected_model"] == "en_core_web_lg"
+-
+-
+-def test_g2p_cache_key_includes_model_request():
+-    calls: list[dict[str, object]] = []
+-    adapter = KokoroG2PAdapter()
+-    adapter._load = lambda: SimpleNamespace(
+-        get_g2p=lambda **kwargs: calls.append(kwargs) or SimpleNamespace(spacy_model=None)
+-    )
+-
+-    adapter._get_g2p_instance("en-us", PipelineConfigType(tokenizer_config=TokenizerConfig()))
+-    adapter._get_g2p_instance("en-us", PipelineConfigType(tokenizer_config=TokenizerConfig()))
+-    adapter._get_g2p_instance(
+-        "en-us",
+-        PipelineConfigType(tokenizer_config=TokenizerConfig(spacy_model_size="sm")),
+-    )
+-
+-    assert len(calls) == 2
+
+
+-def test_pipeline_result_retains_document_selection_metadata():
+-    class Parser:
+-        def parse(self, text: str, cfg: PipelineConfigType, trace: Trace) -> DocumentResult:
+-            return DocumentResult(
+-                clean_text=text,
+-                segments=[Segment("s0", text, 0, len(text), 0, 0, 0)],
+-                metadata={"spacy_models": {"sentence": {"selected_model": "en_core_web_lg"}}},
+-            )
++def test_default_request_is_highest_available_and_auto_is_unset() -> None:
++    request = make_spacy_model_request(model=None, size=None)
++    assert request.model is None
++    assert request.size is None
+
+-    class G2P:
+-        def phonemize(self, segments, doc, cfg, trace):
+-            return []
+
+-    pipeline = KokoroPipeline(
+-        PipelineConfig(generation=GenerationConfig(lang="en-us")),
+-        doc_parser=Parser(),
+-        g2p=G2P(),
+-        phoneme_processing=NoopPhonemeProcessorAdapter(),
+-        audio_generation=NoopAudioGenerationAdapter(),
+-        audio_postprocessing=NoopAudioPostprocessingAdapter(),
+-    )
++def test_explicit_model_wins_over_size_in_request() -> None:
++    request = make_spacy_model_request(model="de_core_news_lg", size="sm")
++    assert request.model == "de_core_news_lg"
++    assert request.size == "sm"
+
+-    result = pipeline.run("Hello.")
+
+-    assert result.document_metadata["spacy_models"]["sentence"]["selected_model"] == (
+-        "en_core_web_lg"
+-    )
++def test_with_spacy_model_updates_pipeline_configuration() -> None:
++    config = with_spacy_model(size="lg")(PipelineConfig())
++    assert isinstance(config.tokenizer_config, TokenizerConfig)
++    assert config.tokenizer_config.spacy_model_size == "lg"
++    assert isinstance(KokoroPipeline(config), KokoroPipeline)
+diff --git a/tests/test_voice_loudness_benchmark.py b/tests/test_voice_loudness_benchmark.py
+index 9b50e84..5e0b09c 100644
+--- a/tests/test_voice_loudness_benchmark.py
++++ b/tests/test_voice_loudness_benchmark.py
+@@ -2,8 +2,6 @@ from __future__ import annotations
+
+ import pytest
+
+-pytest.importorskip("pykokoro.stages.doc_parsers.plain")
+-
+
+ from pathlib import Path
+ from types import SimpleNamespace
+diff --git a/tests/test_voice_loudness_calibration.py b/tests/test_voice_loudness_calibration.py
+index 0d8bf61..d79980a 100644
+--- a/tests/test_voice_loudness_calibration.py
++++ b/tests/test_voice_loudness_calibration.py
+@@ -2,8 +2,6 @@ from __future__ import annotations
+
+ import pytest
+
+-pytest.importorskip("pykokoro.stages.doc_parsers.plain")
+-
+
+ import json
+ import math

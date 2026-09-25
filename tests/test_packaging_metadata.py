@@ -33,7 +33,8 @@ def test_license_and_release_fallback_version_are_present() -> None:
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
     assert "Apache License" in license_text
-    assert pyproject["tool"]["setuptools_scm"]["fallback_version"] == "0.9.2"
+    assert pyproject["tool"]["setuptools_scm"]["fallback_version"] == "0.10.0"
+    assert "Typing :: Typed" in pyproject["project"]["classifiers"]
 
 
 def test_companion_dependency_floors_match_current_integration_contract() -> None:
@@ -41,8 +42,11 @@ def test_companion_dependency_floors_match_current_integration_contract() -> Non
         "dependencies"
     ]
 
-    assert "kokorog2p[espeak,en]>=0.9.9,<1.0" in dependencies
+    assert "kokorog2p[espeak,en]>=0.9.15,<1.0" in dependencies
     assert "lexphon>=0.2.3,<0.3" in dependencies
+    assert "phrasplit>=0.3.9,<0.4" in dependencies
+    assert "audiosig>=0.1.4,<0.2" in dependencies
+    assert "onnxvoice>=0.1.7,<0.2" in dependencies
 
 
 def test_test_requirements_keep_kokorog2p_in_supported_window() -> None:
@@ -164,8 +168,8 @@ def test_playback_extra_is_optional_and_keeps_compatibility_alias() -> None:
 def test_version_fallbacks_target_release() -> None:
     source = (ROOT / "pykokoro" / "__init__.py").read_text(encoding="utf-8")
 
-    assert re.search(r'__version__ = "0\.9\.2"', source)
-    assert re.search(r"__version_tuple__ = \(0, 9, 2\)", source)
+    assert re.search(r'__version__ = "0\.10\.0"', source)
+    assert re.search(r"__version_tuple__ = \(0, 10, 0\)", source)
 
 
 def test_lower_bound_workflow_pins_match_project_floors() -> None:
@@ -187,6 +191,7 @@ def test_lower_bound_workflow_pins_match_project_floors() -> None:
     expected_packages = {
         "kokorog2p",
         "lexphon",
+        "onnxvoice",
         "audiosig",
         "phrasplit",
     }
@@ -194,13 +199,18 @@ def test_lower_bound_workflow_pins_match_project_floors() -> None:
     assert {package: pins[package] for package in expected_packages} == {
         package: floors[package] for package in expected_packages
     }
+    assert '"onnxvoice[cpu]==0.1.7"' in workflow
+    assert "tests/test_onnxvoice_boundary.py" in workflow
+    assert "tests/test_request_renderer.py" in workflow
+    assert "tests/test_voice_manager.py" in workflow
+    assert "tests/test_audio_generator_performance.py" in workflow
     assert "python -m pip install -e . --no-deps" not in workflow
 
 
 def test_package_resource_workflow_covers_kokorog2p_window() -> None:
     workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
 
-    assert 'kokorog2p-version: ["0.9.9"]' in workflow
+    assert 'kokorog2p-version: ["0.9.15"]' in workflow
     assert "working-directory: ${{ runner.temp }}" in workflow
     assert "pykokoro-*.whl" in workflow
     assert "Verify frontend phonemization outside checkout" in workflow
@@ -217,5 +227,8 @@ def test_publish_workflow_validates_artifacts_before_upload() -> None:
     assert "from packaging.requirements import Requirement" in workflow
     assert "from packaging.version import Version" in workflow
     assert "def has_minimum(requirements, name, minimum):" in workflow
-    assert 'has_minimum(requirements, "kokorog2p", "0.9.9")' in workflow
+    assert 'has_minimum(requirements, "kokorog2p", "0.9.15")' in workflow
     assert 'has_minimum(requirements, "lexphon", "0.2.3")' in workflow
+    assert 'has_minimum(requirements, "phrasplit", "0.3.9")' in workflow
+    assert 'has_minimum(requirements, "audiosig", "0.1.4")' in workflow
+    assert 'has_minimum(requirements, "onnxvoice", "0.1.7")' in workflow

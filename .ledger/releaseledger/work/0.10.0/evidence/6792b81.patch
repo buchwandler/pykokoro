@@ -1,0 +1,26 @@
+ tests/test_clausal_comma_pauses.py | 2 +-
+ tests/test_german_segmentation.py  | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/tests/test_clausal_comma_pauses.py b/tests/test_clausal_comma_pauses.py
+index b7d2916..30687cf 100644
+--- a/tests/test_clausal_comma_pauses.py
++++ b/tests/test_clausal_comma_pauses.py
+@@ -39,5 +39,5 @@ def test_clausal_planning_has_no_overlapping_segments() -> None:
+     plan = _plan("The cat sat, and the dog slept.")
+     assert all(
+         left.spoken_end <= right.spoken_start
+-        for left, right in zip(plan.segments, plan.segments[1:], strict=True)
++        for left, right in zip(plan.segments, plan.segments[1:], strict=False)
+     )
+diff --git a/tests/test_german_segmentation.py b/tests/test_german_segmentation.py
+index 9b79d7d..0fc2c9f 100644
+--- a/tests/test_german_segmentation.py
++++ b/tests/test_german_segmentation.py
+@@ -18,5 +18,5 @@ def test_german_abbreviations_and_ordinals_keep_monotonic_offsets() -> None:
+     assert plan.segments
+     assert all(
+         left.spoken_end <= right.spoken_start
+-        for left, right in zip(plan.segments, plan.segments[1:], strict=True)
++        for left, right in zip(plan.segments, plan.segments[1:], strict=False)
+     )

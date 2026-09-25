@@ -17,15 +17,25 @@ def test_synthesis_config_never_splits_long_text() -> None:
     assert config.long_text_split == "none"
 
 
-@pytest.mark.parametrize("mode", ["sentence", "token"])
-def test_synthesis_config_rejects_legacy_splitting_modes(mode: str) -> None:
-    with pytest.raises(ConfigurationError, match="split text in the caller"):
-        SynthesisConfig(long_text_split=mode)  # type: ignore[arg-type]
+def test_synthesis_config_accepts_sentence_splitting() -> None:
+    config = SynthesisConfig(long_text_split="sentence")
+
+    assert config.long_text_split == "sentence"
 
 
 def test_synthesis_config_rejects_unknown_long_text_mode() -> None:
-    with pytest.raises(ConfigurationError, match="long_text_split only accepts 'none'"):
+    with pytest.raises(ConfigurationError, match="long_text_split must be 'none' or 'sentence'"):
         SynthesisConfig(long_text_split="unsupported")  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("use_spacy", [True, False, None])
+def test_synthesis_config_accepts_explicit_spacy_policy(use_spacy: bool | None) -> None:
+    assert SynthesisConfig(long_text_use_spacy=use_spacy).long_text_use_spacy is use_spacy
+
+
+def test_synthesis_config_rejects_invalid_spacy_policy() -> None:
+    with pytest.raises(ConfigurationError, match="long_text_use_spacy must"):
+        SynthesisConfig(long_text_use_spacy="auto")  # type: ignore[arg-type]
 
 
 def test_long_text_mode_and_input_error_are_public_and_structured() -> None:
@@ -36,7 +46,7 @@ def test_long_text_mode_and_input_error_are_public_and_structured() -> None:
         model_id="github:v1.0:fp32",
     )
 
-    assert get_args(LongTextSplitMode) == ("none",)
+    assert get_args(LongTextSplitMode) == ("none", "sentence")
     assert issubclass(SynthesisInputTooLongError, ValueError)
     assert error.text_length == 100
     assert error.token_count == 511

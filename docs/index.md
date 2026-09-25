@@ -26,14 +26,15 @@ changelog
 - KokoroG2P prepared-text integration with explicit pronunciation languages,
   source-aligned overrides, and linguistic annotations
 - Kokoro voice, model, and style selection, including blends
-- Model token-capacity validation, explicit short-sentence handling, and ONNX inference
+- Model token-capacity validation and opt-in sentence-level splitting for oversized
+  requests, plus ONNX inference
 - Request-local timing reconstruction, waveform validation, tracing, and optional voice
   calibration
 - Independent `RenderedSegment` results and standalone WAV writing
 
-PyKokoro does not parse SSMD or YAML, create UtterPlans or AudioJobs, compose caller
-requests, insert cross-request silence, or apply document-level effects. The planned
-0.10.0 breaking change and migration boundary are described in the
+PyKokoro does not parse SSMD or YAML, create UtterPlans or AudioJobs, compose separate
+caller requests, insert cross-request silence, or apply document-level effects. The
+v0.10.0 breaking boundary and migration examples are described in the
 [release note](breaking-change-0.10.0.md).
 
 ## Quick example

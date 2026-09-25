@@ -1,0 +1,400 @@
+ pykokoro/_onnxvoice.py                | 66 +++++++++++++++++++++++--
+ pykokoro/audio_generator.py           | 31 ++++++++++--
+ pyproject.toml                        | 12 ++---
+ tests/test_audio_generator_logging.py | 35 +++++++++++++
+ tests/test_audio_splitting.py         | 92 +++++++++++++++++++++++++++++++++++
+ tests/test_onnxvoice_boundary.py      | 42 ++++++++++++++++
+ 6 files changed, 266 insertions(+), 12 deletions(-)
+
+diff --git a/pykokoro/_onnxvoice.py b/pykokoro/_onnxvoice.py
+index c772a23..7463f02 100644
+--- a/pykokoro/_onnxvoice.py
++++ b/pykokoro/_onnxvoice.py
+@@ -456,6 +456,64 @@ def close_runtime(runtime: Any | None) -> None:
+             close()
+
+
++def _declared_timing_support(
++    resolved: ResolvedKokoroModel,
++    runtime: Any,
++) -> bool | None:
++    """Resolve declared timing support without conflating unknown with false."""
++    runtime_value = getattr(runtime, "supports_timings", None)
++    if isinstance(runtime_value, bool):
++        return runtime_value
++
++    installation = resolved.installation
++    timing_output = getattr(installation, "timing_output", None)
++    if isinstance(timing_output, bool):
++        return timing_output
++    if isinstance(timing_output, str) and timing_output.strip():
++        return True
++
++    metadata = resolved.metadata
++    runtime_metadata = metadata.get("runtime")
++    if isinstance(runtime_metadata, Mapping):
++        value = runtime_metadata.get("timings_output")
++        if isinstance(value, bool):
++            return value
++        if isinstance(value, str) and value.strip():
++            return True
++
++    onnx_contract = metadata.get("onnx_contract")
++    if isinstance(onnx_contract, Mapping):
++        timing = onnx_contract.get("timing")
++        if isinstance(timing, Mapping):
++            value = timing.get("output")
++            if isinstance(value, bool):
++                return value
++            if isinstance(value, str) and value.strip():
++                return True
++
++    return None
++
++
++def _timing_output_name(resolved: ResolvedKokoroModel) -> str | None:
++    """Return the declared timing output name for diagnostics, if available."""
++    installation_output = getattr(resolved.installation, "timing_output", None)
++    if isinstance(installation_output, str) and installation_output.strip():
++        return installation_output
++    runtime_metadata = resolved.metadata.get("runtime")
++    if isinstance(runtime_metadata, Mapping):
++        value = runtime_metadata.get("timings_output")
++        if isinstance(value, str) and value.strip():
++            return value
++    onnx_contract = resolved.metadata.get("onnx_contract")
++    if isinstance(onnx_contract, Mapping):
++        timing = onnx_contract.get("timing")
++        if isinstance(timing, Mapping):
++            value = timing.get("output")
++            if isinstance(value, str) and value.strip():
++                return value
++    return None
++
++
+ class KokoroRuntimeAdapter:
+     """Adapt an OnnxVoice Kokoro adapter to PyKokoro's runtime protocol."""
+
+@@ -463,9 +521,11 @@ class KokoroRuntimeAdapter:
+         self._runtime = runtime
+         self.resolved = resolved
+         self.sample_rate = resolved.sample_rate
+-        runtime_metadata = resolved.metadata.get("runtime")
+-        self.supports_timings = bool(
+-            isinstance(runtime_metadata, Mapping) and runtime_metadata.get("timings_output")
++        self.supports_timings = _declared_timing_support(resolved, runtime)
++        logger.debug(
++            "Kokoro runtime created timestamp_support=%s timing_output=%s",
++            "declared" if self.supports_timings is not None else "unknown",
++            _timing_output_name(resolved),
+         )
+         # Managed installations use storage_id for cache identity.
+         # Local unmanaged models use path-sensitive identity.
+diff --git a/pykokoro/audio_generator.py b/pykokoro/audio_generator.py
+index c684e7c..0c52860 100644
+--- a/pykokoro/audio_generator.py
++++ b/pykokoro/audio_generator.py
+@@ -319,7 +319,12 @@ class AudioGenerator:
+         )
+         self._inference_cache_bytes = 0
+         self._inference_call_number = 0
+-        self._has_timestamp_output = bool(getattr(runtime, "supports_timings", False))
++        runtime_support = getattr(runtime, "supports_timings", None)
++        self._timestamp_support_declared = isinstance(runtime_support, bool)
++        self._timestamp_support: bool | None = (
++            runtime_support if self._timestamp_support_declared else None
++        )
++        self._timestamp_support_observed = False
+         self._reported_missing_timestamp_output = False
+
+     def _tokenize_phonemes(self, phonemes: str) -> list[int]:
+@@ -505,6 +510,12 @@ class AudioGenerator:
+             pred_dur = None if raw_timings is None else np.asarray(raw_timings).reshape(-1)
+             self._put_cached_inference(cache_key, audio, pred_dur)
+             cache_hit = False
++        if pred_dur is not None:
++            self._timestamp_support = True
++            self._timestamp_support_observed = True
++        elif self._timestamp_support is None:
++            self._timestamp_support = False
++            self._timestamp_support_observed = True
+         self._record_inference(
+             trace,
+             effective_phonemes=effective_phonemes,
+@@ -518,13 +529,21 @@ class AudioGenerator:
+         )
+         if logger.isEnabledFor(logging.DEBUG):
+             logger.debug(
+-                "inference.finish cache_hit=%s attempt=%s phonemes=%d tokens=%d samples=%d runtime_ms=%.3f",
++                "inference.finish cache_hit=%s attempt=%s phonemes=%d tokens=%d samples=%d runtime_ms=%.3f timing_values=%d timestamp_support=%s",
+                 cache_hit,
+                 attempt_kind,
+                 len(effective_phonemes),
+                 len(effective_tokens),
+                 int(np.asarray(audio).size),
+                 runtime_s * 1000.0,
++                0 if pred_dur is None else int(np.asarray(pred_dur).reshape(-1).size),
++                (
++                    "observed"
++                    if self._timestamp_support_observed
++                    else "declared"
++                    if self._timestamp_support_declared
++                    else "unknown"
++                ),
+             )
+         if trace is not None:
+             style_values = np.asarray(voice_style_indexed, dtype=np.float32)
+@@ -774,7 +793,7 @@ class AudioGenerator:
+         if (
+             effective_config is not None
+             and effective_config.enabled
+-            and not self._has_timestamp_output
++            and self._timestamp_support is False
+             and self._uses_phrase_short_sentence_mode(effective_config)
+         ):
+             message = (
+@@ -1111,6 +1130,12 @@ class AudioGenerator:
+             pred_duration_count=short_sentence_metadata["pred_duration_count"],
+         )
+         if pred_dur is None:
++            if self._timestamp_support is False and not self._reported_missing_timestamp_output:
++                logger.warning(
++                    "ONNX inference returned no timing output; phrase-based short-sentence "
++                    "extraction requires timings. Falling back to wrap mode for this segment."
++                )
++                self._reported_missing_timestamp_output = True
+             short_sentence_metadata.setdefault("timing_failure_reason", "missing-duration-output")
+             short_sentence_metadata.setdefault("failure_stage", "timing-token-build")
+             short_sentence_metadata.setdefault("cut_failure_reason", "missing-duration-output")
+diff --git a/pyproject.toml b/pyproject.toml
+index 0172749..f30e2e1 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -28,7 +28,7 @@ dependencies = [
+     "numpy",
+     "audiosig>=0.1.4,<0.2",
+     "platformdirs",
+-    "onnxvoice>=0.1,<0.2",
++    "onnxvoice>=0.1.7,<0.2",
+     "audiocompose>=0.1,<0.2",
+     "chardet",
+     "charset-normalizer",
+@@ -68,11 +68,11 @@ dev = [
+     "ruff>=0.1.0",
+     "mypy>=1.0.0",
+ ]
+-cpu = ["onnxvoice[cpu]>=0.1,<0.2"]
+-gpu = ["onnxvoice[gpu]>=0.1,<0.2"]
+-openvino = ["onnxvoice[openvino]>=0.1,<0.2"]
+-directml = ["onnxvoice[directml]>=0.1,<0.2"]
+-coreml = ["onnxvoice[coreml]>=0.1,<0.2"]
++cpu = ["onnxvoice[cpu]>=0.1.7,<0.2"]
++gpu = ["onnxvoice[gpu]>=0.1.7,<0.2"]
++openvino = ["onnxvoice[openvino]>=0.1.7,<0.2"]
++directml = ["onnxvoice[directml]>=0.1.7,<0.2"]
++coreml = ["onnxvoice[coreml]>=0.1.7,<0.2"]
+ goruut = [
+     "kokorog2p[goruut]>=0.9.8,<1.0",
+ ]
+diff --git a/tests/test_audio_generator_logging.py b/tests/test_audio_generator_logging.py
+index f28177f..cbdd794 100644
+--- a/tests/test_audio_generator_logging.py
++++ b/tests/test_audio_generator_logging.py
+@@ -59,6 +59,41 @@ def test_inference_logging_reports_counts_cache_and_runtime_without_payload(capl
+         assert source not in message
+
+
++class _UndeclaredTimestampSession:
++    sample_rate = 24_000
++    cache_identity = "undeclared-timestamp"
++
++    def infer(self, token_ids, *, style, speed, seed=None):
++        _ = token_ids, style, speed, seed
++        return SimpleNamespace(
++            audio=np.zeros(4, dtype=np.float32),
++            timings=np.ones(4, dtype=np.float32),
++        )
++
++
++def test_unknown_timestamp_logging_reports_observed_count_without_payload(caplog) -> None:
++    generator = AudioGenerator(
++        session=cast(Any, _UndeclaredTimestampSession()),
++        tokenizer=cast(Any, _Tokenizer()),
++        short_sentence_config=ShortSentenceConfig(resolve_mode="phrase"),
++    )
++    caplog.set_level(logging.DEBUG, logger="pykokoro.audio_generator")
++
++    config = generator._resolve_short_sentence_config(None)
++    assert config is not None
++    assert config.resolve_mode == "phrase"
++    generator._run_onnx("abc", np.zeros((16, 256), dtype=np.float32), 1.0)
++
++    messages = [record.message for record in caplog.records if "inference.finish" in record.message]
++    assert len(messages) == 1
++    assert "timing_values=4" in messages[0]
++    assert "timestamp_support=observed" in messages[0]
++    assert "timings=[" not in messages[0]
++    assert not any(
++        "Loaded ONNX model has no timestamp output" in record.message for record in caplog.records
++    )
++
++
+ def test_implicit_short_sentence_default_uses_wrap_without_warning(caplog, capsys):
+     generator = AudioGenerator(
+         session=cast(Any, _Session()),
+diff --git a/tests/test_audio_splitting.py b/tests/test_audio_splitting.py
+index 34c0e48..9250381 100644
+--- a/tests/test_audio_splitting.py
++++ b/tests/test_audio_splitting.py
+@@ -57,6 +57,98 @@ class TimestampSession(DummySession):
+         )
+
+
++class UndeclaredTimestampSession:
++    sample_rate = 24_000
++
++    def __init__(self) -> None:
++        self.calls = 0
++
++    def infer(self, token_ids, *, style, speed, seed=None):
++        _ = token_ids, style, speed, seed
++        self.calls += 1
++        return SimpleNamespace(
++            audio=np.zeros(8, dtype=np.float32),
++            timings=np.arange(4, dtype=np.float32),
++        )
++
++
++class UndeclaredMissingTimingSession:
++    sample_rate = 24_000
++
++    def infer(self, token_ids, *, style, speed, seed=None):
++        _ = token_ids, style, speed, seed
++        return SimpleNamespace(audio=np.zeros(8, dtype=np.float32), timings=None)
++
++
++def _phrase_short_sentence_config() -> ShortSentenceConfig:
++    return ShortSentenceConfig(
++        resolve_modes={"phrase": PhraseResolveMode(neutral_phrase="Say {segment}.")},
++        resolve_mode="phrase",
++    )
++
++
++def test_unknown_timing_support_learns_from_inference_and_cache() -> None:
++    session = UndeclaredTimestampSession()
++    generator = AudioGenerator(
++        session=cast(Any, session),
++        tokenizer=cast(Any, DummyTokenizer(factor=1)),
++        short_sentence_config=_phrase_short_sentence_config(),
++    )
++    config = generator._resolve_short_sentence_config(None)
++    assert config is not None
++    assert config.resolve_mode == "phrase"
++
++    style = np.zeros((16, 256), dtype=np.float32)
++    first_audio, first_timings = generator._run_onnx("abc", style, 1.0)
++    second_audio, second_timings = generator._run_onnx("abc", style, 1.0)
++
++    assert session.calls == 1
++    assert first_timings is not None
++    assert second_timings is not None
++    assert np.array_equal(first_audio, second_audio)
++    assert np.array_equal(first_timings, second_timings)
++    assert generator._timestamp_support is True
++
++
++def test_unknown_timing_support_observes_missing_output_and_falls_back(caplog) -> None:
++    generator = AudioGenerator(
++        session=cast(Any, UndeclaredMissingTimingSession()),
++        tokenizer=cast(Any, DummyTokenizer(factor=1)),
++        short_sentence_config=_phrase_short_sentence_config(),
++    )
++    config = generator._resolve_short_sentence_config(None)
++    assert config is not None
++    assert config.resolve_mode == "phrase"
++
++    _, timings = generator._run_onnx("abc", np.zeros((16, 256), dtype=np.float32), 1.0)
++    assert timings is None
++    assert generator._timestamp_support is False
++
++    segment = PhonemeSegment(
++        id="seg_missing",
++        segment_id="seg_missing",
++        phoneme_id=0,
++        text="Go",
++        phonemes="abc",
++        tokens=[1, 2, 3],
++        ssmd_metadata={
++            SHORT_SENTENCE_META_KEY: {
++                "timing_tokens": [],
++                "timing_alignment_complete": True,
++                "generated_token_count": 0,
++            }
++        },
++    )
++    generator._log_short_sentence_timestamps(segment, None)
++    metadata = segment.ssmd_metadata[SHORT_SENTENCE_META_KEY]
++    assert metadata["cut_failure_reason"] == "missing-duration-output"
++    assert "ONNX inference returned no timing output" in caplog.text
++
++    later = generator._resolve_short_sentence_config(None)
++    assert later is not None
++    assert later.resolve_mode == "wrap"
++
++
+ def test_split_phonemes_uses_token_count():
+     tokenizer = DummyTokenizer(factor=300)
+     generator = AudioGenerator(
+diff --git a/tests/test_onnxvoice_boundary.py b/tests/test_onnxvoice_boundary.py
+index b5f7344..e97916a 100644
+--- a/tests/test_onnxvoice_boundary.py
++++ b/tests/test_onnxvoice_boundary.py
+@@ -94,6 +94,48 @@ def test_resolve_maps_installation_metadata(
+     assert resolved.config_path == config
+
+
++@pytest.mark.parametrize(
++    ("metadata", "installation", "runtime_support", "expected"),
++    [
++        ({}, SimpleNamespace(), None, None),
++        ({"runtime": {"timings_output": "durations"}}, SimpleNamespace(), None, True),
++        (
++            {"onnx_contract": {"timing": {"output": "durations"}}},
++            SimpleNamespace(),
++            None,
++            True,
++        ),
++        ({}, SimpleNamespace(timing_output="durations"), None, True),
++        ({}, SimpleNamespace(), False, False),
++    ],
++)
++def test_runtime_adapter_preserves_tri_state_timing_support(
++    metadata: dict[str, object],
++    installation: object,
++    runtime_support: bool | None,
++    expected: bool | None,
++    tmp_path: Path,
++) -> None:
++    runtime = SimpleNamespace()
++    if runtime_support is not None:
++        runtime.supports_timings = runtime_support
++    resolved = boundary.ResolvedKokoroModel(
++        ref="kokoro:v1.0",
++        model_id="v1.0",
++        quality="fp32",
++        distribution="github-model-files-v1.0-timestamped-r4",
++        storage_id="kokoro--test",
++        installation=installation,
++        metadata=metadata,
++        sample_rate=24_000,
++        model_paths=(tmp_path / "model.onnx",),
++        voices_path=None,
++        config_path=None,
++    )
++    adapter = boundary.KokoroRuntimeAdapter(runtime, resolved)
++    assert adapter.supports_timings is expected
++
++
+ def test_open_local_forwards_split_artifacts_and_runtime_options(
+     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+ ) -> None:

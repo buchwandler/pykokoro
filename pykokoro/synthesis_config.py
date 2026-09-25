@@ -16,7 +16,7 @@ from .short_sentence_handler import ShortSentenceConfig
 from .voice_level import VoiceLevelConfig
 from .voice_manager import VoiceBlend
 
-LongTextSplitMode = Literal["none"]
+LongTextSplitMode = Literal["none", "sentence"]
 
 
 if TYPE_CHECKING:
@@ -50,6 +50,7 @@ class SynthesisConfig:
     waveform_validation: Literal["off", "warn", "strict"] = "off"
     inference_audio_diagnostics: bool = False
     long_text_split: LongTextSplitMode = "none"
+    long_text_use_spacy: bool | None = False
     inference_cache_enabled: bool = True
     inference_cache_max_bytes: int = 128 * 1024 * 1024
     voice_level: VoiceLevelConfig = field(default_factory=VoiceLevelConfig)
@@ -68,10 +69,10 @@ class SynthesisConfig:
             raise TypeError("language_routing must be LanguageRoutingConfig or None")
         if self.waveform_validation not in ("off", "warn", "strict"):
             raise ValueError("waveform_validation must be 'off', 'warn', or 'strict'")
-        if self.long_text_split != "none":
-            raise ConfigurationError(
-                "long_text_split only accepts 'none'; split text in the caller before synthesis"
-            )
+        if self.long_text_split not in ("none", "sentence"):
+            raise ConfigurationError("long_text_split must be 'none' or 'sentence'")
+        if self.long_text_use_spacy is not None and not isinstance(self.long_text_use_spacy, bool):
+            raise ConfigurationError("long_text_use_spacy must be True, False, or None")
         if isinstance(self.inference_cache_max_bytes, bool) or not isinstance(
             self.inference_cache_max_bytes, int
         ):

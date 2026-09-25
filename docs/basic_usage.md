@@ -44,50 +44,38 @@ The supported combinations depend on model profiles and available artifacts. Use
 frontends without loading model weights. `model_path`, `voices_path`, and
 `model_config_path` can point at local artifacts when appropriate.
 
-## Caller-owned request sizing
+## Render longer text
 
-Every request is atomic. PyKokoro phonemizes exactly the supplied text and checks
-capacity after G2P tokenization. If the request exceeds the model limit,
-`SynthesisInputTooLongError` reports the source-text length, model-token count, maximum,
-and model identity. The engine never divides the request; callers choose text boundaries
-and compose separate results themselves.
-
-`SynthesisConfig.long_text_split` is retained for migration but accepts only `"none"`.
-Explicit legacy `"sentence"` or `"token"` values raise `ConfigurationError`; they are
-never silently mapped. Split requests before calling PyKokoro, then pass each span as
-its own request.
-
-For example, use externally selected boundaries and retain responsibility for combining
-the independent results:
+By default, `long_text_split="none"` keeps each request intact and raises
+`SynthesisInputTooLongError` if its prepared token count exceeds the model capacity. To
+opt into internal model-safe splitting for oversized requests, configure
+`long_text_split="sentence"`:
 
 ```python
-from phrasplit import split_with_offsets
-from pykokoro import (
-    GenerationConfig,
-    KokoroSynthesizer,
-    SynthesisConfig,
-    SynthesisSegment,
-)
+from pykokoro import GenerationConfig, KokoroSynthesizer, SynthesisConfig
 
-text = "A long passage. Another sentence."
-parts = split_with_offsets(
-    text, mode="sentence", use_spacy=True, language="en"
-)
-requests = [
-    SynthesisSegment(str(index), part.text, "en-us", voice="af_sarah")
-    for index, part in enumerate(parts)
-]
+text = "The first sentence is here. The next sentence follows."
 config = SynthesisConfig(
+    voice="af_sarah",
     generation=GenerationConfig(lang="en-us"),
+    long_text_split="sentence",
+    long_text_use_spacy=False,
 )
 with KokoroSynthesizer(config) as synthesizer:
-    rendered_parts = list(synthesizer.synthesize_segments(requests))
+    rendered = synthesizer.synthesize_text(text, language="en-us")
+
+assert rendered.text == text
+rendered.save_wav("long-text.wav")
 ```
 
-Install PhraseSplit's optional spaCy extra with `pip install "phrasplit[nlp]"` only if
-the caller uses its `use_spacy=True` analysis mode. Each external part becomes an
-independent request and result. PyKokoro checks each request after G2P and never further
-divides it.
+Splitting runs only when the model token limit is exceeded. PhraseSplit is loaded
+lazily; its simple mode does not require spaCy. `long_text_use_spacy=None` allows
+PhraseSplit to use a compatible local spaCy model or fall back to regex, while `True`
+requires spaCy and a compatible model. Sentence spans are packed into token-safe chunks.
+Oversized sentences fall back to clauses and safe word boundaries. A single word that
+cannot fit safely still raises `SynthesisInputTooLongError`. All internal chunks are
+rendered as one `RenderedSegment` with the original request text. Separate requests
+remain independent, and cross-request composition remains caller-owned.
 
 ## Per-request voice and independent batch output
 

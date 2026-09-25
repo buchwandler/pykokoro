@@ -1,9 +1,10 @@
-# Breaking change: request-centric synthesis (planned 0.10.0)
+# Breaking change: request-centric synthesis (v0.10.0)
 
-**Status: planned / unreleased.** The upcoming breaking release reduces PyKokoro to a
-Kokoro speech-synthesis engine. It accepts prepared speech requests and returns
-independent rendered waveforms. This is an architectural break; no compatibility
-aliases, legacy request parsing, or migration adapters will be provided inside PyKokoro.
+This note describes PyKokoro's request-centric API boundary for v0.10.0. PyKokoro
+accepts prepared speech requests and returns independent rendered waveforms. Document
+parsing, speech planning, and cross-request composition belong to the caller. The old
+pipeline and document APIs are removed; the deliberate compatibility aliases retained by
+the new API are listed below.
 
 ## Responsibility change
 
@@ -32,7 +33,15 @@ remains ordinary supplied text.
 | `AudioJob`, composer wrappers, and document streaming results | Caller-owned orchestration and composition outside PyKokoro                           |
 | SSMD pause, emphasis, and prosody configuration               | Upstream speech-plan and final-composition policy                                     |
 
-Example:
+The deprecated `pykokoro.onnx_session` and `pykokoro.provider_config` modules are
+removed. Configure provider and session options through `SynthesisConfig`; OnnxVoice
+owns provider selection and ONNX session creation.
+
+## Deliberate compatibility aliases
+
+The new API keeps `SynthesisSegment` as an alias for `SynthesisRequest` and accepts
+`annotations` as a compatibility alias for `tokens`. These aliases do not restore the
+removed pipeline, document parsing, SSMD, planning, or composition APIs. Example:
 
 ```python
 from pykokoro import GenerationConfig, KokoroSynthesizer, SynthesisConfig
@@ -58,8 +67,18 @@ silence.
 
 - Request `language` is explicit; a voice name never supplies it.
 - `PronunciationOverride` and `LinguisticToken` offsets refer to the exact request text.
-- Model-limit chunks and short-sentence retries remain internal to one synthesis request
-  and are stitched into its single result.
+- `long_text_split="none"` is the default. It never imports PhraseSplit and raises
+  `SynthesisInputTooLongError` when the model-token limit is exceeded.
+- `long_text_split="sentence"` loads PhraseSplit lazily and only splits oversized
+  requests. It packs sentence spans to the model limit, falling back to clauses and then
+  safe word boundaries as necessary. Internal chunk audio is joined into the request's
+  single result.
+- `long_text_use_spacy=False` selects PhraseSplit's simple mode without spaCy. `None`
+  allows a compatible local spaCy model or regex fallback; `True` requires spaCy and a
+  compatible model.
+- A single word that cannot fit safely, or oversized whole-request phonemes that cannot
+  retain source alignment, still raise `SynthesisInputTooLongError`.
+- Explicit short-sentence handling remains local to one synthesis request.
 - `GenerationConfig.speed` remains an acoustic inference control. Editorial playback
   rate, pauses, pitch, gain, mastering, and timeline assembly belong to the caller.
 - `RenderedSegment.save_wav()` writes one mono float32 WAV without AudioCompose.
@@ -68,10 +87,14 @@ silence.
 
 ## Dependency changes
 
-The package no longer declares Utterplan, AudioCompose, or text-file encoding detectors
-as runtime dependencies. KokoroG2P, OnnxVoice, Lexphon, NumPy, audiosig, and soundfile
-remain for the engine paths that use them. The supported installed package does not
-require SSMD, Utterplan, or AudioCompose to import and use the synthesis API.
+PyKokoro does not declare Utterplan, AudioCompose, SSMD, or text-file encoding detectors
+as runtime dependencies. KokoroG2P owns prepared-text phonemization; OnnxVoice owns
+model installation, resolution, and ONNX session concerns; AudioSig supplies DSP
+primitives. PyKokoro retains request rendering, voice/model profile selection, timing
+reconstruction, and metadata-only `discover_models()` and `discover_lexicons()` APIs.
 
-See the [quickstart](quickstart.md), [request examples](examples.md), and
+The supported integration floors are KokoroG2P 0.9.9, Lexphon 0.2.3, PhraseSplit 0.3.9,
+AudioSig 0.1.4, and OnnxVoice 0.1.7. PhraseSplit remains a runtime dependency for opt-in
+long-text splitting, but neither it nor PyKokoro requires spaCy for the default simple
+path. See the [quickstart](quickstart.md), [request examples](examples.md), and
 [API reference](api_reference.md) for the new boundary.

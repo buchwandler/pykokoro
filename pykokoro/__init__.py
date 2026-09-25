@@ -2,7 +2,26 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .asset_progress import (
+        AssetProgressCallback,
+        AssetProgressEvent,
+        ConsoleAssetProgress,
+    )
+    from .discovery import (
+        ModelCapabilities,
+        ModelDiscoveryResult,
+        VoiceCapabilities,
+        discover_models,
+    )
+    from .lexicon_discovery import (
+        LexiconCapabilities,
+        LexiconDiscoveryResult,
+        discover_lexicons,
+    )
+    from .synthesizer import KokoroSynthesizer
 
 from .exceptions import (
     AlignmentError,
@@ -43,8 +62,8 @@ from .voice_manager import VoiceBlend
 try:
     from ._version import __version__, __version_tuple__
 except ImportError:
-    __version__ = "0.9.2"
-    __version_tuple__ = (0, 9, 2)
+    __version__ = "0.10.0"
+    __version_tuple__ = (0, 10, 0)
 
 
 def __getattr__(name: str) -> Any:

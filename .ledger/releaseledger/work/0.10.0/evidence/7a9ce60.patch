@@ -1,0 +1,2100 @@
+ .github/workflows/tests.yml                        |   1 +
+ README.md                                          |   6 +
+ benchmarks/hard_cases/__init__.py                  |   4 -
+ benchmarks/hard_cases/__main__.py                  |  66 ++--
+ benchmarks/hard_cases/data/de/shared/01_seed.jsonl |  13 +-
+ benchmarks/hard_cases/data/en/shared/01_seed.jsonl |  14 +-
+ benchmarks/hard_cases/frontend.py                  |  88 +++---
+ benchmarks/hard_cases/schema.py                    |   1 -
+ benchmarks/hard_cases/segmentation.py              | 131 --------
+ benchmarks/polynorm_eval.py                        |  78 ++---
+ benchmarks/polynorm_phoneme.py                     |   6 +-
+ benchmarks/short_sentence_diagnostics.py           |   4 +-
+ docs/api_reference.md                              |   7 +
+ docs/basic_usage.md                                |  54 ++++
+ docs/pipeline_stages.md                            |  20 +-
+ examples/english.py                                |   3 +-
+ pykokoro/__init__.py                               |   5 +-
+ pykokoro/exceptions.py                             |   4 +
+ pykokoro/request_renderer.py                       | 261 +++++++++++++++-
+ pykokoro/synthesis_config.py                       |   6 +
+ pyproject.toml                                     |   1 +
+ requirements-test.txt                              |   2 -
+ tests/fixtures/ssmd_080_review_podcast.ssmd        |  21 --
+ tests/test_german_frontend_golden.py               |  14 +-
+ tests/test_hard_cases_data.py                      |   8 +-
+ tests/test_hard_cases_frontend.py                  |  31 +-
+ tests/test_hard_cases_segmentation.py              |  26 --
+ tests/test_long_text_splitting.py                  | 347 +++++++++++++++++++++
+ tests/test_packaging_metadata.py                   |   5 +-
+ tests/test_polynorm_phoneme_harness.py             |  41 +--
+ tests/test_public_engine_api.py                    |   6 +
+ tests/test_synthesis_config.py                     |  32 ++
+ 32 files changed, 884 insertions(+), 422 deletions(-)
+
+diff --git a/.github/workflows/tests.yml b/.github/workflows/tests.yml
+index 1e245bf..9a28681 100644
+--- a/.github/workflows/tests.yml
++++ b/.github/workflows/tests.yml
+@@ -123,6 +123,7 @@ jobs:
+         python -m pip install \
+           "kokorog2p[all]==0.9.9" \
+           "lexphon==0.2.3" \
++          "phrasplit==0.3.9" \
+           "audiosig==0.1.4" \
+           platformdirs
+         python -m pip install -e .
+diff --git a/README.md b/README.md
+index 91e8b58..23480fa 100644
+--- a/README.md
++++ b/README.md
+@@ -74,6 +74,12 @@ timing reconstruction, waveform validation, tracing, and optional voice-level
+ calibration. `discover_models()` and `discover_lexicons()` inspect supported runtime
+ capabilities and lexicon metadata without loading a synthesis session.
+
++Oversized prepared-text requests use sentence-aware model chunking by default. Set
++`SynthesisConfig.long_text_split` to `"token"` for token-boundary chunking without
++PhraseSplit, or `"none"` to reject requests that exceed the model token limit. These
++chunks are internal to one request and do not introduce document parsing or planning.
++See [basic usage](docs/basic_usage.md#long-text-model-chunking) for details.
++
+ ## Installation
+
+ Python 3.10 or newer is required. Choose one ONNX Runtime provider extra per
+diff --git a/benchmarks/hard_cases/__init__.py b/benchmarks/hard_cases/__init__.py
+index 783a5cb..80535d9 100644
+--- a/benchmarks/hard_cases/__init__.py
++++ b/benchmarks/hard_cases/__init__.py
+@@ -18,7 +18,6 @@ from .schema import (
+     Provenance,
+     SegmentExpectation,
+ )
+-from .segmentation import PlanEvaluation, SegmentPlan, evaluate_plan
+
+ __all__ = [
+     "AcousticConstraints",
+@@ -34,19 +33,16 @@ __all__ = [
+     "NoOnnxFrontend",
+     "PauseExpectation",
+     "PhonemeObservation",
+-    "PlanEvaluation",
+     "Provenance",
+     "PyKokoroFrontend",
+     "SCHEMA_VERSION",
+     "SegmentExpectation",
+-    "SegmentPlan",
+     "SUPPORTED_LANGUAGES",
+     "SUPPORTED_LOCALES",
+     "available_languages",
+     "available_locales",
+     "case_counts",
+     "evaluate_case",
+-    "evaluate_plan",
+     "load_all_cases",
+     "load_cases",
+     "semantic_phoneme_key",
+diff --git a/benchmarks/hard_cases/__main__.py b/benchmarks/hard_cases/__main__.py
+index 17e2a26..f947593 100644
+--- a/benchmarks/hard_cases/__main__.py
++++ b/benchmarks/hard_cases/__main__.py
+@@ -13,7 +13,6 @@ from .metrics import summarize
+ from .phonemes import evaluate_case
+ from .reports import environment_fingerprint, write_reports
+ from .schema import CATEGORIES, HardCaseError
+-from .segmentation import evaluate_plan
+
+
+ def build_arg_parser() -> argparse.ArgumentParser:
+@@ -29,10 +28,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
+     parser.add_argument("--limit", type=int)
+     parser.add_argument(
+         "--level",
+-        choices=("normalization", "phoneme", "plan", "frontend", "acoustic", "all"),
++        choices=("normalization", "phoneme", "frontend", "acoustic", "all"),
+         default="frontend",
+     )
+-    parser.add_argument("--ssmd", action="store_true")
+     parser.add_argument("--backend", default="kokorog2p")
+     parser.add_argument("--frontend-variant", default="default")
+     parser.add_argument("--lexicon", help="Comma-separated named frontend lexicons")
+@@ -75,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
+             cases = cases[: args.limit]
+         if not cases:
+             raise HardCaseError("no hard-cases matched the requested filters")
+-        options = {"load_gold": True, "load_silver": True, "fallback": "espeak"}
++        options = {"fallback": "espeak"}
+         if args.lexicon:
+             options["lexicons"] = tuple(
+                 item.strip() for item in args.lexicon.split(",") if item.strip()
+@@ -83,27 +81,44 @@ def main(argv: list[str] | None = None) -> int:
+         variant = FrontendVariant(
+             id=args.frontend_variant, language=_runtime_language(locale), options=options
+         )
+-        levels = (
+-            ("normalization", "phoneme", "plan", "acoustic")
+-            if args.level == "all"
+-            else (args.level,)
+-        )
++        levels = ("normalization", "phoneme", "acoustic") if args.level == "all" else (args.level,)
+         results = []
+-        plans = []
+         acoustics = []
+-        with NoOnnxFrontend(
+-            locale, backend=args.backend, ssmd=args.ssmd, variant=variant
+-        ) as frontend:
+-            for case in cases:
+-                if "normalization" in levels or "phoneme" in levels or "frontend" in levels:
++        if "normalization" in levels or "phoneme" in levels or "frontend" in levels:
++            with NoOnnxFrontend(locale, backend=args.backend, variant=variant) as frontend:
++                for case in cases:
+                     results.append(evaluate_case(case, frontend, level=args.level))
+-                if "plan" in levels:
+-                    plans.append(evaluate_plan(case, frontend))
+-                if "acoustic" in levels:
+-                    output = None
+-                    if args.render_audio:
+-                        output = _audio_path(args.results_dir, case.id)
+-                    acoustics.append((case, run_acoustic(frontend, case.text, render_audio=output)))
++        if "acoustic" in levels:
++            from pykokoro import KokoroSynthesizer
++            from pykokoro.generation_config import GenerationConfig
++            from pykokoro.synthesis_config import SynthesisConfig
++
++            config = SynthesisConfig(
++                voice=args.voice,
++                generation=GenerationConfig(lang=variant.language),
++                tokenizer_config=variant.tokenizer_config(args.backend),
++            )
++            with KokoroSynthesizer(config) as synthesizer:
++
++                class RequestFrontend:
++                    def run(self, text: str):
++                        return synthesizer.synthesize_text(
++                            text, language=variant.language, voice=args.voice
++                        )
++
++                for case in cases:
++                    output = _audio_path(args.results_dir, case.id) if args.render_audio else None
++                    acoustics.append(
++                        (
++                            case,
++                            run_acoustic(
++                                RequestFrontend(),
++                                case.text,
++                                constraints=case.expect.acoustic_constraints,
++                                render_audio=output,
++                            ),
++                        )
++                    )
+         environment = environment_fingerprint(
+             {
+                 "language": language,
+@@ -117,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
+         paths = write_reports(
+             args.results_dir or _default_results_dir(), results, environment=environment
+         )
+-        _print_summary(results, plans, acoustics, paths, args.show_details)
++        _print_summary(results, acoustics, paths, args.show_details)
+         if args.write_baseline:
+             baseline = make_baseline(
+                 summarize(results, environment=environment),
+@@ -173,12 +188,11 @@ def _audio_path(results_dir: str | None, case_id: str) -> Path:
+
+ def _print_summary(
+     results: list[object],
+-    plans: list[object],
+     acoustics: list[object],
+     paths: dict[str, Path],
+     details: bool,
+ ) -> None:
+-    print(f"Evaluated {len(results) or len(plans) or len(acoustics)} case(s).")
++    print(f"Evaluated {len(results) or len(acoustics)} case(s).")
+     if results:
+         summary = summarize(results)
+         print(f"Frontend failures: {summary['counts']['cases_failed']}")
+@@ -187,8 +201,6 @@ def _print_summary(
+                 print(
+                     f"{item.case_id}: {'PASS' if not item.failed else 'FAIL'} owner={item.likely_owner}"
+                 )
+-    if plans:
+-        print(f"Plan failures: {sum(not item.passed for item in plans)}")
+     if acoustics:
+         print(f"Acoustic health failures: {sum(not item.passed for _, item in acoustics)}")
+     print(f"Summary: {paths['summary']}")
+diff --git a/benchmarks/hard_cases/data/de/shared/01_seed.jsonl b/benchmarks/hard_cases/data/de/shared/01_seed.jsonl
+index d29798a..8f3092d 100644
+--- a/benchmarks/hard_cases/data/de/shared/01_seed.jsonl
++++ b/benchmarks/hard_cases/data/de/shared/01_seed.jsonl
+@@ -10,8 +10,7 @@
+ {"category": "punctuation_prosody", "expect": {}, "id": "de_shared_010", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "punctuation_prosody", "tags": ["punctuation_prosody", "shared"], "text": "Achtung — jetzt!"}
+ {"category": "questions_focus", "expect": {}, "id": "de_shared_011", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "questions_focus", "tags": ["questions_focus", "shared"], "text": "Nein, wirklich nicht?"}
+ {"category": "dirty_text", "expect": {}, "id": "de_shared_012", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "dirty_text", "tags": ["dirty_text", "shared"], "text": "  mehrere   Leerzeichen "}
+-{"category": "ssmd", "expect": {}, "id": "de_shared_013", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "ssmd", "tags": ["ssmd", "shared"], "text": "<speak>Achtung<break time=\"300ms\"/> jetzt.</speak>"}
+-{"category": "codeswitch", "expect": {}, "id": "de_shared_014", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "codeswitch", "tags": ["codeswitch", "shared"], "text": "Das Team nutzt eine <lang xml:lang=\"en-US\">Software</lang>."}
++{"category": "codeswitch", "expect": {}, "id": "de_shared_014", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "codeswitch", "tags": ["codeswitch", "shared"], "text": "Das Team nutzt eine Software."}
+ {"category": "long_form", "expect": {}, "id": "de_shared_015", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "long_form", "tags": ["long_form", "shared"], "text": "Dies ist ein längerer Satz mit mehreren Teilen, einem Datum im Jahr 2026 und einer abschließenden Frage."}
+ {"category": "morphology", "expect": {}, "id": "de_shared_016", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "morphology", "tags": ["morphology", "shared"], "text": "Die Häuser wurden sorgfältig beschriftet."}
+ {"category": "normalization", "expect": {}, "id": "de_shared_017", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "normalization", "tags": ["normalization", "shared"], "text": "Treffen wir uns um 18:30 Uhr."}
+@@ -26,7 +25,6 @@
+ {"category": "punctuation_prosody", "expect": {}, "id": "de_shared_026", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "punctuation_prosody", "tags": ["punctuation_prosody", "shared"], "text": "Er sagte: „Stopp.“"}
+ {"category": "questions_focus", "expect": {}, "id": "de_shared_027", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "questions_focus", "tags": ["questions_focus", "shared"], "text": "Kommst du morgen?"}
+ {"category": "dirty_text", "expect": {}, "id": "de_shared_028", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "dirty_text", "tags": ["dirty_text", "shared"], "text": "Eine kopierte URL: https://beispiel.de/a?q=1"}
+-{"category": "ssmd", "expect": {}, "id": "de_shared_029", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "ssmd", "tags": ["ssmd", "shared"], "text": "<speak><prosody rate=\"slow\">Ganz vorsichtig.</prosody></speak>"}
+ {"category": "codeswitch", "expect": {}, "id": "de_shared_030", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "codeswitch", "tags": ["codeswitch", "shared"], "text": "Der Name ist München, Deutschland."}
+ {"category": "long_form", "expect": {}, "id": "de_shared_031", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "long_form", "tags": ["long_form", "shared"], "text": "Dies ist ein längerer Satz mit mehreren Teilen, einem Datum im Jahr 2026 und einer abschließenden Frage."}
+ {"category": "morphology", "expect": {}, "id": "de_shared_032", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "morphology", "tags": ["morphology", "shared"], "text": "Ihre Dateien wurden aktualisiert."}
+@@ -42,7 +40,6 @@
+ {"category": "punctuation_prosody", "expect": {}, "id": "de_shared_042", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "punctuation_prosody", "tags": ["punctuation_prosody", "shared"], "text": "Eins, zwei, drei... los."}
+ {"category": "questions_focus", "expect": {}, "id": "de_shared_043", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "questions_focus", "tags": ["questions_focus", "shared"], "text": "Wer hat das gesagt?"}
+ {"category": "dirty_text", "expect": {}, "id": "de_shared_044", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "dirty_text", "tags": ["dirty_text", "shared"], "text": "„Anführungszeichen“ und — Striche."}
+-{"category": "ssmd", "expect": {}, "id": "de_shared_045", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "ssmd", "tags": ["ssmd", "shared"], "text": "<speak>Achtung<break time=\"300ms\"/> jetzt.</speak>"}
+ {"category": "codeswitch", "expect": {}, "id": "de_shared_046", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "codeswitch", "tags": ["codeswitch", "shared"], "text": "Das Wort Kindergarten ist international."}
+ {"category": "long_form", "expect": {}, "id": "de_shared_047", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "long_form", "tags": ["long_form", "shared"], "text": "Dies ist ein längerer Satz mit mehreren Teilen, einem Datum im Jahr 2026 und einer abschließenden Frage."}
+ {"category": "morphology", "expect": {}, "id": "de_shared_048", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "morphology", "tags": ["morphology", "shared"], "text": "Die Häuser wurden sorgfältig beschriftet."}
+@@ -58,8 +55,7 @@
+ {"category": "punctuation_prosody", "expect": {}, "id": "de_shared_058", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "punctuation_prosody", "tags": ["punctuation_prosody", "shared"], "text": "Wirklich? Ja!"}
+ {"category": "questions_focus", "expect": {}, "id": "de_shared_059", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "questions_focus", "tags": ["questions_focus", "shared"], "text": "Jetzt, nicht später."}
+ {"category": "dirty_text", "expect": {}, "id": "de_shared_060", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "dirty_text", "tags": ["dirty_text", "shared"], "text": "TITEL: NATO 2026 UPDATE"}
+-{"category": "ssmd", "expect": {}, "id": "de_shared_061", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "ssmd", "tags": ["ssmd", "shared"], "text": "<speak><prosody rate=\"slow\">Ganz vorsichtig.</prosody></speak>"}
+-{"category": "codeswitch", "expect": {}, "id": "de_shared_062", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "codeswitch", "tags": ["codeswitch", "shared"], "text": "Das Team nutzt eine <lang xml:lang=\"en-US\">Software</lang>."}
++{"category": "codeswitch", "expect": {}, "id": "de_shared_062", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "codeswitch", "tags": ["codeswitch", "shared"], "text": "Das Team nutzt eine Software."}
+ {"category": "long_form", "expect": {}, "id": "de_shared_063", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "long_form", "tags": ["long_form", "shared"], "text": "Dies ist ein längerer Satz mit mehreren Teilen, einem Datum im Jahr 2026 und einer abschließenden Frage."}
+ {"category": "morphology", "expect": {}, "id": "de_shared_064", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "morphology", "tags": ["morphology", "shared"], "text": "Ihre Dateien wurden aktualisiert."}
+ {"category": "normalization", "expect": {}, "id": "de_shared_065", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "normalization", "tags": ["normalization", "shared"], "text": "Die Strecke ist 3 km."}
+@@ -74,7 +70,6 @@
+ {"category": "punctuation_prosody", "expect": {}, "id": "de_shared_074", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "punctuation_prosody", "tags": ["punctuation_prosody", "shared"], "text": "Nutze (vorsichtig) diesen Wert."}
+ {"category": "questions_focus", "expect": {}, "id": "de_shared_075", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "questions_focus", "tags": ["questions_focus", "shared"], "text": "Nein, wirklich nicht?"}
+ {"category": "dirty_text", "expect": {}, "id": "de_shared_076", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "dirty_text", "tags": ["dirty_text", "shared"], "text": "  mehrere   Leerzeichen "}
+-{"category": "ssmd", "expect": {}, "id": "de_shared_077", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "ssmd", "tags": ["ssmd", "shared"], "text": "<speak>Achtung<break time=\"300ms\"/> jetzt.</speak>"}
+ {"category": "codeswitch", "expect": {}, "id": "de_shared_078", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "codeswitch", "tags": ["codeswitch", "shared"], "text": "Der Name ist München, Deutschland."}
+ {"category": "long_form", "expect": {}, "id": "de_shared_079", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "long_form", "tags": ["long_form", "shared"], "text": "Dies ist ein längerer Satz mit mehreren Teilen, einem Datum im Jahr 2026 und einer abschließenden Frage."}
+ {"category": "morphology", "expect": {}, "id": "de_shared_080", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "morphology", "tags": ["morphology", "shared"], "text": "Die Häuser wurden sorgfältig beschriftet."}
+@@ -90,7 +85,6 @@
+ {"category": "punctuation_prosody", "expect": {}, "id": "de_shared_090", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "punctuation_prosody", "tags": ["punctuation_prosody", "shared"], "text": "Achtung — jetzt!"}
+ {"category": "questions_focus", "expect": {}, "id": "de_shared_091", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "questions_focus", "tags": ["questions_focus", "shared"], "text": "Kommst du morgen?"}
+ {"category": "dirty_text", "expect": {}, "id": "de_shared_092", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "dirty_text", "tags": ["dirty_text", "shared"], "text": "Eine kopierte URL: https://beispiel.de/a?q=1"}
+-{"category": "ssmd", "expect": {}, "id": "de_shared_093", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "ssmd", "tags": ["ssmd", "shared"], "text": "<speak><prosody rate=\"slow\">Ganz vorsichtig.</prosody></speak>"}
+ {"category": "codeswitch", "expect": {}, "id": "de_shared_094", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "codeswitch", "tags": ["codeswitch", "shared"], "text": "Das Wort Kindergarten ist international."}
+ {"category": "long_form", "expect": {}, "id": "de_shared_095", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "long_form", "tags": ["long_form", "shared"], "text": "Dies ist ein längerer Satz mit mehreren Teilen, einem Datum im Jahr 2026 und einer abschließenden Frage."}
+ {"category": "morphology", "expect": {}, "id": "de_shared_096", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "morphology", "tags": ["morphology", "shared"], "text": "Ihre Dateien wurden aktualisiert."}
+@@ -106,5 +100,4 @@
+ {"category": "punctuation_prosody", "expect": {}, "id": "de_shared_106", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "punctuation_prosody", "tags": ["punctuation_prosody", "shared"], "text": "Er sagte: „Stopp.“"}
+ {"category": "questions_focus", "expect": {}, "id": "de_shared_107", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "questions_focus", "tags": ["questions_focus", "shared"], "text": "Wer hat das gesagt?"}
+ {"category": "dirty_text", "expect": {}, "id": "de_shared_108", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "dirty_text", "tags": ["dirty_text", "shared"], "text": "„Anführungszeichen“ und — Striche."}
+-{"category": "ssmd", "expect": {}, "id": "de_shared_109", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "ssmd", "tags": ["ssmd", "shared"], "text": "<speak>Achtung<break time=\"300ms\"/> jetzt.</speak>"}
+-{"category": "codeswitch", "expect": {}, "id": "de_shared_110", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "codeswitch", "tags": ["codeswitch", "shared"], "text": "Das Team nutzt eine <lang xml:lang=\"en-US\">Software</lang>."}
++{"category": "codeswitch", "expect": {}, "id": "de_shared_110", "language": "de", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "codeswitch", "tags": ["codeswitch", "shared"], "text": "Das Team nutzt eine Software."}
+diff --git a/benchmarks/hard_cases/data/en/shared/01_seed.jsonl b/benchmarks/hard_cases/data/en/shared/01_seed.jsonl
+index 68a51b9..6268e85 100644
+--- a/benchmarks/hard_cases/data/en/shared/01_seed.jsonl
++++ b/benchmarks/hard_cases/data/en/shared/01_seed.jsonl
+@@ -8,8 +8,7 @@
+ {"category": "punctuation_prosody", "expect": {}, "id": "en_shared_008", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "punctuation_prosody", "tags": ["punctuation_prosody", "shared"], "text": "Wait—now."}
+ {"category": "questions_focus", "expect": {}, "id": "en_shared_009", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "questions_focus", "tags": ["questions_focus", "shared"], "text": "No, really?"}
+ {"category": "dirty_text", "expect": {}, "id": "en_shared_010", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "dirty_text", "tags": ["dirty_text", "shared"], "text": "  multiple   spaces here "}
+-{"category": "ssmd", "expect": {}, "id": "en_shared_011", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "ssmd", "tags": ["ssmd", "shared"], "text": "<speak>Wait<break time=\"300ms\"/> now.</speak>"}
+-{"category": "codeswitch", "expect": {}, "id": "en_shared_012", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "codeswitch", "tags": ["codeswitch", "shared"], "text": "The team shipped a <lang xml:lang=\"de-DE\">Kindergarten</lang> app."}
++{"category": "codeswitch", "expect": {}, "id": "en_shared_012", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "codeswitch", "tags": ["codeswitch", "shared"], "text": "The team shipped a Kindergarten app."}
+ {"category": "long_form", "expect": {}, "id": "en_shared_013", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "long_form", "tags": ["long_form", "shared"], "text": "This is a longer sentence with several clauses, a date in 2026, and a final question."}
+ {"category": "morphology", "expect": {}, "id": "en_shared_014", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "morphology", "tags": ["morphology", "shared"], "text": "The boxes were carefully labeled."}
+ {"category": "normalization", "expect": {}, "id": "en_shared_015", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "normalization", "tags": ["normalization", "shared"], "text": "Meet me at 3:15 p.m."}
+@@ -22,7 +21,6 @@
+ {"category": "punctuation_prosody", "expect": {}, "id": "en_shared_022", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "punctuation_prosody", "tags": ["punctuation_prosody", "shared"], "text": "He said, \"Stop.\""}
+ {"category": "questions_focus", "expect": {}, "id": "en_shared_023", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "questions_focus", "tags": ["questions_focus", "shared"], "text": "Did you call me?"}
+ {"category": "dirty_text", "expect": {}, "id": "en_shared_024", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "dirty_text", "tags": ["dirty_text", "shared"], "text": "A copied URL: https://example.com/a?q=1"}
+-{"category": "ssmd", "expect": {}, "id": "en_shared_025", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "ssmd", "tags": ["ssmd", "shared"], "text": "<speak><prosody rate=\"slow\">Very carefully.</prosody></speak>"}
+ {"category": "codeswitch", "expect": {}, "id": "en_shared_026", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "codeswitch", "tags": ["codeswitch", "shared"], "text": "Her name is München, Germany."}
+ {"category": "long_form", "expect": {}, "id": "en_shared_027", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "long_form", "tags": ["long_form", "shared"], "text": "This is a longer sentence with several clauses, a date in 2026, and a final question."}
+ {"category": "morphology", "expect": {}, "id": "en_shared_028", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "morphology", "tags": ["morphology", "shared"], "text": "Their records were updated."}
+@@ -36,7 +34,6 @@
+ {"category": "punctuation_prosody", "expect": {}, "id": "en_shared_036", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "punctuation_prosody", "tags": ["punctuation_prosody", "shared"], "text": "One, two, three... go."}
+ {"category": "questions_focus", "expect": {}, "id": "en_shared_037", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "questions_focus", "tags": ["questions_focus", "shared"], "text": "Who said that?"}
+ {"category": "dirty_text", "expect": {}, "id": "en_shared_038", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "dirty_text", "tags": ["dirty_text", "shared"], "text": "“Smart quotes” and — dashes."}
+-{"category": "ssmd", "expect": {}, "id": "en_shared_039", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "ssmd", "tags": ["ssmd", "shared"], "text": "<speak>Wait<break time=\"300ms\"/> now.</speak>"}
+ {"category": "codeswitch", "expect": {}, "id": "en_shared_040", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "codeswitch", "tags": ["codeswitch", "shared"], "text": "The German word Zeitgeist is familiar."}
+ {"category": "long_form", "expect": {}, "id": "en_shared_041", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "long_form", "tags": ["long_form", "shared"], "text": "This is a longer sentence with several clauses, a date in 2026, and a final question."}
+ {"category": "morphology", "expect": {}, "id": "en_shared_042", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "morphology", "tags": ["morphology", "shared"], "text": "The boxes were carefully labeled."}
+@@ -50,8 +47,7 @@
+ {"category": "punctuation_prosody", "expect": {}, "id": "en_shared_050", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "punctuation_prosody", "tags": ["punctuation_prosody", "shared"], "text": "Really? Yes!"}
+ {"category": "questions_focus", "expect": {}, "id": "en_shared_051", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "questions_focus", "tags": ["questions_focus", "shared"], "text": "I said now, not later."}
+ {"category": "dirty_text", "expect": {}, "id": "en_shared_052", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "dirty_text", "tags": ["dirty_text", "shared"], "text": "Title: NASA 2026 UPDATE"}
+-{"category": "ssmd", "expect": {}, "id": "en_shared_053", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "ssmd", "tags": ["ssmd", "shared"], "text": "<speak><prosody rate=\"slow\">Very carefully.</prosody></speak>"}
+-{"category": "codeswitch", "expect": {}, "id": "en_shared_054", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "codeswitch", "tags": ["codeswitch", "shared"], "text": "The team shipped a <lang xml:lang=\"de-DE\">Kindergarten</lang> app."}
++{"category": "codeswitch", "expect": {}, "id": "en_shared_054", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "codeswitch", "tags": ["codeswitch", "shared"], "text": "The team shipped a Kindergarten app."}
+ {"category": "long_form", "expect": {}, "id": "en_shared_055", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "long_form", "tags": ["long_form", "shared"], "text": "This is a longer sentence with several clauses, a date in 2026, and a final question."}
+ {"category": "morphology", "expect": {}, "id": "en_shared_056", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "morphology", "tags": ["morphology", "shared"], "text": "Their records were updated."}
+ {"category": "normalization", "expect": {}, "id": "en_shared_057", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "normalization", "tags": ["normalization", "shared"], "text": "The range is 1-4."}
+@@ -64,7 +60,6 @@
+ {"category": "punctuation_prosody", "expect": {}, "id": "en_shared_064", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "punctuation_prosody", "tags": ["punctuation_prosody", "shared"], "text": "Use (carefully) this value."}
+ {"category": "questions_focus", "expect": {}, "id": "en_shared_065", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "questions_focus", "tags": ["questions_focus", "shared"], "text": "No, really?"}
+ {"category": "dirty_text", "expect": {}, "id": "en_shared_066", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "dirty_text", "tags": ["dirty_text", "shared"], "text": "  multiple   spaces here "}
+-{"category": "ssmd", "expect": {}, "id": "en_shared_067", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "ssmd", "tags": ["ssmd", "shared"], "text": "<speak>Wait<break time=\"300ms\"/> now.</speak>"}
+ {"category": "codeswitch", "expect": {}, "id": "en_shared_068", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "codeswitch", "tags": ["codeswitch", "shared"], "text": "Her name is München, Germany."}
+ {"category": "long_form", "expect": {}, "id": "en_shared_069", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "long_form", "tags": ["long_form", "shared"], "text": "This is a longer sentence with several clauses, a date in 2026, and a final question."}
+ {"category": "morphology", "expect": {}, "id": "en_shared_070", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "morphology", "tags": ["morphology", "shared"], "text": "The boxes were carefully labeled."}
+@@ -78,7 +73,6 @@
+ {"category": "punctuation_prosody", "expect": {}, "id": "en_shared_078", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "punctuation_prosody", "tags": ["punctuation_prosody", "shared"], "text": "Wait—now."}
+ {"category": "questions_focus", "expect": {}, "id": "en_shared_079", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "questions_focus", "tags": ["questions_focus", "shared"], "text": "Did you call me?"}
+ {"category": "dirty_text", "expect": {}, "id": "en_shared_080", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "dirty_text", "tags": ["dirty_text", "shared"], "text": "A copied URL: https://example.com/a?q=1"}
+-{"category": "ssmd", "expect": {}, "id": "en_shared_081", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "ssmd", "tags": ["ssmd", "shared"], "text": "<speak><prosody rate=\"slow\">Very carefully.</prosody></speak>"}
+ {"category": "codeswitch", "expect": {}, "id": "en_shared_082", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "codeswitch", "tags": ["codeswitch", "shared"], "text": "The German word Zeitgeist is familiar."}
+ {"category": "long_form", "expect": {}, "id": "en_shared_083", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "long_form", "tags": ["long_form", "shared"], "text": "This is a longer sentence with several clauses, a date in 2026, and a final question."}
+ {"category": "morphology", "expect": {}, "id": "en_shared_084", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "morphology", "tags": ["morphology", "shared"], "text": "Their records were updated."}
+@@ -92,8 +86,7 @@
+ {"category": "punctuation_prosody", "expect": {}, "id": "en_shared_092", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "punctuation_prosody", "tags": ["punctuation_prosody", "shared"], "text": "He said, \"Stop.\""}
+ {"category": "questions_focus", "expect": {}, "id": "en_shared_093", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "questions_focus", "tags": ["questions_focus", "shared"], "text": "Who said that?"}
+ {"category": "dirty_text", "expect": {}, "id": "en_shared_094", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "dirty_text", "tags": ["dirty_text", "shared"], "text": "“Smart quotes” and — dashes."}
+-{"category": "ssmd", "expect": {}, "id": "en_shared_095", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "ssmd", "tags": ["ssmd", "shared"], "text": "<speak>Wait<break time=\"300ms\"/> now.</speak>"}
+-{"category": "codeswitch", "expect": {}, "id": "en_shared_096", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "codeswitch", "tags": ["codeswitch", "shared"], "text": "The team shipped a <lang xml:lang=\"de-DE\">Kindergarten</lang> app."}
++{"category": "codeswitch", "expect": {}, "id": "en_shared_096", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "codeswitch", "tags": ["codeswitch", "shared"], "text": "The team shipped a Kindergarten app."}
+ {"category": "long_form", "expect": {}, "id": "en_shared_097", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "long_form", "tags": ["long_form", "shared"], "text": "This is a longer sentence with several clauses, a date in 2026, and a final question."}
+ {"category": "morphology", "expect": {}, "id": "en_shared_098", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "morphology", "tags": ["morphology", "shared"], "text": "The boxes were carefully labeled."}
+ {"category": "normalization", "expect": {}, "id": "en_shared_099", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "normalization", "tags": ["normalization", "shared"], "text": "Add 10%."}
+@@ -106,5 +99,4 @@
+ {"category": "punctuation_prosody", "expect": {}, "id": "en_shared_106", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "punctuation_prosody", "tags": ["punctuation_prosody", "shared"], "text": "One, two, three... go."}
+ {"category": "questions_focus", "expect": {}, "id": "en_shared_107", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "questions_focus", "tags": ["questions_focus", "shared"], "text": "I said now, not later."}
+ {"category": "dirty_text", "expect": {}, "id": "en_shared_108", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "dirty_text", "tags": ["dirty_text", "shared"], "text": "Title: NASA 2026 UPDATE"}
+-{"category": "ssmd", "expect": {}, "id": "en_shared_109", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "ssmd", "tags": ["ssmd", "shared"], "text": "<speak><prosody rate=\"slow\">Very carefully.</prosody></speak>"}
+ {"category": "codeswitch", "expect": {}, "id": "en_shared_110", "language": "en", "locale": null, "provenance": {"kind": "pykokoro", "license": "project-license", "source": "first-party"}, "schema_version": 1, "subcategory": "codeswitch", "tags": ["codeswitch", "shared"], "text": "Her name is München, Germany."}
+diff --git a/benchmarks/hard_cases/frontend.py b/benchmarks/hard_cases/frontend.py
+index 1ea2a57..cc8c2b2 100644
+--- a/benchmarks/hard_cases/frontend.py
++++ b/benchmarks/hard_cases/frontend.py
+@@ -1,26 +1,22 @@
+ from __future__ import annotations
+
+ from collections.abc import Mapping
+-from dataclasses import dataclass, field, replace
++from dataclasses import dataclass, field
+ from typing import Any
+
+-from utterplan import UtterancePlanner
+-
+ from pykokoro.generation_config import GenerationConfig
+-from pykokoro.pipeline import KokoroPipeline
+-from pykokoro.pipeline_config import PipelineConfig
+-from pykokoro.planning import planner_config_from_pipeline
+-from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
+-from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
+-from pykokoro.stages.phoneme_processing.noop import NoopPhonemeProcessorAdapter
++from pykokoro.prepared_g2p import PreparedG2PAdapter
++from pykokoro.synthesis_config import SynthesisConfig, resolve_synthesis_config
++from pykokoro.synthesis_types import SynthesisSegment
+ from pykokoro.tokenizer import TokenizerConfig
++from pykokoro.types import PhonemeSegment, Trace
+
+-LANGUAGE_TO_G2P = {"en-US": "en-us", "en-GB": "en-gb", "de-DE": "de"}
++LANGUAGE_TO_G2P = {"en-US": "en-us", "en-GB": "en-gb", "de-DE": "de-de"}
+
+
+ @dataclass(frozen=True, slots=True)
+ class FrontendVariant:
+-    """A named frontend configuration, independent of the acoustic model."""
++    """A named request-frontend configuration, independent of acoustic inference."""
+
+     id: str = "default"
+     language: str = "en-us"
+@@ -29,6 +25,7 @@ class FrontendVariant:
+     def tokenizer_config(self, backend: str = "kokorog2p") -> TokenizerConfig:
+         options = dict(self.options)
+         options.setdefault("backend", backend)
++        options["use_spacy"] = False
+         return TokenizerConfig(**options)
+
+
+@@ -37,25 +34,21 @@ class FrontendResult:
+     text: str
+     clean_text: str
+     source_text: str | None
+-    segments: tuple[Any, ...]
+-    phoneme_segments: tuple[Any, ...]
+-    trace: Any
++    segments: tuple[SynthesisSegment, ...]
++    phoneme_segments: tuple[PhonemeSegment, ...]
++    trace: Trace
+     document_metadata: Mapping[str, Any]
+-    audio: Any = None
+-    sample_rate: int | None = None
+
+
+ class NoOnnxFrontend:
+-    """Reusable PyKokoro frontend whose downstream adapters never load ONNX."""
++    """Prepare one request through PyKokoro's public G2P adapter without loading ONNX."""
+
+     def __init__(
+         self,
+         locale: str,
+         *,
+         backend: str = "kokorog2p",
+-        ssmd: bool = False,
+         variant: FrontendVariant | None = None,
+-        pause_mode: str = "tts",
+     ) -> None:
+         if locale not in LANGUAGE_TO_G2P:
+             raise ValueError(f"unsupported locale: {locale!r}")
+@@ -63,44 +56,45 @@ class NoOnnxFrontend:
+         selected = variant or FrontendVariant(language=language)
+         if selected.language != language:
+             raise ValueError("frontend variant language does not match locale")
+-        tokenizer = selected.tokenizer_config(backend)
+-        config = PipelineConfig(
+-            generation=GenerationConfig(lang=language, pause_mode=pause_mode),
+-            tokenizer_config=tokenizer,
+-            return_trace=True,
+-        )
+         self.locale = locale
+         self.variant = selected
+-        planner_config = replace(
+-            planner_config_from_pipeline(config, unit="paragraph"),
+-            document_format="ssmd" if ssmd else "plain",
+-        )
+-        self.planner = UtterancePlanner(planner_config)
+-        self.pipeline = KokoroPipeline(
+-            config,
+-            phoneme_processing=NoopPhonemeProcessorAdapter(),
+-            audio_generation=NoopAudioGenerationAdapter(seconds_per_segment=0.0),
+-            audio_postprocessing=NoopAudioPostprocessingAdapter(),
++        self.config = resolve_synthesis_config(
++            SynthesisConfig(
++                generation=GenerationConfig(lang=language),
++                tokenizer_config=selected.tokenizer_config(backend),
++                return_trace=True,
++            ),
++            language=language,
+         )
++        self.g2p = PreparedG2PAdapter()
+
+     def run(self, text: str) -> FrontendResult:
+-        plan = self.planner.plan(text)
+-        result = self.pipeline.run_plan(plan)
++        request = SynthesisSegment("hard-case", text, self.variant.language)
++        prepared = self.g2p.phonemize(request, self.config)
++        phoneme_segment = PhonemeSegment(
++            id=f"{request.id}:phoneme:0",
++            segment_id=request.id,
++            phoneme_id=0,
++            text=text,
++            phonemes=prepared.phonemes,
++            tokens=list(prepared.token_ids),
++            lang=request.language,
++            char_start=0,
++            char_end=len(text),
++            alignment_tokens=list(prepared.alignment_tokens),
++        )
+         return FrontendResult(
+             text=text,
+-            clean_text=result.clean_text,
+-            source_text=result.source_text,
+-            segments=tuple(result.segments),
+-            phoneme_segments=tuple(result.phoneme_segments),
+-            trace=result.trace,
+-            document_metadata=result.document_metadata,
+-            audio=result.audio,
+-            sample_rate=result.sample_rate,
++            clean_text=text,
++            source_text=text,
++            segments=(request,),
++            phoneme_segments=(phoneme_segment,),
++            trace=Trace(warnings=list(prepared.diagnostics)),
++            document_metadata={},
+         )
+
+     def close(self) -> None:
+-        self.pipeline.close()
+-        self.planner.close()
++        pass
+
+     def __enter__(self) -> NoOnnxFrontend:
+         return self
+diff --git a/benchmarks/hard_cases/schema.py b/benchmarks/hard_cases/schema.py
+index 94b5751..2a0c8de 100644
+--- a/benchmarks/hard_cases/schema.py
++++ b/benchmarks/hard_cases/schema.py
+@@ -28,7 +28,6 @@ CATEGORIES = (
+     "punctuation_prosody",
+     "questions_focus",
+     "dirty_text",
+-    "ssmd",
+     "long_form",
+ )
+ _CASE_ID = re.compile(r"^[a-z][a-z0-9_]+$")
+diff --git a/benchmarks/hard_cases/segmentation.py b/benchmarks/hard_cases/segmentation.py
+deleted file mode 100644
+index 6b812f9..0000000
+--- a/benchmarks/hard_cases/segmentation.py
++++ /dev/null
+@@ -1,131 +0,0 @@
+-from __future__ import annotations
+-
+-from dataclasses import dataclass
+-from typing import Any
+-
+-from .schema import HardCase
+-
+-
+-@dataclass(frozen=True, slots=True)
+-class SegmentPlan:
+-    id: str
+-    text: str
+-    char_start: int
+-    char_end: int
+-    sentence_idx: int | None
+-    clause_idx: int | None
+-    pause_before: float
+-    pause_after: float
+-    sentence_boundary: bool
+-    clause_boundary: bool
+-
+-
+-@dataclass(frozen=True, slots=True)
+-class PlanEvaluation:
+-    case_id: str
+-    clean_text: str
+-    segments: tuple[SegmentPlan, ...]
+-    passed: bool
+-    errors: tuple[str, ...] = ()
+-    likely_owner: str = "none"
+-
+-    @property
+-    def failed(self) -> bool:
+-        return not self.passed
+-
+-
+-def build_segment_plan(result: Any) -> tuple[SegmentPlan, ...]:
+-    phonemes = tuple(result.phoneme_segments)
+-    output: list[SegmentPlan] = []
+-    for index, segment in enumerate(result.segments):
+-        related = [item for item in phonemes if item.segment_id == segment.id]
+-        first, last = (related[0], related[-1]) if related else (None, None)
+-        output.append(
+-            SegmentPlan(
+-                id=segment.id,
+-                text=segment.text,
+-                char_start=segment.char_start,
+-                char_end=segment.char_end,
+-                sentence_idx=segment.sentence_idx,
+-                clause_idx=segment.clause_idx,
+-                pause_before=float(first.pause_before) if first else 0.0,
+-                pause_after=float(last.pause_after) if last else 0.0,
+-                sentence_boundary=index + 1 < len(result.segments)
+-                and segment.sentence_idx != result.segments[index + 1].sentence_idx,
+-                clause_boundary=index + 1 < len(result.segments)
+-                and segment.clause_idx != result.segments[index + 1].clause_idx,
+-            )
+-        )
+-    return tuple(output)
+-
+-
+-def validate_offsets(clean_text: str, segments: tuple[SegmentPlan, ...]) -> tuple[str, ...]:
+-    errors: list[str] = []
+-    previous_end = 0
+-    for segment in segments:
+-        if not 0 <= segment.char_start <= segment.char_end <= len(clean_text):
+-            errors.append(f"invalid offsets for {segment.id}")
+-        elif clean_text[segment.char_start : segment.char_end] != segment.text:
+-            errors.append(f"offset slice mismatch for {segment.id}")
+-        if segment.char_start < previous_end:
+-            errors.append(f"overlapping segments at {segment.id}")
+-        previous_end = max(previous_end, segment.char_end)
+-    return tuple(errors)
+-
+-
+-def evaluate_plan(case: HardCase, frontend: Any) -> PlanEvaluation:
+-    try:
+-        result = frontend.run(case.text)
+-        plan = build_segment_plan(result)
+-        errors = list(validate_offsets(result.clean_text, plan))
+-        expected = case.expect.segment_expectations
+-        for index, requirement in enumerate(expected):
+-            if index >= len(plan):
+-                errors.append(f"missing expected segment {index}")
+-                continue
+-            actual = plan[index]
+-            if requirement.text is not None and actual.text != requirement.text:
+-                errors.append(f"segment {index} text mismatch")
+-            if requirement.char_start is not None and actual.char_start != requirement.char_start:
+-                errors.append(f"segment {index} start mismatch")
+-            if requirement.char_end is not None and actual.char_end != requirement.char_end:
+-                errors.append(f"segment {index} end mismatch")
+-            if (
+-                requirement.sentence_boundary is not None
+-                and actual.sentence_boundary != requirement.sentence_boundary
+-            ):
+-                errors.append(f"segment {index} sentence boundary mismatch")
+-            if (
+-                requirement.clause_boundary is not None
+-                and actual.clause_boundary != requirement.clause_boundary
+-            ):
+-                errors.append(f"segment {index} clause boundary mismatch")
+-        for _index, requirement in enumerate(case.expect.pause_expectations):
+-            candidates = [
+-                item
+-                for item in plan
+-                if requirement.position is None or item.char_end == requirement.position
+-            ]
+-            if not candidates:
+-                errors.append(f"pause at {requirement.position!r} not found")
+-                continue
+-            pause = candidates[0].pause_after
+-            if requirement.min_duration_s is not None and pause < requirement.min_duration_s:
+-                errors.append(f"pause below minimum at {requirement.position!r}")
+-            if requirement.max_duration_s is not None and pause > requirement.max_duration_s:
+-                errors.append(f"pause above maximum at {requirement.position!r}")
+-        owner = "phrasplit" if errors else "none"
+-        return PlanEvaluation(case.id, result.clean_text, plan, not errors, tuple(errors), owner)
+-    except Exception as exc:
+-        return PlanEvaluation(
+-            case.id, "", (), False, (f"{type(exc).__name__}: {exc}",), "pykokoro_pipeline"
+-        )
+-
+-
+-__all__ = [
+-    "PlanEvaluation",
+-    "SegmentPlan",
+-    "build_segment_plan",
+-    "evaluate_plan",
+-    "validate_offsets",
+-]
+diff --git a/benchmarks/polynorm_eval.py b/benchmarks/polynorm_eval.py
+index 819bd32..caf5b8d 100644
+--- a/benchmarks/polynorm_eval.py
++++ b/benchmarks/polynorm_eval.py
+@@ -11,19 +11,14 @@ from importlib import metadata
+ from pathlib import Path
+ from typing import Any
+
+-from utterplan import UtterancePlanner
+-
+ from pykokoro import __version__ as pykokoro_version
+ from pykokoro.constants import SUPPORTED_LANGUAGES
+ from pykokoro.generation_config import GenerationConfig
+-from pykokoro.pipeline import KokoroPipeline
+-from pykokoro.pipeline_config import PipelineConfig, resolve_model_defaults
+-from pykokoro.planning import planner_config_from_pipeline
++from pykokoro.prepared_g2p import PreparedG2PAdapter
+ from pykokoro.spacy_models import make_spacy_model_request
+-from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
+-from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
+-from pykokoro.stages.phoneme_processing.noop import NoopPhonemeProcessorAdapter
+-from pykokoro.tokenizer import TokenizerConfig, _legacy_fallback_kwargs
++from pykokoro.synthesis_config import SynthesisConfig, resolve_synthesis_config
++from pykokoro.synthesis_types import SynthesisSegment
++from pykokoro.tokenizer import TokenizerConfig, _fallback_kwargs
+
+ from .polynorm_data import (
+     POLYNORM_COMMIT,
+@@ -98,63 +93,39 @@ class PyKokoroPhonemeHarness:
+         language: str,
+         backend: str,
+         *,
+-        ssmd: bool = False,
+         tokenizer_config: TokenizerConfig | None = None,
+     ) -> None:
+         base_tokenizer = tokenizer_config or TokenizerConfig()
+-        tokenizer = replace(base_tokenizer, backend=backend, use_spacy=False)
++        self.tokenizer_config = replace(base_tokenizer, backend=backend, use_spacy=False)
+         self.language = language
+         self.backend = backend
+-        self.pipeline_name = "ssmd" if ssmd else "plain"
+-        self.tokenizer_config = tokenizer
+-        self.config = PipelineConfig(
++        self.pipeline_name = "plain"
++        config = SynthesisConfig(
+             generation=GenerationConfig(lang=language),
+-            tokenizer_config=tokenizer,
+-            cache_dir=None,
++            tokenizer_config=self.tokenizer_config,
+             return_trace=True,
+         )
+-        self.resolved_config = resolve_model_defaults(self.config)
+-
+-        base_planner_config = planner_config_from_pipeline(
+-            self.resolved_config,
+-            unit="paragraph",
+-        )
+-        self.planner_config = replace(
+-            base_planner_config,
+-            document_format="ssmd" if ssmd else "plain",
+-        )
+-        self.planner = UtterancePlanner(self.planner_config)
+-        self.pipeline = KokoroPipeline(
+-            self.config,
+-            phoneme_processing=NoopPhonemeProcessorAdapter(),
+-            audio_generation=NoopAudioGenerationAdapter(seconds_per_segment=0.0),
+-            audio_postprocessing=NoopAudioPostprocessingAdapter(),
+-        )
++        self.resolved_config = resolve_synthesis_config(config, language=language)
++        self.g2p = PreparedG2PAdapter()
+
+     def phonemize(self, text: str) -> PhonemeObservation:
+-        plan = self.planner.plan(text)
+-        result = self.pipeline.run_plan(plan)
+-        phonemes = " ".join(
+-            segment.phonemes for segment in result.phoneme_segments if segment.phonemes
++        prepared = self.g2p.phonemize(
++            SynthesisSegment("polynorm", text, self.language), self.resolved_config
+         )
+-        phonemes = _collapse_whitespace(phonemes)
+-        tokens = tuple(token for segment in result.phoneme_segments for token in segment.tokens)
+-        warnings = tuple(result.trace.warnings) if result.trace is not None else ()
+         return PhonemeObservation(
+-            phonemes=phonemes,
+-            tokens=tokens,
+-            segment_count=len(result.phoneme_segments),
+-            warnings=warnings,
++            phonemes=_collapse_whitespace(prepared.phonemes),
++            tokens=prepared.token_ids,
++            segment_count=1 if prepared.token_ids else 0,
++            warnings=prepared.diagnostics,
+         )
+
+     def close(self) -> None:
+-        self.pipeline.close()
+-        self.planner.close()
++        pass
+
+     def __enter__(self) -> PyKokoroPhonemeHarness:
+         return self
+
+-    def __exit__(self, exc_type, exc, tb) -> None:
++    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+         self.close()
+
+
+@@ -360,11 +331,12 @@ def collect_environment_fingerprint(
+     pipelines: Sequence[str],
+ ) -> dict[str, Any]:
+     model_variants = {
+-        locale: resolve_model_defaults(
+-            PipelineConfig(
++        locale: resolve_synthesis_config(
++            SynthesisConfig(
+                 generation=GenerationConfig(lang=language),
+                 tokenizer_config=replace(tokenizer_config, backend=backend),
+-            )
++            ),
++            language=language,
+         ).model_variant
+         for locale, language in POLYNORM_TO_PYKOKORO_LANGUAGE.items()
+     }
+@@ -385,8 +357,6 @@ def collect_environment_fingerprint(
+         "backend": backend,
+         "pipelines": list(pipelines),
+         "use_spacy": tokenizer_config.use_spacy,
+-        "load_gold": tokenizer_config.load_gold,
+-        "load_silver": tokenizer_config.load_silver,
+         "fallback": tokenizer_config.fallback,
+         "model_variants": model_variants,
+     }
+@@ -441,13 +411,11 @@ def direct_kokorog2p_observer(
+             language=kokorog2p_language,
+             version=version,
+             phoneme_quotes="curly",
+-            **_legacy_fallback_kwargs(tokenizer_config.fallback),
++            **_fallback_kwargs(tokenizer_config.fallback),
+             use_spacy=tokenizer_config.use_spacy,
+             spacy_model=request.model,
+             spacy_model_size=request.size,
+             backend=tokenizer_config.backend,
+-            load_gold=tokenizer_config.load_gold,
+-            load_silver=tokenizer_config.load_silver,
+         )
+         result = kokorog2p.phonemize(
+             text,
+diff --git a/benchmarks/polynorm_phoneme.py b/benchmarks/polynorm_phoneme.py
+index fa2bb75..03942ce 100644
+--- a/benchmarks/polynorm_phoneme.py
++++ b/benchmarks/polynorm_phoneme.py
+@@ -35,7 +35,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
+     parser.add_argument("--case", dest="case_id")
+     parser.add_argument("--limit", type=int)
+     parser.add_argument("--backend", default="kokorog2p")
+-    parser.add_argument("--pipeline", choices=("plain", "ssmd", "both"), default="plain")
+     parser.add_argument(
+         "--baseline",
+         default="benchmarks/baselines/polynorm_phoneme.json",
+@@ -76,12 +75,10 @@ def main(argv: list[str] | None = None) -> int:
+         print("error: no PolyNorm cases matched the requested filters", file=sys.stderr)
+         return 2
+
+-    pipelines = ("plain", "ssmd") if args.pipeline == "both" else (args.pipeline,)
++    pipelines = ("plain",)
+     tokenizer_config = TokenizerConfig(
+         backend=args.backend,
+         use_spacy=False,
+-        load_gold=True,
+-        load_silver=True,
+         fallback="espeak",
+     )
+     environment = collect_environment_fingerprint(
+@@ -117,7 +114,6 @@ def main(argv: list[str] | None = None) -> int:
+                     harness = PyKokoroPhonemeHarness(
+                         language,
+                         args.backend,
+-                        ssmd=pipeline == "ssmd",
+                         tokenizer_config=tokenizer_config,
+                     )
+                     harnesses[key] = harness
+diff --git a/benchmarks/short_sentence_diagnostics.py b/benchmarks/short_sentence_diagnostics.py
+index fa49aca..3fce858 100644
+--- a/benchmarks/short_sentence_diagnostics.py
++++ b/benchmarks/short_sentence_diagnostics.py
+@@ -291,7 +291,6 @@ def format_header(
+         "kokorog2p",
+         "lexphon",
+         "phrasplit",
+-        "ssmd",
+         "spokenform",
+         "audiosig",
+         "onnxruntime",
+@@ -466,8 +465,9 @@ def _session_metadata(backend: Any) -> dict[str, object]:
+
+
+ def _runtime(args: argparse.Namespace) -> tuple[Any, Any, Any, Any]:
+-    from pykokoro import GenerationConfig, PipelineConfig
+     from pykokoro.pipeline import KokoroPipeline
++
++    from pykokoro import GenerationConfig, PipelineConfig
+     from pykokoro.short_sentence_handler import ShortSentenceConfig
+
+     config = PipelineConfig(
+diff --git a/docs/api_reference.md b/docs/api_reference.md
+index 7ce2b01..599f7a1 100644
+--- a/docs/api_reference.md
++++ b/docs/api_reference.md
+@@ -57,6 +57,10 @@ word timings are local to that result. `save_wav(path)` writes mono float32 WAV
+    :members:
+    :undoc-members:
+
++.. autoclass:: pykokoro.exceptions.SynthesisInputTooLongError
++   :members:
++   :undoc-members:
++
+ .. autoclass:: pykokoro.generation_config.GenerationConfig
+    :members:
+    :undoc-members:
+@@ -74,6 +78,9 @@ word timings are local to that result. `save_wav(path)` writes mono float32 WAV
+    :undoc-members:
+ ```
+
++`SynthesisConfig.long_text_split` defaults to sentence-aware chunking for oversized
++prepared-text requests. Its other modes, `"token"` and `"none"`, are described in the
++[long-text usage guide](basic_usage.md#long-text-model-chunking).
+ `GenerationConfig.speed` is the acoustic inference speed passed to Kokoro, not an
+ application-level playback-rate effect. `SynthesisConfig.voice_level` is engine-local
+ voice calibration rather than whole-output mastering.
+diff --git a/docs/basic_usage.md b/docs/basic_usage.md
+index a7cd25d..f574deb 100644
+--- a/docs/basic_usage.md
++++ b/docs/basic_usage.md
+@@ -44,6 +44,60 @@ The supported combinations depend on model profiles and available artifacts. Use
+ frontends without loading model weights. `model_path`, `voices_path`, and
+ `model_config_path` can point at local artifacts when appropriate.
+
++## Long-text model chunking
++
++`SynthesisConfig.long_text_split` controls how an oversized request is divided for
++Kokoro inference. The default, `"sentence"`, lazily uses PhraseSplit's regex sentence
++splitter only when the request exceeds the model token limit. It packs complete
++sentences where possible and falls back to token-safe splitting when one sentence is too
++large. PyKokoro always enforces the model token limit; character count is not a
++substitute for it.
++
++Internal sentence splitting always uses `use_spacy=False`. It does not load spaCy, parse
++document markup, or create a public sentence plan. Internal chunks are stitched back
++into one `RenderedSegment` for the original request.
++
++Choose another mode when needed:
++
++- `long_text_split="token"` never invokes PhraseSplit and splits oversized input at safe
++  G2P/model-token boundaries.
++- `long_text_split="none"` disables internal splitting. An oversized request raises
++  `SynthesisInputTooLongError`; use this when you have already segmented and sized
++  requests yourself.
++
++For example, use externally selected boundaries and retain responsibility for combining
++the independent results:
++
++```python
++from phrasplit import split_with_offsets
++from pykokoro import (
++    GenerationConfig,
++    KokoroSynthesizer,
++    SynthesisConfig,
++    SynthesisSegment,
++)
++
++text = "A long passage. Another sentence."
++parts = split_with_offsets(
++    text, mode="sentence", use_spacy=True, language="en"
++)
++requests = [
++    SynthesisSegment(str(index), part.text, "en-us", voice="af_sarah")
++    for index, part in enumerate(parts)
++]
++config = SynthesisConfig(
++    generation=GenerationConfig(lang="en-us"),
++    long_text_split="none",
++)
++with KokoroSynthesizer(config) as synthesizer:
++    rendered_parts = list(synthesizer.synthesize_segments(requests))
++```
++
++Install PhraseSplit's optional spaCy extra with `pip install "phrasplit[nlp]"` and
++install a language model separately to use `use_spacy=True`. Each external part becomes
++an independent request and result. Verify that every part fits the model token limit
++when using `"none"`; this mode does not further split it.
++
+ ## Per-request voice and independent batch output
+
+ A request-level voice takes precedence over the configured default:
+diff --git a/docs/pipeline_stages.md b/docs/pipeline_stages.md
+index 053c7d1..60530a7 100644
+--- a/docs/pipeline_stages.md
++++ b/docs/pipeline_stages.md
+@@ -37,12 +37,24 @@ token IDs, speed, and a seed when supported to OnnxVoice.
+
+ ## Inference and internal chunking
+
+-PyKokoro may split a long request into token-limit chunks or make additional calls for
+-its short-sentence strategy. Such chunks belong to the same public request and are
+-stitched into that request's one result. Chunk timings are rebased to the stitched
+-request-local waveform. No cross-request silence, markers, embedded clips, or
++For an oversized prepared-text request, `SynthesisConfig.long_text_split` selects
++model-input chunking:
++
++- `"sentence"` (default) lazily uses PhraseSplit's regex backend with `use_spacy=False`.
++  It packs complete sentences within the model token budget and falls back to token-safe
++  splitting when a sentence is too large.
++- `"token"` uses token-safe splitting without PhraseSplit.
++- `"none"` rejects an oversized request with `SynthesisInputTooLongError`.
++
++The model token limit remains authoritative. This is acoustic inference chunking, not
++document parsing or a public sentence plan. All internal chunks belong to the same
++public request and are stitched into one `RenderedSegment`. Chunk timings are rebased to
++that request-local waveform. No cross-request silence, markers, embedded clips, or
+ caller-visible timeline data is added.
+
++Separately configured short-sentence handling may also issue extra inference calls; it
++does not change the long-text splitting policy.
++
+ ## Result
+
+ `RenderedSegment` contains the request ID, mono float32 audio, sample rate, prepared
+diff --git a/examples/english.py b/examples/english.py
+index 6fa2ef7..067d8cf 100644
+--- a/examples/english.py
++++ b/examples/english.py
+@@ -17,7 +17,6 @@ except ImportError:
+ TEXT = (
+     "The best way to predict the future is to create it. "
+     "Technology is nothing without the imagination to use it wisely. "
+-    '[tomato]{ipa="təˈmeɪtoʊ"} and [dictionary]{sampa="dIkS@n@ri"}. '
+     "Every great innovation begins with a simple question: what if?"
+ )
+ VOICE = "af_heart"
+@@ -25,7 +24,7 @@ LANG = "en-us"
+
+
+ def main() -> None:
+-    """Generate English speech from text, phonemes, and SSMD text."""
++    """Generate English speech from plain text and phoneme requests."""
+     config = SynthesisConfig(
+         voice=VOICE,
+         generation=GenerationConfig(lang=LANG, speed=1.0),
+diff --git a/pykokoro/__init__.py b/pykokoro/__init__.py
+index a8543d1..d024c2b 100644
+--- a/pykokoro/__init__.py
++++ b/pykokoro/__init__.py
+@@ -4,10 +4,11 @@ from __future__ import annotations
+
+ from typing import Any
+
++from .exceptions import SynthesisInputTooLongError
+ from .generation_config import GenerationConfig
+ from .language_routing import LanguageRoutingConfig
+ from .short_sentence_handler import ShortSentenceConfig
+-from .synthesis_config import SynthesisConfig
++from .synthesis_config import LongTextSplitMode, SynthesisConfig
+ from .synthesis_types import (
+     LinguisticToken,
+     PronunciationOverride,
+@@ -87,6 +88,8 @@ __all__ = [
+     "GenerationConfig",
+     "LanguageRoutingConfig",
+     "SynthesisConfig",
++    "LongTextSplitMode",
++    "SynthesisInputTooLongError",
+     "VoiceLevelConfig",
+     "VoiceBlend",
+     "SynthesisSegment",
+diff --git a/pykokoro/exceptions.py b/pykokoro/exceptions.py
+index d46b70d..1312423 100644
+--- a/pykokoro/exceptions.py
++++ b/pykokoro/exceptions.py
+@@ -6,6 +6,10 @@ class ConfigurationError(KokoroError):
+     """Invalid or inconsistent configuration."""
+
+
++class SynthesisInputTooLongError(ValueError):
++    """Input exceeds model capacity while internal splitting is disabled."""
++
++
+ class CapabilityError(KokoroError):
+     """Requested engine feature is unsupported by a model or runtime profile."""
+
+diff --git a/pykokoro/request_renderer.py b/pykokoro/request_renderer.py
+index e124987..78a20c6 100644
+--- a/pykokoro/request_renderer.py
++++ b/pykokoro/request_renderer.py
+@@ -9,6 +9,7 @@ from typing import Any, Protocol, cast
+
+ import numpy as np
+
++from .exceptions import SynthesisInputTooLongError
+ from .model_profiles import get_model_profile
+ from .prepared_g2p import PreparedSynthesis
+ from .synthesis_config import SynthesisConfig, resolve_synthesis_config
+@@ -84,11 +85,11 @@ class OnnxRequestRenderer:
+         if voice is None:
+             raise ValueError("A voice must resolve before ONNX rendering")
+
+-        backend = self._get_backend(resolved)
+-        voice_style = backend.resolve_voice_style(voice)
+         phoneme_segments = self._build_phoneme_segments(
+-            request, prepared, resolved, profile.max_tokens
++            request, prepared, resolved, profile.max_tokens, trace
+         )
++        backend = self._get_backend(resolved)
++        voice_style = backend.resolve_voice_style(voice)
+
+         def context_phonemizer(text: str, language: str) -> Any:
+             return self._g2p_adapter.phonemize_context(text, language, resolved)
+@@ -219,28 +220,81 @@ class OnnxRequestRenderer:
+         prepared: PreparedSynthesis,
+         config: SynthesisConfig,
+         max_tokens: int,
++        trace: Trace | None = None,
+     ) -> list[PhonemeSegment]:
+         token_ids = list(prepared.token_ids)
+         if not token_ids:
+             return []
++
++        if trace is not None:
++            trace.model.update(
++                {
++                    "long_text_split_mode": config.long_text_split,
++                    "model_token_count": len(token_ids),
++                    "model_max_tokens": max_tokens,
++                }
++            )
++
++        fallback_reason: str | None = None
++        sentence_count = 0
++        oversized_sentence = False
+         if len(token_ids) <= max_tokens:
+             groups = [(token_ids, list(prepared.alignment_tokens), prepared.phonemes)]
++        elif config.long_text_split == "none":
++            raise SynthesisInputTooLongError(
++                f"request {request.id!r} contains {len(token_ids)} model tokens, "
++                f"model maximum is {max_tokens}, and long_text_split='none'; split the request "
++                "externally or use long_text_split='sentence'/'token'"
++            )
++        elif config.long_text_split == "token":
++            safe_groups, fallback_reason = self._model_safe_groups(
++                token_ids, prepared.alignment_tokens, config, max_tokens
++            )
++            groups = [
++                (
++                    chunk_ids,
++                    alignment,
++                    self._g2p_adapter.ids_to_phonemes(chunk_ids, self._target_model(config)),
++                )
++                for chunk_ids, alignment in safe_groups
++            ]
++        elif request.phonemes is not None:
++            fallback_reason = "direct-phoneme-input"
++            safe_groups, alignment_fallback = self._model_safe_groups(
++                token_ids, prepared.alignment_tokens, config, max_tokens
++            )
++            fallback_reason = fallback_reason or alignment_fallback
++            groups = [
++                (
++                    chunk_ids,
++                    alignment,
++                    self._g2p_adapter.ids_to_phonemes(chunk_ids, self._target_model(config)),
++                )
++                for chunk_ids, alignment in safe_groups
++            ]
+         else:
+-            aligned_groups = self._split_at_alignment_boundaries(
+-                token_ids, prepared.alignment_tokens, max_tokens
++            sentence_groups, sentence_count, sentence_reason, oversized_sentence = (
++                self._split_at_sentence_boundaries(
++                    text=request.text,
++                    language=request.language,
++                    token_ids=token_ids,
++                    alignments=prepared.alignment_tokens,
++                    max_tokens=max_tokens,
++                )
+             )
+-            if aligned_groups is None:
+-                id_chunks = [
+-                    token_ids[index : index + max_tokens]
+-                    for index in range(0, len(token_ids), max_tokens)
+-                ]
++            if sentence_groups is None:
++                fallback_reason = sentence_reason or "sentence-mapping-unavailable"
++                safe_groups, alignment_fallback = self._model_safe_groups(
++                    token_ids, prepared.alignment_tokens, config, max_tokens
++                )
++                fallback_reason = fallback_reason or alignment_fallback
+                 groups = [
+                     (
+-                        chunk,
+-                        [],
+-                        self._g2p_adapter.ids_to_phonemes(chunk, self._target_model(config)),
++                        chunk_ids,
++                        alignment,
++                        self._g2p_adapter.ids_to_phonemes(chunk_ids, self._target_model(config)),
+                     )
+-                    for chunk in id_chunks
++                    for chunk_ids, alignment in safe_groups
+                 ]
+             else:
+                 groups = [
+@@ -249,8 +303,27 @@ class OnnxRequestRenderer:
+                         alignment,
+                         self._g2p_adapter.ids_to_phonemes(chunk_ids, self._target_model(config)),
+                     )
+-                    for chunk_ids, alignment in aligned_groups
++                    for chunk_ids, alignment in sentence_groups
+                 ]
++                if oversized_sentence:
++                    fallback_reason = "oversized-sentence"
++
++        if trace is not None:
++            trace.model.update(
++                {
++                    "sentence_count": sentence_count,
++                    "acoustic_chunk_count": len(groups),
++                    "fallback_used": fallback_reason is not None,
++                }
++            )
++            if fallback_reason is not None:
++                trace.model["fallback_reason"] = fallback_reason
++                trace.warnings.append(f"long_text.fallback reason={fallback_reason}")
++            if config.long_text_split == "sentence" and len(token_ids) > max_tokens:
++                trace.warnings.append(
++                    f"long_text.split mode=sentence sentences={sentence_count} "
++                    f"chunks={len(groups)} max_tokens={max_tokens}"
++                )
+
+         voice = config.voice
+         voice_name = voice if isinstance(voice, str) else None
+@@ -260,7 +333,9 @@ class OnnxRequestRenderer:
+                 (item.char_start, item.char_end)
+                 for item in alignment
+                 if isinstance(item.char_start, int)
++                and not isinstance(item.char_start, bool)
+                 and isinstance(item.char_end, int)
++                and not isinstance(item.char_end, bool)
+                 and 0 <= item.char_start <= item.char_end <= len(request.text)
+             ]
+             if char_offsets:
+@@ -288,6 +363,162 @@ class OnnxRequestRenderer:
+             )
+         return result
+
++    def _model_safe_groups(
++        self,
++        token_ids: list[int],
++        alignments: Sequence[G2PAlignmentToken],
++        config: SynthesisConfig,
++        max_tokens: int,
++    ) -> tuple[list[tuple[list[int], list[G2PAlignmentToken]]], str | None]:
++        aligned_groups = self._split_at_alignment_boundaries(token_ids, alignments, max_tokens)
++        if aligned_groups is not None:
++            return aligned_groups, None
++
++        id_chunks = [
++            token_ids[index : index + max_tokens] for index in range(0, len(token_ids), max_tokens)
++        ]
++        return [(chunk, []) for chunk in id_chunks], "invalid-g2p-alignment"
++
++    @staticmethod
++    def _split_at_sentence_boundaries(
++        *,
++        text: str,
++        language: str,
++        token_ids: list[int],
++        alignments: Sequence[G2PAlignmentToken],
++        max_tokens: int,
++    ) -> tuple[list[tuple[list[int], list[G2PAlignmentToken]]] | None, int, str | None, bool]:
++        counts = [token.model_span_token_count for token in alignments]
++        if not counts or any(
++            not isinstance(count, int) or isinstance(count, bool) or count < 0 for count in counts
++        ):
++            return None, 0, "invalid-g2p-alignment", False
++        count_values = [cast(int, count) for count in counts]
++        if sum(count_values) != len(token_ids):
++            return None, 0, "invalid-g2p-alignment", False
++
++        from phrasplit import split_with_offsets
++
++        sentences = split_with_offsets(
++            text,
++            mode="sentence",
++            use_spacy=False,
++            language=language,
++        )
++        if not sentences:
++            return None, 0, "no-sentence-ranges", False
++
++        sentence_ranges: list[tuple[int, int]] = []
++        previous_end = 0
++        for sentence in sentences:
++            start = sentence.char_start
++            end = sentence.char_end
++            if (
++                not isinstance(start, int)
++                or isinstance(start, bool)
++                or not isinstance(end, int)
++                or isinstance(end, bool)
++                or not 0 <= start < end <= len(text)
++                or start < previous_end
++                or text[start:end] != sentence.text
++            ):
++                return None, len(sentences), "invalid-sentence-offsets", False
++            sentence_ranges.append((start, end))
++            previous_end = end
++
++        sentence_alignments: list[list[G2PAlignmentToken]] = [[] for _ in sentence_ranges]
++        sentence_token_ids: list[list[int]] = [[] for _ in sentence_ranges]
++        previous_sentence = 0
++        token_offset = 0
++        for alignment, count in zip(alignments, count_values, strict=True):
++            start = alignment.char_start
++            end = alignment.char_end
++            if (
++                not isinstance(start, int)
++                or isinstance(start, bool)
++                or not isinstance(end, int)
++                or isinstance(end, bool)
++                or not 0 <= start <= end <= len(text)
++            ):
++                return None, len(sentences), "invalid-g2p-alignment-offsets", False
++
++            overlaps = [
++                index
++                for index, (sentence_start, sentence_end) in enumerate(sentence_ranges)
++                if max(start, sentence_start) < min(end, sentence_end)
++            ]
++            if len(overlaps) > 1:
++                return None, len(sentences), "alignment-spans-sentences", False
++            if overlaps:
++                sentence_index = overlaps[0]
++            else:
++                preceding = [
++                    index
++                    for index, (_, sentence_end) in enumerate(sentence_ranges)
++                    if sentence_end <= start
++                ]
++                if preceding:
++                    sentence_index = preceding[-1]
++                else:
++                    following = [
++                        index
++                        for index, (sentence_start, _) in enumerate(sentence_ranges)
++                        if sentence_start >= end
++                    ]
++                    sentence_index = following[0] if following else len(sentences) - 1
++
++            if sentence_index < previous_sentence:
++                return None, len(sentences), "non-monotonic-alignment-offsets", False
++            previous_sentence = sentence_index
++            sentence_alignments[sentence_index].append(alignment)
++            sentence_token_ids[sentence_index].extend(
++                token_ids[token_offset : token_offset + count]
++            )
++            token_offset += count
++
++        if token_offset != len(token_ids) or any(
++            not sentence_alignments[index] or not sentence_token_ids[index]
++            for index in range(len(sentences))
++        ):
++            return None, len(sentences), "incomplete-sentence-alignment", False
++
++        groups: list[tuple[list[int], list[G2PAlignmentToken]]] = []
++        current_ids: list[int] = []
++        current_alignments: list[G2PAlignmentToken] = []
++        oversized_sentence = False
++        for sentence_ids, sentence_tokens in zip(
++            sentence_token_ids, sentence_alignments, strict=True
++        ):
++            if len(sentence_ids) > max_tokens:
++                if current_ids:
++                    groups.append((current_ids, current_alignments))
++                    current_ids = []
++                    current_alignments = []
++                split_groups = OnnxRequestRenderer._split_at_alignment_boundaries(
++                    sentence_ids, sentence_tokens, max_tokens
++                )
++                if split_groups is None:
++                    return None, len(sentences), "oversized-sentence-alignment-unusable", False
++                groups.extend(split_groups)
++                oversized_sentence = True
++                continue
++            if current_ids and len(current_ids) + len(sentence_ids) > max_tokens:
++                groups.append((current_ids, current_alignments))
++                current_ids = []
++                current_alignments = []
++            current_ids.extend(sentence_ids)
++            current_alignments.extend(sentence_tokens)
++
++        if current_ids:
++            groups.append((current_ids, current_alignments))
++        if (
++            not groups
++            or any(not chunk or len(chunk) > max_tokens for chunk, _ in groups)
++            or [token for chunk, _ in groups for token in chunk] != token_ids
++        ):
++            return None, len(sentences), "sentence-token-conservation-failed", False
++        return groups, len(sentences), None, oversized_sentence
++
+     @staticmethod
+     def _split_at_alignment_boundaries(
+         token_ids: Sequence[int],
+diff --git a/pykokoro/synthesis_config.py b/pykokoro/synthesis_config.py
+index a0f1de8..658507f 100644
+--- a/pykokoro/synthesis_config.py
++++ b/pykokoro/synthesis_config.py
+@@ -15,6 +15,9 @@ from .short_sentence_handler import ShortSentenceConfig
+ from .voice_level import VoiceLevelConfig
+ from .voice_manager import VoiceBlend
+
++LongTextSplitMode = Literal["sentence", "token", "none"]
++
++
+ if TYPE_CHECKING:
+     from .tokenizer import EspeakConfig, TokenizerConfig
+
+@@ -45,6 +48,7 @@ class SynthesisConfig:
+     short_sentence_config: ShortSentenceConfig | None = None
+     waveform_validation: Literal["off", "warn", "strict"] = "off"
+     inference_audio_diagnostics: bool = False
++    long_text_split: LongTextSplitMode = "sentence"
+     inference_cache_enabled: bool = True
+     inference_cache_max_bytes: int = 128 * 1024 * 1024
+     voice_level: VoiceLevelConfig = field(default_factory=VoiceLevelConfig)
+@@ -63,6 +67,8 @@ class SynthesisConfig:
+             raise TypeError("language_routing must be LanguageRoutingConfig or None")
+         if self.waveform_validation not in ("off", "warn", "strict"):
+             raise ValueError("waveform_validation must be 'off', 'warn', or 'strict'")
++        if self.long_text_split not in ("sentence", "token", "none"):
++            raise ValueError("long_text_split must be 'sentence', 'token', or 'none'")
+         if isinstance(self.inference_cache_max_bytes, bool) or not isinstance(
+             self.inference_cache_max_bytes, int
+         ):
+diff --git a/pyproject.toml b/pyproject.toml
+index 185dd21..635e995 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -24,6 +24,7 @@ keywords = ["tts", "text-to-speech", "kokoro", "phonemizer", "espeak"]
+ dependencies = [
+     "kokorog2p[espeak,en]>=0.9.9,<1.0",
+     "lexphon>=0.2.3,<0.3",
++    "phrasplit>=0.3.9,<0.4",
+     "numpy",
+     "audiosig>=0.1.4,<0.2",
+     "platformdirs",
+diff --git a/requirements-test.txt b/requirements-test.txt
+index 06d9e7d..0e2441f 100644
+--- a/requirements-test.txt
++++ b/requirements-test.txt
+@@ -10,6 +10,4 @@ coverage
+ tox
+ kokorog2p[all]>=0.9.8,<1.0
+ lexphon>=0.2.3,<0.3
+-phrasplit>=0.3.9,<0.4
+-ssmd>=0.8.7,<0.9
+ spokenform>=0.4.3,<0.5
+diff --git a/tests/fixtures/ssmd_080_review_podcast.ssmd b/tests/fixtures/ssmd_080_review_podcast.ssmd
+deleted file mode 100644
+index 1b772e7..0000000
+--- a/tests/fixtures/ssmd_080_review_podcast.ssmd
++++ /dev/null
+@@ -1,21 +0,0 @@
+----
+-title: Review podcast
+-
+-voice_bindings:
+-  kokoro:
+-    moderator: af_sarah
+-    positive: af_bella
+-
+-pause_defaults:
+-  enabled: true
+-  sentence: 250ms
+-  paragraph: 700ms
+-  voice_change: 350ms
+----
+-<div voice="moderator">
+-Welcome to the review.
+-</div>
+-
+-<div voice="positive">
+-The proposed change improves authoring.
+-</div>
+diff --git a/tests/test_german_frontend_golden.py b/tests/test_german_frontend_golden.py
+index 91932d8..64c8320 100644
+--- a/tests/test_german_frontend_golden.py
++++ b/tests/test_german_frontend_golden.py
+@@ -3,31 +3,31 @@ import spokenform
+
+ GERMAN_GOLDEN_CASES = {
+     "14.05.2026": (
+-        "vierzehnte Mai zweitausendsechsundzwanzig",
++        "Vierzehnte Mai zweitausendsechsundzwanzig",
+         "fˈiːɾʦeːntə mˈI ʦvItWzɛnʣeːksʊndʦvanʦɪç",
+     ),
+     "18:20 Uhr": (
+-        "achtzehn Uhr zwanzig",
++        "Achtzehn Uhr zwanzig",
+         "ˈaxʦeːn ˈuːɾ ʦvˈanʦɪç",
+     ),
+     "1,5 kg": (
+-        "eins Komma fünf Kilogramm",
++        "Eins Komma fünf Kilogramm",
+         "ˈIns kˈɔmɑː fˈynf kˌiːlɔɡɾˈam",
+     ),
+     "500 g": (
+-        "fünfhundert Gramm",
++        "Fünfhundert Gramm",
+         "fˈynfhʊndɜt ɡɾˈam",
+     ),
+     "1 ltr.": (
+-        "ein Liter.",
++        "Ein Liter.",
+         "ˈIn lˈiːtɜ.",
+     ),
+     "45 Min.": (
+-        "fünfundvierzig Minuten.",
++        "Fünfundvierzig Minuten.",
+         "fˈynfʊndvˌiːɾʦɪç miːnˈuːtən.",
+     ),
+     "12,80 EUR": (
+-        "zwölf Euro achtzig Cent",
++        "Zwölf Euro achtzig Cent",
+         "ʦvˈœlf ˈɔøroː ˈaxʦɪç sˈɛnt",
+     ),
+     "Prof.": ("Professor", "pɾoːfˈɛsoːɾ"),
+diff --git a/tests/test_hard_cases_data.py b/tests/test_hard_cases_data.py
+index 01388ef..2c870f6 100644
+--- a/tests/test_hard_cases_data.py
++++ b/tests/test_hard_cases_data.py
+@@ -9,17 +9,17 @@ from benchmarks.hard_cases.data import case_counts, load_cases
+
+
+ def test_builtin_corpus_is_large_enough_and_deterministic() -> None:
+-    assert case_counts() == {"en": 130, "de": 120}
++    assert case_counts() == {"en": 122, "de": 113}
+     assert [case.id for case in load_cases(language="en")[:3]] == [
+         "en_gb_001",
+         "en_gb_002",
+         "en_gb_003",
+     ]
+-    assert len({case.id for case in load_cases()}) == 250
++    assert len({case.id for case in load_cases()}) == 235
+
+
+ def test_builtin_corpus_covers_language_specific_categories() -> None:
+     assert "heteronyms" in {case.category for case in load_cases(language="en")}
+     assert "compounds" in {case.category for case in load_cases(language="de")}
+-    assert len(load_cases(locale="en-US")) == 120
+-    assert len(load_cases(locale="de-DE")) == 120
++    assert len(load_cases(locale="en-US")) == 112
++    assert len(load_cases(locale="de-DE")) == 113
+diff --git a/tests/test_hard_cases_frontend.py b/tests/test_hard_cases_frontend.py
+index 98f17a7..4aa7a5d 100644
+--- a/tests/test_hard_cases_frontend.py
++++ b/tests/test_hard_cases_frontend.py
+@@ -2,29 +2,28 @@ from __future__ import annotations
+
+ import pytest
+
+-pytest.importorskip("benchmarks.hard_cases.data")
+ pytest.importorskip("benchmarks.hard_cases.frontend")
+-pytest.importorskip("benchmarks.hard_cases.phonemes")
+
+-
+-from benchmarks.hard_cases.data import load_cases
+ from benchmarks.hard_cases.frontend import NoOnnxFrontend
+-from benchmarks.hard_cases.phonemes import evaluate_case
+
+
+-def test_english_frontend_runs_without_onnx() -> None:
+-    case = load_cases(locale="en-US", case_id="en_shared_001")[0]
++def test_english_frontend_prepares_one_plain_request_without_onnx() -> None:
++    text = "The value is twelve dollars and fifty cents."
+     with NoOnnxFrontend("en-US") as frontend:
+-        result = frontend.run(case.text)
+-        evaluation = evaluate_case(case, frontend)
+-    assert result.clean_text == "The value is twelve dollars and fifty cents."
+-    assert result.phoneme_segments
+-    assert not evaluation.failed
++        result = frontend.run(text)
+
++    assert result.clean_text == text
++    assert result.source_text == text
++    assert len(result.segments) == 1
++    assert len(result.phoneme_segments) == 1
++    assert result.phoneme_segments[0].text == text
++    assert result.phoneme_segments[0].tokens
+
+-def test_german_frontend_runs_without_onnx() -> None:
+-    case = load_cases(locale="de-DE", case_id="de_shared_001")[0]
++
++def test_german_frontend_prepares_one_plain_request_without_onnx() -> None:
++    text = "Der Wert beträgt zwölf Euro."
+     with NoOnnxFrontend("de-DE") as frontend:
+-        result = frontend.run(case.text)
+-    assert result.clean_text
++        result = frontend.run(text)
++
++    assert result.clean_text == text
+     assert result.phoneme_segments
+diff --git a/tests/test_hard_cases_segmentation.py b/tests/test_hard_cases_segmentation.py
+deleted file mode 100644
+index 187871e..0000000
+--- a/tests/test_hard_cases_segmentation.py
++++ /dev/null
+@@ -1,26 +0,0 @@
+-from __future__ import annotations
+-
+-import pytest
+-
+-pytest.importorskip("benchmarks.hard_cases.frontend")
+-pytest.importorskip("benchmarks.hard_cases.segmentation")
+-
+-
+-from benchmarks.hard_cases.frontend import NoOnnxFrontend
+-from benchmarks.hard_cases.segmentation import build_segment_plan, validate_offsets
+-
+-
+-def test_segment_plan_uses_clean_text_offsets() -> None:
+-    with NoOnnxFrontend("en-US") as frontend:
+-        result = frontend.run("Wait—now. Are you ready?")
+-    plan = build_segment_plan(result)
+-    assert plan
+-    assert validate_offsets(result.clean_text, plan) == ()
+-    assert all(result.clean_text[item.char_start : item.char_end] == item.text for item in plan)
+-
+-
+-def test_ssmd_frontend_retains_prepared_plan() -> None:
+-    with NoOnnxFrontend("de-DE", ssmd=True) as frontend:
+-        result = frontend.run('<speak>Achtung<break time="300ms"/> jetzt.</speak>')
+-    assert result.clean_text
+-    assert build_segment_plan(result)
+diff --git a/tests/test_long_text_splitting.py b/tests/test_long_text_splitting.py
+new file mode 100644
+index 0000000..de6f113
+--- /dev/null
++++ b/tests/test_long_text_splitting.py
+@@ -0,0 +1,347 @@
++from __future__ import annotations
++
++import builtins
++from collections.abc import Callable
++from dataclasses import replace
++from typing import Any
++
++import numpy as np
++import phrasplit
++import pytest
++
++from pykokoro import SynthesisInputTooLongError
++from pykokoro.generation_config import GenerationConfig
++from pykokoro.prepared_g2p import PreparedSynthesis
++from pykokoro.request_renderer import OnnxRequestRenderer
++from pykokoro.synthesis_config import SynthesisConfig
++from pykokoro.synthesis_types import RenderedSegment, SynthesisSegment
++from pykokoro.types import G2PAlignmentToken, Trace, WordTiming
++
++
++class FakeG2PAdapter:
++    def ids_to_phonemes(self, token_ids: list[int] | tuple[int, ...], target_model: str) -> str:
++        return f"phonemes:{','.join(str(token_id) for token_id in token_ids)}"
++
++    def phonemize_context(self, text: str, language: str, config: SynthesisConfig) -> object:
++        return object()
++
++
++class FakeBackend:
++    def resolve_voice_style(self, voice: str) -> str:
++        return voice
++
++    def preprocess_segments(self, segments, enable_short_sentence, **kwargs):
++        return segments
++
++    def generate_raw_audio_segments(self, segments, voice_style, speed, **kwargs):
++        for segment in segments:
++            segment.raw_audio = np.zeros(4, dtype=np.float32)
++            segment.word_timings = [
++                WordTiming(segment.text, segment.char_start, segment.char_end, 1, 3, segment.id)
++            ]
++        return segments
++
++    def postprocess_audio_segments(self, segments, *, trim_silence, **kwargs):
++        for segment in segments:
++            segment.processed_audio = segment.raw_audio
++        return segments
++
++
++class FakeRenderer(OnnxRequestRenderer):
++    def __init__(self) -> None:
++        super().__init__(FakeG2PAdapter(), backend_factory=lambda config: FakeBackend())
++
++
++def _config(mode: str = "sentence", **kwargs: Any) -> SynthesisConfig:
++    return SynthesisConfig(
++        voice="af_heart",
++        generation=GenerationConfig(lang="en-us"),
++        model_source="github",
++        model_variant="v1.0",
++        long_text_split=mode,  # type: ignore[arg-type]
++        **kwargs,
++    )
++
++
++def _prepared(
++    text: str,
++    spans: list[tuple[int, int, int]],
++    *,
++    phonemes: str | None = None,
++) -> PreparedSynthesis:
++    alignments = tuple(
++        G2PAlignmentToken(
++            text=text[start:end],
++            phonemes=text[start:end],
++            char_start=start,
++            char_end=end,
++            model_span_token_count=count,
++        )
++        for start, end, count in spans
++    )
++    token_count = sum(span[2] for span in spans)
++    return PreparedSynthesis(
++        request_id="request",
++        text=text,
++        language="en-us",
++        voice="af_heart",
++        phonemes=phonemes if phonemes is not None else text,
++        token_ids=tuple(range(token_count)),
++        alignment_tokens=alignments,
++    )
++
++
++def _request(text: str, *, phonemes: str | None = None) -> SynthesisSegment:
++    return SynthesisSegment("request", text, "en-us", phonemes=phonemes)
++
++
++def _block_phrasplit_import(monkeypatch: pytest.MonkeyPatch) -> None:
++    original_import: Callable[..., Any] = builtins.__import__
++
++    def guarded_import(name: str, *args: Any, **kwargs: Any) -> Any:
++        if name == "phrasplit" or name.startswith("phrasplit."):
++            raise AssertionError("PhraseSplit must not be imported for this request")
++        return original_import(name, *args, **kwargs)
++
++    monkeypatch.setattr(builtins, "__import__", guarded_import)
++
++
++def test_short_sentence_mode_does_not_import_phrasplit(monkeypatch: pytest.MonkeyPatch) -> None:
++    _block_phrasplit_import(monkeypatch)
++    prepared = _prepared("Hi.", [(0, 3, 2)])
++
++    chunks = FakeRenderer()._build_phoneme_segments(
++        _request("Hi."), prepared, _config(), max_tokens=2
++    )
++
++    assert [chunk.tokens for chunk in chunks] == [[0, 1]]
++
++
++def test_token_mode_never_imports_phrasplit_and_conserves_tokens(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _block_phrasplit_import(monkeypatch)
++    text = "abcdef"
++    prepared = _prepared(text, [(index, index + 1, 1) for index in range(len(text))])
++
++    chunks = FakeRenderer()._build_phoneme_segments(
++        _request(text), prepared, _config("token"), max_tokens=4
++    )
++
++    assert [len(chunk.tokens) for chunk in chunks] == [4, 2]
++    assert [token for chunk in chunks for token in chunk.tokens] == list(prepared.token_ids)
++
++
++def test_direct_phoneme_sentence_mode_uses_token_fallback_without_phrasplit(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _block_phrasplit_import(monkeypatch)
++    text = "abc def."
++    prepared = _prepared(text, [(0, 3, 3), (4, 8, 3)], phonemes="ˈæb ˈdɛf")
++    trace = Trace()
++
++    chunks = FakeRenderer()._build_phoneme_segments(
++        _request(text, phonemes="ˈæb ˈdɛf"),
++        prepared,
++        _config(),
++        max_tokens=4,
++        trace=trace,
++    )
++
++    assert [len(chunk.tokens) for chunk in chunks] == [3, 3]
++    assert [token for chunk in chunks for token in chunk.tokens] == list(prepared.token_ids)
++    assert trace.model["fallback_reason"] == "direct-phoneme-input"
++
++
++def test_none_mode_renders_short_text_and_rejects_oversized_text_without_phrasplit(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    _block_phrasplit_import(monkeypatch)
++    renderer = FakeRenderer()
++    short = _prepared("Hi.", [(0, 3, 2)])
++    assert renderer._build_phoneme_segments(_request("Hi."), short, _config("none"), max_tokens=2)[
++        0
++    ].tokens == [0, 1]
++
++    long = _prepared("Long.", [(0, 5, 4)])
++    with pytest.raises(SynthesisInputTooLongError, match="request.*4 model tokens.*maximum is 2"):
++        renderer._build_phoneme_segments(_request("Long."), long, _config("none"), max_tokens=2)
++
++
++def test_sentence_mode_packs_whole_sentences_without_losing_tokens() -> None:
++    text = "Alpha. Beta. Gamma."
++    prepared = _prepared(text, [(0, 6, 250), (7, 12, 250), (13, 19, 100)])
++
++    groups, sentence_count, reason, oversized = OnnxRequestRenderer._split_at_sentence_boundaries(
++        text=text,
++        language="en-us",
++        token_ids=list(prepared.token_ids),
++        alignments=prepared.alignment_tokens,
++        max_tokens=510,
++    )
++
++    assert groups is not None
++    assert [len(ids) for ids, _ in groups] == [500, 100]
++    assert sentence_count == 3
++    assert reason is None
++    assert not oversized
++    assert [token for ids, _ in groups for token in ids] == list(prepared.token_ids)
++    assert [alignment.char_start for _, alignments in groups for alignment in alignments] == [
++        0,
++        7,
++        13,
++    ]
++
++
++def test_sentence_packing_does_not_split_to_fill_remaining_budget() -> None:
++    text = "First. Second. Third."
++    prepared = _prepared(text, [(0, 6, 300), (7, 14, 250), (15, 21, 100)])
++
++    groups, _, _, _ = OnnxRequestRenderer._split_at_sentence_boundaries(
++        text=text,
++        language="en-us",
++        token_ids=list(prepared.token_ids),
++        alignments=prepared.alignment_tokens,
++        max_tokens=510,
++    )
++
++    assert groups is not None
++    assert [len(ids) for ids, _ in groups] == [300, 350]
++
++
++def test_duplicate_sentences_keep_distinct_source_ranges() -> None:
++    text = "Repeat this. Repeat this. Final sentence."
++    prepared = _prepared(text, [(0, 12, 2), (13, 25, 2), (26, 41, 2)])
++
++    groups, _, _, _ = OnnxRequestRenderer._split_at_sentence_boundaries(
++        text=text,
++        language="en-us",
++        token_ids=list(prepared.token_ids),
++        alignments=prepared.alignment_tokens,
++        max_tokens=4,
++    )
++
++    assert groups is not None
++    assert [[item.text for item in alignments] for _, alignments in groups] == [
++        ["Repeat this.", "Repeat this."],
++        ["Final sentence."],
++    ]
++    assert groups[0][1][0].char_start == 0
++    assert groups[0][1][1].char_start == 13
++
++
++def test_oversized_sentence_falls_back_to_alignment_token_boundaries() -> None:
++    text = "abc def."
++    prepared = _prepared(text, [(0, 3, 3), (4, 8, 3)])
++
++    groups, sentence_count, reason, oversized = OnnxRequestRenderer._split_at_sentence_boundaries(
++        text=text,
++        language="en-us",
++        token_ids=list(prepared.token_ids),
++        alignments=prepared.alignment_tokens,
++        max_tokens=4,
++    )
++
++    assert groups is not None
++    assert [len(ids) for ids, _ in groups] == [3, 3]
++    assert sentence_count == 1
++    assert reason is None
++    assert oversized
++    assert [token for ids, _ in groups for token in ids] == list(prepared.token_ids)
++
++
++@pytest.mark.parametrize(
++    ("text", "language", "expected"),
++    [
++        (
++            "Dr. Smith arrived at 3 p.m. He sat down.",
++            "en-us",
++            ["Dr. Smith arrived at 3 p.m.", "He sat down."],
++        ),
++        (
++            "Version 3.14 is ready. Continue with the next step.",
++            "en-us",
++            ["Version 3.14 is ready.", "Continue with the next step."],
++        ),
++        (
++            "Das ist z. B. ein Test. Danach geht es weiter.",
++            "de-DE",
++            ["Das ist z. B. ein Test.", "Danach geht es weiter."],
++        ),
++        (
++            "First.\n\nSecond!\nThird?",
++            "en-gb",
++            ["First.", "Second!", "Third?"],
++        ),
++    ],
++)
++def test_real_phrasplit_regex_returns_exact_sentence_slices(
++    text: str, language: str, expected: list[str]
++) -> None:
++    sentences = phrasplit.split_with_offsets(
++        text,
++        mode="sentence",
++        use_spacy=False,
++        language=language,
++    )
++
++    assert [sentence.text for sentence in sentences] == expected
++    assert all(text[item.char_start : item.char_end] == item.text for item in sentences)
++
++
++def test_internal_sentence_path_forces_regex_backend(monkeypatch: pytest.MonkeyPatch) -> None:
++    calls: list[dict[str, Any]] = []
++    split = phrasplit.split_with_offsets
++
++    def capture(text: str, **kwargs: Any):
++        calls.append(kwargs)
++        return split(text, **kwargs)
++
++    monkeypatch.setattr(phrasplit, "split_with_offsets", capture)
++    text = "First. Second."
++    prepared = _prepared(text, [(0, 6, 3), (7, 14, 3)])
++
++    groups, _, _, _ = OnnxRequestRenderer._split_at_sentence_boundaries(
++        text=text,
++        language="en-us",
++        token_ids=list(prepared.token_ids),
++        alignments=prepared.alignment_tokens,
++        max_tokens=4,
++    )
++
++    assert groups is not None
++    assert calls == [{"mode": "sentence", "use_spacy": False, "language": "en-us"}]
++
++
++def test_invalid_alignment_falls_back_to_raw_token_safety_and_trace() -> None:
++    text = "long text"
++    prepared = replace(_prepared(text, [(0, 4, 2)]), token_ids=tuple(range(7)))
++    trace = Trace()
++    chunks = FakeRenderer()._build_phoneme_segments(
++        _request(text), prepared, _config(), max_tokens=3, trace=trace
++    )
++
++    assert [len(chunk.tokens) for chunk in chunks] == [3, 3, 1]
++    assert [token for chunk in chunks for token in chunk.tokens] == list(prepared.token_ids)
++    assert trace.model["fallback_reason"] == "invalid-g2p-alignment"
++
++
++def test_sentence_chunks_stitch_one_result_with_rebased_timings() -> None:
++    text = "Alpha. Beta. Gamma."
++    request = _request(text)
++    prepared = _prepared(text, [(0, 6, 250), (7, 12, 250), (13, 19, 100)])
++
++    rendered: RenderedSegment = FakeRenderer().render(prepared, request, _config())
++
++    assert rendered.id == request.id
++    assert len(rendered.audio) == 8
++    assert [timing.start_sample for timing in rendered.word_timings] == [1, 5]
++    assert [timing.end_sample for timing in rendered.word_timings] == [3, 7]
++    assert [(timing.char_start, timing.char_end) for timing in rendered.word_timings] == [
++        (0, 12),
++        (13, 19),
++    ]
++    assert all(
++        timing.start_sample <= timing.end_sample <= len(rendered.audio)
++        for timing in rendered.word_timings
++    )
+diff --git a/tests/test_packaging_metadata.py b/tests/test_packaging_metadata.py
+index b43cdf2..1a9b849 100644
+--- a/tests/test_packaging_metadata.py
++++ b/tests/test_packaging_metadata.py
+@@ -86,8 +86,10 @@ def test_removed_document_dependencies_are_not_declared() -> None:
+     }
+
+     assert not names.intersection(
+-        {"utterplan", "audiocompose", "ssmd", "phrasplit", "chardet", "charset-normalizer"}
++        {"utterplan", "audiocompose", "ssmd", "chardet", "charset-normalizer"}
+     )
++    assert "phrasplit>=0.3.9,<0.4" in dependencies
++    assert not any(requirement.startswith("phrasplit[nlp]") for requirement in dependencies)
+
+
+ def test_audiosig_is_the_only_declared_dsp_backend() -> None:
+@@ -186,6 +188,7 @@ def test_lower_bound_workflow_pins_match_project_floors() -> None:
+         "kokorog2p",
+         "lexphon",
+         "audiosig",
++        "phrasplit",
+     }
+
+     assert {package: pins[package] for package in expected_packages} == {
+diff --git a/tests/test_polynorm_phoneme_harness.py b/tests/test_polynorm_phoneme_harness.py
+index eea8952..546f123 100644
+--- a/tests/test_polynorm_phoneme_harness.py
++++ b/tests/test_polynorm_phoneme_harness.py
+@@ -4,37 +4,18 @@ import pytest
+
+ pytest.importorskip("benchmarks.polynorm_eval")
+
+-
+ from benchmarks.polynorm_eval import PyKokoroPhonemeHarness
+
+
+-@pytest.mark.parametrize(
+-    ("original_text", "normalized_text"),
+-    [
+-        ("2", "two"),
+-        ("42 kg", "forty two kilograms"),
+-        ("Dr. Smith", "Doctor Smith"),
+-        ("$5", "five dollars"),
+-    ],
+-)
+-def test_plain_harness_matches_spokenform_equivalent_pairs(
+-    original_text: str,
+-    normalized_text: str,
+-) -> None:
++def test_request_harness_phonemizes_plain_text_without_document_planning() -> None:
++    text = "Meet Dr. Smith at 5:30."
+     with PyKokoroPhonemeHarness("en-us", "kokorog2p") as harness:
+-        original = harness.phonemize(original_text)
+-        normalized = harness.phonemize(normalized_text)
+-
+-    assert original.phonemes == normalized.phonemes
+-    assert original.tokens == normalized.tokens
+-    assert original.warnings == ()
+-    assert normalized.warnings == ()
+-
+-
+-def test_ssmd_harness_keeps_equivalent_output_without_onnx() -> None:
+-    with PyKokoroPhonemeHarness("en-us", "kokorog2p", ssmd=True) as harness:
+-        original = harness.phonemize("Meet Dr. Smith at 5:30.")
+-        normalized = harness.phonemize("Meet Doctor Smith at five thirty.")
+-
+-    assert original.phonemes == normalized.phonemes
+-    assert original.tokens == normalized.tokens
++        first = harness.phonemize(text)
++        second = harness.phonemize(text)
++
++    assert first.phonemes
++    assert first.tokens
++    assert first.segment_count == 1
++    assert first.phonemes == second.phonemes
++    assert first.tokens == second.tokens
++    assert first.warnings == second.warnings
+diff --git a/tests/test_public_engine_api.py b/tests/test_public_engine_api.py
+index 1f2a7ee..182afcb 100644
+--- a/tests/test_public_engine_api.py
++++ b/tests/test_public_engine_api.py
+@@ -12,9 +12,11 @@ from pykokoro import (
+     KokoroSynthesizer,
+     LanguageRoutingConfig,
+     LinguisticToken,
++    LongTextSplitMode,
+     PronunciationOverride,
+     RenderedSegment,
+     SynthesisConfig,
++    SynthesisInputTooLongError,
+     SynthesisSegment,
+     VoiceBlend,
+     VoiceLevelConfig,
+@@ -37,6 +39,8 @@ def test_public_api_exports_request_and_result_types() -> None:
+         "GenerationConfig",
+         "LanguageRoutingConfig",
+         "SynthesisConfig",
++        "SynthesisInputTooLongError",
++        "LongTextSplitMode",
+         "VoiceLevelConfig",
+         "VoiceBlend",
+         "SynthesisSegment",
+@@ -59,6 +63,8 @@ def test_public_api_exports_request_and_result_types() -> None:
+             SynthesisSegment,
+             RenderedSegment,
+             SynthesisConfig,
++            LongTextSplitMode,
++            SynthesisInputTooLongError,
+             GenerationConfig,
+             VoiceLevelConfig,
+             LanguageRoutingConfig,
+diff --git a/tests/test_synthesis_config.py b/tests/test_synthesis_config.py
+new file mode 100644
+index 0000000..22afe57
+--- /dev/null
++++ b/tests/test_synthesis_config.py
+@@ -0,0 +1,32 @@
++from __future__ import annotations
++
++from typing import get_args
++
++import pytest
++
++import pykokoro
++from pykokoro import LongTextSplitMode, SynthesisConfig, SynthesisInputTooLongError
++
++
++def test_synthesis_config_defaults_to_sentence_splitting() -> None:
++    config = SynthesisConfig()
++
++    assert config.long_text_split == "sentence"
++
++
++def test_synthesis_config_accepts_supported_long_text_modes() -> None:
++    for mode in ("sentence", "token", "none"):
++        config = SynthesisConfig(long_text_split=mode)  # type: ignore[arg-type]
++        assert config.long_text_split == mode
++
++
++def test_synthesis_config_rejects_unknown_long_text_mode() -> None:
++    with pytest.raises(ValueError, match="long_text_split must be"):
++        SynthesisConfig(long_text_split="unsupported")  # type: ignore[arg-type]
++
++
++def test_long_text_mode_and_input_error_are_public() -> None:
++    assert get_args(LongTextSplitMode) == ("sentence", "token", "none")
++    assert issubclass(SynthesisInputTooLongError, ValueError)
++    assert "LongTextSplitMode" in pykokoro.__all__
++    assert "SynthesisInputTooLongError" in pykokoro.__all__

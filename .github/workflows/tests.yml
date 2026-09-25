@@ -125,6 +125,7 @@ jobs:
           "lexphon==0.2.3" \
           "phrasplit==0.3.9" \
           "audiosig==0.1.4" \
+          "onnxvoice[cpu]==0.1.7" \
           platformdirs
         python -m pip install -e .
     - name: Install Lexphon data
@@ -135,7 +136,11 @@ jobs:
           tests/test_packaging_metadata.py \
           tests/test_import_boundaries.py \
           tests/test_frontend_contracts.py \
-          tests/test_lexphon_provisioning.py
+          tests/test_lexphon_provisioning.py \
+          tests/test_onnxvoice_boundary.py \
+          tests/test_request_renderer.py \
+          tests/test_voice_manager.py \
+          tests/test_audio_generator_performance.py
 
 
   package-resources:

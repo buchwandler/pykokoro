@@ -1,0 +1,895 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 1
+release_version: 0.10.0
+git_base_ref: v0.9.10
+git_base_sha: c347d3bcc90443781c24f99b053762c865d67e4b
+git_head_ref: HEAD
+git_head_sha: 35a9c05a06d835b11641e0b4038bd05ad0a3a6de
+git_range: c347d3bcc90443781c24f99b053762c865d67e4b..35a9c05a06d835b11641e0b4038bd05ad0a3a6de
+commit_count: 20
+rows:
+  - sha: f8ff25efa9e3ad870ebee1c5675f8fb2ffbe9170
+    source_ref: git:f8ff25efa9e3ad870ebee1c5675f8fb2ffbe9170
+    short_sha: f8ff25e
+    changed_paths:
+      - README.md
+      - pykokoro/exceptions.py
+      - pykokoro/language_detection.py
+      - pykokoro/pipeline.py
+      - pykokoro/planning/__init__.py
+      - pykokoro/planning/config_adapter.py
+      - pykokoro/planning/utterplan_adapter.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pyproject.toml
+      - tests/test_utterplan_integration.py
+    stats:
+      files_changed: 10
+      insertions: 840
+      deletions: 78
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: add utterplan support"
+  - sha: 825a49a7b6b90d7308eb7d9a672dbcc745f576be
+    source_ref: git:825a49a7b6b90d7308eb7d9a672dbcc745f576be
+    short_sha: 825a49a
+    changed_paths:
+      - README.md
+      - examples/audio_job.py
+      - pykokoro/_onnxvoice.py
+      - pykokoro/audio_generator.py
+      - pykokoro/audio_job.py
+      - pykokoro/composition.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/onnx_session.py
+      - pykokoro/pipeline.py
+      - pykokoro/runtime/thai_wayu.py
+      - pykokoro/runtime_protocol.py
+      - pykokoro/types.py
+      - pykokoro/utils.py
+      - pyproject.toml
+      - tests/test_architecture_boundaries.py
+      - tests/test_audio_generator_logging.py
+      - tests/test_audio_generator_performance.py
+      - tests/test_audio_input_contract.py
+      - tests/test_audio_job.py
+      - tests/test_audio_splitting.py
+      - tests/test_bug_fixes.py
+      - tests/test_import_boundaries.py
+      - tests/test_onnxvoice_boundary.py
+      - tests/test_packaging_metadata.py
+      - tests/test_pipeline_unit_streaming.py
+      - tests/test_session_manager.py
+      - tests/test_ssmd.py
+      - tests/test_word_timings.py
+    stats:
+      files_changed: 28
+      insertions: 1610
+      deletions: 1224
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: migrate to audiocompose and onnxvoice"
+  - sha: 0e22b45622154ad005302d8daa8df38c2df4d2c0
+    source_ref: git:0e22b45622154ad005302d8daa8df38c2df4d2c0
+    short_sha: 0e22b45
+    changed_paths:
+      - pykokoro/_onnxvoice.py
+      - pykokoro/asset_progress.py
+      - pykokoro/audio_generator.py
+      - pykokoro/audio_job.py
+      - pykokoro/pipeline.py
+      - pykokoro/utils.py
+      - tests/test_audio_job.py
+      - tests/test_model_registry.py
+      - tests/test_onnxvoice_boundary.py
+      - tests/test_pipeline_unit_streaming.py
+      - tests/test_word_timings.py
+    stats:
+      files_changed: 11
+      insertions: 485
+      deletions: 70
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: fix issues with migration"
+  - sha: b436299354407edcf98ac24850747726ca6dfbac
+    source_ref: git:b436299354407edcf98ac24850747726ca6dfbac
+    short_sha: b436299
+    changed_paths:
+      - pykokoro/pipeline.py
+      - tests/test_audio_job_from_plan.py
+    stats:
+      files_changed: 2
+      insertions: 329
+      deletions: 0
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: add pipeline function"
+  - sha: 4c55705ff3fd6f477ecff6a04d638cd89d31b6b5
+    source_ref: git:4c55705ff3fd6f477ecff6a04d638cd89d31b6b5
+    short_sha: 4c55705
+    changed_paths:
+      - pykokoro/__init__.py
+      - pykokoro/artifact_manifest.py
+      - pykokoro/asset_constants.py
+      - pykokoro/model_assets.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/onnx_session.py
+      - pykokoro/output_loudness.py
+      - pykokoro/pipeline.py
+      - pykokoro/release_catalog.py
+      - pykokoro/runtime/dispatcher.py
+      - pykokoro/runtime/model_assets.py
+      - pykokoro/runtime/thai_wayu.py
+      - pykokoro/ssmd_config.py
+      - pykokoro/ssmd_parser.py
+      - pykokoro/stages/doc_parsers/plain.py
+      - pykokoro/stages/doc_parsers/ssmd.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/stages/protocols.py
+      - pykokoro/stages/segmentation/phrasplit.py
+      - pykokoro/stages/text_preparation/spokenform.py
+      - pyproject.toml
+      - tests/test_audio_job.py
+      - tests/test_downloads.py
+      - tests/test_model_assets.py
+      - tests/test_model_assets_logging.py
+      - tests/test_output_loudness.py
+      - tests/test_phrasplit_fallbacks.py
+      - tests/test_phrasplit_overrides.py
+      - tests/test_release_catalog.py
+      - tests/test_runtime_model_assets.py
+      - tests/test_session_manager.py
+      - tests/test_splitter_no_overlap.py
+      - tests/test_splitter_offsets.py
+      - tests/test_ssmd.py
+      - tests/test_ssmd_080_frontmatter.py
+      - tests/test_ssmd_080_pause_defaults.py
+      - tests/test_ssmd_080_pipeline.py
+      - tests/test_ssmd_080_profile.py
+      - tests/test_ssmd_080_voice_bindings.py
+      - tests/test_ssmd_deterministic_breaks.py
+      - tests/test_ssmd_parser.py
+      - tests/test_thai_wayu_runtime.py
+      - tests/test_utterplan_integration.py
+    stats:
+      files_changed: 43
+      insertions: 115
+      deletions: 8448
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: clean up obsolete code"
+  - sha: dd8a26e0956551d9250167b3c30db199cc0b61a5
+    source_ref: git:dd8a26e0956551d9250167b3c30db199cc0b61a5
+    short_sha: dd8a26e
+    changed_paths:
+      - benchmarks/hard_cases/frontend.py
+      - benchmarks/polynorm_eval.py
+      - examples/abbreviations.py
+      - examples/legacy/pipeline_stage_showcase.py
+      - examples/optimal_phoneme_length_demo.py
+      - examples/repro_dup_words.py
+      - examples/split_and_phonemize_demo.py
+      - pykokoro/_onnxvoice.py
+      - pykokoro/artifact_manifest.py
+      - pykokoro/asset_constants.py
+      - pykokoro/asset_progress.py
+      - pykokoro/audio_generator.py
+      - pykokoro/audio_job.py
+      - pykokoro/model_assets.py
+      - pykokoro/model_profiles.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/onnx_session.py
+      - pykokoro/output_loudness.py
+      - pykokoro/pipeline.py
+      - pykokoro/release_catalog.py
+      - pykokoro/runtime/dispatcher.py
+      - pykokoro/runtime/model_assets.py
+      - pykokoro/runtime/thai_wayu.py
+      - pykokoro/ssmd_config.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/stages/protocols.py
+      - pykokoro/utils.py
+      - tests/test_architecture_boundaries.py
+      - tests/test_audio_job.py
+      - tests/test_audio_job_from_plan.py
+      - tests/test_auto_pause_mode.py
+      - tests/test_clausal_comma_pauses.py
+      - tests/test_emphasis_policy.py
+      - tests/test_german_segmentation.py
+      - tests/test_model_profile_resolution.py
+      - tests/test_model_registry.py
+      - tests/test_onnxvoice_boundary.py
+      - tests/test_parenthetical_pauses.py
+      - tests/test_pipeline_logging.py
+      - tests/test_pipeline_paragraphs.py
+      - tests/test_pipeline_phoneme_consistency.py
+      - tests/test_pipeline_refactor.py
+      - tests/test_pipeline_unit_streaming.py
+      - tests/test_spacy_model_policy.py
+      - tests/test_utterplan_integration.py
+      - tests/test_word_timings.py
+    stats:
+      files_changed: 46
+      insertions: 2047
+      deletions: 158
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "fix: pre-commit and readd deleted files"
+  - sha: b94802a3c5884050f07621359f4eda82fd94931c
+    source_ref: git:b94802a3c5884050f07621359f4eda82fd94931c
+    short_sha: b94802a
+    changed_paths:
+      - pykokoro/__init__.py
+      - pykokoro/_onnxvoice.py
+      - pykokoro/artifact_manifest.py
+      - pykokoro/asset_constants.py
+      - pykokoro/model_assets.py
+      - pykokoro/model_profiles.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/output_loudness.py
+      - pykokoro/release_catalog.py
+      - pykokoro/runtime/dispatcher.py
+      - pykokoro/runtime/model_assets.py
+      - pykokoro/runtime/thai_wayu.py
+      - tests/test_auto_pause_mode.py
+      - tests/test_clausal_comma_pauses.py
+      - tests/test_emphasis_policy.py
+      - tests/test_german_segmentation.py
+      - tests/test_hard_cases_baseline.py
+      - tests/test_hard_cases_data.py
+      - tests/test_hard_cases_frontend.py
+      - tests/test_hard_cases_schema.py
+      - tests/test_hard_cases_segmentation.py
+      - tests/test_hard_cases_selection.py
+      - tests/test_import_boundaries.py
+      - tests/test_maintainer_review4_download_cache.py
+      - tests/test_onnxvoice_boundary.py
+      - tests/test_parenthetical_pauses.py
+      - tests/test_pipeline_logging.py
+      - tests/test_pipeline_paragraphs.py
+      - tests/test_pipeline_phoneme_consistency.py
+      - tests/test_pipeline_refactor.py
+      - tests/test_pipeline_unit_streaming.py
+      - tests/test_polynorm_eval.py
+      - tests/test_polynorm_external.py
+      - tests/test_polynorm_phoneme_harness.py
+      - tests/test_short_sentence_benchmark_reporting.py
+      - tests/test_short_sentence_diagnostics.py
+      - tests/test_short_sentence_parameter_sweep.py
+      - tests/test_spacy_model_policy.py
+      - tests/test_voice_loudness_benchmark.py
+      - tests/test_voice_loudness_calibration.py
+    stats:
+      files_changed: 40
+      insertions: 427
+      deletions: 3783
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: cleanup code"
+  - sha: 03fb98c121f44ca759672e81cf39028e0781e89d
+    source_ref: git:03fb98c121f44ca759672e81cf39028e0781e89d
+    short_sha: 03fb98c
+    changed_paths:
+      - .github/workflows/tests.yml
+      - README.md
+      - benchmarks/__init__.py
+      - benchmarks/benchmark_martin_cpu.py
+      - benchmarks/hard_cases/frontend.py
+      - benchmarks/polynorm_eval.py
+      - docs/pipeline_stages.md
+      - examples/abbreviations.py
+      - examples/contractions_advanced.py
+      - examples/optimal_phoneme_length_demo.py
+      - examples/pipeline_g2p_onnx_minimal.py
+      - examples/repro_dup_words.py
+      - examples/split_and_phonemize_demo.py
+      - pykokoro/pipeline.py
+      - pykokoro/stages/doc_parsers/__init__.py
+      - pykokoro/stages/segmentation/__init__.py
+      - pykokoro/stages/text_preparation/__init__.py
+      - tests/test_auto_pause_mode.py
+      - tests/test_clausal_comma_pauses.py
+      - tests/test_emphasis_policy.py
+      - tests/test_german_segmentation.py
+      - tests/test_maintainer_review4_reproductions.py
+      - tests/test_packaging_metadata.py
+      - tests/test_parenthetical_pauses.py
+      - tests/test_phoneme_dictionary.py
+      - tests/test_pipeline_logging.py
+      - tests/test_pipeline_paragraphs.py
+      - tests/test_pipeline_phoneme_consistency.py
+      - tests/test_pipeline_refactor.py
+      - tests/test_pipeline_result_retention.py
+      - tests/test_pipeline_unit_streaming.py
+      - tests/test_short_sentence_benchmark_reporting.py
+      - tests/test_short_sentence_diagnostics.py
+      - tests/test_short_sentence_parameter_sweep.py
+      - tests/test_spacy_model_policy.py
+      - tests/test_voice_loudness_benchmark.py
+      - tests/test_voice_loudness_calibration.py
+    stats:
+      files_changed: 37
+      insertions: 367
+      deletions: 1792
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: fix pytest and examples"
+  - sha: 63346451da51c3f4a0585e9a40a1830c8760613f
+    source_ref: git:63346451da51c3f4a0585e9a40a1830c8760613f
+    short_sha: "6334645"
+    changed_paths:
+      - benchmarks/hard_cases/frontend.py
+      - examples/contractions_advanced.py
+      - tests/test_clausal_comma_pauses.py
+      - tests/test_emphasis_policy.py
+      - tests/test_german_segmentation.py
+      - tests/test_phoneme_dictionary.py
+      - tests/test_pipeline_logging.py
+      - tests/test_pipeline_paragraphs.py
+      - tests/test_pipeline_phoneme_consistency.py
+      - tests/test_pipeline_refactor.py
+      - tests/test_pipeline_result_retention.py
+      - tests/test_pipeline_unit_streaming.py
+      - tests/test_polynorm_external.py
+      - tests/test_short_sentence_benchmark_reporting.py
+      - tests/test_short_sentence_diagnostics.py
+      - tests/test_short_sentence_parameter_sweep.py
+      - tests/test_voice_loudness_benchmark.py
+      - tests/test_voice_loudness_calibration.py
+    stats:
+      files_changed: 18
+      insertions: 13
+      deletions: 32
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "chore: pre-commit"
+  - sha: 6792b81f979cdda044eb27d92b4de754a2a50ffe
+    source_ref: git:6792b81f979cdda044eb27d92b4de754a2a50ffe
+    short_sha: 6792b81
+    changed_paths:
+      - tests/test_clausal_comma_pauses.py
+      - tests/test_german_segmentation.py
+    stats:
+      files_changed: 2
+      insertions: 2
+      deletions: 2
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "fix: pytest"
+  - sha: d6767c8f661c3ea33b995d44e92e167622ca3cd9
+    source_ref: git:d6767c8f661c3ea33b995d44e92e167622ca3cd9
+    short_sha: d6767c8
+    changed_paths:
+      - pykokoro/pipeline.py
+    stats:
+      files_changed: 1
+      insertions: 4
+      deletions: 3
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "fix: pipeline"
+  - sha: 9a496a82e9972cdc689df604abcf46d0cca74907
+    source_ref: git:9a496a82e9972cdc689df604abcf46d0cca74907
+    short_sha: 9a496a8
+    changed_paths:
+      - pykokoro/_onnxvoice.py
+      - pykokoro/audio_generator.py
+      - pyproject.toml
+      - tests/test_audio_generator_logging.py
+      - tests/test_audio_splitting.py
+      - tests/test_onnxvoice_boundary.py
+    stats:
+      files_changed: 6
+      insertions: 266
+      deletions: 12
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: with missing timing info from onnx model"
+  - sha: 36606f5bf85993924952da71b48c0536fb9388b1
+    source_ref: git:36606f5bf85993924952da71b48c0536fb9388b1
+    short_sha: 36606f5
+    changed_paths:
+      - pykokoro/_onnxvoice.py
+      - pykokoro/audio_generator.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/pipeline.py
+      - tests/test_audio_generator_performance.py
+      - tests/test_audio_splitting.py
+      - tests/test_onnxvoice_boundary.py
+      - tests/test_short_sentence_diagnostics.py
+      - tests/test_word_timings.py
+    stats:
+      files_changed: 9
+      insertions: 527
+      deletions: 70
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: handle nimpy array length"
+  - sha: 2741b94e51fe9b2e4a520ccbf088dd310e6861bd
+    source_ref: git:2741b94e51fe9b2e4a520ccbf088dd310e6861bd
+    short_sha: 2741b94
+    changed_paths:
+      - pykokoro/stages/g2p/kokorog2p.py
+      - tests/test_pipeline_unit_streaming.py
+      - tests/test_utterplan_integration.py
+    stats:
+      files_changed: 3
+      insertions: 67
+      deletions: 3
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "fix: span loop"
+  - sha: f0833aae4a7b4a277199f7c003c149bd7ec80608
+    source_ref: git:f0833aae4a7b4a277199f7c003c149bd7ec80608
+    short_sha: f0833aa
+    changed_paths:
+      - .github/workflows/tests.yml
+      - pykokoro/planning/utterplan_adapter.py
+      - pykokoro/runtime/cache.py
+      - pykokoro/runtime/linguistics.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pyproject.toml
+      - tests/test_cache_keys.py
+      - tests/test_g2p_cache.py
+      - tests/test_packaging_metadata.py
+      - tests/test_utterplan_v2_annotations.py
+    stats:
+      files_changed: 10
+      insertions: 263
+      deletions: 12
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: update utterplan"
+  - sha: 6550f14c4f5c1cacbe69c6d3b6aad7be06fdaf9f
+    source_ref: git:6550f14c4f5c1cacbe69c6d3b6aad7be06fdaf9f
+    short_sha: 6550f14
+    changed_paths:
+      - pykokoro/__init__.py
+      - pykokoro/pipeline.py
+      - tests/test_utterplan_integration.py
+    stats:
+      files_changed: 3
+      insertions: 187
+      deletions: 0
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: fix pipeline"
+  - sha: 219229ec6980cbedd0f141e44468f290a2e75476
+    source_ref: git:219229ec6980cbedd0f141e44468f290a2e75476
+    short_sha: 219229e
+    changed_paths:
+      - pyproject.toml
+    stats:
+      files_changed: 1
+      insertions: 1
+      deletions: 1
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: increase dep version"
+  - sha: 7824a27c37ff13b422e7e11933b0cd62f3fca579
+    source_ref: git:7824a27c37ff13b422e7e11933b0cd62f3fca579
+    short_sha: 7824a27
+    changed_paths:
+      - .github/workflows/tests.yml
+      - README.md
+      - docs/README.md
+      - docs/advanced_features.md
+      - docs/api_reference.md
+      - docs/basic_usage.md
+      - docs/breaking-change-0.10.0.md
+      - docs/examples.md
+      - docs/hard_cases_benchmark.md
+      - docs/index.md
+      - docs/installation.md
+      - docs/languages.md
+      - docs/pipeline_stages.md
+      - docs/polynorm_benchmark.md
+      - docs/quickstart.md
+      - docs/short_sentence_quality.md
+      - examples/README.md
+      - examples/abbreviations.py
+      - examples/all_voices.py
+      - examples/audio_job.py
+      - examples/automatic_pauses_demo.py
+      - examples/backend_comparison.py
+      - examples/boundary_detection_analysis.py
+      - examples/chinese.py
+      - examples/compare_prosody_algorithms.py
+      - examples/contractions.py
+      - examples/contractions_advanced.py
+      - examples/contractions_advanced.ssmd
+      - examples/cpu_benchmark.py
+      - examples/dash_variations.py
+      - examples/english.py
+      - examples/english_7m.py
+      - examples/english_clausal_comma_pause.py
+      - examples/english_parenthetical_pause.py
+      - examples/french.py
+      - examples/german.py
+      - examples/german2.py
+      - examples/german3.py
+      - examples/german4.py
+      - examples/german_fallback_control.py
+      - examples/german_tts_samples.py
+      - examples/headings_demo.py
+      - examples/hindi.py
+      - examples/homographs.py
+      - examples/italian.py
+      - examples/japanese.py
+      - examples/korean.py
+      - examples/legacy/README.md
+      - examples/legacy/generation_config_demo.py
+      - examples/legacy/gpu_benchmark.py
+      - examples/legacy/hf_v11zh_demo.py
+      - examples/legacy/model_source_comparison.py
+      - examples/legacy/pauses_with_splitting.py
+      - examples/legacy/phoneme_dictionary_demo.py
+      - examples/legacy/phoneme_diff_comparison.py
+      - examples/legacy/pipeline_stage_showcase.py
+      - examples/legacy/provider_config_demo.py
+      - examples/legacy/quality_comparison.py
+      - examples/legacy/token_length_effects.py
+      - examples/legacy/transcript_demo.py
+      - examples/legacy/voice_slerp_demo.py
+      - examples/legacy/voices.py
+      - examples/linguistic_annotations.py
+      - examples/mixed_language.py
+      - examples/mixed_language_auto.py
+      - examples/models_and_languages.py
+      - examples/optimal_phoneme_length_demo.py
+      - examples/paragraph_ssmd_voices.py
+      - examples/paragraph_stream_to_chapter.py
+      - examples/paragraph_streaming.py
+      - examples/paragraph_wave_export.py
+      - examples/pauses_demo.py
+      - examples/phoneme_dictionary.json
+      - examples/phoneme_print_demo.py
+      - examples/pipeline_g2p_onnx_minimal.py
+      - examples/play_audio.py
+      - examples/play_paragraphs.py
+      - examples/play_streaming.py
+      - examples/podcast.py
+      - examples/portuguese.py
+      - examples/pronunciation_overrides.py
+      - examples/prosody_algorithm_selection.py
+      - examples/prosody_demo.py
+      - examples/provider_info.py
+      - examples/punctuation.py
+      - examples/punctuation_variations.py
+      - examples/repro_dup_words.py
+      - examples/request_batch.py
+      - examples/run_all.py
+      - examples/say_as_demo.py
+      - examples/short_sentence_demo.py
+      - examples/short_sentence_randomized_demo.py
+      - examples/short_sentence_voices_demo.py
+      - examples/simple_synthesis.py
+      - examples/spanish.py
+      - examples/split_and_phonemize_demo.py
+      - examples/spokenform_phoneme_equivalence.py
+      - examples/spokenform_showcase.py
+      - examples/ssmd_080_portable_podcast.py
+      - examples/ssmd_demo.py
+      - examples/stream_with_word_timings.py
+      - examples/termux_android_onnx.py
+      - pykokoro/__init__.py
+      - pykokoro/audio_generator.py
+      - pykokoro/audio_job.py
+      - pykokoro/composition.py
+      - pykokoro/constants.py
+      - pykokoro/debug/__init__.py
+      - pykokoro/debug/segment_invariants.py
+      - pykokoro/emphasis.py
+      - pykokoro/exceptions.py
+      - pykokoro/generation_config.py
+      - pykokoro/language_detection.py
+      - pykokoro/language_routing.py
+      - pykokoro/loudness_config.py
+      - pykokoro/model_profiles.py
+      - pykokoro/model_registry.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/phoneme_dictionary.py
+      - pykokoro/pipeline.py
+      - pykokoro/planning/__init__.py
+      - pykokoro/planning/config_adapter.py
+      - pykokoro/planning/utterplan_adapter.py
+      - pykokoro/playback.py
+      - pykokoro/prepared_g2p.py
+      - pykokoro/prosody.py
+      - pykokoro/prosody_config.py
+      - pykokoro/request_renderer.py
+      - pykokoro/runtime/__init__.py
+      - pykokoro/runtime/cache.py
+      - pykokoro/runtime/language_plan.py
+      - pykokoro/runtime/linguistics.py
+      - pykokoro/runtime/spans.py
+      - pykokoro/runtime/tracing.py
+      - pykokoro/short_sentence_cutters/shared.py
+      - pykokoro/ssmd_config.py
+      - pykokoro/stages/__init__.py
+      - pykokoro/stages/audio_generation/__init__.py
+      - pykokoro/stages/audio_generation/base.py
+      - pykokoro/stages/audio_generation/noop.py
+      - pykokoro/stages/audio_generation/onnx.py
+      - pykokoro/stages/audio_postprocessing/__init__.py
+      - pykokoro/stages/audio_postprocessing/base.py
+      - pykokoro/stages/audio_postprocessing/noop.py
+      - pykokoro/stages/audio_postprocessing/onnx.py
+      - pykokoro/stages/g2p/__init__.py
+      - pykokoro/stages/g2p/base.py
+      - pykokoro/stages/g2p/kokorog2p.py
+      - pykokoro/stages/g2p/noop.py
+      - pykokoro/stages/phoneme_processing/__init__.py
+      - pykokoro/stages/phoneme_processing/base.py
+      - pykokoro/stages/phoneme_processing/noop.py
+      - pykokoro/stages/phoneme_processing/onnx.py
+      - pykokoro/stages/protocols.py
+      - pykokoro/stages/synth/__init__.py
+      - pykokoro/stages/synth/base.py
+      - pykokoro/stages/synth/noop.py
+      - pykokoro/stages/synth/onnx.py
+      - pykokoro/synthesis_config.py
+      - pykokoro/synthesis_types.py
+      - pykokoro/synthesizer.py
+      - pykokoro/tokenizer.py
+      - pykokoro/transcript.py
+      - pykokoro/types.py
+      - pykokoro/utils.py
+      - pykokoro/voice_level.py
+      - pyproject.toml
+      - tests/test_all_voices_example.py
+      - tests/test_audio_generator_performance.py
+      - tests/test_audio_input_contract.py
+      - tests/test_audio_job.py
+      - tests/test_audio_job_from_plan.py
+      - tests/test_audio_result_memory.py
+      - tests/test_audio_splitting.py
+      - tests/test_auto_pause_mode.py
+      - tests/test_bug_fixes.py
+      - tests/test_cache.py
+      - tests/test_cache_keys.py
+      - tests/test_clausal_comma_pauses.py
+      - tests/test_docs_examples.py
+      - tests/test_emphasis_plain_and_prosody_probe.py
+      - tests/test_emphasis_policy.py
+      - tests/test_example_runner.py
+      - tests/test_examples_contract.py
+      - tests/test_g2p_abbreviations.py
+      - tests/test_g2p_adapter_spacy_model.py
+      - tests/test_g2p_cache.py
+      - tests/test_g2p_language_routing.py
+      - tests/test_g2p_overrides.py
+      - tests/test_g2p_pause_propagation.py
+      - tests/test_g2p_punctuation.py
+      - tests/test_g2p_spokenform.py
+      - tests/test_generation_config.py
+      - tests/test_german_example.py
+      - tests/test_german_examples.py
+      - tests/test_german_segmentation.py
+      - tests/test_german_tts_samples_example.py
+      - tests/test_hard_cases_cli.py
+      - tests/test_import_boundaries.py
+      - tests/test_language_detection_config.py
+      - tests/test_language_plan.py
+      - tests/test_language_routing.py
+      - tests/test_lexicon_discovery.py
+      - tests/test_lexicon_hot_swap.py
+      - tests/test_linguistics.py
+      - tests/test_loudness_config.py
+      - tests/test_maintainer_review4_reproductions.py
+      - tests/test_model_profile_resolution.py
+      - tests/test_models_and_languages_example.py
+      - tests/test_packaging_metadata.py
+      - tests/test_parenthetical_pauses.py
+      - tests/test_phoneme_dictionary.py
+      - tests/test_pipeline_lifecycle.py
+      - tests/test_pipeline_logging.py
+      - tests/test_pipeline_paragraphs.py
+      - tests/test_pipeline_phoneme_consistency.py
+      - tests/test_pipeline_refactor.py
+      - tests/test_pipeline_result_retention.py
+      - tests/test_pipeline_spacy.py
+      - tests/test_pipeline_unit_streaming.py
+      - tests/test_playback.py
+      - tests/test_playback_stream.py
+      - tests/test_prepared_g2p_adapter.py
+      - tests/test_prosody.py
+      - tests/test_prosody_algorithm_selection_example.py
+      - tests/test_prosody_backends.py
+      - tests/test_prosody_config.py
+      - tests/test_prosody_examples.py
+      - tests/test_prosody_pipeline.py
+      - tests/test_prosody_trace.py
+      - tests/test_public_api_compatibility.py
+      - tests/test_public_engine_api.py
+      - tests/test_public_pipeline_resolution.py
+      - tests/test_release_profiles.py
+      - tests/test_request_renderer.py
+      - tests/test_runtime_tracing_logging.py
+      - tests/test_segment_invariants.py
+      - tests/test_short_sentence_handler.py
+      - tests/test_short_sentence_parameter_sweep.py
+      - tests/test_spacy_model_policy.py
+      - tests/test_spans.py
+      - tests/test_synthesis_types.py
+      - tests/test_synthesizer_requests.py
+      - tests/test_tokenizer.py
+      - tests/test_utils.py
+      - tests/test_utterplan_integration.py
+      - tests/test_utterplan_v2_annotations.py
+      - tests/test_voice_leveling.py
+      - tests/test_voice_loudness_benchmark.py
+      - tests/test_voice_switching_pipeline.py
+      - tests/test_word_timings.py
+      - tests/typecheck/public_api.py
+    stats:
+      files_changed: 252
+      insertions: 3180
+      deletions: 37468
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: simplify pykokoro and removr utterplan and audiocompose"
+  - sha: 7a9ce60fd9d44a84bc9f58dfb86ed5db7f00a231
+    source_ref: git:7a9ce60fd9d44a84bc9f58dfb86ed5db7f00a231
+    short_sha: 7a9ce60
+    changed_paths:
+      - .github/workflows/tests.yml
+      - README.md
+      - benchmarks/hard_cases/__init__.py
+      - benchmarks/hard_cases/__main__.py
+      - benchmarks/hard_cases/data/de/shared/01_seed.jsonl
+      - benchmarks/hard_cases/data/en/shared/01_seed.jsonl
+      - benchmarks/hard_cases/frontend.py
+      - benchmarks/hard_cases/schema.py
+      - benchmarks/hard_cases/segmentation.py
+      - benchmarks/polynorm_eval.py
+      - benchmarks/polynorm_phoneme.py
+      - benchmarks/short_sentence_diagnostics.py
+      - docs/api_reference.md
+      - docs/basic_usage.md
+      - docs/pipeline_stages.md
+      - examples/english.py
+      - pykokoro/__init__.py
+      - pykokoro/exceptions.py
+      - pykokoro/request_renderer.py
+      - pykokoro/synthesis_config.py
+      - pyproject.toml
+      - requirements-test.txt
+      - tests/fixtures/ssmd_080_review_podcast.ssmd
+      - tests/test_german_frontend_golden.py
+      - tests/test_hard_cases_data.py
+      - tests/test_hard_cases_frontend.py
+      - tests/test_hard_cases_segmentation.py
+      - tests/test_long_text_splitting.py
+      - tests/test_packaging_metadata.py
+      - tests/test_polynorm_phoneme_harness.py
+      - tests/test_public_engine_api.py
+      - tests/test_synthesis_config.py
+    stats:
+      files_changed: 32
+      insertions: 884
+      deletions: 422
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject:
+      "feat: add phrasplit again to handle to long text for proper rendering"
+  - sha: 35a9c05a06d835b11641e0b4038bd05ad0a3a6de
+    source_ref: git:35a9c05a06d835b11641e0b4038bd05ad0a3a6de
+    short_sha: 35a9c05
+    changed_paths:
+      - README.md
+      - docs/advanced_features.md
+      - docs/api_reference.md
+      - docs/basic_usage.md
+      - docs/index.md
+      - docs/pipeline_stages.md
+      - pykokoro/__init__.py
+      - pykokoro/audio_generator.py
+      - pykokoro/exceptions.py
+      - pykokoro/generation_config.py
+      - pykokoro/prepared_g2p.py
+      - pykokoro/request_renderer.py
+      - pykokoro/synthesis_config.py
+      - pykokoro/synthesis_identity.py
+      - pykokoro/synthesis_types.py
+      - pykokoro/synthesizer.py
+      - pykokoro/voice_level.py
+      - tests/test_audio_generator_logging.py
+      - tests/test_long_text_splitting.py
+      - tests/test_prepared_g2p_adapter.py
+      - tests/test_public_engine_api.py
+      - tests/test_request_renderer.py
+      - tests/test_synthesis_config.py
+      - tests/test_synthesis_identity.py
+      - tests/test_synthesis_types.py
+      - tests/test_synthesizer_requests.py
+      - tests/test_voice_leveling.py
+    stats:
+      files_changed: 27
+      insertions: 1197
+      deletions: 848
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: provice API for atomic text syntesize"

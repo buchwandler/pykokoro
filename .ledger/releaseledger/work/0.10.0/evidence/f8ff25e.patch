@@ -1,0 +1,1151 @@
+ README.md                              |  34 ++++
+ pykokoro/exceptions.py                 |   8 +
+ pykokoro/language_detection.py         |  18 +-
+ pykokoro/pipeline.py                   | 321 +++++++++++++++++++++++++--------
+ pykokoro/planning/__init__.py          |  17 ++
+ pykokoro/planning/config_adapter.py    |  77 ++++++++
+ pykokoro/planning/utterplan_adapter.py | 225 +++++++++++++++++++++++
+ pykokoro/stages/g2p/kokorog2p.py       |  61 ++++++-
+ pyproject.toml                         |   1 +
+ tests/test_utterplan_integration.py    | 156 ++++++++++++++++
+ 10 files changed, 840 insertions(+), 78 deletions(-)
+
+diff --git a/README.md b/README.md
+index 5b0db75..c2b419f 100644
+--- a/README.md
++++ b/README.md
+@@ -47,6 +47,40 @@ request documents before returning results. Use `tokenizer_config.use_spacy=Fals
+ disable NLP, leave it unset for local-only fallback, or set it to `True` for strict
+ model availability.
+
++## UtterPlan debugging workflow
++
++The existing text API remains the simplest entry point:
++
++```python
++from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
++
++pipeline = KokoroPipeline(
++    PipelineConfig(generation=GenerationConfig(lang="en-us"))
++)
++result = pipeline.run("Hello world.")
++```
++
++For a reproducible planning boundary, build and save an immutable `UtterancePlan`, then
++render only that plan:
++
++```python
++from utterplan import PlannerConfig, UtterancePlan, UtterancePlanner
++from pykokoro import KokoroPipeline
++
++planner = UtterancePlanner(PlannerConfig(language="en-us"))
++plan = planner.plan("Hello world.")
++plan.save("hello.utterplan.json")
++
++loaded = UtterancePlan.load("hello.utterplan.json")
++result = pipeline.run_plan(loaded)
++```
++
++`run_plan()` does not reparse SSMD or rerun Spokenform, Phrasplit, or planning-time
++linguistic analysis. Inspect the UtterPlan when spoken text, segmentation, pauses,
++directives, or units are wrong. Inspect PyKokoro when the plan is correct but
++pronunciation, model timing, or audio is wrong. The supplied plan is never mutated
++during rendering.
++
+ ## Runtime model support
+
+ Runtime model selection uses the canonical `catalog/models.json` registry. Model
+diff --git a/pykokoro/exceptions.py b/pykokoro/exceptions.py
+index 92e9f89..4700131 100644
+--- a/pykokoro/exceptions.py
++++ b/pykokoro/exceptions.py
+@@ -6,6 +6,14 @@ class ConfigurationError(KokoroError):
+     """Invalid or inconsistent configuration."""
+
+
++class PlanConsumptionError(KokoroError):
++    """An UtterPlan cannot be consumed by PyKokoro."""
++
++
++class PlanConfigurationConflict(PlanConsumptionError):
++    """A renderer request attempted to override frozen planning state."""
++
++
+ class SSMDDocumentError(ConfigurationError):
+     """Invalid SSMD 0.8 document metadata or renderer profile value."""
+
+diff --git a/pykokoro/language_detection.py b/pykokoro/language_detection.py
+index 4e1b04b..7f76c0f 100644
+--- a/pykokoro/language_detection.py
++++ b/pykokoro/language_detection.py
+@@ -4,7 +4,7 @@ from __future__ import annotations
+
+ from collections.abc import Mapping
+ from dataclasses import dataclass
+-from typing import Any, Literal
++from typing import Any, Literal, cast
+
+ from kokorog2p.language_codes import normalize_language_code, supported_languages
+
+@@ -51,6 +51,22 @@ def resolve_language_detection(
+             languages=config.languages,
+             source="pipeline",
+         )
++    direct_hint = header.get("language_detection")
++    if "language_detection" in header and direct_hint is None:
++        return ResolvedLanguageDetection()
++    if isinstance(direct_hint, Mapping):
++        mode = direct_hint.get("mode", "off")
++        languages = direct_hint.get("languages", ())
++        if isinstance(mode, str) and isinstance(languages, (list, tuple)):
++            normalized = LanguageDetectionConfig(
++                mode=cast(LanguageDetectionMode, mode),
++                languages=tuple(languages),
++            )
++            return ResolvedLanguageDetection(
++                mode=normalized.mode,
++                languages=normalized.languages,
++                source="header",
++            )
+     import ssmd
+
+     hint = ssmd.language_detection_hint(header)
+diff --git a/pykokoro/pipeline.py b/pykokoro/pipeline.py
+index ed17914..822bdf7 100644
+--- a/pykokoro/pipeline.py
++++ b/pykokoro/pipeline.py
+@@ -5,23 +5,26 @@ import json
+ import logging
+ import threading
+ from collections.abc import Callable, Collection, Iterable, Iterator, Mapping, Sequence
++from contextlib import nullcontext as _nullcontext
+ from copy import copy, deepcopy
+ from dataclasses import dataclass, fields, is_dataclass, replace
+ from pathlib import Path
+ from types import MappingProxyType, TracebackType
+-from typing import TYPE_CHECKING, Any
++from typing import TYPE_CHECKING, Any, cast
+
+ import numpy as np
+ from typing_extensions import Self
++from utterplan import UtterancePlan, UtterancePlanner
+
+ from .constants import SAMPLE_RATE
+ from .emphasis import apply_emphasis_policy
+-from .exceptions import ConfigurationError
++from .exceptions import ConfigurationError, PlanConsumptionError
+ from .generation_config import GenerationConfig
+ from .language_detection import LanguageDetectionConfig
+ from .loudness_config import LoudnessConfig
+ from .output_loudness import apply_complete_output_loudness
+ from .pipeline_config import PipelineConfig, require_document_language, resolve_model_defaults
++from .planning import adapt_plan, assert_renderer_overrides, planner_config_from_pipeline
+ from .runtime.language_plan import build_language_plan
+ from .runtime.linguistics import (
+     LinguisticRequestState,
+@@ -124,6 +127,7 @@ class PreparedFrontend:
+     _segments: list[Segment]
+     _state: LinguisticRequestState
+     _unit_kind: AudioUnitKind
++    _plan: UtterancePlan | None = None
+     _closed: bool = False
+
+     @property
+@@ -732,6 +736,9 @@ class KokoroPipeline:
+         audio_generation: AudioGeneratorStage | None = None,
+         audio_postprocessing: AudioPostprocessor | None = None,
+     ) -> None:
++        self._legacy_frontend_compat = any(
++            value is not None for value in (doc_parser, text_preparer, sentence_segmenter)
++        )
+         self.config = config
+         self.doc_parser = doc_parser or SsmdDocumentParser()
+         self.text_preparer = text_preparer or SpokenformTextPreparer()
+@@ -951,6 +958,55 @@ class KokoroPipeline:
+         self._prepared_objects.append(result)
+         return result
+
++    def prepare_plan_units(
++        self,
++        plan: UtterancePlan,
++        **overrides: Any,
++    ) -> PreparedAudioUnits:
++        """Prepare renderer units from an existing immutable UtterPlan."""
++        assert_renderer_overrides(overrides)
++        cfg = _copy_config_for_preparation(self._resolve_run_config(overrides))
++        if cfg.generation.is_phonemes:
++            raise ConfigurationError(
++                "run_plan() requires a text UtterancePlan; phoneme input plans are unsupported"
++            )
++        unit = self._plan_unit_kind(plan)
++        prepared = self._prepare_document_from_plan(plan, cfg, unit)
++        result = PreparedAudioUnits(self, prepared)
++        self._prepared_objects.append(result)
++        return result
++
++    def run_plan(self, plan: UtterancePlan, **overrides: Any) -> AudioResult:
++        """Render an existing UtterPlan without reparsing or replanning it."""
++        with self.prepare_plan_units(plan, **overrides) as prepared:
++            return (
++                self._audio_result_from_prepared(prepared._prepared)
++                if prepared._prepared
++                else AudioResult(
++                    audio=np.array([], dtype=np.float32),
++                    sample_rate=SAMPLE_RATE,
++                    segments=[],
++                    phoneme_segments=[],
++                    trace=None,
++                    document_metadata={},
++                    markers=[],
++                    word_timings=[],
++                    clean_text="",
++                    source_text="",
++                )
++            )
++
++    @staticmethod
++    def _plan_unit_kind(plan: UtterancePlan) -> AudioUnitKind:
++        kinds = {unit.kind for unit in plan.units}
++        if not kinds:
++            return "paragraph"
++        if len(kinds) != 1 or next(iter(kinds)) not in {"paragraph", "sentence"}:
++            raise PlanConsumptionError(
++                f"Unsupported or inconsistent plan unit kinds: {sorted(kinds)!r}"
++            )
++        return cast(AudioUnitKind, next(iter(kinds)))
++
+     def prepare_frontend(
+         self,
+         text: str,
+@@ -1061,13 +1117,12 @@ class KokoroPipeline:
+             )
+         return analyses
+
+-    def _prepare_frontend(
++    def _prepare_frontend_legacy(
+         self, text: str, cfg: PipelineConfig, unit: AudioUnitKind
+     ) -> PreparedFrontend:
+         language = require_document_language(cfg)
+         trace = Trace()
+         with trace_timing(trace, "doc", "parse"):
+-            logger.debug("Parsing document")
+             doc = self.doc_parser.parse(text, cfg, trace)
+         trace.warnings.extend(doc.warnings)
+         state = LinguisticRequestState()
+@@ -1116,92 +1171,112 @@ class KokoroPipeline:
+         self._apply_post_segmentation_pauses(doc, segments, cfg)
+         return PreparedFrontend(self, cfg, trace, doc, segments, state, unit)
+
+-    def _prepare_document(
++    @staticmethod
++    def _compile_plan(text: str, cfg: PipelineConfig, unit: AudioUnitKind) -> UtterancePlan:
++        planner_config = planner_config_from_pipeline(cfg, unit=unit)
++        return UtterancePlanner(planner_config).plan(text, config=planner_config, unit=unit)
++
++    def _prepare_frontend(
+         self, text: str, cfg: PipelineConfig, unit: AudioUnitKind
+-    ) -> _PreparedDocument:
+-        language = require_document_language(cfg)
++    ) -> PreparedFrontend:
++        if self._legacy_frontend_compat:
++            return self._prepare_frontend_legacy(text, cfg, unit)
++        plan = self._compile_plan(text, cfg, unit)
++        adapted = adapt_plan(plan)
+         trace = Trace()
+-        with trace_timing(trace, "doc", "parse"):
+-            logger.debug("Parsing document")
+-            doc = self.doc_parser.parse(text, cfg, trace)
+-        trace.warnings.extend(doc.warnings)
+-        state = LinguisticRequestState()
+-        doc.linguistic_state = state
+-        with trace_timing(trace, "language_plan", "source"):
+-            state.source_plan = build_language_plan(
+-                doc.clean_text, doc.annotation_spans, default_language=language
+-            )
+-        with trace_timing(trace, "linguistics", "pass_a"):
+-            state.source_analysis = self._analyze_runs(
+-                doc.clean_text, state.source_plan, cfg, trace, "pass_a"
++        trace.events.append(
++            TraceEvent(
++                stage="planning",
++                name="compile",
++                ms=0.0,
++                details={
++                    "plan_id": plan.plan_id,
++                    "producer": dict(plan.producer),
++                    "schema_version": plan.schema_version,
++                },
+             )
+-        try:
+-            with trace_timing(trace, "text_preparation", "prepare"):
+-                doc = self.text_preparer.prepare(doc, cfg, trace)
+-        except Exception:
+-            state.release_docs()
+-            doc.linguistic_state = None
+-            raise
+-        doc.linguistic_state = state
+-        trace.warnings.extend(doc.preparation.warnings if doc.preparation else ())
+-        with trace_timing(trace, "language_plan", "prepared"):
+-            state.prepared_plan = build_language_plan(
+-                doc.clean_text, doc.annotation_spans, default_language=language
+-            )
+-        try:
+-            with trace_timing(trace, "linguistics", "pass_b"):
+-                state.prepared_analysis = self._analyze_runs(
+-                    doc.clean_text, state.prepared_plan, cfg, trace, "pass_b"
+-                )
+-        except Exception:
+-            state.release_docs()
+-            doc.linguistic_state = None
+-            raise
+-        state.release_source_docs()
++        )
++        trace.warnings.extend(adapted.document.warnings)
++        state = LinguisticRequestState()
++        doc = adapted.document
++        segments = [item.to_segment() for item in adapted.segments]
++        doc.segments = segments
++        return PreparedFrontend(self, cfg, trace, doc, segments, state, unit, plan)
+
+-        try:
+-            with trace_timing(trace, "segmentation", "split"):
+-                segments = self.sentence_segmenter.split(doc, cfg, trace)
+-        except Exception:
+-            state.release_docs()
+-            doc.linguistic_state = None
+-            raise
+-        if not segments and doc.clean_text:
+-            segments = [
+-                Segment(
+-                    id="p0_s0_c0_seg0",
+-                    text=doc.clean_text,
+-                    char_start=0,
+-                    char_end=len(doc.clean_text),
+-                    paragraph_idx=0,
+-                    sentence_idx=0,
+-                    clause_idx=0,
+-                )
+-            ]
++    def _prepare_document_from_plan(
++        self, plan: UtterancePlan, cfg: PipelineConfig, unit: AudioUnitKind
++    ) -> _PreparedDocument:
++        adapted = adapt_plan(plan)
++        trace = Trace()
++        trace.events.append(
++            TraceEvent(
++                stage="planning",
++                name="consume",
++                ms=0.0,
++                details={
++                    "plan_id": plan.plan_id,
++                    "producer": dict(plan.producer),
++                    "schema_version": plan.schema_version,
++                },
++            )
++        )
++        trace.warnings.extend(adapted.document.warnings)
++        doc = adapted.document
++        segments = [item.to_segment() for item in adapted.segments]
+         doc.segments = segments
+-        self._apply_post_segmentation_pauses(doc, segments, cfg)
++        with trace_timing(trace, "g2p", "phonemize") if segments else _nullcontext():
++            logger.debug("Phonemizing %d plan segments", len(segments))
++            phoneme_segments = self.g2p.phonemize(segments, doc, cfg, trace) if segments else []
++        with trace_timing(trace, "runtime", "resolve_stages"):
++            phoneme_processor, audio_generator, audio_postprocessor = self._resolve_stages(cfg)
++        with (
++            trace_timing(trace, "phoneme_processing", "preprocess")
++            if phoneme_segments
++            else _nullcontext()
++        ):
++            if phoneme_segments:
++                phoneme_segments = phoneme_processor.process(phoneme_segments, cfg, trace)
++        if phoneme_segments:
++            apply_emphasis_policy(phoneme_segments, cfg, trace)
++        groups = self._build_unit_groups_from_plan(adapted, doc, segments, phoneme_segments, cfg)
++        return _PreparedDocument(
++            cfg=cfg,
++            unit_kind=unit,
++            trace=trace,
++            doc=doc,
++            segments=segments,
++            phoneme_segments=phoneme_segments,
++            groups=groups,
++            phoneme_processor=phoneme_processor,
++            audio_generator=audio_generator,
++            audio_postprocessor=audio_postprocessor,
++        )
+
++    def _prepare_document_legacy(
++        self, text: str, cfg: PipelineConfig, unit: AudioUnitKind
++    ) -> _PreparedDocument:
++        frontend = self._prepare_frontend_legacy(text, cfg, unit)
++        doc = frontend._doc
++        state = frontend._state
++        segments = list(frontend._segments)
++        assert doc is not None
+         try:
+-            with trace_timing(trace, "g2p", "phonemize"):
+-                logger.debug("Phonemizing %d segments", len(segments))
+-                phoneme_segments = self.g2p.phonemize(segments, doc, cfg, trace)
++            with trace_timing(frontend._trace, "g2p", "phonemize"):
++                phoneme_segments = self.g2p.phonemize(segments, doc, cfg, frontend._trace)
+         finally:
+             state.release_docs()
+             doc.linguistic_state = None
+-        with trace_timing(trace, "runtime", "resolve_stages"):
++        with trace_timing(frontend._trace, "runtime", "resolve_stages"):
+             phoneme_processor, audio_generator, audio_postprocessor = self._resolve_stages(cfg)
+-
+-        with trace_timing(trace, "phoneme_processing", "preprocess"):
+-            logger.debug("Preprocessing %d phoneme segments", len(phoneme_segments))
+-            phoneme_segments = phoneme_processor.process(phoneme_segments, cfg, trace)
+-
+-        apply_emphasis_policy(phoneme_segments, cfg, trace)
+-
++        with trace_timing(frontend._trace, "phoneme_processing", "preprocess"):
++            phoneme_segments = phoneme_processor.process(phoneme_segments, cfg, frontend._trace)
++        apply_emphasis_policy(phoneme_segments, cfg, frontend._trace)
+         groups = self._build_unit_groups(doc, segments, phoneme_segments, cfg, unit)
++        frontend._closed = True
+         return _PreparedDocument(
+             cfg=cfg,
+             unit_kind=unit,
+-            trace=trace,
++            trace=frontend._trace,
+             doc=doc,
+             segments=segments,
+             phoneme_segments=phoneme_segments,
+@@ -1211,6 +1286,14 @@ class KokoroPipeline:
+             audio_postprocessor=audio_postprocessor,
+         )
+
++    def _prepare_document(
++        self, text: str, cfg: PipelineConfig, unit: AudioUnitKind
++    ) -> _PreparedDocument:
++        if self._legacy_frontend_compat:
++            return self._prepare_document_legacy(text, cfg, unit)
++        plan = self._compile_plan(text, cfg, unit)
++        return self._prepare_document_from_plan(plan, cfg, unit)
++
+     @staticmethod
+     def _copy_frontend_trace(trace: Trace) -> Trace:
+         return Trace(
+@@ -1225,6 +1308,8 @@ class KokoroPipeline:
+         self, frontend: PreparedFrontend, cfg: PipelineConfig
+     ) -> _PreparedDocument:
+         frontend._ensure_open()
++        if frontend._plan is not None:
++            return self._prepare_document_from_plan(frontend._plan, cfg, frontend._unit_kind)
+         doc = frontend._doc
+         doc.linguistic_state = frontend._state
+         trace = self._copy_frontend_trace(frontend._trace)
+@@ -1412,6 +1497,92 @@ class KokoroPipeline:
+         assert audio_postprocessor is not None
+         return phoneme_processor, audio_generator, audio_postprocessor
+
++    def _build_unit_groups_from_plan(
++        self,
++        adapted: Any,
++        doc: Any,
++        segments: list[Segment],
++        phoneme_segments: list[PhonemeSegment],
++        cfg: PipelineConfig,
++    ) -> tuple[_PreparedUnitGroup, ...]:
++        segment_by_id = {segment.id: segment for segment in segments}
++        phoneme_by_segment: dict[str, list[int]] = {}
++        for index, phoneme in enumerate(phoneme_segments):
++            phoneme_by_segment.setdefault(phoneme.segment_id, []).append(index)
++        markers = {marker.id: marker for marker in adapted.plan.markers}
++        groups: list[_PreparedUnitGroup] = []
++        previous_end = -1
++        for index, unit in enumerate(adapted.plan.units):
++            if unit.index != index:
++                raise PlanConsumptionError(f"Plan unit order is invalid at {unit.id!r}")
++            unit_segments = []
++            for segment_id in unit.segment_ids:
++                if segment_id not in segment_by_id:
++                    raise PlanConsumptionError(
++                        f"Plan unit {unit.id!r} references unknown segment {segment_id!r}"
++                    )
++                unit_segments.append(segment_by_id[segment_id])
++            positions = [
++                position
++                for segment_id in unit.segment_ids
++                for position in phoneme_by_segment.get(segment_id, ())
++            ]
++            if positions and positions != list(range(min(positions), max(positions) + 1)):
++                raise PlanConsumptionError(
++                    f"Plan unit {unit.id!r} has non-contiguous phoneme segments"
++                )
++            if positions and min(positions) <= previous_end:
++                raise PlanConsumptionError(f"Plan units overlap or are out of order at {unit.id!r}")
++            if not positions and unit_segments:
++                raise PlanConsumptionError(f"Plan unit {unit.id!r} has no phoneme output")
++            marker_events = []
++            for marker_id in unit.marker_ids:
++                marker = markers.get(marker_id)
++                if marker is None:
++                    raise PlanConsumptionError(
++                        f"Plan unit {unit.id!r} references unknown marker {marker_id!r}"
++                    )
++                marker_events.append(
++                    BoundaryEvent(
++                        pos=marker.spoken_position,
++                        kind="marker",
++                        attrs={"marker": marker.name},
++                    )
++                )
++            if positions:
++                start, end = min(positions), max(positions) + 1
++            else:
++                start = end = 0
++            paragraph = unit_segments[0].paragraph_idx if unit_segments else 0
++            sentence = (
++                unit_segments[0].sentence_idx if unit.kind == "sentence" and unit_segments else None
++            )
++            text = doc.clean_text[unit.spoken_start : unit.spoken_end]
++            descriptor = AudioUnitDescriptor(
++                index=index,
++                paragraph_idx=paragraph or 0,
++                char_start=unit.spoken_start,
++                char_end=unit.spoken_end,
++                text=text,
++                text_hash=_unit_text_hash(
++                    paragraph or 0,
++                    unit.spoken_start,
++                    unit.spoken_end,
++                    text,
++                    phoneme_segments[start:end],
++                    cfg,
++                    marker_events,
++                ),
++                segment_ids=tuple(unit.segment_ids),
++                phoneme_segment_ids=tuple(segment.id for segment in phoneme_segments[start:end]),
++                unit_kind=unit.kind,
++                sentence_idx=sentence,
++                marker_names=tuple(event.attrs["marker"] for event in marker_events),
++            )
++            groups.append(_PreparedUnitGroup(descriptor, start, end, tuple(marker_events)))
++            previous_end = end - 1
++        return tuple(groups)
++
+     def _build_unit_groups(
+         self,
+         doc: Any,
+diff --git a/pykokoro/planning/__init__.py b/pykokoro/planning/__init__.py
+new file mode 100644
+index 0000000..ae39eca
+--- /dev/null
++++ b/pykokoro/planning/__init__.py
+@@ -0,0 +1,17 @@
++from __future__ import annotations
++
++from .config_adapter import planner_config_from_pipeline
++from .utterplan_adapter import (
++    RenderPlan,
++    RenderSegment,
++    adapt_plan,
++    assert_renderer_overrides,
++)
++
++__all__ = [
++    "RenderPlan",
++    "RenderSegment",
++    "adapt_plan",
++    "assert_renderer_overrides",
++    "planner_config_from_pipeline",
++]
+diff --git a/pykokoro/planning/config_adapter.py b/pykokoro/planning/config_adapter.py
+new file mode 100644
+index 0000000..e73d7b0
+--- /dev/null
++++ b/pykokoro/planning/config_adapter.py
+@@ -0,0 +1,77 @@
++from __future__ import annotations
++
++from typing import Any
++
++from utterplan import LinguisticsConfig, PauseConfig, PlannerConfig, SSMDConfig
++
++from ..pipeline_config import PipelineConfig, require_document_language
++
++
++def planner_config_from_pipeline(
++    cfg: PipelineConfig,
++    *,
++    unit: str,
++) -> PlannerConfig:
++    """Map PyKokoro planning settings to an immutable UtterPlan config."""
++    generation = cfg.generation
++    tokenizer = cfg.tokenizer_config
++    pause_mode = generation.pause_mode
++    pauses = PauseConfig(
++        mode=pause_mode,
++        weak=generation.pause_parenthetical,
++        clause=generation.pause_clause,
++        sentence=generation.pause_sentence,
++        paragraph=generation.pause_paragraph,
++        parenthetical=generation.pause_parenthetical,
++        voice_change=generation.pause_parenthetical,
++    )
++    linguistics = LinguisticsConfig(
++        use_spacy=None if tokenizer is None else tokenizer.use_spacy,
++        spacy_model=None if tokenizer is None else tokenizer.spacy_model,
++        spacy_model_size=(
++            None
++            if tokenizer is None or tokenizer.spacy_model_size is None
++            else tokenizer.spacy_model_size
++        ),
++        require_spacy=False if tokenizer is None else tokenizer.use_spacy is True,
++    )
++    pause_defaults: dict[str, Any] | None = None
++    if cfg.ssmd.pause_defaults is not None:
++        pause_defaults = {
++            name: value
++            for name in ("enabled", "sentence", "paragraph", "voice_change")
++            if (value := getattr(cfg.ssmd.pause_defaults, name)) is not None
++        }
++    return PlannerConfig(
++        language=require_document_language(cfg),
++        document_format="ssmd",
++        text_preparation="spokenform",
++        unit=unit,
++        pauses=pauses,
++        linguistics=linguistics,
++        ssmd=SSMDConfig(
++            parse_header=cfg.ssmd.parse_header,
++            strict_header=cfg.ssmd.strict_header,
++            unknown_header=cfg.ssmd.unknown_header,
++            pause_defaults=pause_defaults,
++        ),
++        overlap_mode=cfg.overlap_mode,
++    )
++
++
++PLANNING_OVERRIDE_KEYS = frozenset(
++    {
++        "lang",
++        "generation",
++        "ssmd",
++        "overlap_mode",
++        "unit",
++        "document_format",
++        "text_preparation",
++        "pause_mode",
++        "pause_weak",
++        "pause_clause",
++        "pause_sentence",
++        "pause_paragraph",
++    }
++)
+diff --git a/pykokoro/planning/utterplan_adapter.py b/pykokoro/planning/utterplan_adapter.py
+new file mode 100644
+index 0000000..cdee5f3
+--- /dev/null
++++ b/pykokoro/planning/utterplan_adapter.py
+@@ -0,0 +1,225 @@
++from __future__ import annotations
++
++from collections.abc import Mapping
++from copy import deepcopy
++from dataclasses import dataclass
++from types import MappingProxyType
++from typing import Any
++
++from utterplan import UtterancePlan
++
++from ..exceptions import PlanConfigurationConflict, PlanConsumptionError
++from ..stages.protocols import DocumentResult
++from ..types import AnnotationSpan, BoundaryEvent, Segment, TextPreparationInfo
++from .config_adapter import PLANNING_OVERRIDE_KEYS
++
++
++@dataclass(frozen=True, slots=True)
++class RenderSegment:
++    """A renderer-owned view of a plan segment.
++
++    ``char_start`` and ``char_end`` are offsets into the plan's spoken text,
++    never offsets into its structural source text.
++    """
++
++    id: str
++    text: str
++    char_start: int
++    char_end: int
++    paragraph_idx: int
++    sentence_idx: int
++    clause_idx: int
++    language: str
++    token_indices: tuple[int, ...]
++    annotation_ids: tuple[str, ...]
++    pause_before: float
++    pause_after: float
++    directives: Mapping[str, Any]
++
++    def to_segment(self) -> Segment:
++        return Segment(
++            id=self.id,
++            text=self.text,
++            char_start=self.char_start,
++            char_end=self.char_end,
++            paragraph_idx=self.paragraph_idx,
++            sentence_idx=self.sentence_idx,
++            clause_idx=self.clause_idx,
++            meta={
++                "language": self.language,
++                "plan_segment_id": self.id,
++                "plan_token_indices": self.token_indices,
++                "plan_annotation_ids": self.annotation_ids,
++                "plan_directives": dict(self.directives),
++            },
++        )
++
++
++@dataclass(frozen=True, slots=True)
++class RenderPlan:
++    """Immutable renderer adapter for an UtterancePlan."""
++
++    plan: UtterancePlan
++    spoken_text: str
++    source_text: str | None
++    segments: tuple[RenderSegment, ...]
++    document: DocumentResult
++    document_metadata: Mapping[str, Any]
++
++
++def _directive_attrs(segment: Any) -> dict[str, str]:
++    directives = segment.directives
++    attrs: dict[str, str] = {}
++    voice = directives.voice
++    if voice is not None:
++        attrs["voice_reference"] = voice.reference
++        attrs["voice"] = voice.reference
++    pronunciation = directives.pronunciation
++    if pronunciation is not None:
++        attrs["ph"] = pronunciation.phonemes
++        attrs["phoneme_alphabet"] = pronunciation.alphabet
++    prosody = directives.prosody
++    if prosody is not None:
++        for source, target in (
++            ("rate", "prosody_rate"),
++            ("pitch", "prosody_pitch"),
++            ("volume", "prosody_volume"),
++        ):
++            value = getattr(prosody, source)
++            if value is not None:
++                attrs[target] = value
++    emphasis = directives.emphasis
++    if emphasis is not None:
++        attrs["emphasis"] = emphasis.level
++    audio = directives.audio
++    if audio is not None:
++        for source, target in (
++            ("src", "audio_src"),
++            ("alt_text", "audio_alt_text"),
++            ("clip_begin", "audio_clip_begin"),
++            ("clip_end", "audio_clip_end"),
++            ("speed", "audio_speed"),
++            ("repeat_duration", "audio_repeat_dur"),
++            ("repeat_count", "audio_repeat_count"),
++            ("sound_level", "audio_sound_level"),
++        ):
++            value = getattr(audio, source)
++            if value is not None:
++                attrs[target] = str(value)
++    return attrs
++
++
++def _metadata(plan: UtterancePlan) -> dict[str, Any]:
++    metadata = deepcopy(dict(plan.document_metadata))
++    header = metadata.get("header")
++    if isinstance(header, Mapping):
++        for key in ("voice_bindings", "language_detection", "title", "pause_defaults"):
++            if key in header and key not in metadata:
++                metadata[key] = deepcopy(header[key])
++    metadata["utterplan"] = {
++        "plan_id": plan.plan_id,
++        "producer": deepcopy(dict(plan.producer)),
++        "schema_version": plan.schema_version,
++    }
++    metadata["utterplan_tokens"] = tuple(plan.tokens)
++    metadata["utterplan_units"] = tuple(plan.units)
++    metadata["utterplan_markers"] = tuple(plan.markers)
++    metadata["utterplan_annotations"] = tuple(plan.annotations)
++    metadata["utterplan_pauses"] = {
++        item.id: (item.pause_before.seconds, item.pause_after.seconds) for item in plan.segments
++    }
++    metadata["language_detection"] = deepcopy(metadata.get("language_detection"))
++    if "voice_bindings" not in metadata:
++        metadata["voice_bindings"] = {}
++    return metadata
++
++
++def adapt_plan(plan: UtterancePlan) -> RenderPlan:
++    """Validate and adapt a plan without changing any plan-owned value."""
++    if not isinstance(plan, UtterancePlan):
++        raise PlanConsumptionError(
++            f"run_plan() requires utterplan.UtterancePlan, got {type(plan).__name__}"
++        )
++    try:
++        plan.validate()
++    except Exception as exc:
++        raise PlanConsumptionError(f"Invalid UtterPlan: {exc}") from exc
++
++    segments = tuple(
++        RenderSegment(
++            id=item.id,
++            text=item.text,
++            char_start=item.spoken_start,
++            char_end=item.spoken_end,
++            paragraph_idx=item.paragraph,
++            sentence_idx=item.sentence,
++            clause_idx=item.clause,
++            language=item.language,
++            token_indices=tuple(item.token_indices),
++            annotation_ids=tuple(item.annotation_ids),
++            pause_before=item.pause_before.seconds,
++            pause_after=item.pause_after.seconds,
++            directives=MappingProxyType(_directive_attrs(item)),
++        )
++        for item in plan.segments
++    )
++    metadata = _metadata(plan)
++    annotations = [
++        AnnotationSpan(
++            char_start=item.spoken_start,
++            char_end=item.spoken_end,
++            attrs={str(key): str(value) for key, value in item.attrs.items()},
++        )
++        for item in plan.annotations
++        if item.spoken_start is not None and item.spoken_end is not None
++    ]
++    boundaries = [
++        BoundaryEvent(
++            pos=item.position,
++            kind="pause",
++            duration_s=item.seconds,
++            attrs={"origin": item.origin, "strength": item.strength or ""},
++        )
++        for item in plan.boundaries
++        if item.kind == "pause"
++    ]
++    boundaries.extend(
++        BoundaryEvent(pos=item.spoken_position, kind="marker", attrs={"marker": item.name})
++        for item in plan.markers
++    )
++    document = DocumentResult(
++        clean_text=plan.texts.spoken,
++        structural_clean_text=plan.texts.structural,
++        annotation_spans=annotations,
++        boundary_events=boundaries,
++        segments=[item.to_segment() for item in segments],
++        warnings=list(plan.warnings),
++        header=metadata,
++        body=plan.texts.spoken,
++        metadata=metadata,
++        preparation=TextPreparationInfo(
++            source_text=plan.texts.structural,
++            spoken_text=plan.texts.spoken,
++            backend=plan.preparation.backend,
++            version=plan.preparation.version,
++            languages=tuple(plan.preparation.languages),
++            replacements=tuple(dict(item) for item in plan.preparation.replacements),
++            warnings=tuple(plan.preparation.warnings),
++        ),
++    )
++    return RenderPlan(
++        plan=plan,
++        spoken_text=plan.texts.spoken,
++        source_text=plan.texts.structural,
++        segments=segments,
++        document=document,
++        document_metadata=MappingProxyType(metadata),
++    )
++
++
++def assert_renderer_overrides(overrides: Mapping[str, Any]) -> None:
++    for key in overrides:
++        if key in PLANNING_OVERRIDE_KEYS:
++            raise PlanConfigurationConflict(
++                f"run_plan() received planning override {key!r}; create a new UtterancePlan instead."
++            )
+diff --git a/pykokoro/stages/g2p/kokorog2p.py b/pykokoro/stages/g2p/kokorog2p.py
+index 1e8bc6e..d5a7bca 100644
+--- a/pykokoro/stages/g2p/kokorog2p.py
++++ b/pykokoro/stages/g2p/kokorog2p.py
+@@ -2,6 +2,7 @@ from __future__ import annotations
+
+ import re
+ from collections import OrderedDict
++from collections.abc import Mapping
+ from dataclasses import asdict, dataclass, replace
+ from types import ModuleType
+ from typing import TYPE_CHECKING, Any, cast
+@@ -13,6 +14,7 @@ from ...runtime.cache import cache_from_dir, make_g2p_key
+ from ...runtime.language_plan import canonicalize_language
+ from ...runtime.spans import slice_boundaries, slice_spans
+ from ...spacy_models import SpacyModelSize, make_spacy_model_request, spacy_selection_metadata
++from ...ssmd_config import resolve_document_voice
+ from ...types import (
+     AnnotationSpan,
+     G2PAlignmentToken,
+@@ -149,11 +151,35 @@ class KokoroG2PAdapter(G2PAdapter):
+                 span_warnings,
+             )
+             overrides = self._prepared_overrides(doc.annotation_spans, segment, span_warnings)
++            plan_directives = segment.meta.get("plan_directives")
++            if isinstance(plan_directives, dict):
++                plan_phonemes = plan_directives.get("ph")
++                if phoneme_override is None and isinstance(plan_phonemes, str):
++                    phoneme_override = plan_phonemes
++                    overrides = [
++                        AnnotationSpan(0, segment.char_end - segment.char_start, plan_directives)
++                    ]
+             trace.warnings.extend(span_warnings)
+             annotations = self._prepared_annotations(doc, segment)
+
+             lang = segment.meta.get("language") or generation.lang
+             ssmd_metadata: dict[str, str] = {}
++            if isinstance(plan_directives, dict):
++                self._apply_span_metadata(plan_directives, ssmd_metadata)
++            header_bindings = doc.header.get("voice_bindings", {})
++            if not isinstance(header_bindings, Mapping):
++                header_bindings = {}
++            voice_reference = ssmd_metadata.get("voice_reference") or ssmd_metadata.get("voice")
++            if voice_reference:
++                resolution = resolve_document_voice(
++                    voice_reference,
++                    provider=cfg.ssmd.provider,
++                    api_bindings=cfg.ssmd.voice_bindings,
++                    header_bindings=header_bindings,
++                )
++                ssmd_metadata["voice_reference"] = resolution.reference
++                ssmd_metadata["voice_name"] = resolution.target
++                ssmd_metadata["voice_source"] = resolution.source
+             for span in span_list:
+                 self._apply_span_metadata(span.attrs, ssmd_metadata)
+             if not isinstance(lang, str) or not lang:
+@@ -252,7 +278,11 @@ class KokoroG2PAdapter(G2PAdapter):
+                 },
+             )
+
+-            pause_before, pause_after = self._resolve_pauses(seg_boundaries, generation)
++            plan_pauses = doc.metadata.get("utterplan_pauses", {})
++            if isinstance(plan_pauses, dict) and segment.id in plan_pauses:
++                pause_before, pause_after = plan_pauses[segment.id]
++            else:
++                pause_before, pause_after = self._resolve_pauses(seg_boundaries, generation)
+             if any(
+                 boundary.attrs.get("deterministic_pause_boundary") == "true"
+                 for boundary in seg_boundaries
+@@ -367,7 +397,34 @@ class KokoroG2PAdapter(G2PAdapter):
+     def _prepared_annotations(doc: DocumentResult, segment: Segment) -> list[Any]:
+         state = getattr(doc, "linguistic_state", None)
+         if state is None:
+-            return []
++            tokens = doc.metadata.get("utterplan_tokens")
++            indices = segment.meta.get("plan_token_indices")
++            if not isinstance(tokens, tuple) or not isinstance(indices, tuple):
++                return []
++            from ...runtime.linguistics import TokenAnnotation
++
++            plan_annotations: list[Any] = []
++            for index in indices:
++                if not isinstance(index, int) or index < 0 or index >= len(tokens):
++                    raise ValueError(
++                        f"Plan segment {segment.id!r} references invalid token {index!r}"
++                    )
++                item = tokens[index]
++                start = max(item.spoken_start, segment.char_start) - segment.char_start
++                end = min(item.spoken_end, segment.char_end) - segment.char_start
++                if start < end:
++                    plan_annotations.append(
++                        TokenAnnotation(
++                            start=start,
++                            end=end,
++                            text=item.text,
++                            pos=item.pos,
++                            tag=item.tag,
++                            lemma=item.lemma,
++                            language=item.language,
++                        )
++                    )
++            return plan_annotations
+         annotations: list[Any] = []
+         for analysis in getattr(state, "prepared_analysis", ()):
+             analysis_language = canonicalize_language(analysis.run.language)
+diff --git a/pyproject.toml b/pyproject.toml
+index 8098893..79692c4 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -23,6 +23,7 @@ authors = [
+ keywords = ["tts", "text-to-speech", "kokoro", "phonemizer", "espeak"]
+ dependencies = [
+     "kokorog2p[espeak,en]>=0.9.9,<1.0",
++    "utterplan>=0.1.2,<0.2",
+     "lexphon>=0.2.3,<0.3",
+     "phrasplit>=0.3.9,<0.4",
+     "numpy",
+diff --git a/tests/test_utterplan_integration.py b/tests/test_utterplan_integration.py
+new file mode 100644
+index 0000000..0a9288b
+--- /dev/null
++++ b/tests/test_utterplan_integration.py
+@@ -0,0 +1,156 @@
++from __future__ import annotations
++
++from dataclasses import replace
++
++import pytest
++from utterplan import PlannerConfig, UtterancePlan, UtterancePlanner
++
++from pykokoro.exceptions import PlanConfigurationConflict, PlanConsumptionError
++from pykokoro.generation_config import GenerationConfig
++from pykokoro.pipeline import KokoroPipeline
++from pykokoro.pipeline_config import PipelineConfig
++from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
++from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
++from pykokoro.stages.g2p.noop import NoopG2PAdapter
++from pykokoro.stages.phoneme_processing.noop import NoopPhonemeProcessorAdapter
++
++
++@pytest.fixture
++def pipeline() -> KokoroPipeline:
++    return KokoroPipeline(
++        PipelineConfig(generation=GenerationConfig(lang="en-us")),
++        g2p=NoopG2PAdapter(),
++        phoneme_processing=NoopPhonemeProcessorAdapter(),
++        audio_generation=NoopAudioGenerationAdapter(),
++        audio_postprocessing=NoopAudioPostprocessingAdapter(),
++    )
++
++
++def test_run_plan_does_not_mutate_plan(pipeline: KokoroPipeline) -> None:
++    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("Hello world.")
++    before = plan.to_json(indent=None)
++    plan_id = plan.plan_id
++
++    result = pipeline.run_plan(plan)
++
++    assert result.clean_text == "Hello world."
++    assert plan.to_json(indent=None) == before
++    assert plan.plan_id == plan_id
++    assert result.trace is None
++
++
++def test_run_plan_round_trips_saved_plan(pipeline: KokoroPipeline, tmp_path) -> None:
++    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("Round trip.")
++    path = tmp_path / "case.utterplan.json"
++    plan.save(path)
++
++    loaded = UtterancePlan.load(path)
++    left = pipeline.run_plan(plan)
++    right = pipeline.run_plan(loaded)
++
++    assert left.clean_text == right.clean_text
++    assert left.sample_rate == right.sample_rate
++    assert left.audio.shape == right.audio.shape
++
++
++def test_run_plan_does_not_call_planner(monkeypatch, pipeline: KokoroPipeline) -> None:
++    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("Already planned.")
++
++    def fail(*args, **kwargs):
++        raise AssertionError("run_plan called the planner")
++
++    monkeypatch.setattr("pykokoro.pipeline.UtterancePlanner.plan", fail)
++    assert pipeline.run_plan(plan).clean_text == "Already planned."
++
++
++def test_run_plan_rejects_planning_override(pipeline: KokoroPipeline) -> None:
++    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("Frozen.")
++
++    with pytest.raises(PlanConfigurationConflict, match="planning override 'lang'"):
++        pipeline.run_plan(plan, lang="de-de")
++
++
++def test_run_plan_supports_empty_plan_without_g2p() -> None:
++    class FailingG2P:
++        def phonemize(self, *args, **kwargs):
++            raise AssertionError("empty plan called G2P")
++
++    pipeline = KokoroPipeline(
++        PipelineConfig(generation=GenerationConfig(lang="en-us")),
++        g2p=FailingG2P(),
++        phoneme_processing=NoopPhonemeProcessorAdapter(),
++        audio_generation=NoopAudioGenerationAdapter(),
++        audio_postprocessing=NoopAudioPostprocessingAdapter(),
++    )
++    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("")
++
++    result = pipeline.run_plan(plan)
++
++    assert result.audio.size == 0
++    assert result.clean_text == ""
++
++
++def test_invalid_plan_unit_is_rejected(pipeline: KokoroPipeline) -> None:
++    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("Invalid unit.")
++    invalid = replace(plan, units=(replace(plan.units[0], segment_ids=("missing",)),))
++
++    with pytest.raises(PlanConsumptionError):
++        pipeline.run_plan(invalid)
++
++
++def test_run_plan_preserves_plan_when_g2p_fails() -> None:
++    class FailingG2P:
++        def phonemize(self, *args, **kwargs):
++            raise RuntimeError("g2p failed")
++
++    pipeline = KokoroPipeline(
++        PipelineConfig(generation=GenerationConfig(lang="en-us")),
++        g2p=FailingG2P(),
++        phoneme_processing=NoopPhonemeProcessorAdapter(),
++        audio_generation=NoopAudioGenerationAdapter(),
++        audio_postprocessing=NoopAudioPostprocessingAdapter(),
++    )
++    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("Failure path.")
++    before = plan.to_json(indent=None)
++
++    with pytest.raises(RuntimeError, match="g2p failed"):
++        pipeline.run_plan(plan)
++
++    assert plan.to_json(indent=None) == before
++
++
++def test_text_and_plan_paths_share_rendering(pipeline: KokoroPipeline) -> None:
++    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("Parity.")
++
++    text_result = pipeline.run("Parity.")
++    plan_result = pipeline.run_plan(plan)
++
++    assert text_result.clean_text == plan_result.clean_text
++    assert text_result.audio.shape == plan_result.audio.shape
++    assert [segment.text for segment in text_result.segments] == [
++        segment.text for segment in plan_result.segments
++    ]
++
++
++def test_plan_trace_contains_identity() -> None:
++    pipeline = KokoroPipeline(
++        PipelineConfig(
++            generation=GenerationConfig(lang="en-us"),
++            return_trace=True,
++        ),
++        g2p=NoopG2PAdapter(),
++        phoneme_processing=NoopPhonemeProcessorAdapter(),
++        audio_generation=NoopAudioGenerationAdapter(),
++        audio_postprocessing=NoopAudioPostprocessingAdapter(),
++    )
++    plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("Trace.")
++
++    result = pipeline.run_plan(plan)
++
++    assert result.trace is not None
++    consume = [
++        event
++        for event in result.trace.events
++        if event.stage == "planning" and event.name == "consume"
++    ]
++    assert consume and consume[0].details["plan_id"] == plan.plan_id

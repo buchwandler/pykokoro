@@ -1,0 +1,3010 @@
+ README.md                             |  29 ++-
+ docs/advanced_features.md             |  35 ++-
+ docs/api_reference.md                 |  31 ++-
+ docs/basic_usage.md                   |  41 ++--
+ docs/index.md                         |   2 +-
+ docs/pipeline_stages.md               |  49 ++--
+ pykokoro/__init__.py                  |  44 +++-
+ pykokoro/audio_generator.py           |   2 -
+ pykokoro/exceptions.py                |  80 ++++++-
+ pykokoro/generation_config.py         |   6 +-
+ pykokoro/prepared_g2p.py              |  25 +-
+ pykokoro/request_renderer.py          | 424 +++++++---------------------------
+ pykokoro/synthesis_config.py          |  28 ++-
+ pykokoro/synthesis_identity.py        | 157 +++++++++++++
+ pykokoro/synthesis_types.py           | 206 ++++++++++++-----
+ pykokoro/synthesizer.py               |  42 +++-
+ pykokoro/voice_level.py               |  98 ++++++--
+ tests/test_audio_generator_logging.py |  19 +-
+ tests/test_long_text_splitting.py     | 335 ++++++---------------------
+ tests/test_prepared_g2p_adapter.py    |   6 +-
+ tests/test_public_engine_api.py       |  28 +++
+ tests/test_request_renderer.py        | 142 +++++++++---
+ tests/test_synthesis_config.py        |  45 +++-
+ tests/test_synthesis_identity.py      |  35 +++
+ tests/test_synthesis_types.py         |  94 ++++++++
+ tests/test_synthesizer_requests.py    |  24 +-
+ tests/test_voice_leveling.py          |  18 ++
+ 27 files changed, 1197 insertions(+), 848 deletions(-)
+
+diff --git a/README.md b/README.md
+index 23480fa..4f18a9a 100644
+--- a/README.md
++++ b/README.md
+@@ -69,16 +69,25 @@ Kokoro acoustic inference control, not editorial timeline-rate policy.
+ ## Engine behavior
+
+ The engine owns Kokoro-specific G2P integration, request-local voice/model/style
+-selection, voice blends, token-limit chunking, short-sentence handling, inference,
+-timing reconstruction, waveform validation, tracing, and optional voice-level
+-calibration. `discover_models()` and `discover_lexicons()` inspect supported runtime
+-capabilities and lexicon metadata without loading a synthesis session.
+-
+-Oversized prepared-text requests use sentence-aware model chunking by default. Set
+-`SynthesisConfig.long_text_split` to `"token"` for token-boundary chunking without
+-PhraseSplit, or `"none"` to reject requests that exceed the model token limit. These
+-chunks are internal to one request and do not introduce document parsing or planning.
+-See [basic usage](docs/basic_usage.md#long-text-model-chunking) for details.
++selection, voice blends, token-capacity validation, explicitly configured short-sentence
++handling, inference, timing reconstruction, waveform validation, tracing, and optional
++voice-level calibration. `discover_models()` and `discover_lexicons()` inspect supported
++runtime capabilities and lexicon metadata without loading a synthesis session.
++
++Each call renders one atomic request with exactly the supplied text. PyKokoro runs its
++frontend on that text, then checks the resulting model-token count. Oversized requests
++raise `SynthesisInputTooLongError` with text length, token count, model capacity, and
++model identity. PyKokoro never divides an oversized request. The caller owns text
++splitting and composition.
++
++`SynthesisConfig.long_text_split` is retained only for migration and accepts `"none"`;
++explicit legacy `"sentence"` and `"token"` values raise `ConfigurationError`. A missing
++`short_sentence_config` leaves short-sentence processing disabled. Enable it explicitly
++with `GenerationConfig(enable_short_sentence=True)` or a `ShortSentenceConfig`. Results
++expose their resolved synthesis identity and structured voice-level application
++metadata. See
++[caller-owned request sizing](docs/basic_usage.md#caller-owned-request-sizing) for
++details.
+
+ ## Installation
+
+diff --git a/docs/advanced_features.md b/docs/advanced_features.md
+index 21c4d78..e8a3877 100644
+--- a/docs/advanced_features.md
++++ b/docs/advanced_features.md
+@@ -43,8 +43,9 @@ an earlier source file or markup document.
+
+ ## Caller-provided linguistic annotations
+
+-`LinguisticToken` supplies source-aligned POS, tag, lemma, and optional language context
+-to KokoroG2P. The caller owns text analysis and passes only these simple values:
++`LinguisticToken` supplies source-aligned POS, tag, lemma, morphology, and optional
++language context to KokoroG2P. The caller owns text analysis and passes only these
++simple values:
+
+ ```python
+ from pykokoro import LinguisticToken, SynthesisSegment
+@@ -54,15 +55,19 @@ request = SynthesisSegment(
+     text="I read the note yesterday.",
+     language="en-us",
+     voice="af_sarah",
+-    annotations=(
+-        LinguisticToken(2, 6, text="read", pos="VERB", tag="VBD", lemma="read"),
++    tokens=(
++        LinguisticToken(
++            2, 6, text="read", pos="VERB", tag="VBD", lemma="read", morph="Tense=Past"
++        ),
+     ),
+ )
+ ```
+
+-PyKokoro does not require Utterplan, spaCy documents, or planner node objects.
+-Annotation ranges are validated against the supplied request text; if token text is
+-present, it must match the slice at those offsets.
++PyKokoro does not require Utterplan, spaCy documents, or planner node objects. Supplied
++tokens, including `morph`, take precedence and bypass engine-side spaCy. `annotations`
++remains available as a compatibility alias for `tokens`. Annotation ranges are validated
++against the request text; if token text is present, it must match the slice at those
++offsets.
+
+ ## Automatic pronunciation-language routing
+
+@@ -81,6 +86,15 @@ Explicit request language overrides and token language annotations are passed th
+ the prepared-text API; routing does not change the selected acoustic model, voice, or
+ runtime.
+
++## Explicit short-sentence handling
++
++Short-sentence context is disabled when neither `short_sentence_config` nor the
++generation override is supplied. Opt in with a `ShortSentenceConfig`, or set
++`GenerationConfig(enable_short_sentence=True)`. PyKokoro may use generated context
++internally, but the result text and word timings remain aligned to the original request.
++The `RenderedSegment.short_sentence_mode` field reports the mode used without exposing
++the context.
++
+ ## Tracing and voice calibration
+
+ Set `return_trace=True` for request-local engine trace information. `voice_level` can
+@@ -95,6 +109,9 @@ config = SynthesisConfig(
+ )
+ ```
+
+-This calibration is distinct from mastering a complete program or audiobook. For short
+-sentences, token-limit handling, and model profiles, see
++Calibration is distinct from mastering a complete program or audiobook. Each result's
++`voice_level_applications` records the applied gain, calibration source, and a
++structured `calibration_not_found` outcome for custom voices.
++`synthesis_identity.cache_key` provides a stable digest of output-affecting engine
++settings. For capacity errors and model profiles, see
+ [the request lifecycle](pipeline_stages.md) and [language profiles](languages.md).
+diff --git a/docs/api_reference.md b/docs/api_reference.md
+index 599f7a1..a1935d3 100644
+--- a/docs/api_reference.md
++++ b/docs/api_reference.md
+@@ -14,7 +14,8 @@ the package.
+
+ The main methods are:
+
+-- `synthesize(segment)` renders one `SynthesisSegment`.
++- `synthesize(request)` renders one `SynthesisRequest` (`SynthesisSegment` remains a
++  compatibility alias).
+ - `synthesize_text(text, language=..., voice=...)` creates and renders one plain
+   prepared text request.
+ - `synthesize_segments(segments)` yields independent results in input order.
+@@ -25,6 +26,11 @@ The main methods are:
+ ## Request and result types
+
+ ```{eval-rst}
++.. autoclass:: pykokoro.synthesis_types.SynthesisRequest
++   :members:
++   :undoc-members:
++
++
+ .. autoclass:: pykokoro.synthesis_types.SynthesisSegment
+    :members:
+    :undoc-members:
+@@ -57,6 +63,11 @@ word timings are local to that result. `save_wav(path)` writes mono float32 WAV
+    :members:
+    :undoc-members:
+
++.. autoclass:: pykokoro.synthesis_identity.SynthesisIdentity
++   :members:
++   :undoc-members:
++
++
+ .. autoclass:: pykokoro.exceptions.SynthesisInputTooLongError
+    :members:
+    :undoc-members:
+@@ -73,17 +84,23 @@ word timings are local to that result. `save_wav(path)` writes mono float32 WAV
+    :members:
+    :undoc-members:
+
++.. autoclass:: pykokoro.voice_level.VoiceLevelApplication
++   :members:
++   :undoc-members:
++
+ .. autoclass:: pykokoro.short_sentence_handler.ShortSentenceConfig
+    :members:
+    :undoc-members:
+ ```
+
+-`SynthesisConfig.long_text_split` defaults to sentence-aware chunking for oversized
+-prepared-text requests. Its other modes, `"token"` and `"none"`, are described in the
+-[long-text usage guide](basic_usage.md#long-text-model-chunking).
+-`GenerationConfig.speed` is the acoustic inference speed passed to Kokoro, not an
+-application-level playback-rate effect. `SynthesisConfig.voice_level` is engine-local
+-voice calibration rather than whole-output mastering.
++Each synthesis request is atomic. Capacity is checked after frontend tokenization;
++oversized input raises `SynthesisInputTooLongError`. `SynthesisConfig.long_text_split`
++is migration-only, accepts only `"none"`, and rejects legacy splitting modes.
++`RenderedSegment.synthesis_identity` and `voice_level_applications` expose resolved
++output identity and calibration outcomes. `GenerationConfig.speed` is the acoustic
++inference speed passed to Kokoro, not an application-level playback-rate effect.
++`SynthesisConfig.voice_level` is engine-local voice calibration rather than whole-output
++mastering.
+
+ ## Voice blends and discovery
+
+diff --git a/docs/basic_usage.md b/docs/basic_usage.md
+index f574deb..ff9d93e 100644
+--- a/docs/basic_usage.md
++++ b/docs/basic_usage.md
+@@ -44,26 +44,18 @@ The supported combinations depend on model profiles and available artifacts. Use
+ frontends without loading model weights. `model_path`, `voices_path`, and
+ `model_config_path` can point at local artifacts when appropriate.
+
+-## Long-text model chunking
++## Caller-owned request sizing
+
+-`SynthesisConfig.long_text_split` controls how an oversized request is divided for
+-Kokoro inference. The default, `"sentence"`, lazily uses PhraseSplit's regex sentence
+-splitter only when the request exceeds the model token limit. It packs complete
+-sentences where possible and falls back to token-safe splitting when one sentence is too
+-large. PyKokoro always enforces the model token limit; character count is not a
+-substitute for it.
++Every request is atomic. PyKokoro phonemizes exactly the supplied text and checks
++capacity after G2P tokenization. If the request exceeds the model limit,
++`SynthesisInputTooLongError` reports the source-text length, model-token count, maximum,
++and model identity. The engine never divides the request; callers choose text boundaries
++and compose separate results themselves.
+
+-Internal sentence splitting always uses `use_spacy=False`. It does not load spaCy, parse
+-document markup, or create a public sentence plan. Internal chunks are stitched back
+-into one `RenderedSegment` for the original request.
+-
+-Choose another mode when needed:
+-
+-- `long_text_split="token"` never invokes PhraseSplit and splits oversized input at safe
+-  G2P/model-token boundaries.
+-- `long_text_split="none"` disables internal splitting. An oversized request raises
+-  `SynthesisInputTooLongError`; use this when you have already segmented and sized
+-  requests yourself.
++`SynthesisConfig.long_text_split` is retained for migration but accepts only `"none"`.
++Explicit legacy `"sentence"` or `"token"` values raise `ConfigurationError`; they are
++never silently mapped. Split requests before calling PyKokoro, then pass each span as
++its own request.
+
+ For example, use externally selected boundaries and retain responsibility for combining
+ the independent results:
+@@ -87,16 +79,15 @@ requests = [
+ ]
+ config = SynthesisConfig(
+     generation=GenerationConfig(lang="en-us"),
+-    long_text_split="none",
+ )
+ with KokoroSynthesizer(config) as synthesizer:
+     rendered_parts = list(synthesizer.synthesize_segments(requests))
+ ```
+
+-Install PhraseSplit's optional spaCy extra with `pip install "phrasplit[nlp]"` and
+-install a language model separately to use `use_spacy=True`. Each external part becomes
+-an independent request and result. Verify that every part fits the model token limit
+-when using `"none"`; this mode does not further split it.
++Install PhraseSplit's optional spaCy extra with `pip install "phrasplit[nlp]"` only if
++the caller uses its `use_spacy=True` analysis mode. Each external part becomes an
++independent request and result. PyKokoro checks each request after G2P and never further
++divides it.
+
+ ## Per-request voice and independent batch output
+
+@@ -134,6 +125,10 @@ waveform; it is not a composition API.
+   playback rate belongs to the caller's composition layer.
+ - `GenerationConfig.random_seed` sets the inference seed when supported by the
+   model/runtime.
++- `GenerationConfig.enable_short_sentence` or `SynthesisConfig.short_sentence_config`
++  explicitly enables short-sentence processing; leaving both unset keeps it off.
++- `RenderedSegment.synthesis_identity` and `voice_level_applications` expose cache
++  identity and calibration outcomes.
+ - `SynthesisConfig.voice_level` controls optional engine-local voice calibration, not
+   whole-program loudness mastering.
+ - `SynthesisConfig.return_trace=True` attaches request-local engine trace information to
+diff --git a/docs/index.md b/docs/index.md
+index cd828f0..e25fba4 100644
+--- a/docs/index.md
++++ b/docs/index.md
+@@ -26,7 +26,7 @@ changelog
+ - KokoroG2P prepared-text integration with explicit pronunciation languages,
+   source-aligned overrides, and linguistic annotations
+ - Kokoro voice, model, and style selection, including blends
+-- Model-limit chunking, short-sentence handling, and ONNX inference
++- Model token-capacity validation, explicit short-sentence handling, and ONNX inference
+ - Request-local timing reconstruction, waveform validation, tracing, and optional voice
+   calibration
+ - Independent `RenderedSegment` results and standalone WAV writing
+diff --git a/docs/pipeline_stages.md b/docs/pipeline_stages.md
+index 60530a7..d529780 100644
+--- a/docs/pipeline_stages.md
++++ b/docs/pipeline_stages.md
+@@ -24,9 +24,10 @@ RenderedSegment
+
+ ## Prepared-text G2P
+
+-PyKokoro forwards the request's text, explicit language, pronunciation overrides,
+-linguistic token annotations, routing settings, and model target to KokoroG2P's
+-prepared-text API. It does not parse a document, build a plan, or interpret markup.
++PyKokoro forwards the request's exact text, explicit language, pronunciation overrides,
++and linguistic annotations, including morphology, to KokoroG2P. Supplied tokens take
++precedence and prevent internal spaCy analysis. It does not parse a document, build a
++plan, or interpret markup.
+
+ ## Model and voice preparation
+
+@@ -35,30 +36,30 @@ voice on `SynthesisSegment` overrides the configured default; a `VoiceBlend` can
+ supplied as the request voice. The engine prepares model-ready style data and sends
+ token IDs, speed, and a seed when supported to OnnxVoice.
+
+-## Inference and internal chunking
++## Atomic inference and capacity
+
+-For an oversized prepared-text request, `SynthesisConfig.long_text_split` selects
+-model-input chunking:
++Each request is one indivisible inference unit. After G2P, PyKokoro checks its
++model-token count against the resolved profile. Oversized input raises
++`SynthesisInputTooLongError` with the source-text length, actual token count, maximum,
++and model identity. PyKokoro never splits or chunks a request; the caller owns
++segmentation and composition.
+
+-- `"sentence"` (default) lazily uses PhraseSplit's regex backend with `use_spacy=False`.
+-  It packs complete sentences within the model token budget and falls back to token-safe
+-  splitting when a sentence is too large.
+-- `"token"` uses token-safe splitting without PhraseSplit.
+-- `"none"` rejects an oversized request with `SynthesisInputTooLongError`.
++`SynthesisConfig.long_text_split` remains only as a migration surface. It accepts
++`"none"`; explicit `"sentence"` or `"token"` values raise `ConfigurationError`.
+
+-The model token limit remains authoritative. This is acoustic inference chunking, not
+-document parsing or a public sentence plan. All internal chunks belong to the same
+-public request and are stitched into one `RenderedSegment`. Chunk timings are rebased to
+-that request-local waveform. No cross-request silence, markers, embedded clips, or
+-caller-visible timeline data is added.
+-
+-Separately configured short-sentence handling may also issue extra inference calls; it
+-does not change the long-text splitting policy.
++Short-sentence handling is also explicit and disabled when no short-sentence
++configuration or enable override is supplied. Callers can opt in with
++`GenerationConfig(enable_short_sentence=True)` or `ShortSentenceConfig`. It may use
++context and retry inference internally, but returned text, phonemes, and timings remain
++request-local. `RenderedSegment.short_sentence_mode` reports the mode actually used
++without exposing generated context text.
+
+ ## Result
+
+-`RenderedSegment` contains the request ID, mono float32 audio, sample rate, prepared
+-text, language, resolved voice name when applicable, phonemes, token IDs, diagnostics,
+-and optional trace and word timings. Timings use sample offsets within the returned
+-waveform. The caller owns any cross-request playback order, pause policy, resampling,
+-and composition.
++`RenderedSegment` contains the request ID, mono float32 audio, sample rate, exact
++request text, language, resolved voice name when applicable, phonemes, token IDs,
++diagnostics, and word timings. Timings use source-text character ranges and ordered
++sample offsets inside the returned waveform. `synthesis_identity` exposes stable
++output-affecting settings; `voice_level_applications` records calibration mode, gain,
++source, and missing-custom-voice outcomes. The caller owns cross-request playback order,
++pause policy, resampling, and composition.
+diff --git a/pykokoro/__init__.py b/pykokoro/__init__.py
+index d024c2b..363ab6e 100644
+--- a/pykokoro/__init__.py
++++ b/pykokoro/__init__.py
+@@ -4,20 +4,40 @@ from __future__ import annotations
+
+ from typing import Any
+
+-from .exceptions import SynthesisInputTooLongError
++from .exceptions import (
++    AlignmentError,
++    BackendError,
++    CapabilityError,
++    ConfigurationError,
++    EmptyTextError,
++    InvalidLanguageError,
++    InvalidLinguisticTokensError,
++    InvalidModelError,
++    InvalidPronunciationError,
++    InvalidRequestError,
++    InvalidVoiceError,
++    KokoroError,
++    PyKokoroError,
++    SynthesisError,
++    SynthesisInputTooLongError,
++    SynthesisStateError,
++    UnsupportedFeatureError,
++)
+ from .generation_config import GenerationConfig
+ from .language_routing import LanguageRoutingConfig
+ from .short_sentence_handler import ShortSentenceConfig
+ from .synthesis_config import LongTextSplitMode, SynthesisConfig
++from .synthesis_identity import SynthesisIdentity, build_synthesis_identity
+ from .synthesis_types import (
+     LinguisticToken,
+     PronunciationOverride,
+     RenderedSegment,
++    SynthesisRequest,
+     SynthesisSegment,
+ )
+ from .tokenizer import EspeakConfig, TokenizerConfig
+ from .types import WordTiming
+-from .voice_level import VoiceLevelConfig
++from .voice_level import VoiceLevelApplication, VoiceLevelConfig
+ from .voice_manager import VoiceBlend
+
+ try:
+@@ -88,10 +108,30 @@ __all__ = [
+     "GenerationConfig",
+     "LanguageRoutingConfig",
+     "SynthesisConfig",
++    "SynthesisIdentity",
++    "build_synthesis_identity",
+     "LongTextSplitMode",
+     "SynthesisInputTooLongError",
++    "PyKokoroError",
++    "KokoroError",
++    "SynthesisError",
++    "ConfigurationError",
++    "InvalidRequestError",
++    "EmptyTextError",
++    "InvalidLanguageError",
++    "InvalidVoiceError",
++    "InvalidModelError",
++    "InvalidPronunciationError",
++    "InvalidLinguisticTokensError",
++    "UnsupportedFeatureError",
++    "CapabilityError",
++    "SynthesisStateError",
++    "AlignmentError",
++    "BackendError",
+     "VoiceLevelConfig",
++    "VoiceLevelApplication",
+     "VoiceBlend",
++    "SynthesisRequest",
+     "SynthesisSegment",
+     "RenderedSegment",
+     "PronunciationOverride",
+diff --git a/pykokoro/audio_generator.py b/pykokoro/audio_generator.py
+index 999276b..9360f2d 100644
+--- a/pykokoro/audio_generator.py
++++ b/pykokoro/audio_generator.py
+@@ -468,8 +468,6 @@ class AudioGenerator:
+             else:
+                 if effective_config is not None:
+                     effective_config = dataclasses.replace(effective_config, enabled=False)
+-        elif effective_config is None:
+-            effective_config = ShortSentenceConfig()
+
+         if (
+             effective_config is not None
+diff --git a/pykokoro/exceptions.py b/pykokoro/exceptions.py
+index 1312423..5e15226 100644
+--- a/pykokoro/exceptions.py
++++ b/pykokoro/exceptions.py
+@@ -1,22 +1,84 @@
+-class KokoroError(Exception):
+-    """Base exception for pykokoro."""
++class PyKokoroError(Exception):
++    """Base exception for PyKokoro."""
+
+
+-class ConfigurationError(KokoroError):
++KokoroError = PyKokoroError
++
++
++class SynthesisError(PyKokoroError):
++    """Base exception for synthesis failures."""
++
++
++class ConfigurationError(PyKokoroError, ValueError):
+     """Invalid or inconsistent configuration."""
+
+
+-class SynthesisInputTooLongError(ValueError):
+-    """Input exceeds model capacity while internal splitting is disabled."""
++class InvalidRequestError(SynthesisError, ValueError):
++    """A synthesis request contains invalid caller-provided data."""
++
++
++class EmptyTextError(InvalidRequestError):
++    """Synthesis text is empty or whitespace-only."""
++
++
++class InvalidLanguageError(InvalidRequestError):
++    """The requested language is unsupported."""
++
++
++class InvalidVoiceError(InvalidRequestError):
++    """The requested voice is invalid or unavailable."""
++
++
++class InvalidModelError(InvalidRequestError):
++    """The requested model is invalid or unavailable."""
+
+
+-class CapabilityError(KokoroError):
++class InvalidPronunciationError(InvalidRequestError):
++    """Pronunciation overrides are invalid or ambiguous."""
++
++
++class InvalidLinguisticTokensError(InvalidRequestError):
++    """Linguistic token annotations are invalid or ambiguous."""
++
++
++class SynthesisInputTooLongError(SynthesisError, ValueError):
++    """Tokenized request exceeds model capacity."""
++
++    def __init__(
++        self,
++        message: str | None = None,
++        *,
++        text_length: int | None = None,
++        token_count: int | None = None,
++        max_tokens: int | None = None,
++        model_id: str | None = None,
++    ) -> None:
++        self.text_length = text_length
++        self.token_count = token_count
++        self.max_tokens = max_tokens
++        self.model_id = model_id
++        if message is None:
++            message = (
++                f"request has {token_count} model tokens, model maximum is {max_tokens} "
++                f"for {model_id!r}; split the request externally"
++            )
++        super().__init__(message)
++
++
++class UnsupportedFeatureError(SynthesisError):
+     """Requested engine feature is unsupported by a model or runtime profile."""
+
+
+-class AlignmentError(KokoroError):
++CapabilityError = UnsupportedFeatureError
++
++
++class SynthesisStateError(SynthesisError, RuntimeError):
++    """Synthesis engine is not in a state that accepts requests."""
++
++
++class AlignmentError(SynthesisError):
+     """Alignment failed in a way that cannot be recovered."""
+
+
+-class BackendError(KokoroError):
+-    """Synthesis backend failed (onnx runtime, model I/O, etc.)."""
++class BackendError(SynthesisError):
++    """Synthesis backend failed (ONNX runtime, model I/O, etc.)."""
+diff --git a/pykokoro/generation_config.py b/pykokoro/generation_config.py
+index 54bf14e..40f607e 100644
+--- a/pykokoro/generation_config.py
++++ b/pykokoro/generation_config.py
+@@ -6,6 +6,8 @@ import math
+ from dataclasses import dataclass
+ from numbers import Real
+
++from .exceptions import ConfigurationError
++
+
+ @dataclass(frozen=True, slots=True)
+ class GenerationConfig:
+@@ -18,9 +20,9 @@ class GenerationConfig:
+
+     def __post_init__(self) -> None:
+         if isinstance(self.speed, bool) or not isinstance(self.speed, Real):
+-            raise ValueError("speed must be a real number greater than zero")
++            raise ConfigurationError("speed must be a real number greater than zero")
+         if not math.isfinite(float(self.speed)) or self.speed <= 0:
+-            raise ValueError("speed must be finite and greater than zero")
++            raise ConfigurationError("speed must be finite and greater than zero")
+         if self.lang is not None and (not isinstance(self.lang, str) or not self.lang.strip()):
+             raise ValueError("lang must be a non-empty string or None")
+         if self.random_seed is not None and (
+diff --git a/pykokoro/prepared_g2p.py b/pykokoro/prepared_g2p.py
+index 678afff..39538bf 100644
+--- a/pykokoro/prepared_g2p.py
++++ b/pykokoro/prepared_g2p.py
+@@ -52,9 +52,15 @@ class PreparedG2PAdapter:
+         if profile is not None:
+             require_frontend(profile.variant, allow_experimental=config.allow_experimental_frontend)
+         language = segment.language
+-        g2p = self._get_g2p_instance(language, config, tokenizer_config, profile)
++        g2p = self._get_g2p_instance(
++            language,
++            config,
++            tokenizer_config,
++            profile,
++            use_spacy=False if segment.tokens else None,
++        )
+         overrides = tuple(self._to_override(item) for item in segment.pronunciation_overrides)
+-        annotations = tuple(self._to_annotation(item) for item in segment.annotations)
++        annotations = tuple(self._to_annotation(item) for item in segment.tokens)
+         routing = config.language_routing
+         language_routing = (
+             None
+@@ -81,7 +87,11 @@ class PreparedG2PAdapter:
+                 overlap="snap",
+                 g2p=g2p,
+                 g2p_resolver=lambda candidate: self._get_g2p_instance(
+-                    candidate, config, tokenizer_config, profile
++                    candidate,
++                    config,
++                    tokenizer_config,
++                    profile,
++                    use_spacy=False if segment.tokens else None,
+                 ),
+             )
+             phonemes = str(getattr(result, "phonemes", "") or "")
+@@ -136,10 +146,6 @@ class PreparedG2PAdapter:
+             ),
+         )
+
+-    def ids_to_phonemes(self, token_ids: list[int] | tuple[int, ...], target_model: str) -> str:
+-        """Decode a bounded model-token chunk using KokoroG2P's active vocabulary."""
+-        return str(self._load().ids_to_phonemes(list(token_ids), model=target_model))
+-
+     @staticmethod
+     def _to_override(value: PronunciationOverride) -> OverrideSpan:
+         attrs: dict[str, str] = {}
+@@ -159,6 +165,7 @@ class PreparedG2PAdapter:
+             tag=value.tag,
+             lemma=value.lemma,
+             language=value.language,
++            morph=value.morph,
+         )
+
+     @staticmethod
+@@ -228,6 +235,8 @@ class PreparedG2PAdapter:
+         config: SynthesisConfig,
+         tokenizer_config: TokenizerConfig,
+         profile: Any | None,
++        *,
++        use_spacy: bool | None = None,
+     ) -> Any:
+         from kokorog2p.language_codes import normalize_language_code
+
+@@ -244,7 +253,7 @@ class PreparedG2PAdapter:
+             "version": self._model_target(config)[0],
+             "phoneme_quotes": "curly",
+             **_fallback_kwargs(tokenizer_config.fallback),
+-            "use_spacy": tokenizer_config.use_spacy,
++            "use_spacy": tokenizer_config.use_spacy if use_spacy is None else use_spacy,
+             "spacy_model": tokenizer_config.spacy_model,
+             "spacy_model_size": tokenizer_config.spacy_model_size,
+             "backend": backend,
+diff --git a/pykokoro/request_renderer.py b/pykokoro/request_renderer.py
+index 78a20c6..f887423 100644
+--- a/pykokoro/request_renderer.py
++++ b/pykokoro/request_renderer.py
+@@ -2,26 +2,31 @@
+
+ from __future__ import annotations
+
+-from collections.abc import Callable, Sequence
++from collections.abc import Callable
+ from dataclasses import replace
+ from pathlib import Path
+-from typing import Any, Protocol, cast
++from typing import Any, Protocol
+
+ import numpy as np
+
+-from .exceptions import SynthesisInputTooLongError
++from .exceptions import (
++    BackendError,
++    ConfigurationError,
++    InvalidVoiceError,
++    SynthesisInputTooLongError,
++)
+ from .model_profiles import get_model_profile
+ from .prepared_g2p import PreparedSynthesis
+ from .synthesis_config import SynthesisConfig, resolve_synthesis_config
++from .synthesis_identity import build_synthesis_identity
+ from .synthesis_types import RenderedSegment, SynthesisSegment
+-from .types import G2PAlignmentToken, PhonemeSegment, Trace, WordTiming
++from .types import PhonemeSegment, Trace, WordTiming
++from .voice_level import resolve_voice_level_application
+
+
+ class _RequestG2PAdapter(Protocol):
+     def phonemize_context(self, text: str, language: str, config: SynthesisConfig) -> Any: ...
+
+-    def ids_to_phonemes(self, token_ids: list[int] | tuple[int, ...], target_model: str) -> str: ...
+-
+
+ class OnnxRequestRenderer:
+     """Render each prepared request through Kokoro's ONNX inference backend."""
+@@ -52,6 +57,9 @@ class OnnxRequestRenderer:
+         config: SynthesisConfig,
+     ) -> RenderedSegment:
+         resolved = resolve_synthesis_config(config, language=request.language, voice=request.voice)
++        identity = build_synthesis_identity(
++            resolved, language=request.language, voice=resolved.voice
++        )
+         profile = get_model_profile(
+             resolved.model_variant or "v1.0", resolved.model_source or "github"
+         )
+@@ -64,32 +72,27 @@ class OnnxRequestRenderer:
+                     "model_source": resolved.model_source,
+                     "model_variant": resolved.model_variant,
+                     "model_quality": resolved.model_quality,
++                    "synthesis_identity": identity.to_dict(),
+                     "voice": voice_name,
+                 }
+             )
+             trace.warnings.extend(prepared.diagnostics)
+
+         if not prepared.token_ids:
+-            return RenderedSegment(
+-                id=request.id,
+-                audio=np.zeros(0, dtype=np.float32),
+-                sample_rate=profile.sample_rate,
+-                text=request.text,
+-                language=request.language,
+-                voice=voice_name,
+-                phonemes=prepared.phonemes,
+-                token_ids=prepared.token_ids,
+-                diagnostics=prepared.diagnostics,
+-                trace=trace,
+-            )
++            raise BackendError(f"frontend produced no model tokens for request {request.id!r}")
+         if voice is None:
+-            raise ValueError("A voice must resolve before ONNX rendering")
++            raise InvalidVoiceError("a voice must resolve before ONNX rendering")
+
+         phoneme_segments = self._build_phoneme_segments(
+             request, prepared, resolved, profile.max_tokens, trace
+         )
+         backend = self._get_backend(resolved)
+-        voice_style = backend.resolve_voice_style(voice)
++        try:
++            voice_style = backend.resolve_voice_style(voice)
++        except (KeyError, ValueError, FileNotFoundError, ConfigurationError) as exc:
++            raise InvalidVoiceError(
++                f"Voice {voice!r} is unavailable for the resolved model"
++            ) from exc
+
+         def context_phonemizer(text: str, language: str) -> Any:
+             return self._g2p_adapter.phonemize_context(text, language, resolved)
+@@ -100,6 +103,19 @@ class OnnxRequestRenderer:
+             random_seed=resolved.generation.random_seed,
+             context_phonemizer=context_phonemizer,
+         )
++        postprocessed_token_count = sum(len(segment.tokens) for segment in phoneme_segments)
++        if postprocessed_token_count > profile.max_tokens:
++            raise SynthesisInputTooLongError(
++                text_length=len(request.text),
++                token_count=postprocessed_token_count,
++                max_tokens=profile.max_tokens,
++                model_id=identity.model_id,
++            )
++        if len(phoneme_segments) != 1:
++            raise BackendError(
++                f"short-sentence preprocessing must preserve one request segment; "
++                f"received {len(phoneme_segments)}"
++            )
+
+         raw_segments = backend.generate_raw_audio_segments(
+             phoneme_segments,
+@@ -115,6 +131,10 @@ class OnnxRequestRenderer:
+             trace=trace,
+             voice_level_config=resolved.voice_level,
+         )
++        if len(processed_segments) != 1:
++            raise BackendError(
++                f"postprocessing must preserve one request segment; received {len(processed_segments)}"
++            )
+         audio_parts: list[np.ndarray] = []
+         word_timings: list[WordTiming] = []
+         sample_offset = 0
+@@ -139,6 +159,22 @@ class OnnxRequestRenderer:
+             if audio_parts
+             else np.zeros(0, dtype=np.float32)
+         )
++        if rendered_audio.size == 0:
++            raise BackendError(f"backend produced no audio samples for request {request.id!r}")
++        voice_level_applications = tuple(
++            resolve_voice_level_application(resolved.voice_level, segment.render_voice_key)
++            for segment in processed_segments
++            if segment.processed_audio is not None
++        )
++        short_metadata = (processed_segments[0].engine_metadata or {}).get("__short_sentence")
++        short_sentence_mode = None
++        if isinstance(short_metadata, dict):
++            short_kind = short_metadata.get("kind")
++            if isinstance(short_kind, str):
++                short_sentence_mode = short_kind
++        identity = replace(identity, resolved_short_sentence_mode=short_sentence_mode)
++        if trace is not None:
++            trace.model["synthesis_identity"] = identity.to_dict()
+         return RenderedSegment(
+             id=request.id,
+             audio=rendered_audio,
+@@ -151,6 +187,9 @@ class OnnxRequestRenderer:
+             word_timings=tuple(word_timings),
+             diagnostics=prepared.diagnostics,
+             trace=trace,
++            synthesis_identity=identity,
++            voice_level_applications=voice_level_applications,
++            short_sentence_mode=short_sentence_mode,
+         )
+
+     def _get_backend(self, config: SynthesisConfig) -> Any:
+@@ -224,338 +263,41 @@ class OnnxRequestRenderer:
+     ) -> list[PhonemeSegment]:
+         token_ids = list(prepared.token_ids)
+         if not token_ids:
+-            return []
+-
+-        if trace is not None:
+-            trace.model.update(
+-                {
+-                    "long_text_split_mode": config.long_text_split,
+-                    "model_token_count": len(token_ids),
+-                    "model_max_tokens": max_tokens,
+-                }
++            raise BackendError(f"frontend produced no model tokens for request {request.id!r}")
++        if len(token_ids) > max_tokens:
++            model_id = config.model_identity or (
++                f"{config.model_source}:{config.model_variant}:{config.model_quality}"
+             )
+-
+-        fallback_reason: str | None = None
+-        sentence_count = 0
+-        oversized_sentence = False
+-        if len(token_ids) <= max_tokens:
+-            groups = [(token_ids, list(prepared.alignment_tokens), prepared.phonemes)]
+-        elif config.long_text_split == "none":
+             raise SynthesisInputTooLongError(
+-                f"request {request.id!r} contains {len(token_ids)} model tokens, "
+-                f"model maximum is {max_tokens}, and long_text_split='none'; split the request "
+-                "externally or use long_text_split='sentence'/'token'"
++                text_length=len(request.text),
++                token_count=len(token_ids),
++                max_tokens=max_tokens,
++                model_id=model_id,
+             )
+-        elif config.long_text_split == "token":
+-            safe_groups, fallback_reason = self._model_safe_groups(
+-                token_ids, prepared.alignment_tokens, config, max_tokens
+-            )
+-            groups = [
+-                (
+-                    chunk_ids,
+-                    alignment,
+-                    self._g2p_adapter.ids_to_phonemes(chunk_ids, self._target_model(config)),
+-                )
+-                for chunk_ids, alignment in safe_groups
+-            ]
+-        elif request.phonemes is not None:
+-            fallback_reason = "direct-phoneme-input"
+-            safe_groups, alignment_fallback = self._model_safe_groups(
+-                token_ids, prepared.alignment_tokens, config, max_tokens
+-            )
+-            fallback_reason = fallback_reason or alignment_fallback
+-            groups = [
+-                (
+-                    chunk_ids,
+-                    alignment,
+-                    self._g2p_adapter.ids_to_phonemes(chunk_ids, self._target_model(config)),
+-                )
+-                for chunk_ids, alignment in safe_groups
+-            ]
+-        else:
+-            sentence_groups, sentence_count, sentence_reason, oversized_sentence = (
+-                self._split_at_sentence_boundaries(
+-                    text=request.text,
+-                    language=request.language,
+-                    token_ids=token_ids,
+-                    alignments=prepared.alignment_tokens,
+-                    max_tokens=max_tokens,
+-                )
+-            )
+-            if sentence_groups is None:
+-                fallback_reason = sentence_reason or "sentence-mapping-unavailable"
+-                safe_groups, alignment_fallback = self._model_safe_groups(
+-                    token_ids, prepared.alignment_tokens, config, max_tokens
+-                )
+-                fallback_reason = fallback_reason or alignment_fallback
+-                groups = [
+-                    (
+-                        chunk_ids,
+-                        alignment,
+-                        self._g2p_adapter.ids_to_phonemes(chunk_ids, self._target_model(config)),
+-                    )
+-                    for chunk_ids, alignment in safe_groups
+-                ]
+-            else:
+-                groups = [
+-                    (
+-                        chunk_ids,
+-                        alignment,
+-                        self._g2p_adapter.ids_to_phonemes(chunk_ids, self._target_model(config)),
+-                    )
+-                    for chunk_ids, alignment in sentence_groups
+-                ]
+-                if oversized_sentence:
+-                    fallback_reason = "oversized-sentence"
+
+         if trace is not None:
+             trace.model.update(
+                 {
+-                    "sentence_count": sentence_count,
+-                    "acoustic_chunk_count": len(groups),
+-                    "fallback_used": fallback_reason is not None,
++                    "model_token_count": len(token_ids),
++                    "model_max_tokens": max_tokens,
++                    "acoustic_chunk_count": 1,
+                 }
+             )
+-            if fallback_reason is not None:
+-                trace.model["fallback_reason"] = fallback_reason
+-                trace.warnings.append(f"long_text.fallback reason={fallback_reason}")
+-            if config.long_text_split == "sentence" and len(token_ids) > max_tokens:
+-                trace.warnings.append(
+-                    f"long_text.split mode=sentence sentences={sentence_count} "
+-                    f"chunks={len(groups)} max_tokens={max_tokens}"
+-                )
+
+         voice = config.voice
+         voice_name = voice if isinstance(voice, str) else None
+-        result: list[PhonemeSegment] = []
+-        for index, (chunk_ids, alignment, phonemes) in enumerate(groups):
+-            char_offsets = [
+-                (item.char_start, item.char_end)
+-                for item in alignment
+-                if isinstance(item.char_start, int)
+-                and not isinstance(item.char_start, bool)
+-                and isinstance(item.char_end, int)
+-                and not isinstance(item.char_end, bool)
+-                and 0 <= item.char_start <= item.char_end <= len(request.text)
+-            ]
+-            if char_offsets:
+-                char_start = min(start for start, _ in char_offsets)
+-                char_end = max(end for _, end in char_offsets)
+-                text = request.text[char_start:char_end]
+-            elif len(groups) == 1:
+-                char_start, char_end, text = 0, len(request.text), request.text
+-            else:
+-                char_start, char_end, text = 0, len(request.text), request.text
+-            result.append(
+-                PhonemeSegment(
+-                    id=f"{request.id}:phoneme:{index}",
+-                    segment_id=request.id,
+-                    phoneme_id=index,
+-                    text=text,
+-                    phonemes=phonemes,
+-                    tokens=chunk_ids,
+-                    lang=request.language,
+-                    char_start=char_start,
+-                    char_end=char_end,
+-                    voice_name=voice_name,
+-                    alignment_tokens=alignment,
+-                )
++        return [
++            PhonemeSegment(
++                id=f"{request.id}:phoneme:0",
++                segment_id=request.id,
++                phoneme_id=0,
++                text=request.text,
++                phonemes=prepared.phonemes,
++                tokens=token_ids,
++                lang=request.language,
++                char_start=0,
++                char_end=len(request.text),
++                voice_name=voice_name,
++                alignment_tokens=list(prepared.alignment_tokens),
+             )
+-        return result
+-
+-    def _model_safe_groups(
+-        self,
+-        token_ids: list[int],
+-        alignments: Sequence[G2PAlignmentToken],
+-        config: SynthesisConfig,
+-        max_tokens: int,
+-    ) -> tuple[list[tuple[list[int], list[G2PAlignmentToken]]], str | None]:
+-        aligned_groups = self._split_at_alignment_boundaries(token_ids, alignments, max_tokens)
+-        if aligned_groups is not None:
+-            return aligned_groups, None
+-
+-        id_chunks = [
+-            token_ids[index : index + max_tokens] for index in range(0, len(token_ids), max_tokens)
+         ]
+-        return [(chunk, []) for chunk in id_chunks], "invalid-g2p-alignment"
+-
+-    @staticmethod
+-    def _split_at_sentence_boundaries(
+-        *,
+-        text: str,
+-        language: str,
+-        token_ids: list[int],
+-        alignments: Sequence[G2PAlignmentToken],
+-        max_tokens: int,
+-    ) -> tuple[list[tuple[list[int], list[G2PAlignmentToken]]] | None, int, str | None, bool]:
+-        counts = [token.model_span_token_count for token in alignments]
+-        if not counts or any(
+-            not isinstance(count, int) or isinstance(count, bool) or count < 0 for count in counts
+-        ):
+-            return None, 0, "invalid-g2p-alignment", False
+-        count_values = [cast(int, count) for count in counts]
+-        if sum(count_values) != len(token_ids):
+-            return None, 0, "invalid-g2p-alignment", False
+-
+-        from phrasplit import split_with_offsets
+-
+-        sentences = split_with_offsets(
+-            text,
+-            mode="sentence",
+-            use_spacy=False,
+-            language=language,
+-        )
+-        if not sentences:
+-            return None, 0, "no-sentence-ranges", False
+-
+-        sentence_ranges: list[tuple[int, int]] = []
+-        previous_end = 0
+-        for sentence in sentences:
+-            start = sentence.char_start
+-            end = sentence.char_end
+-            if (
+-                not isinstance(start, int)
+-                or isinstance(start, bool)
+-                or not isinstance(end, int)
+-                or isinstance(end, bool)
+-                or not 0 <= start < end <= len(text)
+-                or start < previous_end
+-                or text[start:end] != sentence.text
+-            ):
+-                return None, len(sentences), "invalid-sentence-offsets", False
+-            sentence_ranges.append((start, end))
+-            previous_end = end
+-
+-        sentence_alignments: list[list[G2PAlignmentToken]] = [[] for _ in sentence_ranges]
+-        sentence_token_ids: list[list[int]] = [[] for _ in sentence_ranges]
+-        previous_sentence = 0
+-        token_offset = 0
+-        for alignment, count in zip(alignments, count_values, strict=True):
+-            start = alignment.char_start
+-            end = alignment.char_end
+-            if (
+-                not isinstance(start, int)
+-                or isinstance(start, bool)
+-                or not isinstance(end, int)
+-                or isinstance(end, bool)
+-                or not 0 <= start <= end <= len(text)
+-            ):
+-                return None, len(sentences), "invalid-g2p-alignment-offsets", False
+-
+-            overlaps = [
+-                index
+-                for index, (sentence_start, sentence_end) in enumerate(sentence_ranges)
+-                if max(start, sentence_start) < min(end, sentence_end)
+-            ]
+-            if len(overlaps) > 1:
+-                return None, len(sentences), "alignment-spans-sentences", False
+-            if overlaps:
+-                sentence_index = overlaps[0]
+-            else:
+-                preceding = [
+-                    index
+-                    for index, (_, sentence_end) in enumerate(sentence_ranges)
+-                    if sentence_end <= start
+-                ]
+-                if preceding:
+-                    sentence_index = preceding[-1]
+-                else:
+-                    following = [
+-                        index
+-                        for index, (sentence_start, _) in enumerate(sentence_ranges)
+-                        if sentence_start >= end
+-                    ]
+-                    sentence_index = following[0] if following else len(sentences) - 1
+-
+-            if sentence_index < previous_sentence:
+-                return None, len(sentences), "non-monotonic-alignment-offsets", False
+-            previous_sentence = sentence_index
+-            sentence_alignments[sentence_index].append(alignment)
+-            sentence_token_ids[sentence_index].extend(
+-                token_ids[token_offset : token_offset + count]
+-            )
+-            token_offset += count
+-
+-        if token_offset != len(token_ids) or any(
+-            not sentence_alignments[index] or not sentence_token_ids[index]
+-            for index in range(len(sentences))
+-        ):
+-            return None, len(sentences), "incomplete-sentence-alignment", False
+-
+-        groups: list[tuple[list[int], list[G2PAlignmentToken]]] = []
+-        current_ids: list[int] = []
+-        current_alignments: list[G2PAlignmentToken] = []
+-        oversized_sentence = False
+-        for sentence_ids, sentence_tokens in zip(
+-            sentence_token_ids, sentence_alignments, strict=True
+-        ):
+-            if len(sentence_ids) > max_tokens:
+-                if current_ids:
+-                    groups.append((current_ids, current_alignments))
+-                    current_ids = []
+-                    current_alignments = []
+-                split_groups = OnnxRequestRenderer._split_at_alignment_boundaries(
+-                    sentence_ids, sentence_tokens, max_tokens
+-                )
+-                if split_groups is None:
+-                    return None, len(sentences), "oversized-sentence-alignment-unusable", False
+-                groups.extend(split_groups)
+-                oversized_sentence = True
+-                continue
+-            if current_ids and len(current_ids) + len(sentence_ids) > max_tokens:
+-                groups.append((current_ids, current_alignments))
+-                current_ids = []
+-                current_alignments = []
+-            current_ids.extend(sentence_ids)
+-            current_alignments.extend(sentence_tokens)
+-
+-        if current_ids:
+-            groups.append((current_ids, current_alignments))
+-        if (
+-            not groups
+-            or any(not chunk or len(chunk) > max_tokens for chunk, _ in groups)
+-            or [token for chunk, _ in groups for token in chunk] != token_ids
+-        ):
+-            return None, len(sentences), "sentence-token-conservation-failed", False
+-        return groups, len(sentences), None, oversized_sentence
+-
+-    @staticmethod
+-    def _split_at_alignment_boundaries(
+-        token_ids: Sequence[int],
+-        alignments: Sequence[G2PAlignmentToken],
+-        max_tokens: int,
+-    ) -> list[tuple[list[int], list[G2PAlignmentToken]]] | None:
+-        counts = [token.model_span_token_count for token in alignments]
+-        if not counts or any(
+-            not isinstance(count, int) or isinstance(count, bool) or count < 0 for count in counts
+-        ):
+-            return None
+-        count_values = [cast(int, count) for count in counts]
+-        if sum(count_values) != len(token_ids):
+-            return None
+-        groups: list[tuple[list[int], list[G2PAlignmentToken]]] = []
+-        current: list[G2PAlignmentToken] = []
+-        current_count = 0
+-        token_offset = 0
+-        group_start = 0
+-        for token, count in zip(alignments, count_values, strict=True):
+-            if count > max_tokens:
+-                return None
+-            if current and current_count + count > max_tokens:
+-                groups.append((list(token_ids[group_start:token_offset]), current))
+-                group_start = token_offset
+-                current = []
+-                current_count = 0
+-            current.append(token)
+-            current_count += count
+-            token_offset += count
+-        if current:
+-            groups.append((list(token_ids[group_start:token_offset]), current))
+-        if token_offset != len(token_ids) or any(not chunk for chunk, _ in groups):
+-            return None
+-        return groups
+-
+-    @staticmethod
+-    def _target_model(config: SynthesisConfig) -> str:
+-        profile = get_model_profile(config.model_variant or "v1.0", config.model_source or "github")
+-        return profile.tokenizer_vocab_version
+diff --git a/pykokoro/synthesis_config.py b/pykokoro/synthesis_config.py
+index 658507f..0e4ef7a 100644
+--- a/pykokoro/synthesis_config.py
++++ b/pykokoro/synthesis_config.py
+@@ -9,13 +9,14 @@ from typing import TYPE_CHECKING, Any, Literal, cast
+
+ from .asset_progress import AssetProgressCallback
+ from .config_types import ModelQuality, ModelSource, ModelVariant, ProviderType
++from .exceptions import ConfigurationError, InvalidModelError, InvalidVoiceError
+ from .generation_config import GenerationConfig
+ from .language_routing import LanguageRoutingConfig
+ from .short_sentence_handler import ShortSentenceConfig
+ from .voice_level import VoiceLevelConfig
+ from .voice_manager import VoiceBlend
+
+-LongTextSplitMode = Literal["sentence", "token", "none"]
++LongTextSplitMode = Literal["none"]
+
+
+ if TYPE_CHECKING:
+@@ -48,7 +49,7 @@ class SynthesisConfig:
+     short_sentence_config: ShortSentenceConfig | None = None
+     waveform_validation: Literal["off", "warn", "strict"] = "off"
+     inference_audio_diagnostics: bool = False
+-    long_text_split: LongTextSplitMode = "sentence"
++    long_text_split: LongTextSplitMode = "none"
+     inference_cache_enabled: bool = True
+     inference_cache_max_bytes: int = 128 * 1024 * 1024
+     voice_level: VoiceLevelConfig = field(default_factory=VoiceLevelConfig)
+@@ -58,17 +59,19 @@ class SynthesisConfig:
+
+     def __post_init__(self) -> None:
+         if self.voice is not None and not isinstance(self.voice, (str, VoiceBlend)):
+-            raise TypeError("voice must be a voice name, VoiceBlend, or None")
++            raise InvalidVoiceError("voice must be a voice name, VoiceBlend, or None")
+         if isinstance(self.voice, str) and not self.voice.strip():
+-            raise ValueError("voice must be non-empty when supplied")
++            raise InvalidVoiceError("voice must be non-empty when supplied")
+         if self.language_routing is not None and not isinstance(
+             self.language_routing, LanguageRoutingConfig
+         ):
+             raise TypeError("language_routing must be LanguageRoutingConfig or None")
+         if self.waveform_validation not in ("off", "warn", "strict"):
+             raise ValueError("waveform_validation must be 'off', 'warn', or 'strict'")
+-        if self.long_text_split not in ("sentence", "token", "none"):
+-            raise ValueError("long_text_split must be 'sentence', 'token', or 'none'")
++        if self.long_text_split != "none":
++            raise ConfigurationError(
++                "long_text_split only accepts 'none'; split text in the caller before synthesis"
++            )
+         if isinstance(self.inference_cache_max_bytes, bool) or not isinstance(
+             self.inference_cache_max_bytes, int
+         ):
+@@ -177,7 +180,7 @@ def resolve_synthesis_config(
+         if voice_model is not None:
+             voice_profile = profile_for_voice(effective_voice)
+             if voice_profile is None or voice_profile.variant != voice_model:
+-                raise ValueError(
++                raise InvalidModelError(
+                     f"Voice {effective_voice!r} maps to {voice_model!r} but has no compatible profile"
+                 )
+             variant = voice_model
+@@ -206,9 +209,12 @@ def resolve_synthesis_config(
+         source = "github"
+
+     assert source is not None and variant is not None
+-    profile = get_model_profile(variant, source)
++    try:
++        profile = get_model_profile(variant, source)
++    except ValueError as exc:
++        raise InvalidModelError(f"Invalid model {source!r}/{variant!r}: {exc}") from exc
+     if profile.runtime_available is False and config.release_manifest_path is None:
+-        raise ValueError(
++        raise InvalidModelError(
+             f"Model profile {variant!r} is present but has no runtime-ready distribution"
+         )
+     quality = config.model_quality or cast(
+@@ -225,7 +231,7 @@ def resolve_synthesis_config(
+     )
+     if source == "huggingface" and profile.quality_files and quality not in profile.quality_files:
+         available = ", ".join(profile.quality_files) or "none"
+-        raise ValueError(
++        raise InvalidModelError(
+             f"Quality {quality!r} is not available for {source}/{variant}. Available: {available}"
+         )
+     if resolved.voice is None:
+@@ -237,7 +243,7 @@ def resolve_synthesis_config(
+         and resolved.voice not in profile.voice_names
+     ):
+         available = ", ".join(profile.voice_names)
+-        raise ValueError(
++        raise InvalidVoiceError(
+             f"Voice {resolved.voice!r} is not available for model variant {variant!r}. "
+             f"Available voices: {available}"
+         )
+diff --git a/pykokoro/synthesis_identity.py b/pykokoro/synthesis_identity.py
+new file mode 100644
+index 0000000..6f6541c
+--- /dev/null
++++ b/pykokoro/synthesis_identity.py
+@@ -0,0 +1,157 @@
++"""Stable output-affecting identity for one resolved synthesis request."""
++
++from __future__ import annotations
++
++import hashlib
++import json
++from collections.abc import Mapping
++from dataclasses import asdict, dataclass, is_dataclass
++from pathlib import Path
++from typing import Any
++
++from .synthesis_config import SynthesisConfig
++from .voice_level import default_voice_calibration
++from .voice_manager import VoiceBlend
++
++
++def _identity_value(value: Any) -> Any:
++    if is_dataclass(value):
++        return _identity_value(asdict(value))
++    if isinstance(value, Mapping):
++        return {
++            str(key): _identity_value(item)
++            for key, item in sorted(value.items(), key=lambda pair: str(pair[0]))
++            if not callable(item)
++        }
++    if isinstance(value, (list, tuple)):
++        return [_identity_value(item) for item in value]
++    if isinstance(value, Path):
++        return {"configured_path": True}
++    if value is None or isinstance(value, (str, int, float, bool)):
++        return value
++    if callable(value):
++        return None
++    raise TypeError(f"unsupported value in synthesis identity: {type(value).__name__}")
++
++
++def _canonical_json(value: Any) -> str:
++    return json.dumps(
++        _identity_value(value),
++        ensure_ascii=False,
++        allow_nan=False,
++        sort_keys=True,
++        separators=(",", ":"),
++    )
++
++
++def _digest(value: Any) -> str:
++    return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
++
++
++@dataclass(frozen=True, slots=True)
++class SynthesisIdentity:
++    """JSON-safe identity fields that can form a stable output cache key."""
++
++    package_version: str
++    model_id: str
++    voice: str
++    language: str
++    speed: float
++    random_seed: int | None
++    short_sentence: str
++    resolved_short_sentence_mode: str | None
++    frontend: str
++    provider: str | None
++    provider_options_sha256: str | None
++    voice_level_mode: str
++    voice_level_gain_db: float | None
++    calibration_dataset: str | None
++    calibration_sha256: str | None
++
++    def to_dict(self) -> dict[str, Any]:
++        """Return a JSON-safe representation without transient filesystem paths."""
++        return asdict(self)
++
++    @property
++    def cache_key(self) -> str:
++        """Return a stable digest of all identity fields."""
++        return _digest(self.to_dict())
++
++
++def build_synthesis_identity(
++    config: SynthesisConfig,
++    *,
++    language: str,
++    voice: str | VoiceBlend | None,
++) -> SynthesisIdentity:
++    """Build a stable identity from resolved settings that can affect output."""
++    from . import __version__
++    from .short_sentence_handler import ShortSentenceConfig
++
++    if isinstance(voice, VoiceBlend):
++        voice_identity = _canonical_json(
++            {"voices": voice.voices, "interpolation": voice.interpolation}
++        )
++    else:
++        voice_identity = voice or ""
++
++    short_sentence_config = config.short_sentence_config
++    short_sentence_override = config.generation.enable_short_sentence
++    if short_sentence_override is False:
++        short_sentence_identity: Any = {"enabled": False}
++    elif short_sentence_config is not None:
++        short_sentence_identity = asdict(short_sentence_config)
++        if short_sentence_override is True:
++            short_sentence_identity["enabled"] = True
++    elif short_sentence_override is True:
++        short_sentence_identity = asdict(ShortSentenceConfig())
++    else:
++        short_sentence_identity = {"enabled": False}
++
++    frontend_identity = {
++        "tokenizer": config.tokenizer_config,
++        "espeak_configured": config.espeak_config is not None,
++        "language_routing": config.language_routing,
++        "allow_experimental_frontend": config.allow_experimental_frontend,
++    }
++    model_id = config.model_identity or ":".join(
++        str(value) for value in (config.model_source, config.model_variant, config.model_quality)
++    )
++
++    calibration_dataset = None
++    calibration_sha256 = None
++    if config.voice_level.mode == "calibrated" and config.voice_level.gain_db is None:
++        catalog = default_voice_calibration()
++        calibration_dataset = catalog.corpus
++        calibration_sha256 = _digest(
++            {
++                "schema": catalog.schema,
++                "method": catalog.method,
++                "corpus": catalog.corpus,
++                "reference_lufs": catalog.reference_lufs,
++                "generated_with": catalog.generated_with,
++                "voices": {str(key): value for key, value in catalog.voices.items()},
++            }
++        )
++
++    return SynthesisIdentity(
++        package_version=__version__,
++        model_id=model_id,
++        voice=voice_identity,
++        language=language,
++        speed=float(config.generation.speed),
++        random_seed=config.generation.random_seed,
++        short_sentence=_canonical_json(short_sentence_identity),
++        resolved_short_sentence_mode=None,
++        frontend=_canonical_json(frontend_identity),
++        provider=config.provider,
++        provider_options_sha256=(
++            None if config.provider_options is None else _digest(config.provider_options)
++        ),
++        voice_level_mode=config.voice_level.mode,
++        voice_level_gain_db=(
++            None if config.voice_level.gain_db is None else float(config.voice_level.gain_db)
++        ),
++        calibration_dataset=calibration_dataset,
++        calibration_sha256=calibration_sha256,
++    )
+diff --git a/pykokoro/synthesis_types.py b/pykokoro/synthesis_types.py
+index 8ae8fdc..2daef87 100644
+--- a/pykokoro/synthesis_types.py
++++ b/pykokoro/synthesis_types.py
+@@ -9,31 +9,47 @@ from typing import TYPE_CHECKING
+ import numpy as np
+ from kokorog2p.language_codes import normalize_language_code, supported_languages
+
++from .exceptions import (
++    EmptyTextError,
++    InvalidLanguageError,
++    InvalidLinguisticTokensError,
++    InvalidPronunciationError,
++    InvalidRequestError,
++    InvalidVoiceError,
++)
+ from .voice_manager import VoiceBlend
+
+ if TYPE_CHECKING:
++    from .synthesis_identity import SynthesisIdentity
+     from .types import Trace, WordTiming
++    from .voice_level import VoiceLevelApplication
+
+ _SUPPORTED_LANGUAGES = frozenset(supported_languages())
+
+
+-def _validate_offset(start: int, end: int, text_length: int, label: str) -> None:
++def _validate_offset(
++    start: int,
++    end: int,
++    text_length: int,
++    label: str,
++    error_type: type[ValueError] = InvalidLinguisticTokensError,
++) -> None:
+     if isinstance(start, bool) or not isinstance(start, int):
+-        raise TypeError(f"{label}.start must be an integer")
++        raise error_type(f"{label}.start must be an integer")
+     if isinstance(end, bool) or not isinstance(end, int):
+-        raise TypeError(f"{label}.end must be an integer")
++        raise error_type(f"{label}.end must be an integer")
+     if not 0 <= start < end <= text_length:
+-        raise ValueError(
++        raise error_type(
+             f"{label} offsets must satisfy 0 <= start < end <= {text_length}, got [{start}, {end})"
+         )
+
+
+ def _normalize_language(language: str, label: str) -> str:
+     if not isinstance(language, str) or not language.strip():
+-        raise ValueError(f"{label} must be a non-empty supported language code")
++        raise InvalidLanguageError(f"{label} must be a non-empty supported language code")
+     normalized = normalize_language_code(language)
+     if normalized not in _SUPPORTED_LANGUAGES:
+-        raise ValueError(f"unsupported {label}: {language!r}")
++        raise InvalidLanguageError(f"unsupported {label}: {language!r}")
+     return normalized
+
+
+@@ -47,22 +63,21 @@ class PronunciationOverride:
+     language: str | None = None
+
+     def __post_init__(self) -> None:
+-        if isinstance(self.start, bool) or not isinstance(self.start, int):
+-            raise TypeError("pronunciation override start must be an integer")
+-        if isinstance(self.end, bool) or not isinstance(self.end, int):
+-            raise TypeError("pronunciation override end must be an integer")
+-        if self.start < 0 or self.end <= self.start:
+-            raise ValueError("pronunciation override must satisfy 0 <= start < end")
++        _validate_offset(
++            self.start, self.end, self.end, "pronunciation override", InvalidPronunciationError
++        )
+         if self.phonemes is not None and (
+             not isinstance(self.phonemes, str) or not self.phonemes.strip()
+         ):
+-            raise ValueError("pronunciation override phonemes must be non-empty or None")
++            raise InvalidPronunciationError(
++                "pronunciation override phonemes must be non-empty or None"
++            )
+         if self.language is not None:
+             object.__setattr__(
+                 self, "language", _normalize_language(self.language, "override language")
+             )
+         if self.phonemes is None and self.language is None:
+-            raise ValueError("pronunciation override must set phonemes or language")
++            raise InvalidPronunciationError("pronunciation override must set phonemes or language")
+
+
+ @dataclass(frozen=True, slots=True)
+@@ -76,82 +91,141 @@ class LinguisticToken:
+     tag: str | None = None
+     lemma: str | None = None
+     language: str | None = None
++    morph: str | None = None
+
+     def __post_init__(self) -> None:
+-        if isinstance(self.start, bool) or not isinstance(self.start, int):
+-            raise TypeError("linguistic token start must be an integer")
+-        if isinstance(self.end, bool) or not isinstance(self.end, int):
+-            raise TypeError("linguistic token end must be an integer")
+-        if self.start < 0 or self.end <= self.start:
+-            raise ValueError("linguistic token must satisfy 0 <= start < end")
+-        for name in ("text", "pos", "tag", "lemma"):
++        _validate_offset(
++            self.start, self.end, self.end, "linguistic token", InvalidLinguisticTokensError
++        )
++        for name in ("text", "pos", "tag", "lemma", "morph"):
+             value = getattr(self, name)
+             if value is not None and not isinstance(value, str):
+-                raise TypeError(f"linguistic token {name} must be a string or None")
++                raise InvalidLinguisticTokensError(
++                    f"linguistic token {name} must be a string or None"
++                )
+         if self.language is not None:
+             object.__setattr__(
+                 self, "language", _normalize_language(self.language, "token language")
+             )
+
+
+-@dataclass(frozen=True, slots=True)
+-class SynthesisSegment:
+-    """One prepared, independent speech request for a Kokoro synthesis target."""
++@dataclass(frozen=True, slots=True, init=False)
++class SynthesisRequest:
++    """One atomic, caller-prepared speech request for a Kokoro synthesis target."""
+
+     id: str
+     text: str
+     language: str
+-    voice: str | VoiceBlend | None = None
+-    pronunciation_overrides: tuple[PronunciationOverride, ...] = ()
+-    annotations: tuple[LinguisticToken, ...] = ()
+-    phonemes: str | None = None
++    voice: str | VoiceBlend | None
++    pronunciation_overrides: tuple[PronunciationOverride, ...]
++    tokens: tuple[LinguisticToken, ...]
++    phonemes: str | None
++
++    def __init__(
++        self,
++        id: str,
++        text: str,
++        language: str,
++        voice: str | VoiceBlend | None = None,
++        pronunciation_overrides: tuple[PronunciationOverride, ...]
++        | list[PronunciationOverride] = (),
++        annotations: tuple[LinguisticToken, ...] | list[LinguisticToken] | None = None,
++        phonemes: str | None = None,
++        *,
++        tokens: tuple[LinguisticToken, ...] | list[LinguisticToken] | None = None,
++    ) -> None:
++        if tokens is not None and annotations is not None and tuple(tokens) != tuple(annotations):
++            raise InvalidLinguisticTokensError(
++                "tokens and legacy annotations cannot provide different values"
++            )
++        request_tokens = tokens if tokens is not None else annotations or ()
++        object.__setattr__(self, "id", id)
++        object.__setattr__(self, "text", text)
++        object.__setattr__(self, "language", language)
++        object.__setattr__(self, "voice", voice)
++        object.__setattr__(self, "pronunciation_overrides", tuple(pronunciation_overrides))
++        object.__setattr__(self, "tokens", tuple(request_tokens))
++        object.__setattr__(self, "phonemes", phonemes)
++        self.__post_init__()
++
++    @property
++    def annotations(self) -> tuple[LinguisticToken, ...]:
++        """Deprecated compatibility alias for ``tokens``."""
++        return self.tokens
+
+     def __post_init__(self) -> None:
+         if not isinstance(self.id, str) or not self.id.strip():
+-            raise ValueError("synthesis segment id must be a non-empty string")
++            raise InvalidRequestError("synthesis request id must be a non-empty string")
+         if not isinstance(self.text, str):
+-            raise TypeError("synthesis segment text must be a string")
++            raise InvalidRequestError("synthesis request text must be a string")
++        if not self.text.strip():
++            raise EmptyTextError(
++                "synthesis text must contain at least one non-whitespace character"
++            )
+         object.__setattr__(self, "language", _normalize_language(self.language, "language"))
+         if self.voice is not None and not isinstance(self.voice, (str, VoiceBlend)):
+-            raise TypeError("synthesis segment voice must be a voice name, VoiceBlend, or None")
++            raise InvalidVoiceError("voice must be a voice name, VoiceBlend, or None")
+         if isinstance(self.voice, str) and not self.voice.strip():
+-            raise ValueError("synthesis segment voice must be non-empty when supplied")
++            raise InvalidVoiceError("voice must be non-empty when supplied")
+         if self.phonemes is not None and not isinstance(self.phonemes, str):
+-            raise TypeError("synthesis segment phonemes must be a string or None")
++            raise InvalidPronunciationError("request phonemes must be a string or None")
+
+-        overrides = tuple(self.pronunciation_overrides)
+-        annotations = tuple(self.annotations)
++        overrides = self.pronunciation_overrides
++        tokens = self.tokens
+         if any(not isinstance(item, PronunciationOverride) for item in overrides):
+-            raise TypeError("pronunciation_overrides must contain PronunciationOverride values")
+-        if any(not isinstance(item, LinguisticToken) for item in annotations):
+-            raise TypeError("annotations must contain LinguisticToken values")
+-        object.__setattr__(self, "pronunciation_overrides", overrides)
+-        object.__setattr__(self, "annotations", annotations)
++            raise InvalidPronunciationError(
++                "pronunciation_overrides must contain PronunciationOverride values"
++            )
++        if any(not isinstance(item, LinguisticToken) for item in tokens):
++            raise InvalidLinguisticTokensError("tokens must contain LinguisticToken values")
+
+         for index, override in enumerate(overrides):
+-            _validate_offset(override.start, override.end, len(self.text), f"override[{index}]")
++            _validate_offset(
++                override.start,
++                override.end,
++                len(self.text),
++                f"override[{index}]",
++                InvalidPronunciationError,
++            )
+         direct_overrides = sorted(
+             (item for item in overrides if item.phonemes is not None), key=lambda item: item.start
+         )
+         for previous, current in zip(direct_overrides, direct_overrides[1:], strict=False):
+             if current.start < previous.end:
+-                raise ValueError("overlapping direct phoneme overrides are ambiguous")
++                raise InvalidPronunciationError(
++                    "overlapping direct phoneme overrides are ambiguous"
++                )
+         if self.phonemes is not None and direct_overrides:
+-            raise ValueError(
++            raise InvalidPronunciationError(
+                 "whole-request phonemes cannot be combined with span phoneme overrides"
+             )
+
+-        for index, annotation in enumerate(annotations):
++        previous: LinguisticToken | None = None
++        for index, token in enumerate(tokens):
+             _validate_offset(
+-                annotation.start, annotation.end, len(self.text), f"annotation[{index}]"
++                token.start,
++                token.end,
++                len(self.text),
++                f"token[{index}]",
++                InvalidLinguisticTokensError,
+             )
+-            if (
+-                annotation.text is not None
+-                and self.text[annotation.start : annotation.end] != annotation.text
+-            ):
+-                raise ValueError(
+-                    f"annotation[{index}] text does not match the source text at its offsets"
++            if token.text is not None and self.text[token.start : token.end] != token.text:
++                raise InvalidLinguisticTokensError(
++                    f"token[{index}] text does not match the source text at its offsets"
+                 )
++            if previous is not None:
++                if (token.start, token.end) < (previous.start, previous.end):
++                    raise InvalidLinguisticTokensError(
++                        "linguistic tokens must be sorted by (start, end)"
++                    )
++                if token.start < previous.end:
++                    raise InvalidLinguisticTokensError(
++                        "overlapping linguistic tokens are ambiguous"
++                    )
++            previous = token
++
++
++SynthesisSegment = SynthesisRequest
+
+
+ @dataclass(slots=True)
+@@ -169,6 +243,9 @@ class RenderedSegment:
+     word_timings: tuple[WordTiming, ...] = ()
+     diagnostics: tuple[str, ...] = ()
+     trace: Trace | None = None
++    synthesis_identity: SynthesisIdentity | None = None
++    voice_level_applications: tuple[VoiceLevelApplication, ...] = ()
++    short_sentence_mode: str | None = None
+
+     def __post_init__(self) -> None:
+         if not isinstance(self.id, str) or not self.id.strip():
+@@ -176,20 +253,45 @@ class RenderedSegment:
+         audio = np.asarray(self.audio, dtype=np.float32)
+         if audio.ndim != 1:
+             raise ValueError("rendered segment audio must be mono (one-dimensional)")
++        if audio.size == 0:
++            raise ValueError("rendered segment audio must not be empty")
+         self.audio = audio
+         if isinstance(self.sample_rate, bool) or not isinstance(self.sample_rate, int):
+             raise TypeError("rendered segment sample_rate must be an integer")
+         if self.sample_rate <= 0:
+             raise ValueError("rendered segment sample_rate must be positive")
++        if not isinstance(self.text, str):
++            raise TypeError("rendered segment text must be a string")
+         self.language = _normalize_language(self.language, "rendered segment language")
+         self.token_ids = tuple(int(token_id) for token_id in self.token_ids)
+         self.word_timings = tuple(self.word_timings)
+         self.diagnostics = tuple(self.diagnostics)
++        self.voice_level_applications = tuple(self.voice_level_applications)
++        if self.short_sentence_mode is not None and not isinstance(self.short_sentence_mode, str):
++            raise TypeError("short_sentence_mode must be a string or None")
++        previous_char_end = 0
++        previous_sample_end = 0
+         for timing in self.word_timings:
++            if timing.segment_id != self.id:
++                raise ValueError("word timing segment_id must match rendered segment id")
++            if (
++                timing.char_start < 0
++                or timing.char_end < timing.char_start
++                or timing.char_end > len(self.text)
++            ):
++                raise ValueError("word timing character bounds must refer to rendered text")
++            if self.text[timing.char_start : timing.char_end] != timing.text:
++                raise ValueError("word timing text must match rendered text at its offsets")
++            if timing.char_start < previous_char_end:
++                raise ValueError("word timing character offsets must be monotonic")
+             if timing.start_sample < 0 or timing.end_sample < timing.start_sample:
+                 raise ValueError("word timing sample bounds must be non-negative and ordered")
++            if timing.start_sample < previous_sample_end:
++                raise ValueError("word timing sample offsets must be monotonic")
+             if timing.end_sample > len(self.audio):
+                 raise ValueError("word timing exceeds rendered audio duration")
++            previous_char_end = timing.char_end
++            previous_sample_end = timing.end_sample
+
+     def save_wav(self, path: str | Path) -> None:
+         """Write this mono waveform as 32-bit floating-point WAV without clipping."""
+diff --git a/pykokoro/synthesizer.py b/pykokoro/synthesizer.py
+index 4aa41ab..a1f47f9 100644
+--- a/pykokoro/synthesizer.py
++++ b/pykokoro/synthesizer.py
+@@ -6,9 +6,17 @@ import uuid
+ from collections.abc import Iterable, Iterator
+ from typing import Protocol
+
++from .exceptions import (
++    AlignmentError,
++    BackendError,
++    InvalidLanguageError,
++    InvalidRequestError,
++    PyKokoroError,
++    SynthesisStateError,
++)
+ from .prepared_g2p import PreparedG2PAdapter, PreparedSynthesis
+ from .synthesis_config import SynthesisConfig, resolve_synthesis_config
+-from .synthesis_types import RenderedSegment, SynthesisSegment
++from .synthesis_types import RenderedSegment, SynthesisRequest, SynthesisSegment
+ from .voice_manager import VoiceBlend
+
+
+@@ -47,7 +55,12 @@ class KokoroSynthesizer:
+         config = resolve_synthesis_config(
+             self.config, language=segment.language, voice=segment.voice
+         )
+-        return self.g2p.phonemize(segment, config)
++        try:
++            return self.g2p.phonemize(segment, config)
++        except PyKokoroError:
++            raise
++        except Exception as exc:
++            raise BackendError(f"Kokoro frontend failed for request {segment.id!r}") from exc
+
+     def synthesize(self, segment: SynthesisSegment) -> RenderedSegment:
+         """Render exactly one independent prepared speech request."""
+@@ -56,12 +69,19 @@ class KokoroSynthesizer:
+         config = resolve_synthesis_config(
+             self.config, language=segment.language, voice=segment.voice
+         )
+-        prepared = self.g2p.phonemize(segment, config)
+-        result = self._renderer.render(prepared, segment, config)
++        try:
++            prepared = self.g2p.phonemize(segment, config)
++            result = self._renderer.render(prepared, segment, config)
++        except PyKokoroError:
++            raise
++        except Exception as exc:
++            raise BackendError(f"Kokoro synthesis failed for request {segment.id!r}") from exc
+         if not isinstance(result, RenderedSegment):
+-            raise TypeError("request renderer must return a RenderedSegment")
+-        if result.id != segment.id:
+-            raise ValueError("rendered result ID must match the synthesis request ID")
++            raise BackendError("request renderer must return a RenderedSegment")
++        if result.id != segment.id or result.text != segment.text:
++            raise AlignmentError(
++                "rendered result ID must match request, and result text must match request text"
++            )
+         return result
+
+     def synthesize_text(
+@@ -74,7 +94,7 @@ class KokoroSynthesizer:
+         """Synthesize one already-prepared string without document parsing."""
+         effective_language = language if language is not None else self.config.generation.lang
+         if effective_language is None:
+-            raise ValueError("a synthesis language is required")
++            raise InvalidLanguageError("a synthesis language is required")
+         return self.synthesize(
+             SynthesisSegment(
+                 id=f"request-{uuid.uuid4().hex}",
+@@ -102,12 +122,12 @@ class KokoroSynthesizer:
+
+     @staticmethod
+     def _validate_request(segment: SynthesisSegment) -> None:
+-        if not isinstance(segment, SynthesisSegment):
+-            raise TypeError("synthesize requires a SynthesisSegment")
++        if not isinstance(segment, SynthesisRequest):
++            raise InvalidRequestError("synthesize requires a SynthesisRequest")
+
+     def _ensure_open(self) -> None:
+         if self._closed:
+-            raise RuntimeError("KokoroSynthesizer is closed")
++            raise SynthesisStateError("KokoroSynthesizer is closed")
+
+     def __enter__(self) -> KokoroSynthesizer:
+         self._ensure_open()
+diff --git a/pykokoro/voice_level.py b/pykokoro/voice_level.py
+index a650b4c..d2156c1 100644
+--- a/pykokoro/voice_level.py
++++ b/pykokoro/voice_level.py
+@@ -37,6 +37,33 @@ class VoiceLevelConfig:
+             raise ValueError("voice level gain_db must be a finite number or None")
+
+
++@dataclass(frozen=True, slots=True)
++class VoiceLevelApplication:
++    """Structured record of the calibration applied to one rendered voice."""
++
++    mode: Literal["off", "calibrated"]
++    applied: bool
++    gain_db: float
++    source: Literal["none", "override", "registry"]
++    reason: str | None
++    key: str | None
++    method: str | None
++    corpus: str | None
++
++    def to_dict(self) -> dict[str, Any]:
++        """Return JSON-safe application metadata."""
++        return {
++            "mode": self.mode,
++            "applied": self.applied,
++            "gain_db": self.gain_db,
++            "source": self.source,
++            "reason": self.reason,
++            "key": self.key,
++            "method": self.method,
++            "corpus": self.corpus,
++        }
++
++
+ @dataclass(frozen=True, slots=True)
+ class VoiceCalibrationKey:
+     """Identity used to prevent calibration reuse across model variants."""
+@@ -210,42 +237,71 @@ def default_voice_calibration() -> VoiceCalibrationCatalog:
+     return load_voice_calibrations()
+
+
+-def apply_voice_level_calibration(
+-    audio: np.ndarray,
++def resolve_voice_level_application(
+     config: VoiceLevelConfig,
+     key: VoiceCalibrationKey | None,
+     *,
+-    trace: Trace | None = None,
+     catalog: VoiceCalibrationCatalog | None = None,
+-    segment_id: str | None = None,
+-) -> np.ndarray:
+-    """Apply one static voice gain without measuring the runtime waveform."""
+-    mode = config.mode
+-    source = "none"
+-    reason = "disabled" if mode == "off" else None
++) -> VoiceLevelApplication:
++    """Resolve the static calibration that applies to one model voice."""
+     calibration = None
++    resolved_catalog = catalog
+     if config.gain_db is not None:
+-        gain_db = config.gain_db
+-        source = "override"
++        gain_db = float(config.gain_db)
++        source: Literal["none", "override", "registry"] = "override"
+         reason = "override"
+-    elif mode == "calibrated":
+-        calibration = resolve_voice_calibration(catalog or default_voice_calibration(), key)
++    elif config.mode == "calibrated":
++        resolved_catalog = catalog or default_voice_calibration()
++        calibration = resolve_voice_calibration(resolved_catalog, key)
+         gain_db = calibration.gain_db if calibration is not None else 0.0
+         source = "registry" if calibration is not None else "none"
+         reason = "calibrated" if calibration is not None else "calibration_not_found"
+     else:
+         gain_db = 0.0
++        source = "none"
++        reason = "disabled"
++    return VoiceLevelApplication(
++        mode=config.mode,
++        applied=gain_db != 0.0,
++        gain_db=gain_db,
++        source=source,
++        reason=reason,
++        key=None if key is None else str(key),
++        method=None if calibration is None else calibration.method,
++        corpus=(
++            None
++            if calibration is None
++            else (
++                calibration.corpus_version
++                or (resolved_catalog.corpus if resolved_catalog is not None else None)
++            )
++        ),
++    )
++
++
++def apply_voice_level_calibration(
++    audio: np.ndarray,
++    config: VoiceLevelConfig,
++    key: VoiceCalibrationKey | None,
++    *,
++    trace: Trace | None = None,
++    catalog: VoiceCalibrationCatalog | None = None,
++    segment_id: str | None = None,
++) -> np.ndarray:
++    """Apply one static voice gain without measuring the runtime waveform."""
++    application = resolve_voice_level_application(config, key, catalog=catalog)
+     if trace is not None:
+         trace.model.setdefault("voice_leveling", []).append(
+             {
+                 "segment_id": segment_id,
+-                "mode": mode,
+-                "voice_key": None if key is None else str(key),
+-                "gain_db": gain_db,
+-                "source": source,
+-                "reason": reason,
+-                "method": None if calibration is None else calibration.method,
+-                "corpus": None if calibration is None else calibration.corpus_version,
++                "mode": application.mode,
++                "voice_key": application.key,
++                "applied": application.applied,
++                "gain_db": application.gain_db,
++                "source": application.source,
++                "reason": application.reason,
++                "method": application.method,
++                "corpus": application.corpus,
+             }
+         )
+-    return audio if gain_db == 0.0 else apply_gain_db(audio, gain_db)
++    return audio if not application.applied else apply_gain_db(audio, application.gain_db)
+diff --git a/tests/test_audio_generator_logging.py b/tests/test_audio_generator_logging.py
+index cbdd794..963151b 100644
+--- a/tests/test_audio_generator_logging.py
++++ b/tests/test_audio_generator_logging.py
+@@ -94,7 +94,7 @@ def test_unknown_timestamp_logging_reports_observed_count_without_payload(caplog
+     )
+
+
+-def test_implicit_short_sentence_default_uses_wrap_without_warning(caplog, capsys):
++def test_implicit_short_sentence_default_is_disabled(caplog, capsys):
+     generator = AudioGenerator(
+         session=cast(Any, _Session()),
+         tokenizer=cast(Any, _Tokenizer()),
+@@ -103,8 +103,7 @@ def test_implicit_short_sentence_default_uses_wrap_without_warning(caplog, capsy
+
+     config = generator._resolve_short_sentence_config(None)
+
+-    assert config is not None
+-    assert config.resolve_mode == "wrap"
++    assert config is None
+     assert not caplog.records
+     assert capsys.readouterr().out == ""
+
+@@ -131,13 +130,23 @@ def test_explicit_phrase_mode_without_timestamps_warns_once(caplog):
+     assert len(messages) == 1
+
+
+-def test_timestamp_capable_model_keeps_randomized_phrase_default():
++def test_implicit_short_sentence_default_stays_disabled_when_timestamps_exist():
+     generator = AudioGenerator(
+         session=cast(Any, _TimestampSession()),
+         tokenizer=cast(Any, _Tokenizer()),
+     )
+
+-    config = generator._resolve_short_sentence_config(None)
++    assert generator._resolve_short_sentence_config(None) is None
++
++
++def test_explicit_enable_uses_short_sentence_configuration():
++    generator = AudioGenerator(
++        session=cast(Any, _TimestampSession()),
++        tokenizer=cast(Any, _Tokenizer()),
++    )
++
++    config = generator._resolve_short_sentence_config(True)
+
+     assert config is not None
++    assert config.enabled is True
+     assert config.resolve_mode == "randomized-phrase"
+diff --git a/tests/test_long_text_splitting.py b/tests/test_long_text_splitting.py
+index de6f113..d1e6ef0 100644
+--- a/tests/test_long_text_splitting.py
++++ b/tests/test_long_text_splitting.py
+@@ -2,31 +2,32 @@ from __future__ import annotations
+
+ import builtins
+ from collections.abc import Callable
+-from dataclasses import replace
+ from typing import Any
+
+ import numpy as np
+-import phrasplit
+ import pytest
+
+ from pykokoro import SynthesisInputTooLongError
+-from pykokoro.generation_config import GenerationConfig
+ from pykokoro.prepared_g2p import PreparedSynthesis
+ from pykokoro.request_renderer import OnnxRequestRenderer
+ from pykokoro.synthesis_config import SynthesisConfig
+-from pykokoro.synthesis_types import RenderedSegment, SynthesisSegment
+-from pykokoro.types import G2PAlignmentToken, Trace, WordTiming
++from pykokoro.synthesis_types import SynthesisSegment
++from pykokoro.types import G2PAlignmentToken, PhonemeSegment, Trace, WordTiming
+
+
+ class FakeG2PAdapter:
+-    def ids_to_phonemes(self, token_ids: list[int] | tuple[int, ...], target_model: str) -> str:
+-        return f"phonemes:{','.join(str(token_id) for token_id in token_ids)}"
++    def __init__(self) -> None:
++        self.context_calls: list[tuple[str, str]] = []
+
+     def phonemize_context(self, text: str, language: str, config: SynthesisConfig) -> object:
++        self.context_calls.append((text, language))
+         return object()
+
+
+ class FakeBackend:
++    def __init__(self) -> None:
++        self.generated: list[PhonemeSegment] = []
++
+     def resolve_voice_style(self, voice: str) -> str:
+         return voice
+
+@@ -34,6 +35,7 @@ class FakeBackend:
+         return segments
+
+     def generate_raw_audio_segments(self, segments, voice_style, speed, **kwargs):
++        self.generated = list(segments)
+         for segment in segments:
+             segment.raw_audio = np.zeros(4, dtype=np.float32)
+             segment.word_timings = [
+@@ -49,299 +51,98 @@ class FakeBackend:
+
+ class FakeRenderer(OnnxRequestRenderer):
+     def __init__(self) -> None:
+-        super().__init__(FakeG2PAdapter(), backend_factory=lambda config: FakeBackend())
++        self.backend = FakeBackend()
++        super().__init__(FakeG2PAdapter(), backend_factory=lambda config: self.backend)
+
+
+-def _config(mode: str = "sentence", **kwargs: Any) -> SynthesisConfig:
++def _config(**kwargs: Any) -> SynthesisConfig:
+     return SynthesisConfig(
+         voice="af_heart",
+-        generation=GenerationConfig(lang="en-us"),
+         model_source="github",
+         model_variant="v1.0",
+-        long_text_split=mode,  # type: ignore[arg-type]
++        model_identity="test-model",
+         **kwargs,
+     )
+
+
+-def _prepared(
+-    text: str,
+-    spans: list[tuple[int, int, int]],
+-    *,
+-    phonemes: str | None = None,
+-) -> PreparedSynthesis:
+-    alignments = tuple(
+-        G2PAlignmentToken(
+-            text=text[start:end],
+-            phonemes=text[start:end],
+-            char_start=start,
+-            char_end=end,
+-            model_span_token_count=count,
+-        )
+-        for start, end, count in spans
+-    )
+-    token_count = sum(span[2] for span in spans)
++def _prepared(text: str, token_count: int) -> PreparedSynthesis:
+     return PreparedSynthesis(
+         request_id="request",
+         text=text,
+         language="en-us",
+         voice="af_heart",
+-        phonemes=phonemes if phonemes is not None else text,
++        phonemes="prepared-phonemes",
+         token_ids=tuple(range(token_count)),
+-        alignment_tokens=alignments,
+-    )
+-
+-
+-def _request(text: str, *, phonemes: str | None = None) -> SynthesisSegment:
+-    return SynthesisSegment("request", text, "en-us", phonemes=phonemes)
+-
+-
+-def _block_phrasplit_import(monkeypatch: pytest.MonkeyPatch) -> None:
+-    original_import: Callable[..., Any] = builtins.__import__
+-
+-    def guarded_import(name: str, *args: Any, **kwargs: Any) -> Any:
+-        if name == "phrasplit" or name.startswith("phrasplit."):
+-            raise AssertionError("PhraseSplit must not be imported for this request")
+-        return original_import(name, *args, **kwargs)
+-
+-    monkeypatch.setattr(builtins, "__import__", guarded_import)
+-
+-
+-def test_short_sentence_mode_does_not_import_phrasplit(monkeypatch: pytest.MonkeyPatch) -> None:
+-    _block_phrasplit_import(monkeypatch)
+-    prepared = _prepared("Hi.", [(0, 3, 2)])
+-
+-    chunks = FakeRenderer()._build_phoneme_segments(
+-        _request("Hi."), prepared, _config(), max_tokens=2
+-    )
+-
+-    assert [chunk.tokens for chunk in chunks] == [[0, 1]]
+-
+-
+-def test_token_mode_never_imports_phrasplit_and_conserves_tokens(
+-    monkeypatch: pytest.MonkeyPatch,
+-) -> None:
+-    _block_phrasplit_import(monkeypatch)
+-    text = "abcdef"
+-    prepared = _prepared(text, [(index, index + 1, 1) for index in range(len(text))])
+-
+-    chunks = FakeRenderer()._build_phoneme_segments(
+-        _request(text), prepared, _config("token"), max_tokens=4
++        alignment_tokens=(
++            G2PAlignmentToken(
++                text=text,
++                phonemes="prepared-phonemes",
++                char_start=0,
++                char_end=len(text),
++                model_token_count=token_count,
++                model_span_token_count=token_count,
++            ),
++        ),
+     )
+
+-    assert [len(chunk.tokens) for chunk in chunks] == [4, 2]
+-    assert [token for chunk in chunks for token in chunk.tokens] == list(prepared.token_ids)
+-
+-
+-def test_direct_phoneme_sentence_mode_uses_token_fallback_without_phrasplit(
+-    monkeypatch: pytest.MonkeyPatch,
+-) -> None:
+-    _block_phrasplit_import(monkeypatch)
+-    text = "abc def."
+-    prepared = _prepared(text, [(0, 3, 3), (4, 8, 3)], phonemes="ˈæb ˈdɛf")
+-    trace = Trace()
+-
+-    chunks = FakeRenderer()._build_phoneme_segments(
+-        _request(text, phonemes="ˈæb ˈdɛf"),
+-        prepared,
+-        _config(),
+-        max_tokens=4,
+-        trace=trace,
+-    )
+
+-    assert [len(chunk.tokens) for chunk in chunks] == [3, 3]
+-    assert [token for chunk in chunks for token in chunk.tokens] == list(prepared.token_ids)
+-    assert trace.model["fallback_reason"] == "direct-phoneme-input"
++def _request(text: str) -> SynthesisSegment:
++    return SynthesisSegment("request", text, "en-us")
+
+
+-def test_none_mode_renders_short_text_and_rejects_oversized_text_without_phrasplit(
+-    monkeypatch: pytest.MonkeyPatch,
+-) -> None:
+-    _block_phrasplit_import(monkeypatch)
++def test_atomic_request_keeps_exact_text_in_one_phoneme_segment() -> None:
++    request = _request("The caller prepared this exact text.")
++    prepared = _prepared(request.text, 2)
+     renderer = FakeRenderer()
+-    short = _prepared("Hi.", [(0, 3, 2)])
+-    assert renderer._build_phoneme_segments(_request("Hi."), short, _config("none"), max_tokens=2)[
+-        0
+-    ].tokens == [0, 1]
+-
+-    long = _prepared("Long.", [(0, 5, 4)])
+-    with pytest.raises(SynthesisInputTooLongError, match="request.*4 model tokens.*maximum is 2"):
+-        renderer._build_phoneme_segments(_request("Long."), long, _config("none"), max_tokens=2)
+-
+-
+-def test_sentence_mode_packs_whole_sentences_without_losing_tokens() -> None:
+-    text = "Alpha. Beta. Gamma."
+-    prepared = _prepared(text, [(0, 6, 250), (7, 12, 250), (13, 19, 100)])
+-
+-    groups, sentence_count, reason, oversized = OnnxRequestRenderer._split_at_sentence_boundaries(
+-        text=text,
+-        language="en-us",
+-        token_ids=list(prepared.token_ids),
+-        alignments=prepared.alignment_tokens,
+-        max_tokens=510,
+-    )
+-
+-    assert groups is not None
+-    assert [len(ids) for ids, _ in groups] == [500, 100]
+-    assert sentence_count == 3
+-    assert reason is None
+-    assert not oversized
+-    assert [token for ids, _ in groups for token in ids] == list(prepared.token_ids)
+-    assert [alignment.char_start for _, alignments in groups for alignment in alignments] == [
+-        0,
+-        7,
+-        13,
+-    ]
+-
+-
+-def test_sentence_packing_does_not_split_to_fill_remaining_budget() -> None:
+-    text = "First. Second. Third."
+-    prepared = _prepared(text, [(0, 6, 300), (7, 14, 250), (15, 21, 100)])
+
+-    groups, _, _, _ = OnnxRequestRenderer._split_at_sentence_boundaries(
+-        text=text,
+-        language="en-us",
+-        token_ids=list(prepared.token_ids),
+-        alignments=prepared.alignment_tokens,
+-        max_tokens=510,
+-    )
++    result = renderer.render(prepared, request, _config(return_trace=True))
+
+-    assert groups is not None
+-    assert [len(ids) for ids, _ in groups] == [300, 350]
++    assert result.text == request.text
++    assert len(renderer.backend.generated) == 1
++    segment = renderer.backend.generated[0]
++    assert segment.text == request.text
++    assert (segment.char_start, segment.char_end) == (0, len(request.text))
++    assert segment.tokens == [0, 1]
++    assert result.trace is not None
++    assert result.trace.model["acoustic_chunk_count"] == 1
+
+
+-def test_duplicate_sentences_keep_distinct_source_ranges() -> None:
+-    text = "Repeat this. Repeat this. Final sentence."
+-    prepared = _prepared(text, [(0, 12, 2), (13, 25, 2), (26, 41, 2)])
++def test_capacity_boundary_accepts_exact_limit_and_rejects_limit_plus_one() -> None:
++    renderer = FakeRenderer()
++    request = _request("Hello")
+
+-    groups, _, _, _ = OnnxRequestRenderer._split_at_sentence_boundaries(
+-        text=text,
+-        language="en-us",
+-        token_ids=list(prepared.token_ids),
+-        alignments=prepared.alignment_tokens,
+-        max_tokens=4,
++    exact = renderer._build_phoneme_segments(
++        request, _prepared(request.text, 2), _config(), max_tokens=2
+     )
++    assert len(exact) == 1
++    assert exact[0].tokens == [0, 1]
+
+-    assert groups is not None
+-    assert [[item.text for item in alignments] for _, alignments in groups] == [
+-        ["Repeat this.", "Repeat this."],
+-        ["Final sentence."],
+-    ]
+-    assert groups[0][1][0].char_start == 0
+-    assert groups[0][1][1].char_start == 13
+-
++    with pytest.raises(SynthesisInputTooLongError) as raised:
++        renderer._build_phoneme_segments(
++            request, _prepared(request.text, 3), _config(), max_tokens=2
++        )
+
+-def test_oversized_sentence_falls_back_to_alignment_token_boundaries() -> None:
+-    text = "abc def."
+-    prepared = _prepared(text, [(0, 3, 3), (4, 8, 3)])
++    error = raised.value
++    assert error.text_length == len(request.text)
++    assert error.token_count == 3
++    assert error.max_tokens == 2
++    assert error.model_id == "test-model"
+
+-    groups, sentence_count, reason, oversized = OnnxRequestRenderer._split_at_sentence_boundaries(
+-        text=text,
+-        language="en-us",
+-        token_ids=list(prepared.token_ids),
+-        alignments=prepared.alignment_tokens,
+-        max_tokens=4,
+-    )
+
+-    assert groups is not None
+-    assert [len(ids) for ids, _ in groups] == [3, 3]
+-    assert sentence_count == 1
+-    assert reason is None
+-    assert oversized
+-    assert [token for ids, _ in groups for token in ids] == list(prepared.token_ids)
+-
+-
+-@pytest.mark.parametrize(
+-    ("text", "language", "expected"),
+-    [
+-        (
+-            "Dr. Smith arrived at 3 p.m. He sat down.",
+-            "en-us",
+-            ["Dr. Smith arrived at 3 p.m.", "He sat down."],
+-        ),
+-        (
+-            "Version 3.14 is ready. Continue with the next step.",
+-            "en-us",
+-            ["Version 3.14 is ready.", "Continue with the next step."],
+-        ),
+-        (
+-            "Das ist z. B. ein Test. Danach geht es weiter.",
+-            "de-DE",
+-            ["Das ist z. B. ein Test.", "Danach geht es weiter."],
+-        ),
+-        (
+-            "First.\n\nSecond!\nThird?",
+-            "en-gb",
+-            ["First.", "Second!", "Third?"],
+-        ),
+-    ],
+-)
+-def test_real_phrasplit_regex_returns_exact_sentence_slices(
+-    text: str, language: str, expected: list[str]
++def test_oversized_atomic_request_never_imports_or_uses_phrasplit(
++    monkeypatch: pytest.MonkeyPatch,
+ ) -> None:
+-    sentences = phrasplit.split_with_offsets(
+-        text,
+-        mode="sentence",
+-        use_spacy=False,
+-        language=language,
+-    )
+-
+-    assert [sentence.text for sentence in sentences] == expected
+-    assert all(text[item.char_start : item.char_end] == item.text for item in sentences)
+-
+-
+-def test_internal_sentence_path_forces_regex_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+-    calls: list[dict[str, Any]] = []
+-    split = phrasplit.split_with_offsets
+-
+-    def capture(text: str, **kwargs: Any):
+-        calls.append(kwargs)
+-        return split(text, **kwargs)
+-
+-    monkeypatch.setattr(phrasplit, "split_with_offsets", capture)
+-    text = "First. Second."
+-    prepared = _prepared(text, [(0, 6, 3), (7, 14, 3)])
+-
+-    groups, _, _, _ = OnnxRequestRenderer._split_at_sentence_boundaries(
+-        text=text,
+-        language="en-us",
+-        token_ids=list(prepared.token_ids),
+-        alignments=prepared.alignment_tokens,
+-        max_tokens=4,
+-    )
+-
+-    assert groups is not None
+-    assert calls == [{"mode": "sentence", "use_spacy": False, "language": "en-us"}]
++    original_import: Callable[..., Any] = builtins.__import__
+
++    def guarded_import(name: str, *args: Any, **kwargs: Any) -> Any:
++        if name == "phrasplit" or name.startswith("phrasplit."):
++            raise AssertionError("request rendering must not import PhraseSplit")
++        return original_import(name, *args, **kwargs)
+
+-def test_invalid_alignment_falls_back_to_raw_token_safety_and_trace() -> None:
+-    text = "long text"
+-    prepared = replace(_prepared(text, [(0, 4, 2)]), token_ids=tuple(range(7)))
+-    trace = Trace()
+-    chunks = FakeRenderer()._build_phoneme_segments(
+-        _request(text), prepared, _config(), max_tokens=3, trace=trace
+-    )
++    monkeypatch.setattr(builtins, "__import__", guarded_import)
++    request = _request("First. Second.")
+
+-    assert [len(chunk.tokens) for chunk in chunks] == [3, 3, 1]
+-    assert [token for chunk in chunks for token in chunk.tokens] == list(prepared.token_ids)
+-    assert trace.model["fallback_reason"] == "invalid-g2p-alignment"
+-
+-
+-def test_sentence_chunks_stitch_one_result_with_rebased_timings() -> None:
+-    text = "Alpha. Beta. Gamma."
+-    request = _request(text)
+-    prepared = _prepared(text, [(0, 6, 250), (7, 12, 250), (13, 19, 100)])
+-
+-    rendered: RenderedSegment = FakeRenderer().render(prepared, request, _config())
+-
+-    assert rendered.id == request.id
+-    assert len(rendered.audio) == 8
+-    assert [timing.start_sample for timing in rendered.word_timings] == [1, 5]
+-    assert [timing.end_sample for timing in rendered.word_timings] == [3, 7]
+-    assert [(timing.char_start, timing.char_end) for timing in rendered.word_timings] == [
+-        (0, 12),
+-        (13, 19),
+-    ]
+-    assert all(
+-        timing.start_sample <= timing.end_sample <= len(rendered.audio)
+-        for timing in rendered.word_timings
+-    )
++    with pytest.raises(SynthesisInputTooLongError):
++        FakeRenderer()._build_phoneme_segments(
++            request, _prepared(request.text, 5), _config(), max_tokens=4, trace=Trace()
++        )
+diff --git a/tests/test_prepared_g2p_adapter.py b/tests/test_prepared_g2p_adapter.py
+index 885a27f..9bb5403 100644
+--- a/tests/test_prepared_g2p_adapter.py
++++ b/tests/test_prepared_g2p_adapter.py
+@@ -66,7 +66,9 @@ def test_prepared_adapter_forwards_request_text_overrides_annotations_and_routin
+             PronunciationOverride(0, 5, phonemes="hˈɛloʊ"),
+             PronunciationOverride(6, 11, language="de"),
+         ),
+-        annotations=(LinguisticToken(0, 5, text="Hello", pos="INTJ", lemma="hello"),),
++        tokens=(
++            LinguisticToken(0, 5, text="Hello", pos="INTJ", lemma="hello", morph="Number=Sing"),
++        ),
+     )
+     config = _config()
+
+@@ -84,6 +86,8 @@ def test_prepared_adapter_forwards_request_text_overrides_annotations_and_routin
+     assert isinstance(kwargs["annotations"][0], TokenAnnotation)
+     assert kwargs["annotations"][0].pos == "INTJ"
+     assert kwargs["annotations"][0].lemma == "hello"
++    assert kwargs["annotations"][0].morph == "Number=Sing"
++    assert module.g2p_creations[0][0]["use_spacy"] is False
+     assert kwargs["g2p"].__class__ is object
+     assert result.request_id == request.id
+     assert result.alignment_tokens[1].char_start == 6
+diff --git a/tests/test_public_engine_api.py b/tests/test_public_engine_api.py
+index 182afcb..27bea79 100644
+--- a/tests/test_public_engine_api.py
++++ b/tests/test_public_engine_api.py
+@@ -16,10 +16,14 @@ from pykokoro import (
+     PronunciationOverride,
+     RenderedSegment,
+     SynthesisConfig,
++    SynthesisIdentity,
+     SynthesisInputTooLongError,
++    SynthesisRequest,
+     SynthesisSegment,
+     VoiceBlend,
++    VoiceLevelApplication,
+     VoiceLevelConfig,
++    build_synthesis_identity,
+ )
+ from pykokoro.types import PhonemeSegment
+
+@@ -40,10 +44,30 @@ def test_public_api_exports_request_and_result_types() -> None:
+         "LanguageRoutingConfig",
+         "SynthesisConfig",
+         "SynthesisInputTooLongError",
++        "PyKokoroError",
++        "KokoroError",
++        "SynthesisError",
++        "ConfigurationError",
++        "InvalidRequestError",
++        "EmptyTextError",
++        "InvalidLanguageError",
++        "InvalidVoiceError",
++        "InvalidModelError",
++        "InvalidPronunciationError",
++        "InvalidLinguisticTokensError",
++        "UnsupportedFeatureError",
++        "CapabilityError",
++        "SynthesisStateError",
++        "AlignmentError",
++        "BackendError",
+         "LongTextSplitMode",
++        "SynthesisIdentity",
++        "build_synthesis_identity",
+         "VoiceLevelConfig",
++        "VoiceLevelApplication",
+         "VoiceBlend",
+         "SynthesisSegment",
++        "SynthesisRequest",
+         "RenderedSegment",
+         "PronunciationOverride",
+         "LinguisticToken",
+@@ -61,12 +85,16 @@ def test_public_api_exports_request_and_result_types() -> None:
+         for value in (
+             KokoroSynthesizer,
+             SynthesisSegment,
++            SynthesisRequest,
+             RenderedSegment,
+             SynthesisConfig,
++            SynthesisIdentity,
++            build_synthesis_identity,
+             LongTextSplitMode,
+             SynthesisInputTooLongError,
+             GenerationConfig,
+             VoiceLevelConfig,
++            VoiceLevelApplication,
+             LanguageRoutingConfig,
+             PronunciationOverride,
+             LinguisticToken,
+diff --git a/tests/test_request_renderer.py b/tests/test_request_renderer.py
+index 149fbbe..80062b6 100644
+--- a/tests/test_request_renderer.py
++++ b/tests/test_request_renderer.py
+@@ -3,10 +3,14 @@ from __future__ import annotations
+ from typing import Any
+
+ import numpy as np
++import pytest
+
++from pykokoro import SynthesisInputTooLongError
++from pykokoro.exceptions import InvalidVoiceError
+ from pykokoro.generation_config import GenerationConfig
+ from pykokoro.prepared_g2p import PreparedSynthesis
+ from pykokoro.request_renderer import OnnxRequestRenderer
++from pykokoro.short_sentence_handler import ShortSentenceConfig
+ from pykokoro.synthesis_config import SynthesisConfig
+ from pykokoro.synthesis_types import SynthesisSegment
+ from pykokoro.types import G2PAlignmentToken, PhonemeSegment, WordTiming
+@@ -113,6 +117,16 @@ def test_renderer_keeps_one_request_independent_and_rebases_timings() -> None:
+     assert rendered.token_ids == (1, 2, 3)
+     assert rendered.word_timings == (WordTiming("Hello", 0, 5, 0, 2, request.id),)
+     assert rendered.diagnostics == ("frontend note",)
++    assert rendered.synthesis_identity is not None
++    assert rendered.synthesis_identity.voice == "af_sarah"
++    assert rendered.synthesis_identity.language == "en-us"
++    assert rendered.synthesis_identity.voice_level_gain_db == -2.5
++    assert len(rendered.synthesis_identity.cache_key) == 64
++    assert len(rendered.voice_level_applications) == 1
++    assert rendered.voice_level_applications[0].applied is True
++    assert rendered.voice_level_applications[0].gain_db == -2.5
++    assert rendered.voice_level_applications[0].source == "override"
++    assert rendered.short_sentence_mode is None
+     assert rendered.trace is not None
+     assert rendered.trace.warnings == ["frontend note"]
+     assert backend.preprocessed[0].tokens == [1, 2, 3]
+@@ -130,48 +144,112 @@ def test_renderer_keeps_one_request_independent_and_rebases_timings() -> None:
+     assert backend.closed
+
+
+-def test_chunk_split_uses_exact_g2p_alignment_boundaries() -> None:
+-    token_ids = [10, 11, 12, 13, 14, 15, 16]
+-    alignments = [
+-        G2PAlignmentToken("a", "a", char_start=0, char_end=1, model_span_token_count=2),
+-        G2PAlignmentToken("b", "b", char_start=2, char_end=3, model_span_token_count=2),
+-        G2PAlignmentToken("c", "c", char_start=4, char_end=5, model_span_token_count=3),
+-    ]
+-
+-    groups = OnnxRequestRenderer._split_at_alignment_boundaries(token_ids, alignments, 4)
+-
+-    assert groups == [
+-        (token_ids[:4], alignments[:2]),
+-        (token_ids[4:], alignments[2:]),
+-    ]
+-    assert OnnxRequestRenderer._split_at_alignment_boundaries(token_ids, alignments, 2) is None
+-
+-
+-def test_renderer_stitches_model_sized_chunks_without_losing_local_timings() -> None:
++def test_renderer_rejects_oversized_request_before_model_inference() -> None:
+     adapter = FakeG2PAdapter()
+     backend = FakeBackend()
+     renderer = OnnxRequestRenderer(adapter, backend_factory=lambda config: backend)
+     text = "x" * 511
+     request = SynthesisSegment("long-request", text, "en-us")
+-    alignment = tuple(
+-        G2PAlignmentToken("x", "x", char_start=index, char_end=index + 1, model_span_token_count=1)
+-        for index in range(len(text))
+-    )
+     prepared = PreparedSynthesis(
+         request_id=request.id,
+-        text=text,
++        text=request.text,
+         language=request.language,
+         voice="af_heart",
+         phonemes=text,
+-        token_ids=tuple(range(len(text))),
+-        alignment_tokens=alignment,
++        token_ids=tuple(range(511)),
++    )
++
++    with pytest.raises(SynthesisInputTooLongError) as raised:
++        renderer.render(prepared, request, _config())
++
++    assert raised.value.text_length == len(text)
++    assert raised.value.token_count == 511
++    assert raised.value.max_tokens == 510
++    assert backend.generated == []
++
++
++def test_renderer_reports_invalid_voice_as_typed_error() -> None:
++    class MissingVoiceBackend(FakeBackend):
++        def resolve_voice_style(self, voice: str) -> str:
++            raise KeyError(voice)
++
++    request = SynthesisSegment("bad-voice", "Hello", "en-us", voice="not-a-voice")
++    prepared = PreparedSynthesis(
++        request_id=request.id,
++        text=request.text,
++        language=request.language,
++        voice=request.voice,
++        phonemes="hello",
++        token_ids=(1, 2),
++    )
++    renderer = OnnxRequestRenderer(
++        FakeG2PAdapter(), backend_factory=lambda config: MissingVoiceBackend()
+     )
+
+-    rendered = renderer.render(prepared, request, _config())
++    with pytest.raises(InvalidVoiceError, match="not-a-voice"):
++        renderer.render(prepared, request, _config())
++
++
++def test_renderer_checks_capacity_after_frontend_postprocessing() -> None:
++    class ExpandingBackend(FakeBackend):
++        def preprocess_segments(self, segments, enable_short_sentence, **kwargs):
++            result = super().preprocess_segments(segments, enable_short_sentence, **kwargs)
++            result[0].tokens.append(511)
++            return result
++
++    backend = ExpandingBackend()
++    renderer = OnnxRequestRenderer(FakeG2PAdapter(), backend_factory=lambda config: backend)
++    request = SynthesisSegment("expanded", "Hello", "en-us")
++    prepared = PreparedSynthesis(
++        request_id=request.id,
++        text=request.text,
++        language=request.language,
++        voice="af_heart",
++        phonemes="hello",
++        token_ids=tuple(range(510)),
++    )
++
++    with pytest.raises(SynthesisInputTooLongError) as raised:
++        renderer.render(prepared, request, _config())
++
++    assert raised.value.token_count == 511
++    assert raised.value.max_tokens == 510
++    assert backend.generated == []
++
++
++def test_rendered_result_exposes_short_sentence_mode_without_context_text() -> None:
++    class WrappedBackend(FakeBackend):
++        def preprocess_segments(self, segments, enable_short_sentence, **kwargs):
++            result = super().preprocess_segments(segments, enable_short_sentence, **kwargs)
++            result[0].engine_metadata = {
++                "__short_sentence": {
++                    "kind": "wrap",
++                    "phrase_template": "synthetic context around {segment}",
++                }
++            }
++            return result
++
++    request = SynthesisSegment("wrapped", "Hello", "en-us")
++    prepared = PreparedSynthesis(
++        request_id=request.id,
++        text=request.text,
++        language=request.language,
++        voice="af_heart",
++        phonemes="həlˈoʊ",
++        token_ids=(1, 2, 3),
++    )
++    renderer = OnnxRequestRenderer(
++        FakeG2PAdapter(), backend_factory=lambda config: WrappedBackend()
++    )
++    result = renderer.render(
++        prepared,
++        request,
++        _config(short_sentence_config=ShortSentenceConfig(resolve_mode="wrap")),
++    )
+
+-    assert [len(segment.tokens) for segment in backend.generated] == [510, 1]
+-    assert len(rendered.audio) == 6
+-    assert [timing.start_sample for timing in rendered.word_timings] == [0, 3]
+-    assert [timing.end_sample for timing in rendered.word_timings] == [2, 5]
+-    assert all(timing.segment_id == request.id for timing in rendered.word_timings)
+-    assert [len(ids) for ids, _ in adapter.decoded] == [510, 1]
++    assert result.text == request.text
++    assert result.phonemes == prepared.phonemes
++    assert result.short_sentence_mode == "wrap"
++    assert result.synthesis_identity is not None
++    assert result.synthesis_identity.resolved_short_sentence_mode == "wrap"
++    assert "synthetic context" not in result.synthesis_identity.short_sentence
+diff --git a/tests/test_synthesis_config.py b/tests/test_synthesis_config.py
+index 22afe57..e33df0d 100644
+--- a/tests/test_synthesis_config.py
++++ b/tests/test_synthesis_config.py
+@@ -6,27 +6,54 @@ import pytest
+
+ import pykokoro
+ from pykokoro import LongTextSplitMode, SynthesisConfig, SynthesisInputTooLongError
++from pykokoro.exceptions import ConfigurationError, InvalidModelError
++from pykokoro.generation_config import GenerationConfig
++from pykokoro.synthesis_config import resolve_synthesis_config
+
+
+-def test_synthesis_config_defaults_to_sentence_splitting() -> None:
++def test_synthesis_config_never_splits_long_text() -> None:
+     config = SynthesisConfig()
+
+-    assert config.long_text_split == "sentence"
++    assert config.long_text_split == "none"
+
+
+-def test_synthesis_config_accepts_supported_long_text_modes() -> None:
+-    for mode in ("sentence", "token", "none"):
+-        config = SynthesisConfig(long_text_split=mode)  # type: ignore[arg-type]
+-        assert config.long_text_split == mode
++@pytest.mark.parametrize("mode", ["sentence", "token"])
++def test_synthesis_config_rejects_legacy_splitting_modes(mode: str) -> None:
++    with pytest.raises(ConfigurationError, match="split text in the caller"):
++        SynthesisConfig(long_text_split=mode)  # type: ignore[arg-type]
+
+
+ def test_synthesis_config_rejects_unknown_long_text_mode() -> None:
+-    with pytest.raises(ValueError, match="long_text_split must be"):
++    with pytest.raises(ConfigurationError, match="long_text_split only accepts 'none'"):
+         SynthesisConfig(long_text_split="unsupported")  # type: ignore[arg-type]
+
+
+-def test_long_text_mode_and_input_error_are_public() -> None:
+-    assert get_args(LongTextSplitMode) == ("sentence", "token", "none")
++def test_long_text_mode_and_input_error_are_public_and_structured() -> None:
++    error = SynthesisInputTooLongError(
++        text_length=100,
++        token_count=511,
++        max_tokens=510,
++        model_id="github:v1.0:fp32",
++    )
++
++    assert get_args(LongTextSplitMode) == ("none",)
+     assert issubclass(SynthesisInputTooLongError, ValueError)
++    assert error.text_length == 100
++    assert error.token_count == 511
++    assert error.max_tokens == 510
++    assert error.model_id == "github:v1.0:fp32"
+     assert "LongTextSplitMode" in pykokoro.__all__
+     assert "SynthesisInputTooLongError" in pykokoro.__all__
++
++
++def test_invalid_speed_is_a_typed_configuration_error() -> None:
++    with pytest.raises(ConfigurationError, match="speed must"):
++        GenerationConfig(speed=0)
++
++
++def test_model_resolution_uses_typed_error() -> None:
++    with pytest.raises(InvalidModelError, match="Invalid model"):
++        resolve_synthesis_config(
++            SynthesisConfig(model_variant="unknown"),  # type: ignore[arg-type]
++            language="en-us",
++        )
+diff --git a/tests/test_synthesis_identity.py b/tests/test_synthesis_identity.py
+new file mode 100644
+index 0000000..7226602
+--- /dev/null
++++ b/tests/test_synthesis_identity.py
+@@ -0,0 +1,35 @@
++from __future__ import annotations
++
++import pykokoro
++from pykokoro.generation_config import GenerationConfig
++from pykokoro.synthesis_config import SynthesisConfig, resolve_synthesis_config
++from pykokoro.synthesis_identity import SynthesisIdentity, build_synthesis_identity
++
++
++def _identity(config: SynthesisConfig | None = None) -> SynthesisIdentity:
++    resolved = resolve_synthesis_config(
++        config or SynthesisConfig(), language="en-us", voice="af_heart"
++    )
++    return build_synthesis_identity(resolved, language="en-us", voice=resolved.voice)
++
++
++def test_resolved_synthesis_identity_is_stable_and_output_sensitive() -> None:
++    base = _identity()
++    same = _identity()
++    faster = _identity(SynthesisConfig(generation=GenerationConfig(speed=1.2)))
++
++    assert base.package_version == pykokoro.__version__
++    assert base.model_id == "github:v1.0:fp32"
++    assert base.voice == "af_heart"
++    assert base.language == "en-us"
++    assert base.short_sentence == '{"enabled":false}'
++    assert base.cache_key == same.cache_key
++    assert base.cache_key != faster.cache_key
++    assert len(base.cache_key) == 64
++
++
++def test_synthesis_identity_does_not_include_transient_model_paths(tmp_path) -> None:
++    first = _identity(SynthesisConfig(model_path=tmp_path / "one.onnx"))
++    second = _identity(SynthesisConfig(model_path=tmp_path / "two.onnx"))
++
++    assert first.cache_key == second.cache_key
+diff --git a/tests/test_synthesis_types.py b/tests/test_synthesis_types.py
+index 44b791b..50db989 100644
+--- a/tests/test_synthesis_types.py
++++ b/tests/test_synthesis_types.py
+@@ -1,11 +1,18 @@
+ import numpy as np
+ import pytest
+
++from pykokoro.exceptions import (
++    EmptyTextError,
++    InvalidLanguageError,
++    InvalidLinguisticTokensError,
++    InvalidVoiceError,
++)
+ from pykokoro.synthesis_config import SynthesisConfig
+ from pykokoro.synthesis_types import (
+     LinguisticToken,
+     PronunciationOverride,
+     RenderedSegment,
++    SynthesisRequest,
+     SynthesisSegment,
+ )
+ from pykokoro.types import WordTiming
+@@ -34,6 +41,48 @@ def test_synthesis_segment_rejects_empty_id_and_unsupported_language():
+         SynthesisSegment(id="line", text="Hello", language="xx-unsupported")
+
+
++def test_synthesis_request_accepts_tokens_morph_and_legacy_segment_alias():
++    token = LinguisticToken(0, 5, text="Hello", pos="INTJ", morph="Number=Sing")
++    request = SynthesisRequest(id="line", text="Hello", language="en-us", tokens=(token,))
++
++    assert request.tokens == (token,)
++    assert request.annotations is request.tokens
++    assert request.tokens[0].morph == "Number=Sing"
++    assert isinstance(request, SynthesisSegment)
++
++
++def test_synthesis_request_rejects_empty_text_with_typed_error():
++    with pytest.raises(EmptyTextError, match="non-whitespace"):
++        SynthesisRequest(id="line", text=" \n", language="en-us")
++
++
++def test_synthesis_request_uses_typed_language_and_voice_errors():
++    with pytest.raises(InvalidLanguageError):
++        SynthesisRequest(id="line", text="Hello", language="xx-unsupported")
++    with pytest.raises(InvalidVoiceError):
++        SynthesisRequest(id="line", text="Hello", language="en-us", voice="  ")
++
++
++def test_synthesis_request_rejects_unsorted_and_overlapping_tokens():
++    with pytest.raises(InvalidLinguisticTokensError, match="sorted"):
++        SynthesisRequest(
++            id="line",
++            text="Hello world",
++            language="en-us",
++            tokens=(
++                LinguisticToken(6, 11, text="world"),
++                LinguisticToken(0, 5, text="Hello"),
++            ),
++        )
++    with pytest.raises(InvalidLinguisticTokensError, match="overlapping"):
++        SynthesisRequest(
++            id="line",
++            text="Hello",
++            language="en-us",
++            tokens=(LinguisticToken(0, 3, text="Hel"), LinguisticToken(2, 5, text="llo")),
++        )
++
++
+ def test_override_and_annotation_offsets_are_bounded_and_source_aligned():
+     with pytest.raises(ValueError, match="offsets"):
+         SynthesisSegment(
+@@ -136,6 +185,51 @@ def test_rendered_segment_enforces_mono_float32_and_request_local_timing_bounds(
+         )
+
+
++def test_rendered_segment_rejects_invalid_source_and_nonmonotonic_timings() -> None:
++    with pytest.raises(ValueError, match="text must match rendered text"):
++        RenderedSegment(
++            id="line",
++            audio=np.ones(8),
++            sample_rate=24000,
++            text="Hello",
++            language="en-us",
++            voice=None,
++            phonemes="hello",
++            token_ids=(1,),
++            word_timings=(WordTiming("World", 0, 5, 0, 4, "line"),),
++        )
++
++    with pytest.raises(ValueError, match="sample offsets must be monotonic"):
++        RenderedSegment(
++            id="line",
++            audio=np.ones(8),
++            sample_rate=24000,
++            text="Hello world",
++            language="en-us",
++            voice=None,
++            phonemes="hello world",
++            token_ids=(1, 2),
++            word_timings=(
++                WordTiming("Hello", 0, 5, 4, 6, "line"),
++                WordTiming("world", 6, 11, 1, 3, "line"),
++            ),
++        )
++
++
++def test_rendered_segment_rejects_empty_audio() -> None:
++    with pytest.raises(ValueError, match="must not be empty"):
++        RenderedSegment(
++            id="line",
++            audio=np.zeros(0),
++            sample_rate=24000,
++            text="Hello",
++            language="en-us",
++            voice=None,
++            phonemes="hello",
++            token_ids=(1,),
++        )
++
++
+ def test_synthesis_config_only_accepts_engine_owned_options():
+     config = SynthesisConfig(voice="af_sarah")
+
+diff --git a/tests/test_synthesizer_requests.py b/tests/test_synthesizer_requests.py
+index 66f3dd5..31471fd 100644
+--- a/tests/test_synthesizer_requests.py
++++ b/tests/test_synthesizer_requests.py
+@@ -1,6 +1,7 @@
+ import numpy as np
+ import pytest
+
++from pykokoro.exceptions import AlignmentError, BackendError, SynthesisStateError
+ from pykokoro.generation_config import GenerationConfig
+ from pykokoro.prepared_g2p import PreparedSynthesis
+ from pykokoro.synthesis_config import SynthesisConfig
+@@ -85,5 +86,26 @@ def test_synthesize_rejects_renderer_result_with_wrong_request_id():
+
+     synthesizer = KokoroSynthesizer(g2p=FakeG2P(), renderer=WrongIdRenderer())
+
+-    with pytest.raises(ValueError, match="ID must match"):
++    with pytest.raises(AlignmentError, match="ID must match"):
+         synthesizer.synthesize(SynthesisSegment("expected", "Hello", "en-us"))
++
++
++def test_closed_synthesizer_raises_typed_state_error():
++    synthesizer = KokoroSynthesizer(g2p=FakeG2P(), renderer=FakeRenderer())
++    synthesizer.close()
++
++    with pytest.raises(SynthesisStateError, match="closed"):
++        synthesizer.synthesize(SynthesisSegment("line", "Hello", "en-us"))
++
++
++def test_backend_failure_is_wrapped_as_typed_error() -> None:
++    class BrokenRenderer(FakeRenderer):
++        def render(self, prepared, segment, config):
++            raise RuntimeError("inference failed")
++
++    synthesizer = KokoroSynthesizer(g2p=FakeG2P(), renderer=BrokenRenderer())
++
++    with pytest.raises(BackendError, match="Kokoro synthesis failed") as raised:
++        synthesizer.synthesize(SynthesisSegment("line", "Hello", "en-us"))
++
++    assert isinstance(raised.value.__cause__, RuntimeError)
+diff --git a/tests/test_voice_leveling.py b/tests/test_voice_leveling.py
+index 831fab1..5f073d4 100644
+--- a/tests/test_voice_leveling.py
++++ b/tests/test_voice_leveling.py
+@@ -15,6 +15,7 @@ from pykokoro.voice_level import (
+     apply_voice_level_calibration,
+     default_voice_calibration,
+     load_voice_calibrations,
++    resolve_voice_level_application,
+ )
+
+
+@@ -63,6 +64,23 @@ def test_override_replaces_registry_gain_and_missing_is_safe() -> None:
+     )
+
+
++def test_voice_level_application_reports_calibrated_and_missing_outcomes() -> None:
++    calibrated = resolve_voice_level_application(
++        VoiceLevelConfig(mode="calibrated"), _key(), catalog=_catalog()
++    )
++    missing = resolve_voice_level_application(
++        VoiceLevelConfig(mode="calibrated"), None, catalog=_catalog()
++    )
++
++    assert calibrated.applied is True
++    assert calibrated.gain_db == -2.0
++    assert calibrated.source == "registry"
++    assert calibrated.corpus == "test"
++    assert missing.applied is False
++    assert missing.reason == "calibration_not_found"
++    assert missing.key is None
++
++
+ def test_calibration_trace_is_static_metadata() -> None:
+     trace = Trace()
+     apply_voice_level_calibration(

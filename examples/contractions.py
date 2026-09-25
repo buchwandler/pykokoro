@@ -12,6 +12,9 @@ Output:
     contractions_demo.wav - Generated English speech testing contractions
 """
 
+import numpy as np
+import soundfile as sf
+
 try:
     from ._output import artifact_path
 except ImportError:
@@ -80,15 +83,21 @@ def main() -> None:
     print(f"Voice: {VOICE}")
     print(f"Language: {LANG}")
 
-    print("\nGenerating audio...")
+    paragraphs = [paragraph.strip() for paragraph in TEXT.split("\n\n") if paragraph.strip()]
+    print(f"\nGenerating audio for {len(paragraphs)} paragraphs...")
+    rendered_paragraphs = []
     with KokoroSynthesizer(config) as synthesizer:
-        rendered = synthesizer.synthesize_text(TEXT, language=LANG, voice=VOICE)
+        for paragraph in paragraphs:
+            rendered = synthesizer.synthesize_text(paragraph, language=LANG, voice=VOICE)
+            rendered_paragraphs.append(rendered)
 
+    audio = np.concatenate([rendered.audio for rendered in rendered_paragraphs])
+    sample_rate = rendered_paragraphs[0].sample_rate
     output_file = artifact_path("contractions_demo.wav")
-    rendered.save_wav(output_file)
-
-    duration = len(rendered.audio) / rendered.sample_rate
+    sf.write(output_file, audio, sample_rate, subtype="FLOAT")
     print(f"\nCreated {output_file}")
+
+    duration = len(audio) / sample_rate
     print(f"Duration: {duration:.2f} seconds")
 
 

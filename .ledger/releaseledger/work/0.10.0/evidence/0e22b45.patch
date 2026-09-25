@@ -1,0 +1,910 @@
+ pykokoro/_onnxvoice.py                |  45 +++++++------
+ pykokoro/asset_progress.py            | 117 +++++++++++++++++++++++++---------
+ pykokoro/audio_generator.py           |  42 ++++++++----
+ pykokoro/audio_job.py                 |  21 +++++-
+ pykokoro/pipeline.py                  |   3 +-
+ pykokoro/utils.py                     |   6 +-
+ tests/test_audio_job.py               |  80 +++++++++++++++++++++++
+ tests/test_model_registry.py          |  90 +++++++++++++++++++++++++-
+ tests/test_onnxvoice_boundary.py      |  38 ++++++++++-
+ tests/test_pipeline_unit_streaming.py |  81 ++++++++++++++++++++++-
+ tests/test_word_timings.py            |  32 ++++++++++
+ 11 files changed, 485 insertions(+), 70 deletions(-)
+
+diff --git a/pykokoro/_onnxvoice.py b/pykokoro/_onnxvoice.py
+index 20546a0..892d176 100644
+--- a/pykokoro/_onnxvoice.py
++++ b/pykokoro/_onnxvoice.py
+@@ -2,15 +2,18 @@
+
+ from __future__ import annotations
+
++import logging
+ import os
+ from collections.abc import Callable, Mapping, Sequence
+ from dataclasses import dataclass
+ from pathlib import Path
+-from typing import Any, cast
++from typing import Any
+
+ from .asset_progress import AssetProgressEvent, AssetProgressPhase
+ from .exceptions import BackendError, ConfigurationError, KokoroError
+
++logger = logging.getLogger(__name__)
++
+
+ @dataclass(frozen=True, slots=True)
+ class ResolvedKokoroModel:
+@@ -109,34 +112,40 @@ def adapt_progress(
+         return None
+
+     def emit(event: Any) -> None:
+-        phase_map = {
+-            "catalog_started": "download-start",
+-            "catalog_cached": "download-complete",
+-            "catalog_completed": "download-complete",
+-            "install_started": "download-start",
+-            "install_completed": "download-complete",
++        phase_map: dict[str, AssetProgressPhase] = {
+             "download_started": "download-start",
+             "download_progress": "download-progress",
+-            "download_completed": "download-complete",
+-            "artifact_cached": "download-complete",
+             "verify_started": "verify-start",
++            "verify_completed": "verify-complete",
++            "download_completed": "download-complete",
++            "artifact_cached": "cache-hit",
++            "artifact_installed": "artifact-installed",
++            "install_completed": "install-complete",
++            "install_failed": "install-failed",
+         }
+-        phase = cast(
+-            AssetProgressPhase, phase_map.get(str(getattr(event, "phase", "")), "verify-start")
+-        )
++        raw_phase = str(getattr(event, "phase", ""))
++        phase = phase_map.get(raw_phase)
++        if phase is None:
++            logger.debug("Ignoring unsupported OnnxVoice progress phase %r", raw_phase)
++            return
+         ref = getattr(event, "ref", None)
+         model_id = ref.split(":", 1)[1] if isinstance(ref, str) and ":" in ref else str(ref or "")
++        artifact = getattr(event, "artifact", None)
++        role = getattr(event, "role", None)
++        completed = getattr(event, "completed", None)
++        total = getattr(event, "total", None)
+         callback(
+             AssetProgressEvent(
+                 phase=phase,
+                 model_id=model_id,
+-                distribution_id=str(getattr(event, "distribution", "") or ""),
+-                artifact_id=str(getattr(event, "artifact", "") or ""),
+-                role=str(getattr(event, "role", "model") or "model"),
+-                filename=str(getattr(event, "filename", "") or ""),
+-                bytes_done=int(getattr(event, "completed", 0) or 0),
+-                bytes_total=int(getattr(event, "total", 0) or 0),
++                distribution_id="",
++                artifact_id=str(artifact or ""),
++                role=str(role or "artifact"),
++                filename=str(artifact or ""),
++                bytes_done=int(completed) if completed is not None else 0,
++                bytes_total=int(total) if total is not None else None,
+                 target=str(getattr(event, "target", "") or ""),
++                message=getattr(event, "message", None),
+             )
+         )
+
+diff --git a/pykokoro/asset_progress.py b/pykokoro/asset_progress.py
+index b8dc3e2..91f1cf6 100644
+--- a/pykokoro/asset_progress.py
++++ b/pykokoro/asset_progress.py
+@@ -10,7 +10,12 @@ AssetProgressPhase = Literal[
+     "download-start",
+     "download-progress",
+     "verify-start",
++    "verify-complete",
+     "download-complete",
++    "cache-hit",
++    "artifact-installed",
++    "install-complete",
++    "install-failed",
+ ]
+
+
+@@ -25,8 +30,9 @@ class AssetProgressEvent:
+     role: str
+     filename: str
+     bytes_done: int
+-    bytes_total: int
++    bytes_total: int | None
+     target: str
++    message: str | None = None
+
+
+ class AssetProgressCallback(Protocol):
+@@ -54,11 +60,12 @@ _ROLE_NAMES = {
+     "config": "config",
+     "vocabulary": "vocabulary",
+     "bundle": "bundle",
++    "artifact": "artifact",
+ }
+
+
+ class ConsoleAssetProgress:
+-    """Render runtime asset download progress to a text stream."""
++    """Render runtime asset progress to a text stream."""
+
+     def __init__(
+         self,
+@@ -71,10 +78,12 @@ class ConsoleAssetProgress:
+         self.stream = stream if stream is not None else sys.stderr
+         self.min_percent_step = min_percent_step
+         self._last_percent: dict[str, int] = {}
++        self._last_bytes: dict[str, int] = {}
+         self._download_started = False
+         self._active_tty_artifact: str | None = None
+
+     def __call__(self, event: AssetProgressEvent) -> None:
++        artifact_id = event.artifact_id or event.filename or event.target
+         if event.phase == "download-start":
+             if not self._download_started:
+                 print(
+@@ -82,48 +91,92 @@ class ConsoleAssetProgress:
+                     file=self.stream,
+                 )
+                 self._download_started = True
+-            self._last_percent[event.artifact_id] = -self.min_percent_step
+-            self._active_tty_artifact = event.artifact_id if self._is_tty() else None
++            self._last_percent[artifact_id] = -self.min_percent_step
++            self._last_bytes[artifact_id] = 0
++            self._active_tty_artifact = artifact_id if self._is_tty() else None
++            size = (
++                format_bytes(event.bytes_total)
++                if event.bytes_total is not None
++                else "size unknown"
++            )
+             print(
+-                f"Downloading {self._role(event.role)}: {event.filename} "
+-                f"({format_bytes(event.bytes_total)})",
++                f"Downloading {self._role(event.role)}: {self._artifact_name(event)} ({size})",
+                 file=self.stream,
+                 flush=True,
+             )
+             return
+
+         if event.phase == "download-progress":
+-            percent = _percent(event.bytes_done, event.bytes_total)
+-            previous = self._last_percent.get(event.artifact_id, -self.min_percent_step)
+-            if percent < 100 and percent - previous < self.min_percent_step:
+-                return
+-            self._last_percent[event.artifact_id] = percent
+-            if self._is_tty():
+-                print(
+-                    f"\r  {percent:3d}% {format_bytes(event.bytes_done)} / "
+-                    f"{format_bytes(event.bytes_total)}",
+-                    end="",
+-                    file=self.stream,
+-                    flush=True,
++            if event.bytes_total is None:
++                if event.bytes_done and event.bytes_done - self._last_bytes.get(artifact_id, 0) < 1024 * 1024:
++                    return
++                self._last_bytes[artifact_id] = event.bytes_done
++                message = f"  {format_bytes(event.bytes_done)} / (size unknown)"
++            else:
++                percent = _percent(event.bytes_done, event.bytes_total)
++                previous = self._last_percent.get(artifact_id, -self.min_percent_step)
++                if percent < 100 and percent - previous < self.min_percent_step:
++                    return
++                self._last_percent[artifact_id] = percent
++                message = (
++                    f"  {percent:3d}% {format_bytes(event.bytes_done)} / "
++                    f"{format_bytes(event.bytes_total)}"
+                 )
++            if self._is_tty():
++                print(f"\r{message}", end="", file=self.stream, flush=True)
++            else:
++                print(message, file=self.stream, flush=True)
+             return
+
+         if event.phase == "verify-start":
+-            if self._is_tty() and self._active_tty_artifact == event.artifact_id:
+-                print(file=self.stream)
+-                self._active_tty_artifact = None
++            self._finish_tty_line(artifact_id)
+             print(
+-                f"Verifying {self._role(event.role)}: {event.filename}",
++                f"Verifying {self._role(event.role)}: {self._artifact_name(event)}",
+                 file=self.stream,
+                 flush=True,
+             )
+             return
+
+-        if event.phase == "download-complete":
+-            if self._is_tty() and self._active_tty_artifact == event.artifact_id:
+-                print(file=self.stream)
+-                self._active_tty_artifact = None
+-            print(f"Ready: {event.filename}", file=self.stream, flush=True)
++        if event.phase == "verify-complete":
++            print(
++                f"Verified {self._role(event.role)}: {self._artifact_name(event)}",
++                file=self.stream,
++                flush=True,
++            )
++            return
++
++        if event.phase == "cache-hit":
++            print(
++                f"Using cached {self._role(event.role)}: {self._artifact_name(event)}",
++                file=self.stream,
++                flush=True,
++            )
++            return
++
++        if event.phase == "install-complete":
++            self._finish_tty_line(artifact_id)
++            heading = (
++                "Runtime assets already installed:"
++                if event.message == "already installed"
++                else "Runtime assets ready:"
++            )
++            print(heading, file=self.stream, flush=True)
++            if event.target:
++                print(f"  {event.target}", file=self.stream, flush=True)
++            return
++
++        if event.phase == "install-failed":
++            self._finish_tty_line(artifact_id)
++            print(
++                f"Runtime asset installation failed: {event.target or self._artifact_name(event)}",
++                file=self.stream,
++                flush=True,
++            )
++
++    def _finish_tty_line(self, artifact_id: str) -> None:
++        if self._is_tty() and self._active_tty_artifact == artifact_id:
++            print(file=self.stream)
++            self._active_tty_artifact = None
+
+     def _is_tty(self) -> bool:
+         isatty = getattr(self.stream, "isatty", None)
+@@ -131,10 +184,14 @@ class ConsoleAssetProgress:
+
+     @staticmethod
+     def _role(role: str) -> str:
+-        return _ROLE_NAMES.get(role, role)
++        return _ROLE_NAMES.get(role, role or "artifact")
++
++    @staticmethod
++    def _artifact_name(event: AssetProgressEvent) -> str:
++        return event.filename or event.artifact_id or "artifact"
+
+
+-def _percent(done: int, total: int) -> int:
+-    if total <= 0:
++def _percent(done: int, total: int | None) -> int:
++    if total is None or total <= 0:
+         return 0
+     return min(100, max(0, done * 100 // total))
+diff --git a/pykokoro/audio_generator.py b/pykokoro/audio_generator.py
+index b8005d1..4375ee9 100644
+--- a/pykokoro/audio_generator.py
++++ b/pykokoro/audio_generator.py
+@@ -9,7 +9,7 @@ import random
+ import re
+ import time
+ from collections import OrderedDict
+-from collections.abc import Callable
++from collections.abc import Callable, Sequence
+ from typing import TYPE_CHECKING, Any, Literal, cast
+
+ import numpy as np
+@@ -29,7 +29,7 @@ from .short_sentence_handler import (
+ )
+ from .tokenizer import Tokenizer
+ from .types import G2PAlignmentToken, PhonemeSegment, WordTiming, _exact_timing_geometry
+-from .utils import generate_silence
++from .utils import generate_silence, seconds_to_samples
+ from .voice_level import apply_voice_level_calibration
+ from .voice_manager import normalize_voice_style
+
+@@ -1565,20 +1565,16 @@ class AudioGenerator:
+         trace: Trace | None = None,
+     ) -> np.ndarray:
+         audio_parts: list[np.ndarray] = []
+-        cursor_samples = 0
+         previous_index: int | None = None
+         previous_segment: PhonemeSegment | None = None
+
+         for segment in segments:
+             if segment.pause_before > 0:
+-                pause = generate_silence(segment.pause_before, SAMPLE_RATE)
+-                audio_parts.append(pause)
+-                cursor_samples += len(pause)
++                audio_parts.append(generate_silence(segment.pause_before, SAMPLE_RATE))
+                 previous_index = None
+                 previous_segment = None
+
+             if segment.processed_audio is not None:
+-                segment.word_timings = _translate_word_timings(segment.word_timings, cursor_samples)
+                 current = np.asarray(segment.processed_audio)
+                 if (
+                     previous_index is not None
+@@ -1607,15 +1603,12 @@ class AudioGenerator:
+                 audio_parts.append(current)
+                 previous_index = len(audio_parts) - 1
+                 previous_segment = segment
+-                cursor_samples += len(current)
+             else:
+                 previous_index = None
+                 previous_segment = None
+
+             if segment.pause_after > 0:
+-                pause = generate_silence(segment.pause_after, SAMPLE_RATE)
+-                audio_parts.append(pause)
+-                cursor_samples += len(pause)
++                audio_parts.append(generate_silence(segment.pause_after, SAMPLE_RATE))
+                 previous_index = None
+                 previous_segment = None
+
+@@ -1830,6 +1823,33 @@ def _translate_word_timings(timings: list[WordTiming], sample_offset: int) -> li
+         for timing in timings
+     ]
+
++def _collect_unit_word_timings(
++    segments: Sequence[PhonemeSegment],
++    *,
++    sample_rate: int = SAMPLE_RATE,
++) -> list[WordTiming]:
++    """Translate segment-local timings into unit-local copies without mutation."""
++    result: list[WordTiming] = []
++    cursor = 0
++    for segment in segments:
++        cursor += seconds_to_samples(segment.pause_before, sample_rate)
++        if segment.processed_audio is not None:
++            waveform_length = len(np.asarray(segment.processed_audio).reshape(-1))
++            for index, timing in enumerate(segment.word_timings):
++                if not (
++                    0 <= timing.start_sample <= timing.end_sample <= waveform_length
++                ):
++                    raise ValueError(
++                        "word timing is not segment-local: "
++                        f"segment={segment.id!r} word_index={index} "
++                        f"range={timing.start_sample}:{timing.end_sample} "
++                        f"waveform_length={waveform_length}"
++                    )
++            result.extend(_translate_word_timings(segment.word_timings, cursor))
++            cursor += waveform_length
++        cursor += seconds_to_samples(segment.pause_after, sample_rate)
++    return result
++
+
+ def _join_timestamps(
+     tokens: list[object],
+diff --git a/pykokoro/audio_job.py b/pykokoro/audio_job.py
+index 62d4e8d..9b4cc74 100644
+--- a/pykokoro/audio_job.py
++++ b/pykokoro/audio_job.py
+@@ -19,6 +19,7 @@ from audiocompose import (
+
+ from .loudness_config import LoudnessConfig
+ from .types import BoundaryEvent, PhonemeSegment
++from .utils import seconds_to_samples
+
+
+ def _json_safe(value: Any) -> Any:
+@@ -32,7 +33,20 @@ def _json_safe(value: Any) -> Any:
+
+
+ def _quantized_seconds(seconds: float, sample_rate: int) -> float:
+-    return round(seconds * sample_rate) / sample_rate
++    return seconds_to_samples(seconds, sample_rate) / sample_rate
++def _validate_segment_word_timings(
++    segment: PhonemeSegment,
++    waveform_length: int,
++) -> None:
++    for index, timing in enumerate(segment.word_timings):
++        if not (0 <= timing.start_sample <= timing.end_sample <= waveform_length):
++            raise ValueError(
++                "word timing is not segment-local: "
++                f"segment={segment.id!r} word_index={index} text={timing.text!r} "
++                f"range={timing.start_sample}:{timing.end_sample} "
++                f"waveform_length={waveform_length}"
++            )
++
+
+
+ def _loudness_policy(config: LoudnessConfig | None) -> LoudnessPolicy:
+@@ -76,6 +90,7 @@ def rendered_segments_to_audio_job(
+             continue
+         waveform = np.asarray(audio, dtype=np.float32).reshape(-1)
+         anchors: list[AudioAnchor] = []
++        _validate_segment_word_timings(segment, len(waveform))
+         for index, boundary in enumerate(marker_events):
+             if index in used_markers:
+                 continue
+@@ -93,8 +108,8 @@ def rendered_segments_to_audio_job(
+             AudioSpan(
+                 source_start=timing.char_start,
+                 source_end=timing.char_end,
+-                sample_start=max(0, timing.start_sample),
+-                sample_end=max(0, timing.end_sample),
++                sample_start=timing.start_sample,
++                sample_end=timing.end_sample,
+                 id=f"word:{segment.id}:{index}",
+                 metadata={"text": timing.text, "segment_id": timing.segment_id},
+             )
+diff --git a/pykokoro/pipeline.py b/pykokoro/pipeline.py
+index 0b0b29c..d410fc0 100644
+--- a/pykokoro/pipeline.py
++++ b/pykokoro/pipeline.py
+@@ -17,6 +17,7 @@ from audiocompose import AudioJob
+ from typing_extensions import Self
+ from utterplan import UtterancePlan, UtterancePlanner
+
++from .audio_generator import _collect_unit_word_timings
+ from .audio_job import rendered_segments_to_audio_job, waveform_to_audio_job
+ from .composition import compose_audio_job
+ from .constants import SAMPLE_RATE
+@@ -1795,7 +1796,7 @@ class KokoroPipeline:
+                         **prepared.doc.metadata,
+                     }
+                 ),
+-                word_timings=[timing for segment in generated for timing in segment.word_timings],
++                word_timings=_collect_unit_word_timings(generated),
+             )
+             if not prepared.cfg.retain_segment_audio:
+                 result.release_segment_audio()
+diff --git a/pykokoro/utils.py b/pykokoro/utils.py
+index e9242c2..ebaa280 100644
+--- a/pykokoro/utils.py
++++ b/pykokoro/utils.py
+@@ -228,6 +228,10 @@ def format_chapters_range(indices: list[int], total_chapters: int) -> str:
+     return f"chapters_{min_chapter}-{max_chapter}"
+
+
++def seconds_to_samples(seconds: float, sample_rate: int) -> int:
++    """Convert seconds to samples using the pipeline's canonical rounding."""
++    return round(seconds * sample_rate)
++
+ def generate_silence(duration: float, sample_rate: int = 24000) -> Any:
+     """Generate silence array of specified duration.
+
+@@ -240,7 +244,7 @@ def generate_silence(duration: float, sample_rate: int = 24000) -> Any:
+     """
+     import numpy as np
+
+-    return np.zeros(int(duration * sample_rate), dtype=np.float32)
++    return np.zeros(seconds_to_samples(duration, sample_rate), dtype=np.float32)
+
+
+ def format_filename_template(
+diff --git a/tests/test_audio_job.py b/tests/test_audio_job.py
+index 2e62601..c647bca 100644
+--- a/tests/test_audio_job.py
++++ b/tests/test_audio_job.py
+@@ -3,6 +3,7 @@ from __future__ import annotations
+ import numpy as np
+ from audiocompose import AudioJob, Composer
+
++from pykokoro.audio_generator import _crop_word_timings, _scale_word_timings
+ from pykokoro.audio_job import rendered_segments_to_audio_job
+ from pykokoro.types import BoundaryEvent, PhonemeSegment, WordTiming
+
+@@ -34,6 +35,85 @@ def test_rendered_segments_create_quantized_pauses_markers_and_spans() -> None:
+     assert composed.markers[0].name == "start"
+     assert composed.spans[0].id == "word:seg-1:0"
+
++def test_multi_segment_spans_remain_clip_local_and_compose_globally() -> None:
++    first = PhonemeSegment(
++        id="a",
++        segment_id="a",
++        phoneme_id=0,
++        text="a",
++        phonemes="a",
++        tokens=[1],
++        processed_audio=np.zeros(100, dtype=np.float32),
++        pause_after=10 / 24000,
++        word_timings=[WordTiming("a", 0, 1, 10, 80, "a")],
++    )
++    second = PhonemeSegment(
++        id="b",
++        segment_id="b",
++        phoneme_id=0,
++        text="b",
++        phonemes="b",
++        tokens=[1],
++        processed_audio=np.zeros(120, dtype=np.float32),
++        word_timings=[WordTiming("b", 0, 1, 20, 100, "b")],
++    )
++
++    job = rendered_segments_to_audio_job([first, second])
++
++    first_clip = job.items[0]
++    second_clip = job.items[2]
++    assert first_clip.spans[0].sample_start == 10
++    assert first_clip.spans[0].sample_end == 80
++    assert second_clip.spans[0].sample_start == 20
++    assert second_clip.spans[0].sample_end == 100
++    composed = Composer().compose(job)
++    assert composed.spans[1].sample_start == 130
++    assert composed.spans[1].sample_end == 210
++
++
++def test_invalid_segment_word_timing_fails_before_composition() -> None:
++    segment = PhonemeSegment(
++        id="invalid",
++        segment_id="invalid",
++        phoneme_id=0,
++        text="bad",
++        phonemes="bad",
++        tokens=[1],
++        processed_audio=np.zeros(10, dtype=np.float32),
++        word_timings=[WordTiming("bad", 0, 3, 5, 11, "invalid")],
++    )
++
++    try:
++        rendered_segments_to_audio_job([segment])
++    except ValueError as exc:
++        assert "segment='invalid'" in str(exc)
++        assert "range=5:11" in str(exc)
++        assert "waveform_length=10" in str(exc)
++    else:
++        raise AssertionError("invalid local timing was accepted")
++
++def test_trim_and_prosody_timing_transforms_remain_composable() -> None:
++    cropped = _crop_word_timings(
++        [WordTiming("speech", 0, 6, 10, 90, "segment")],
++        5,
++        95,
++    )
++    scaled = _scale_word_timings(cropped, 90, 120)
++    segment = PhonemeSegment(
++        id="segment",
++        segment_id="segment",
++        phoneme_id=0,
++        text="speech",
++        phonemes="speech",
++        tokens=[1],
++        processed_audio=np.zeros(120, dtype=np.float32),
++        word_timings=scaled,
++    )
++
++    assert [(timing.start_sample, timing.end_sample) for timing in scaled] == [(7, 113)]
++    composed = Composer().compose(rendered_segments_to_audio_job([segment]))
++    assert composed.spans[0].sample_start == 7
++    assert composed.spans[0].sample_end == 113
+
+ def test_audio_job_metadata_is_json_safe() -> None:
+     segment = PhonemeSegment(
+diff --git a/tests/test_model_registry.py b/tests/test_model_registry.py
+index 898521b..8211ec0 100644
+--- a/tests/test_model_registry.py
++++ b/tests/test_model_registry.py
+@@ -381,14 +381,100 @@ def test_console_asset_progress_reports_lifecycle() -> None:
+     )
+     reporter(
+         AssetProgressEvent(
+-            phase="download-complete",
++            phase="verify-complete",
+             bytes_done=base["bytes_total"],
+             **base,
+         )
+     )
++    reporter(
++        AssetProgressEvent(
++            phase="install-complete",
++            bytes_done=base["bytes_total"],
++            artifact_id="",
++            filename="",
++            role="artifact",
++            distribution_id=base["distribution_id"],
++            model_id=base["model_id"],
++            bytes_total=None,
++            target="/cache/onnxvoice/kokoro/v1.0",
++        )
++    )
+
+     text = stream.getvalue()
+     assert "Downloading model:" in text
+     assert "13.0 MiB" in text
+     assert "Verifying model:" in text
+-    assert "Ready: model.onnx" in text
++    assert "Runtime assets ready:" in text
++    assert "/cache/onnxvoice/kokoro/v1.0" in text
++
++def test_console_asset_progress_reports_cache_unknown_size_and_install_state() -> None:
++    cached_stream = StringIO()
++    cached = ConsoleAssetProgress(cached_stream)
++    cached(
++        AssetProgressEvent(
++            phase="cache-hit",
++            model_id="v1.0",
++            distribution_id="github-v1",
++            artifact_id="voices",
++            role="voices",
++            filename="voices.npz",
++            bytes_done=0,
++            bytes_total=123,
++            target="/cache/voices.npz",
++        )
++    )
++    assert cached_stream.getvalue() == "Using cached voices: voices.npz\n"
++
++    unknown_stream = StringIO()
++    unknown = ConsoleAssetProgress(unknown_stream)
++    unknown(
++        AssetProgressEvent(
++            phase="download-start",
++            model_id="v1.0",
++            distribution_id="github-v1",
++            artifact_id="model",
++            role="model",
++            filename="model.onnx",
++            bytes_done=0,
++            bytes_total=None,
++            target="/cache/model.onnx",
++        )
++    )
++    unknown(
++        AssetProgressEvent(
++            phase="download-progress",
++            model_id="v1.0",
++            distribution_id="github-v1",
++            artifact_id="model",
++            role="model",
++            filename="model.onnx",
++            bytes_done=2 * 1024 * 1024,
++            bytes_total=None,
++            target="/cache/model.onnx",
++        )
++    )
++    unknown_text = unknown_stream.getvalue()
++    assert "model.onnx" in unknown_text
++    assert "size unknown" in unknown_text
++    assert "0 B" not in unknown_text
++
++    installed_stream = StringIO()
++    installed = ConsoleAssetProgress(installed_stream)
++    installed(
++        AssetProgressEvent(
++            phase="install-complete",
++            model_id="v1.0",
++            distribution_id="github-v1",
++            artifact_id="",
++            role="artifact",
++            filename="",
++            bytes_done=0,
++            bytes_total=None,
++            target="/cache/onnxvoice/kokoro/v1.0",
++            message="already installed",
++        )
++    )
++    installed_text = installed_stream.getvalue()
++    assert "Runtime assets already installed:" in installed_text
++    assert "/cache/onnxvoice/kokoro/v1.0" in installed_text
++    assert "Downloading" not in installed_text
+diff --git a/tests/test_onnxvoice_boundary.py b/tests/test_onnxvoice_boundary.py
+index ce4ba74..d7daf3c 100644
+--- a/tests/test_onnxvoice_boundary.py
++++ b/tests/test_onnxvoice_boundary.py
+@@ -146,7 +146,7 @@ def test_progress_and_diagnostics_are_trace_safe() -> None:
+             phase="download_progress",
+             ref="kokoro:v1.0",
+             distribution="cpu",
+-            artifact="model",
++            artifact="model.onnx",
+             role="model",
+             filename="model.onnx",
+             completed=3,
+@@ -159,8 +159,8 @@ def test_progress_and_diagnostics_are_trace_safe() -> None:
+         AssetProgressEvent(
+             phase="download-progress",
+             model_id="v1.0",
+-            distribution_id="cpu",
+-            artifact_id="model",
++            distribution_id="",
++            artifact_id="model.onnx",
+             role="model",
+             filename="model.onnx",
+             bytes_done=3,
+@@ -169,6 +169,38 @@ def test_progress_and_diagnostics_are_trace_safe() -> None:
+         )
+     ]
+
++
++def test_progress_maps_install_lifecycle_and_ignores_unknown_phases() -> None:
++    events: list[AssetProgressEvent] = []
++    callback = boundary.adapt_progress(events.append)
++    assert callback is not None
++
++    callback(SimpleNamespace(phase="install_started", ref="kokoro:v1.0"))
++    assert events == []
++
++    callback(
++        SimpleNamespace(
++            phase="install_completed",
++            ref="kokoro:v1.0",
++            target="/cache/onnxvoice/kokoro/v1.0",
++        )
++    )
++    assert events == [
++        AssetProgressEvent(
++            phase="install-complete",
++            model_id="v1.0",
++            distribution_id="",
++            artifact_id="",
++            role="artifact",
++            filename="",
++            bytes_done=0,
++            bytes_total=None,
++            target="/cache/onnxvoice/kokoro/v1.0",
++        )
++    ]
++
++    callback(SimpleNamespace(phase="future_phase", ref="kokoro:v1.0"))
++    assert len(events) == 1
+     diagnostic = SimpleNamespace(
+         system="kokoro",
+         ref="kokoro:v1.0",
+diff --git a/tests/test_pipeline_unit_streaming.py b/tests/test_pipeline_unit_streaming.py
+index 63d90f9..37eeff1 100644
+--- a/tests/test_pipeline_unit_streaming.py
++++ b/tests/test_pipeline_unit_streaming.py
+@@ -4,6 +4,7 @@ from dataclasses import replace
+
+ import numpy as np
+ import pytest
++from audiocompose import Composer
+ from audiosig import measure_loudness
+
+ from pykokoro import (
+@@ -21,7 +22,7 @@ from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
+ from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
+ from pykokoro.stages.doc_parsers.plain import PlainTextDocumentParser
+ from pykokoro.stages.protocols import DocumentResult
+-from pykokoro.types import BoundaryEvent, PhonemeSegment, Segment
++from pykokoro.types import BoundaryEvent, PhonemeSegment, Segment, WordTiming
+
+
+ class CountingG2P:
+@@ -48,6 +49,56 @@ class CountingG2P:
+             for segment in segments
+         ]
+
++class TwoSegmentG2P:
++    def phonemize(self, segments, doc, cfg, trace):
++        _ = doc, trace
++        source = segments[0]
++        return [
++            PhonemeSegment(
++                id=f"{source.id}-a",
++                segment_id=source.id,
++                phoneme_id=0,
++                text="first",
++                phonemes="a",
++                tokens=[],
++                lang=cfg.generation.lang,
++                char_start=source.char_start,
++                char_end=source.char_start + 5,
++                pause_after=10 / 24000,
++            ),
++            PhonemeSegment(
++                id=f"{source.id}-b",
++                segment_id=source.id,
++                phoneme_id=1,
++                text="second",
++                phonemes="a",
++                tokens=[],
++                lang=cfg.generation.lang,
++                char_start=source.char_start + 6,
++                char_end=source.char_end,
++            ),
++        ]
++
++
++class TimedGenerator:
++    def generate(self, phoneme_segments, cfg, trace):
++        _ = cfg, trace
++        for index, segment in enumerate(phoneme_segments):
++            length = 100 + index * 20
++            segment.raw_audio = np.ones(length, dtype=np.float32)
++            segment.word_timings = [
++                WordTiming(
++                    segment.text,
++                    segment.char_start,
++                    segment.char_end,
++                    10,
++                    length - 20,
++                    segment.id,
++                )
++            ]
++        return phoneme_segments
++
++
+
+ class CountingProcessor:
+     def __init__(self) -> None:
+@@ -166,6 +217,34 @@ def test_streamed_audio_matches_run_for_noop_stages() -> None:
+             result.release_audio()
+     np.testing.assert_array_equal(legacy.audio, np.concatenate(pieces))
+
++def test_pipeline_timing_contract_without_network() -> None:
++    pipeline = KokoroPipeline(
++        PipelineConfig(generation=GenerationConfig(lang="en-us")),
++        doc_parser=PlainTextDocumentParser(),
++        g2p=TwoSegmentG2P(),
++        phoneme_processing=CountingProcessor(),
++        audio_generation=TimedGenerator(),
++        audio_postprocessing=NoopAudioPostprocessingAdapter(),
++    )
++
++    job = pipeline.to_audio_job("First second")
++    _ = Composer().compose(job)
++    for item in job.items:
++        if not hasattr(item, "source") or not item.spans:
++            continue
++        waveform = item.source.load()[0]
++        for span in item.spans:
++            assert 0 <= span.sample_start <= span.sample_end <= len(waveform)
++
++    result = pipeline.run("First second")
++    for segment in result.phoneme_segments:
++        assert segment.processed_audio is not None
++        for timing in segment.word_timings:
++            assert 0 <= timing.start_sample <= timing.end_sample <= len(segment.processed_audio)
++
++    starts = [timing.start_sample for timing in result.word_timings]
++    assert starts == sorted(starts)
++
+
+ def test_skip_indices_do_not_generate_and_order_is_descriptor_order() -> None:
+     generator = CountingGenerator()
+diff --git a/tests/test_word_timings.py b/tests/test_word_timings.py
+index 89669a4..2d2c1f4 100644
+--- a/tests/test_word_timings.py
++++ b/tests/test_word_timings.py
+@@ -7,6 +7,7 @@ import numpy as np
+
+ from pykokoro.audio_generator import (
+     AudioGenerator,
++    _collect_unit_word_timings,
+     _crop_word_timings,
+     _join_timestamps,
+     _record_short_sentence_timing_alignment,
+@@ -54,6 +55,37 @@ def test_word_timing_seconds_and_sample_transform_helpers() -> None:
+     assert _scale_word_timings([timing], 20, 40)[0].end_sample == 40
+     assert _translate_word_timings([timing], 7)[0].start_sample == 17
+
++def test_collect_unit_word_timings_translates_copies_and_preserves_segments() -> None:
++    first = PhonemeSegment(
++        id="a",
++        segment_id="a",
++        phoneme_id=0,
++        text="A",
++        phonemes="a",
++        tokens=[1],
++        processed_audio=np.zeros(100, dtype=np.float32),
++        pause_after=1.0,
++        word_timings=[WordTiming("A", 0, 1, 10, 80, "a")],
++    )
++    second = PhonemeSegment(
++        id="b",
++        segment_id="b",
++        phoneme_id=0,
++        text="B",
++        phonemes="b",
++        tokens=[1],
++        processed_audio=np.zeros(120, dtype=np.float32),
++        word_timings=[WordTiming("B", 2, 3, 20, 100, "b")],
++    )
++    before_first = list(first.word_timings)
++    before_second = list(second.word_timings)
++
++    timings = _collect_unit_word_timings([first, second], sample_rate=10)
++
++    assert [(timing.start_sample, timing.end_sample) for timing in timings] == [(10, 80), (130, 210)]
++    assert first.word_timings == before_first
++    assert second.word_timings == before_second
++
+
+ def test_timestamp_output_is_selected_by_name() -> None:
+     generator = AudioGenerator(

@@ -113,6 +113,10 @@ def build_synthesis_identity(
         "espeak_configured": config.espeak_config is not None,
         "language_routing": config.language_routing,
         "allow_experimental_frontend": config.allow_experimental_frontend,
+        "long_text_split": config.long_text_split,
+        "long_text_use_spacy": (
+            config.long_text_use_spacy if config.long_text_split == "sentence" else None
+        ),
     }
     model_id = config.model_identity or ":".join(
         str(value) for value in (config.model_source, config.model_variant, config.model_quality)

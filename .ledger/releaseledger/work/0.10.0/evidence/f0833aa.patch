@@ -1,0 +1,454 @@
+ .github/workflows/tests.yml            |   2 +-
+ pykokoro/planning/utterplan_adapter.py |   8 +-
+ pykokoro/runtime/cache.py              |   4 +-
+ pykokoro/runtime/linguistics.py        |   2 +
+ pykokoro/stages/g2p/kokorog2p.py       |  12 +-
+ pyproject.toml                         |   2 +-
+ tests/test_cache_keys.py               |   7 +
+ tests/test_g2p_cache.py                |   4 +-
+ tests/test_packaging_metadata.py       |   4 +-
+ tests/test_utterplan_v2_annotations.py | 230 +++++++++++++++++++++++++++++++++
+ 10 files changed, 263 insertions(+), 12 deletions(-)
+
+diff --git a/.github/workflows/tests.yml b/.github/workflows/tests.yml
+index 55f9684..ba9bfb9 100644
+--- a/.github/workflows/tests.yml
++++ b/.github/workflows/tests.yml
+@@ -123,7 +123,7 @@ jobs:
+         python -m pip install \
+           "kokorog2p[all]==0.9.9" \
+           "lexphon==0.2.3" \
+-          "utterplan==0.1.2" \
++          "utterplan==0.1.4" \
+           "audiosig==0.1.4" \
+           platformdirs
+         python -m pip install -e .
+diff --git a/pykokoro/planning/utterplan_adapter.py b/pykokoro/planning/utterplan_adapter.py
+index cdee5f3..2a99021 100644
+--- a/pykokoro/planning/utterplan_adapter.py
++++ b/pykokoro/planning/utterplan_adapter.py
+@@ -6,7 +6,7 @@ from dataclasses import dataclass
+ from types import MappingProxyType
+ from typing import Any
+
+-from utterplan import UtterancePlan
++from utterplan import CURRENT_SCHEMA_VERSION, UtterancePlan
+
+ from ..exceptions import PlanConfigurationConflict, PlanConsumptionError
+ from ..stages.protocols import DocumentResult
+@@ -122,6 +122,7 @@ def _metadata(plan: UtterancePlan) -> dict[str, Any]:
+         "schema_version": plan.schema_version,
+     }
+     metadata["utterplan_tokens"] = tuple(plan.tokens)
++    metadata["utterplan_linguistic_runs"] = tuple(plan.linguistic_runs)
+     metadata["utterplan_units"] = tuple(plan.units)
+     metadata["utterplan_markers"] = tuple(plan.markers)
+     metadata["utterplan_annotations"] = tuple(plan.annotations)
+@@ -140,6 +141,11 @@ def adapt_plan(plan: UtterancePlan) -> RenderPlan:
+         raise PlanConsumptionError(
+             f"run_plan() requires utterplan.UtterancePlan, got {type(plan).__name__}"
+         )
++    if plan.schema_version != CURRENT_SCHEMA_VERSION:
++        raise PlanConsumptionError(
++            f"Unsupported UtterPlan schema version {plan.schema_version}; "
++            f"expected {CURRENT_SCHEMA_VERSION}"
++        )
+     try:
+         plan.validate()
+     except Exception as exc:
+diff --git a/pykokoro/runtime/cache.py b/pykokoro/runtime/cache.py
+index e64de8c..45f77ca 100644
+--- a/pykokoro/runtime/cache.py
++++ b/pykokoro/runtime/cache.py
+@@ -38,14 +38,14 @@ def annotation_fingerprint(annotations: Sequence[Any] | None) -> str:
+             values.append(
+                 tuple(
+                     item.get(key)
+-                    for key in ("start", "end", "text", "pos", "tag", "lemma", "language")
++                    for key in ("start", "end", "text", "pos", "tag", "lemma", "language", "morph")
+                 )
+             )
+         else:
+             values.append(
+                 tuple(
+                     getattr(item, key, None)
+-                    for key in ("start", "end", "text", "pos", "tag", "lemma", "language")
++                    for key in ("start", "end", "text", "pos", "tag", "lemma", "language", "morph")
+                 )
+             )
+     return make_cache_key(values)
+diff --git a/pykokoro/runtime/linguistics.py b/pykokoro/runtime/linguistics.py
+index 9da6ebb..6e27679 100644
+--- a/pykokoro/runtime/linguistics.py
++++ b/pykokoro/runtime/linguistics.py
+@@ -25,6 +25,7 @@ class TokenAnnotation:
+     tag: str | None = None
+     lemma: str | None = None
+     language: str | None = None
++    morph: str | None = None
+
+
+ @dataclass(slots=True)
+@@ -186,6 +187,7 @@ class LinguisticResourcePool:
+                 tag=getattr(token, "tag_", None) or None,
+                 lemma=getattr(token, "lemma_", None) or None,
+                 language=language,
++                morph=str(getattr(token, "morph", "")) or None,
+             )
+             for token in doc
+         )
+diff --git a/pykokoro/stages/g2p/kokorog2p.py b/pykokoro/stages/g2p/kokorog2p.py
+index 0db106b..0eac88b 100644
+--- a/pykokoro/stages/g2p/kokorog2p.py
++++ b/pykokoro/stages/g2p/kokorog2p.py
+@@ -114,10 +114,11 @@ class _G2PTokenAnnotation:
+     tag: str | None = None
+     lemma: str | None = None
+     language: str | None = None
++    morph: str | None = None
+
+
+ class KokoroG2PAdapter(G2PAdapter):
+-    _cache_schema = 11
++    _cache_schema = 12
+
+     def __init__(self) -> None:
+         self._g2p: ModuleType | None = None
+@@ -464,6 +465,7 @@ class KokoroG2PAdapter(G2PAdapter):
+                             tag=item.tag,
+                             lemma=item.lemma,
+                             language=item.language,
++                            morph=item.morph,
+                         )
+                     )
+             return plan_annotations
+@@ -494,6 +496,7 @@ class KokoroG2PAdapter(G2PAdapter):
+                         tag=item.tag,
+                         lemma=item.lemma,
+                         language=forwarded_language,
++                        morph=item.morph,
+                     )
+                 )
+             break
+@@ -528,8 +531,11 @@ class KokoroG2PAdapter(G2PAdapter):
+                 language_routing=language_routing,
+                 target_model=target_model,
+             )
+-        # Compatibility for test doubles and old installations; released PyKokoro
+-        # dependencies always provide the prepared entry point.
++        if annotations:
++            raise RuntimeError(
++                "kokorog2p does not support prepared token annotations required by Utterplan v2"
++            )
++        # Compatibility for test doubles and old installations with no annotations.
+         return g2p.phonemize(
+             text,
+             language=language,
+diff --git a/pyproject.toml b/pyproject.toml
+index f30e2e1..e5588d4 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -23,7 +23,7 @@ authors = [
+ keywords = ["tts", "text-to-speech", "kokoro", "phonemizer", "espeak"]
+ dependencies = [
+     "kokorog2p[espeak,en]>=0.9.9,<1.0",
+-    "utterplan>=0.1.2,<0.2",
++    "utterplan>=0.1.4,<0.2",
+     "lexphon>=0.2.3,<0.3",
+     "numpy",
+     "audiosig>=0.1.4,<0.2",
+diff --git a/tests/test_cache_keys.py b/tests/test_cache_keys.py
+index c2df9f6..987de46 100644
+--- a/tests/test_cache_keys.py
++++ b/tests/test_cache_keys.py
+@@ -96,3 +96,10 @@ def test_annotation_fingerprint_includes_language_and_pos() -> None:
+     assert annotation_fingerprint(base) == annotation_fingerprint(list(base))
+     assert annotation_fingerprint(base) != annotation_fingerprint(tagged)
+     assert annotation_fingerprint(base) != annotation_fingerprint(german)
++
++
++def test_annotation_fingerprint_includes_morph() -> None:
++    base = [{"start": 0, "end": 4, "text": "live", "pos": "VERB", "morph": "Tense=Pres"}]
++    changed = [{"start": 0, "end": 4, "text": "live", "pos": "VERB", "morph": "Tense=Past"}]
++
++    assert annotation_fingerprint(base) != annotation_fingerprint(changed)
+diff --git a/tests/test_g2p_cache.py b/tests/test_g2p_cache.py
+index f56dc2e..f72898a 100644
+--- a/tests/test_g2p_cache.py
++++ b/tests/test_g2p_cache.py
+@@ -90,7 +90,7 @@ def test_german_short_u_cleanup_retokenizes_uncached_and_cached_results(
+     cache_files = list(tmp_path.glob("*.json"))
+     assert len(cache_files) == 1
+     payload = DiskCache(tmp_path).get(cache_files[0].stem)
+-    assert payload["schema"] == 11
++    assert payload["schema"] == 12
+     assert payload["phonemes"] == "bykə"
+     assert payload["tokens"] == [ord(char) for char in "bykə"]
+
+@@ -164,7 +164,7 @@ def test_previous_g2p_cache_schema_is_recomputed_with_cleaned_payload(
+
+     assert calls["phonemize"] == 1
+     assert result[0].phonemes == "bykə"
+-    assert payload["schema"] == 11
++    assert payload["schema"] == 12
+     assert payload["phonemes"] == "bykə"
+     assert payload["tokens"] == [ord(char) for char in "bykə"]
+
+diff --git a/tests/test_packaging_metadata.py b/tests/test_packaging_metadata.py
+index 9f840bf..bf38e61 100644
+--- a/tests/test_packaging_metadata.py
++++ b/tests/test_packaging_metadata.py
+@@ -42,7 +42,7 @@ def test_companion_dependency_floors_match_current_integration_contract() -> Non
+     ]
+
+     assert "kokorog2p[espeak,en]>=0.9.9,<1.0" in dependencies
+-    assert "utterplan>=0.1.2,<0.2" in dependencies
++    assert "utterplan>=0.1.4,<0.2" in dependencies
+     assert "lexphon>=0.2.3,<0.3" in dependencies
+
+
+@@ -82,7 +82,7 @@ def test_planning_dependency_targets_current_contract() -> None:
+     dependencies = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+         "dependencies"
+     ]
+-    assert "utterplan>=0.1.2,<0.2" in dependencies
++    assert "utterplan>=0.1.4,<0.2" in dependencies
+     assert not any(requirement.startswith("phrasplit") for requirement in dependencies)
+     assert not any(requirement.startswith("ssmd") for requirement in dependencies)
+     assert not any(requirement.startswith("spokenform") for requirement in dependencies)
+diff --git a/tests/test_utterplan_v2_annotations.py b/tests/test_utterplan_v2_annotations.py
+new file mode 100644
+index 0000000..3f25da7
+--- /dev/null
++++ b/tests/test_utterplan_v2_annotations.py
+@@ -0,0 +1,230 @@
++from __future__ import annotations
++
++from dataclasses import replace
++from types import SimpleNamespace
++
++import pytest
++from utterplan import PlannerConfig, UtterancePlan, UtterancePlanner
++from utterplan.units import make_units
++
++from pykokoro.planning.utterplan_adapter import adapt_plan
++from pykokoro.runtime.language_plan import LanguageRun
++from pykokoro.runtime.linguistics import (
++    LinguisticRequestState,
++    PreparedRunAnalysis,
++    TokenAnnotation,
++)
++from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
++from pykokoro.stages.protocols import DocumentResult
++from pykokoro.types import Segment
++
++
++def _annotated_plan(text: str, annotations: dict[str, dict[str, str]]) -> UtterancePlan:
++    plan = UtterancePlanner(
++        PlannerConfig(language="en-us", text_preparation="identity", document_format="ssmd")
++    ).plan(text)
++    tokens = tuple(replace(token, **annotations.get(token.text, {})) for token in plan.tokens)
++    units = make_units(plan.segments, plan.markers, tokens, plan.units[0].kind)
++    return replace(plan, tokens=tokens, units=units).with_identity()
++
++def _target_segment(plan: UtterancePlan, text: str):
++    rendered = adapt_plan(plan)
++    segment = next(segment for segment in rendered.segments if segment.text == text)
++    return rendered, segment
++
++
++def test_plan_token_annotations_forward_with_local_offsets_and_provenance() -> None:
++    plan = _annotated_plan(
++        "Intro. I live here.",
++        {
++            "I": {"pos": "PRON", "tag": "PRP", "lemma": "I", "morph": "Case=Nom"},
++            "live": {"pos": "VERB", "tag": "VBP", "lemma": "live", "morph": "Tense=Pres"},
++            "here.": {"pos": "ADV", "tag": "RB", "lemma": "here", "morph": "PronType=Dem"},
++        },
++    )
++    rendered, segment = _target_segment(plan, "I live here.")
++
++    annotations = KokoroG2PAdapter._prepared_annotations(rendered.document, segment.to_segment())
++
++    assert rendered.document.metadata["utterplan_linguistic_runs"] == plan.linguistic_runs
++    assert [
++        (
++            item.start,
++            item.end,
++            item.text,
++            item.pos,
++            item.tag,
++            item.lemma,
++            item.language,
++            item.morph,
++        )
++        for item in annotations
++    ] == [
++        (0, 1, "I", "PRON", "PRP", "I", "en-us", "Case=Nom"),
++        (2, 6, "live", "VERB", "VBP", "live", "en-us", "Tense=Pres"),
++        (7, 12, "here.", "ADV", "RB", "here", "en-us", "PronType=Dem"),
++    ]
++
++
++class _GrammarAwareG2P:
++    def __init__(self) -> None:
++        self.annotations = ()
++
++    def phonemize_prepared(self, text: str, **kwargs: object) -> SimpleNamespace:
++        self.annotations = tuple(kwargs["annotations"] or ())
++        live = next(item for item in self.annotations if item.text == "live")
++        phonemes = "GRAMMAR_VERB" if live.pos == "VERB" else "GRAMMAR_ADJECTIVE"
++        return SimpleNamespace(phonemes=phonemes, ids=[1], tokens=[])
++
++
++def test_grammar_annotations_change_prepared_g2p_output() -> None:
++    cases = (
++        (
++            "I live here.",
++            {
++                "I": {"pos": "PRON", "tag": "PRP", "lemma": "I"},
++                "live": {"pos": "VERB", "tag": "VBP", "lemma": "live"},
++                "here.": {"pos": "ADV", "tag": "RB", "lemma": "here"},
++            },
++            "GRAMMAR_VERB",
++        ),
++        (
++            "a live show",
++            {
++                "a": {"pos": "DET", "tag": "DT", "lemma": "a"},
++                "live": {"pos": "ADJ", "tag": "JJ", "lemma": "live"},
++                "show": {"pos": "NOUN", "tag": "NN", "lemma": "show"},
++            },
++            "GRAMMAR_ADJECTIVE",
++        ),
++    )
++
++    outputs = []
++    for text, fields, expected in cases:
++        plan = _annotated_plan(text, fields)
++        rendered, segment = _target_segment(plan, text)
++        fake = _GrammarAwareG2P()
++        result = KokoroG2PAdapter._phonemize_prepared(
++            fake,
++            segment.text,
++            segment.language,
++            [],
++            KokoroG2PAdapter._prepared_annotations(rendered.document, segment.to_segment()),
++            object(),
++        )
++        outputs.append(result.phonemes)
++        assert result.phonemes == expected
++        assert next(item for item in fake.annotations if item.text == "live").pos == fields["live"]["pos"]
++
++    assert outputs == ["GRAMMAR_VERB", "GRAMMAR_ADJECTIVE"]
++
++
++def test_plan_round_trip_preserves_token_annotations(tmp_path) -> None:
++    plan = _annotated_plan(
++        "a live show",
++        {
++            "a": {"pos": "DET", "tag": "DT", "lemma": "a", "morph": "Definite=Ind"},
++            "live": {"pos": "ADJ", "tag": "JJ", "lemma": "live", "morph": "Degree=Pos"},
++            "show": {"pos": "NOUN", "tag": "NN", "lemma": "show", "morph": "Number=Sing"},
++        },
++    )
++    path = tmp_path / "annotated.utterplan.json"
++    plan.save(path)
++    loaded = UtterancePlan.load(path)
++
++    assert loaded.tokens == plan.tokens
++    rendered, segment = _target_segment(loaded, "a live show")
++    annotations = KokoroG2PAdapter._prepared_annotations(rendered.document, segment.to_segment())
++    assert [item.morph for item in annotations] == ["Definite=Ind", "Degree=Pos", "Number=Sing"]
++
++
++def test_plan_annotations_do_not_request_spacy(monkeypatch) -> None:
++    def fail(*args: object, **kwargs: object) -> object:
++        raise AssertionError("plan rendering requested spaCy")
++
++    monkeypatch.setattr(
++        "pykokoro.runtime.linguistics.LinguisticResourcePool.get_spacy_pipeline",
++        fail,
++    )
++    plan = _annotated_plan(
++        "a live show",
++        {
++            "a": {"pos": "DET"},
++            "live": {"pos": "ADJ"},
++            "show": {"pos": "NOUN"},
++        },
++    )
++    rendered, segment = _target_segment(plan, "a live show")
++
++    assert KokoroG2PAdapter._prepared_annotations(rendered.document, segment.to_segment())
++
++
++def test_invalid_plan_token_index_is_a_hard_error() -> None:
++    plan = _annotated_plan("a live show", {"live": {"pos": "ADJ"}})
++    rendered, segment = _target_segment(plan, "a live show")
++    segment_value = segment.to_segment()
++    segment_value = replace(
++        segment_value,
++        meta={**segment_value.meta, "plan_token_indices": (999,)},
++    )
++
++    with pytest.raises(ValueError, match="invalid token"):
++        KokoroG2PAdapter._prepared_annotations(rendered.document, segment_value)
++
++
++def test_linguistic_state_annotations_preserve_morph() -> None:
++    text = "live"
++    doc = DocumentResult(clean_text=text)
++    doc.linguistic_state = LinguisticRequestState(
++        prepared_analysis=[
++            PreparedRunAnalysis(
++                run=LanguageRun(0, len(text), "en-us"),
++                text=text,
++                doc=None,
++                annotations=(
++                    TokenAnnotation(
++                        start=0,
++                        end=len(text),
++                        text=text,
++                        pos="VERB",
++                        tag="VBP",
++                        lemma="live",
++                        language="en-us",
++                        morph="Tense=Pres",
++                    ),
++                ),
++            ),
++        ]
++    )
++    segment = Segment(
++        id="seg",
++        text=text,
++        char_start=0,
++        char_end=len(text),
++        paragraph_idx=0,
++        sentence_idx=0,
++        clause_idx=0,
++    )
++
++    annotations = KokoroG2PAdapter._prepared_annotations(doc, segment)
++
++    assert annotations[0].morph == "Tense=Pres"
++    assert annotations[0].pos == "VERB"
++    assert annotations[0].tag == "VBP"
++    assert annotations[0].lemma == "live"
++
++
++def test_missing_prepared_api_rejects_annotations_but_keeps_empty_fallback() -> None:
++    class LegacyG2P:
++        def phonemize(self, *args: object, **kwargs: object) -> str:
++            return "legacy"
++
++    with pytest.raises(RuntimeError, match="prepared token annotations"):
++        KokoroG2PAdapter._phonemize_prepared(
++            LegacyG2P(), "live", "en-us", [], [object()], object()
++        )
++
++    assert (
++        KokoroG2PAdapter._phonemize_prepared(LegacyG2P(), "live", "en-us", [], [], object())
++        == "legacy"
++    )

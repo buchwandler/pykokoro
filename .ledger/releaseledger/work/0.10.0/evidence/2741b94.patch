@@ -1,0 +1,124 @@
+ pykokoro/stages/g2p/kokorog2p.py      |  4 +--
+ tests/test_pipeline_unit_streaming.py |  4 ++-
+ tests/test_utterplan_integration.py   | 62 +++++++++++++++++++++++++++++++++++
+ 3 files changed, 67 insertions(+), 3 deletions(-)
+
+diff --git a/pykokoro/stages/g2p/kokorog2p.py b/pykokoro/stages/g2p/kokorog2p.py
+index 1920564..0db106b 100644
+--- a/pykokoro/stages/g2p/kokorog2p.py
++++ b/pykokoro/stages/g2p/kokorog2p.py
+@@ -209,6 +209,8 @@ class KokoroG2PAdapter(G2PAdapter):
+             ssmd_metadata: dict[str, str] = {}
+             if isinstance(plan_directives, dict):
+                 self._apply_span_metadata(plan_directives, ssmd_metadata)
++            for span in span_list:
++                self._apply_span_metadata(span.attrs, ssmd_metadata)
+             header_bindings = doc.header.get("voice_bindings", {})
+             if not isinstance(header_bindings, Mapping):
+                 header_bindings = {}
+@@ -223,8 +225,6 @@ class KokoroG2PAdapter(G2PAdapter):
+                 ssmd_metadata["voice_reference"] = resolution.reference
+                 ssmd_metadata["voice_name"] = resolution.target
+                 ssmd_metadata["voice_source"] = resolution.source
+-            for span in span_list:
+-                self._apply_span_metadata(span.attrs, ssmd_metadata)
+             if not isinstance(lang, str) or not lang:
+                 raise ValueError("A language is required for each G2P segment")
+
+diff --git a/tests/test_pipeline_unit_streaming.py b/tests/test_pipeline_unit_streaming.py
+index a06da54..51ea15b 100644
+--- a/tests/test_pipeline_unit_streaming.py
++++ b/tests/test_pipeline_unit_streaming.py
+@@ -197,9 +197,11 @@ def test_global_stages_run_once_and_generation_is_deferred() -> None:
+     with pipeline.prepare_units("One.\n\nTwo.") as prepared:
+         assert len(prepared.units) == 2
+         assert (g2p.calls, processor.calls, generator.calls) == (1, 1, 0)
+-        first = next(prepared.render())
++        iterator = prepared.render()
++        first = next(iterator)
+         assert generator.calls == 1
+         first.release_audio()
++        iterator.close()
+     assert generator.calls == 1
+
+
+diff --git a/tests/test_utterplan_integration.py b/tests/test_utterplan_integration.py
+index 5001fcf..e1413db 100644
+--- a/tests/test_utterplan_integration.py
++++ b/tests/test_utterplan_integration.py
+@@ -9,6 +9,7 @@ from pykokoro.exceptions import PlanConfigurationConflict, PlanConsumptionError
+ from pykokoro.generation_config import GenerationConfig
+ from pykokoro.pipeline import KokoroPipeline
+ from pykokoro.pipeline_config import PipelineConfig
++from pykokoro.ssmd_config import SSMDRenderConfig, resolve_document_voice
+ from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
+ from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
+ from pykokoro.stages.g2p.noop import NoopG2PAdapter
+@@ -26,6 +27,67 @@ def pipeline() -> KokoroPipeline:
+     )
+
+
++def test_run_plan_preserves_logical_voice_but_renders_resolved_api_voice() -> None:
++    plan = UtterancePlanner(
++        PlannerConfig(language="en-us", text_preparation="identity", document_format="ssmd")
++    ).plan('[Hello.]{voice="narrator"}')
++    pipeline = KokoroPipeline(
++        PipelineConfig(
++            voice="af_sarah",
++            generation=GenerationConfig(lang="en-us"),
++            ssmd=SSMDRenderConfig(
++                voice_bindings={"kokoro": {"narrator": "af_sarah"}}
++            ),
++        ),
++        phoneme_processing=NoopPhonemeProcessorAdapter(),
++        audio_generation=NoopAudioGenerationAdapter(),
++        audio_postprocessing=NoopAudioPostprocessingAdapter(),
++    )
++    try:
++        result = pipeline.run_plan(plan)
++    finally:
++        pipeline.close()
++
++    assert result.phoneme_segments
++    voiced_segments = [
++        segment
++        for segment in result.phoneme_segments
++        if segment.ssmd_metadata
++        and segment.ssmd_metadata.get("voice_reference") == "narrator"
++    ]
++    assert voiced_segments
++    assert {segment.ssmd_metadata["voice_reference"] for segment in voiced_segments} == {"narrator"}
++    assert {segment.ssmd_metadata["voice_source"] for segment in voiced_segments} == {"api"}
++    assert {segment.voice_name for segment in voiced_segments} == {"af_sarah"}
++
++
++@pytest.mark.parametrize(
++    ("reference", "api_bindings", "header_bindings", "target", "source"),
++    [
++        ("narrator", {"narrator": "af_sarah"}, {"narrator": "af_heart"}, "af_sarah", "api"),
++        ("host", {}, {"host": "af_bella"}, "af_bella", "header"),
++        ("af_sarah", {}, {}, "af_sarah", "direct"),
++    ],
++    ids=["api", "header", "direct"],
++)
++def test_resolve_document_voice_precedence(
++    reference: str,
++    api_bindings: dict[str, str],
++    header_bindings: dict[str, str],
++    target: str,
++    source: str,
++) -> None:
++    resolution = resolve_document_voice(
++        reference,
++        provider="kokoro",
++        api_bindings={"kokoro": api_bindings},
++        header_bindings={"kokoro": header_bindings},
++    )
++
++    assert resolution.reference == reference
++    assert resolution.target == target
++    assert resolution.source == source
++
+ def test_run_plan_does_not_mutate_plan(pipeline: KokoroPipeline) -> None:
+     plan = UtterancePlanner(PlannerConfig(language="en-us")).plan("Hello world.")
+     before = plan.to_json(indent=None)

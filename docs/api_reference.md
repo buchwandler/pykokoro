@@ -93,9 +93,18 @@ word timings are local to that result. `save_wav(path)` writes mono float32 WAV 
    :undoc-members:
 ```
 
-Each synthesis request is atomic. Capacity is checked after frontend tokenization;
-oversized input raises `SynthesisInputTooLongError`. `SynthesisConfig.long_text_split`
-is migration-only, accepts only `"none"`, and rejects legacy splitting modes.
+Each call returns one `RenderedSegment`, even when a single request is internally split.
+G2P tokenization is checked against the selected model capacity. With the default
+`long_text_split="none"`, oversized input raises `SynthesisInputTooLongError`. Set
+`long_text_split="sentence"` to enable lazy PhraseSplit-based splitting only for
+oversized requests. It packs source spans into model-safe chunks, falling back from
+sentences to clauses and then safe word boundaries when needed. Chunk audio is joined
+into the one request result, while request text and source-aligned context remain
+intact. A word that cannot fit safely still raises `SynthesisInputTooLongError`.
+
+`long_text_use_spacy=False` selects PhraseSplit's simple mode without spaCy. `None`
+permits a compatible local spaCy model with regex fallback; `True` requires spaCy and a
+compatible model. Separate synthesis requests still produce separate results.
 `RenderedSegment.synthesis_identity` and `voice_level_applications` expose resolved
 output identity and calibration outcomes. `GenerationConfig.speed` is the acoustic
 inference speed passed to Kokoro, not an application-level playback-rate effect.
