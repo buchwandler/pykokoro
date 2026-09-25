@@ -16,8 +16,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from pykokoro import GenerationConfig, PipelineConfig
 from pykokoro.pipeline import KokoroPipeline
+
+from pykokoro import GenerationConfig, PipelineConfig
 from pykokoro.short_sentence_handler import PhraseResolveMode, ShortSentenceConfig
 from pykokoro.tokenizer import TokenizerConfig
 

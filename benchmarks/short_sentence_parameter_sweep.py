@@ -10,9 +10,9 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from pykokoro.pipeline import KokoroPipeline
 
 from pykokoro import GenerationConfig, PipelineConfig
-from pykokoro.pipeline import KokoroPipeline
 from pykokoro.short_sentence_handler import PhraseResolveMode, ShortSentenceConfig
 
 try:
