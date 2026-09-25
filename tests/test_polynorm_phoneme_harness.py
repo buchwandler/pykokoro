@@ -4,37 +4,18 @@ import pytest
 
 pytest.importorskip("benchmarks.polynorm_eval")
 
-
 from benchmarks.polynorm_eval import PyKokoroPhonemeHarness
 
 
-@pytest.mark.parametrize(
-    ("original_text", "normalized_text"),
-    [
-        ("2", "two"),
-        ("42 kg", "forty two kilograms"),
-        ("Dr. Smith", "Doctor Smith"),
-        ("$5", "five dollars"),
-    ],
-)
-def test_plain_harness_matches_spokenform_equivalent_pairs(
-    original_text: str,
-    normalized_text: str,
-) -> None:
+def test_request_harness_phonemizes_plain_text_without_document_planning() -> None:
+    text = "Meet Dr. Smith at 5:30."
     with PyKokoroPhonemeHarness("en-us", "kokorog2p") as harness:
-        original = harness.phonemize(original_text)
-        normalized = harness.phonemize(normalized_text)
+        first = harness.phonemize(text)
+        second = harness.phonemize(text)
 
-    assert original.phonemes == normalized.phonemes
-    assert original.tokens == normalized.tokens
-    assert original.warnings == ()
-    assert normalized.warnings == ()
-
-
-def test_ssmd_harness_keeps_equivalent_output_without_onnx() -> None:
-    with PyKokoroPhonemeHarness("en-us", "kokorog2p", ssmd=True) as harness:
-        original = harness.phonemize("Meet Dr. Smith at 5:30.")
-        normalized = harness.phonemize("Meet Doctor Smith at five thirty.")
-
-    assert original.phonemes == normalized.phonemes
-    assert original.tokens == normalized.tokens
+    assert first.phonemes
+    assert first.tokens
+    assert first.segment_count == 1
+    assert first.phonemes == second.phonemes
+    assert first.tokens == second.tokens
+    assert first.warnings == second.warnings

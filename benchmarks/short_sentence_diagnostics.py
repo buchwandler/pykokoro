@@ -291,7 +291,6 @@ def format_header(
         "kokorog2p",
         "lexphon",
         "phrasplit",
-        "ssmd",
         "spokenform",
         "audiosig",
         "onnxruntime",
@@ -466,8 +465,9 @@ def _session_metadata(backend: Any) -> dict[str, object]:
 
 
 def _runtime(args: argparse.Namespace) -> tuple[Any, Any, Any, Any]:
-    from pykokoro import GenerationConfig, PipelineConfig
     from pykokoro.pipeline import KokoroPipeline
+
+    from pykokoro import GenerationConfig, PipelineConfig
     from pykokoro.short_sentence_handler import ShortSentenceConfig
 
     config = PipelineConfig(

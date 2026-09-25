@@ -6,6 +6,10 @@ class ConfigurationError(KokoroError):
     """Invalid or inconsistent configuration."""
 
 
+class SynthesisInputTooLongError(ValueError):
+    """Input exceeds model capacity while internal splitting is disabled."""
+
+
 class CapabilityError(KokoroError):
     """Requested engine feature is unsupported by a model or runtime profile."""
 

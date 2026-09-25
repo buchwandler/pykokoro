@@ -17,7 +17,6 @@ except ImportError:
 TEXT = (
     "The best way to predict the future is to create it. "
     "Technology is nothing without the imagination to use it wisely. "
-    '[tomato]{ipa="təˈmeɪtoʊ"} and [dictionary]{sampa="dIkS@n@ri"}. '
     "Every great innovation begins with a simple question: what if?"
 )
 VOICE = "af_heart"
@@ -25,7 +24,7 @@ LANG = "en-us"
 
 
 def main() -> None:
-    """Generate English speech from text, phonemes, and SSMD text."""
+    """Generate English speech from plain text and phoneme requests."""
     config = SynthesisConfig(
         voice=VOICE,
         generation=GenerationConfig(lang=LANG, speed=1.0),

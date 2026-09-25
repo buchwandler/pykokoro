@@ -28,7 +28,6 @@ CATEGORIES = (
     "punctuation_prosody",
     "questions_focus",
     "dirty_text",
-    "ssmd",
     "long_form",
 )
 _CASE_ID = re.compile(r"^[a-z][a-z0-9_]+$")

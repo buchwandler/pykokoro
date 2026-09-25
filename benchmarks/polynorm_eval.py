@@ -11,19 +11,14 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
-from utterplan import UtterancePlanner
-
 from pykokoro import __version__ as pykokoro_version
 from pykokoro.constants import SUPPORTED_LANGUAGES
 from pykokoro.generation_config import GenerationConfig
-from pykokoro.pipeline import KokoroPipeline
-from pykokoro.pipeline_config import PipelineConfig, resolve_model_defaults
-from pykokoro.planning import planner_config_from_pipeline
+from pykokoro.prepared_g2p import PreparedG2PAdapter
 from pykokoro.spacy_models import make_spacy_model_request
-from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
-from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
-from pykokoro.stages.phoneme_processing.noop import NoopPhonemeProcessorAdapter
-from pykokoro.tokenizer import TokenizerConfig, _legacy_fallback_kwargs
+from pykokoro.synthesis_config import SynthesisConfig, resolve_synthesis_config
+from pykokoro.synthesis_types import SynthesisSegment
+from pykokoro.tokenizer import TokenizerConfig, _fallback_kwargs
 
 from .polynorm_data import (
     POLYNORM_COMMIT,
@@ -98,63 +93,39 @@ class PyKokoroPhonemeHarness:
         language: str,
         backend: str,
         *,
-        ssmd: bool = False,
         tokenizer_config: TokenizerConfig | None = None,
     ) -> None:
         base_tokenizer = tokenizer_config or TokenizerConfig()
-        tokenizer = replace(base_tokenizer, backend=backend, use_spacy=False)
+        self.tokenizer_config = replace(base_tokenizer, backend=backend, use_spacy=False)
         self.language = language
         self.backend = backend
-        self.pipeline_name = "ssmd" if ssmd else "plain"
-        self.tokenizer_config = tokenizer
-        self.config = PipelineConfig(
+        self.pipeline_name = "plain"
+        config = SynthesisConfig(
             generation=GenerationConfig(lang=language),
-            tokenizer_config=tokenizer,
-            cache_dir=None,
+            tokenizer_config=self.tokenizer_config,
             return_trace=True,
         )
-        self.resolved_config = resolve_model_defaults(self.config)
-
-        base_planner_config = planner_config_from_pipeline(
-            self.resolved_config,
-            unit="paragraph",
-        )
-        self.planner_config = replace(
-            base_planner_config,
-            document_format="ssmd" if ssmd else "plain",
-        )
-        self.planner = UtterancePlanner(self.planner_config)
-        self.pipeline = KokoroPipeline(
-            self.config,
-            phoneme_processing=NoopPhonemeProcessorAdapter(),
-            audio_generation=NoopAudioGenerationAdapter(seconds_per_segment=0.0),
-            audio_postprocessing=NoopAudioPostprocessingAdapter(),
-        )
+        self.resolved_config = resolve_synthesis_config(config, language=language)
+        self.g2p = PreparedG2PAdapter()
 
     def phonemize(self, text: str) -> PhonemeObservation:
-        plan = self.planner.plan(text)
-        result = self.pipeline.run_plan(plan)
-        phonemes = " ".join(
-            segment.phonemes for segment in result.phoneme_segments if segment.phonemes
+        prepared = self.g2p.phonemize(
+            SynthesisSegment("polynorm", text, self.language), self.resolved_config
         )
-        phonemes = _collapse_whitespace(phonemes)
-        tokens = tuple(token for segment in result.phoneme_segments for token in segment.tokens)
-        warnings = tuple(result.trace.warnings) if result.trace is not None else ()
         return PhonemeObservation(
-            phonemes=phonemes,
-            tokens=tokens,
-            segment_count=len(result.phoneme_segments),
-            warnings=warnings,
+            phonemes=_collapse_whitespace(prepared.phonemes),
+            tokens=prepared.token_ids,
+            segment_count=1 if prepared.token_ids else 0,
+            warnings=prepared.diagnostics,
         )
 
     def close(self) -> None:
-        self.pipeline.close()
-        self.planner.close()
+        pass
 
     def __enter__(self) -> PyKokoroPhonemeHarness:
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
         self.close()
 
 
@@ -360,11 +331,12 @@ def collect_environment_fingerprint(
     pipelines: Sequence[str],
 ) -> dict[str, Any]:
     model_variants = {
-        locale: resolve_model_defaults(
-            PipelineConfig(
+        locale: resolve_synthesis_config(
+            SynthesisConfig(
                 generation=GenerationConfig(lang=language),
                 tokenizer_config=replace(tokenizer_config, backend=backend),
-            )
+            ),
+            language=language,
         ).model_variant
         for locale, language in POLYNORM_TO_PYKOKORO_LANGUAGE.items()
     }
@@ -385,8 +357,6 @@ def collect_environment_fingerprint(
         "backend": backend,
         "pipelines": list(pipelines),
         "use_spacy": tokenizer_config.use_spacy,
-        "load_gold": tokenizer_config.load_gold,
-        "load_silver": tokenizer_config.load_silver,
         "fallback": tokenizer_config.fallback,
         "model_variants": model_variants,
     }
@@ -441,13 +411,11 @@ def direct_kokorog2p_observer(
             language=kokorog2p_language,
             version=version,
             phoneme_quotes="curly",
-            **_legacy_fallback_kwargs(tokenizer_config.fallback),
+            **_fallback_kwargs(tokenizer_config.fallback),
             use_spacy=tokenizer_config.use_spacy,
             spacy_model=request.model,
             spacy_model_size=request.size,
             backend=tokenizer_config.backend,
-            load_gold=tokenizer_config.load_gold,
-            load_silver=tokenizer_config.load_silver,
         )
         result = kokorog2p.phonemize(
             text,

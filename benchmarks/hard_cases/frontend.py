@@ -1,26 +1,22 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import Any
 
-from utterplan import UtterancePlanner
-
 from pykokoro.generation_config import GenerationConfig
-from pykokoro.pipeline import KokoroPipeline
-from pykokoro.pipeline_config import PipelineConfig
-from pykokoro.planning import planner_config_from_pipeline
-from pykokoro.stages.audio_generation.noop import NoopAudioGenerationAdapter
-from pykokoro.stages.audio_postprocessing.noop import NoopAudioPostprocessingAdapter
-from pykokoro.stages.phoneme_processing.noop import NoopPhonemeProcessorAdapter
+from pykokoro.prepared_g2p import PreparedG2PAdapter
+from pykokoro.synthesis_config import SynthesisConfig, resolve_synthesis_config
+from pykokoro.synthesis_types import SynthesisSegment
 from pykokoro.tokenizer import TokenizerConfig
+from pykokoro.types import PhonemeSegment, Trace
 
-LANGUAGE_TO_G2P = {"en-US": "en-us", "en-GB": "en-gb", "de-DE": "de"}
+LANGUAGE_TO_G2P = {"en-US": "en-us", "en-GB": "en-gb", "de-DE": "de-de"}
 
 
 @dataclass(frozen=True, slots=True)
 class FrontendVariant:
-    """A named frontend configuration, independent of the acoustic model."""
+    """A named request-frontend configuration, independent of acoustic inference."""
 
     id: str = "default"
     language: str = "en-us"
@@ -29,6 +25,7 @@ class FrontendVariant:
     def tokenizer_config(self, backend: str = "kokorog2p") -> TokenizerConfig:
         options = dict(self.options)
         options.setdefault("backend", backend)
+        options["use_spacy"] = False
         return TokenizerConfig(**options)
 
 
@@ -37,25 +34,21 @@ class FrontendResult:
     text: str
     clean_text: str
     source_text: str | None
-    segments: tuple[Any, ...]
-    phoneme_segments: tuple[Any, ...]
-    trace: Any
+    segments: tuple[SynthesisSegment, ...]
+    phoneme_segments: tuple[PhonemeSegment, ...]
+    trace: Trace
     document_metadata: Mapping[str, Any]
-    audio: Any = None
-    sample_rate: int | None = None
 
 
 class NoOnnxFrontend:
-    """Reusable PyKokoro frontend whose downstream adapters never load ONNX."""
+    """Prepare one request through PyKokoro's public G2P adapter without loading ONNX."""
 
     def __init__(
         self,
         locale: str,
         *,
         backend: str = "kokorog2p",
-        ssmd: bool = False,
         variant: FrontendVariant | None = None,
-        pause_mode: str = "tts",
     ) -> None:
         if locale not in LANGUAGE_TO_G2P:
             raise ValueError(f"unsupported locale: {locale!r}")
@@ -63,44 +56,45 @@ class NoOnnxFrontend:
         selected = variant or FrontendVariant(language=language)
         if selected.language != language:
             raise ValueError("frontend variant language does not match locale")
-        tokenizer = selected.tokenizer_config(backend)
-        config = PipelineConfig(
-            generation=GenerationConfig(lang=language, pause_mode=pause_mode),
-            tokenizer_config=tokenizer,
-            return_trace=True,
-        )
         self.locale = locale
         self.variant = selected
-        planner_config = replace(
-            planner_config_from_pipeline(config, unit="paragraph"),
-            document_format="ssmd" if ssmd else "plain",
+        self.config = resolve_synthesis_config(
+            SynthesisConfig(
+                generation=GenerationConfig(lang=language),
+                tokenizer_config=selected.tokenizer_config(backend),
+                return_trace=True,
+            ),
+            language=language,
         )
-        self.planner = UtterancePlanner(planner_config)
-        self.pipeline = KokoroPipeline(
-            config,
-            phoneme_processing=NoopPhonemeProcessorAdapter(),
-            audio_generation=NoopAudioGenerationAdapter(seconds_per_segment=0.0),
-            audio_postprocessing=NoopAudioPostprocessingAdapter(),
-        )
+        self.g2p = PreparedG2PAdapter()
 
     def run(self, text: str) -> FrontendResult:
-        plan = self.planner.plan(text)
-        result = self.pipeline.run_plan(plan)
+        request = SynthesisSegment("hard-case", text, self.variant.language)
+        prepared = self.g2p.phonemize(request, self.config)
+        phoneme_segment = PhonemeSegment(
+            id=f"{request.id}:phoneme:0",
+            segment_id=request.id,
+            phoneme_id=0,
+            text=text,
+            phonemes=prepared.phonemes,
+            tokens=list(prepared.token_ids),
+            lang=request.language,
+            char_start=0,
+            char_end=len(text),
+            alignment_tokens=list(prepared.alignment_tokens),
+        )
         return FrontendResult(
             text=text,
-            clean_text=result.clean_text,
-            source_text=result.source_text,
-            segments=tuple(result.segments),
-            phoneme_segments=tuple(result.phoneme_segments),
-            trace=result.trace,
-            document_metadata=result.document_metadata,
-            audio=result.audio,
-            sample_rate=result.sample_rate,
+            clean_text=text,
+            source_text=text,
+            segments=(request,),
+            phoneme_segments=(phoneme_segment,),
+            trace=Trace(warnings=list(prepared.diagnostics)),
+            document_metadata={},
         )
 
     def close(self) -> None:
-        self.pipeline.close()
-        self.planner.close()
+        pass
 
     def __enter__(self) -> NoOnnxFrontend:
         return self

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from .exceptions import SynthesisInputTooLongError
 from .generation_config import GenerationConfig
 from .language_routing import LanguageRoutingConfig
 from .short_sentence_handler import ShortSentenceConfig
-from .synthesis_config import SynthesisConfig
+from .synthesis_config import LongTextSplitMode, SynthesisConfig
 from .synthesis_types import (
     LinguisticToken,
     PronunciationOverride,
@@ -87,6 +88,8 @@ __all__ = [
     "GenerationConfig",
     "LanguageRoutingConfig",
     "SynthesisConfig",
+    "LongTextSplitMode",
+    "SynthesisInputTooLongError",
     "VoiceLevelConfig",
     "VoiceBlend",
     "SynthesisSegment",

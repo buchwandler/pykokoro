@@ -13,7 +13,6 @@ from .metrics import summarize
 from .phonemes import evaluate_case
 from .reports import environment_fingerprint, write_reports
 from .schema import CATEGORIES, HardCaseError
-from .segmentation import evaluate_plan
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -29,10 +28,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=int)
     parser.add_argument(
         "--level",
-        choices=("normalization", "phoneme", "plan", "frontend", "acoustic", "all"),
+        choices=("normalization", "phoneme", "frontend", "acoustic", "all"),
         default="frontend",
     )
-    parser.add_argument("--ssmd", action="store_true")
     parser.add_argument("--backend", default="kokorog2p")
     parser.add_argument("--frontend-variant", default="default")
     parser.add_argument("--lexicon", help="Comma-separated named frontend lexicons")
@@ -75,7 +73,7 @@ def main(argv: list[str] | None = None) -> int:
             cases = cases[: args.limit]
         if not cases:
             raise HardCaseError("no hard-cases matched the requested filters")
-        options = {"load_gold": True, "load_silver": True, "fallback": "espeak"}
+        options = {"fallback": "espeak"}
         if args.lexicon:
             options["lexicons"] = tuple(
                 item.strip() for item in args.lexicon.split(",") if item.strip()
@@ -83,27 +81,44 @@ def main(argv: list[str] | None = None) -> int:
         variant = FrontendVariant(
             id=args.frontend_variant, language=_runtime_language(locale), options=options
         )
-        levels = (
-            ("normalization", "phoneme", "plan", "acoustic")
-            if args.level == "all"
-            else (args.level,)
-        )
+        levels = ("normalization", "phoneme", "acoustic") if args.level == "all" else (args.level,)
         results = []
-        plans = []
         acoustics = []
-        with NoOnnxFrontend(
-            locale, backend=args.backend, ssmd=args.ssmd, variant=variant
-        ) as frontend:
-            for case in cases:
-                if "normalization" in levels or "phoneme" in levels or "frontend" in levels:
+        if "normalization" in levels or "phoneme" in levels or "frontend" in levels:
+            with NoOnnxFrontend(locale, backend=args.backend, variant=variant) as frontend:
+                for case in cases:
                     results.append(evaluate_case(case, frontend, level=args.level))
-                if "plan" in levels:
-                    plans.append(evaluate_plan(case, frontend))
-                if "acoustic" in levels:
-                    output = None
-                    if args.render_audio:
-                        output = _audio_path(args.results_dir, case.id)
-                    acoustics.append((case, run_acoustic(frontend, case.text, render_audio=output)))
+        if "acoustic" in levels:
+            from pykokoro import KokoroSynthesizer
+            from pykokoro.generation_config import GenerationConfig
+            from pykokoro.synthesis_config import SynthesisConfig
+
+            config = SynthesisConfig(
+                voice=args.voice,
+                generation=GenerationConfig(lang=variant.language),
+                tokenizer_config=variant.tokenizer_config(args.backend),
+            )
+            with KokoroSynthesizer(config) as synthesizer:
+
+                class RequestFrontend:
+                    def run(self, text: str):
+                        return synthesizer.synthesize_text(
+                            text, language=variant.language, voice=args.voice
+                        )
+
+                for case in cases:
+                    output = _audio_path(args.results_dir, case.id) if args.render_audio else None
+                    acoustics.append(
+                        (
+                            case,
+                            run_acoustic(
+                                RequestFrontend(),
+                                case.text,
+                                constraints=case.expect.acoustic_constraints,
+                                render_audio=output,
+                            ),
+                        )
+                    )
         environment = environment_fingerprint(
             {
                 "language": language,
@@ -117,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
         paths = write_reports(
             args.results_dir or _default_results_dir(), results, environment=environment
         )
-        _print_summary(results, plans, acoustics, paths, args.show_details)
+        _print_summary(results, acoustics, paths, args.show_details)
         if args.write_baseline:
             baseline = make_baseline(
                 summarize(results, environment=environment),
@@ -173,12 +188,11 @@ def _audio_path(results_dir: str | None, case_id: str) -> Path:
 
 def _print_summary(
     results: list[object],
-    plans: list[object],
     acoustics: list[object],
     paths: dict[str, Path],
     details: bool,
 ) -> None:
-    print(f"Evaluated {len(results) or len(plans) or len(acoustics)} case(s).")
+    print(f"Evaluated {len(results) or len(acoustics)} case(s).")
     if results:
         summary = summarize(results)
         print(f"Frontend failures: {summary['counts']['cases_failed']}")
@@ -187,8 +201,6 @@ def _print_summary(
                 print(
                     f"{item.case_id}: {'PASS' if not item.failed else 'FAIL'} owner={item.likely_owner}"
                 )
-    if plans:
-        print(f"Plan failures: {sum(not item.passed for item in plans)}")
     if acoustics:
         print(f"Acoustic health failures: {sum(not item.passed for _, item in acoustics)}")
     print(f"Summary: {paths['summary']}")

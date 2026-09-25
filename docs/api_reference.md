@@ -57,6 +57,10 @@ word timings are local to that result. `save_wav(path)` writes mono float32 WAV 
    :members:
    :undoc-members:
 
+.. autoclass:: pykokoro.exceptions.SynthesisInputTooLongError
+   :members:
+   :undoc-members:
+
 .. autoclass:: pykokoro.generation_config.GenerationConfig
    :members:
    :undoc-members:
@@ -74,6 +78,9 @@ word timings are local to that result. `save_wav(path)` writes mono float32 WAV 
    :undoc-members:
 ```
 
+`SynthesisConfig.long_text_split` defaults to sentence-aware chunking for oversized
+prepared-text requests. Its other modes, `"token"` and `"none"`, are described in the
+[long-text usage guide](basic_usage.md#long-text-model-chunking).
 `GenerationConfig.speed` is the acoustic inference speed passed to Kokoro, not an
 application-level playback-rate effect. `SynthesisConfig.voice_level` is engine-local
 voice calibration rather than whole-output mastering.

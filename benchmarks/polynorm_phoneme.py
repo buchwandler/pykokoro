@@ -35,7 +35,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--case", dest="case_id")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--backend", default="kokorog2p")
-    parser.add_argument("--pipeline", choices=("plain", "ssmd", "both"), default="plain")
     parser.add_argument(
         "--baseline",
         default="benchmarks/baselines/polynorm_phoneme.json",
@@ -76,12 +75,10 @@ def main(argv: list[str] | None = None) -> int:
         print("error: no PolyNorm cases matched the requested filters", file=sys.stderr)
         return 2
 
-    pipelines = ("plain", "ssmd") if args.pipeline == "both" else (args.pipeline,)
+    pipelines = ("plain",)
     tokenizer_config = TokenizerConfig(
         backend=args.backend,
         use_spacy=False,
-        load_gold=True,
-        load_silver=True,
         fallback="espeak",
     )
     environment = collect_environment_fingerprint(
@@ -117,7 +114,6 @@ def main(argv: list[str] | None = None) -> int:
                     harness = PyKokoroPhonemeHarness(
                         language,
                         args.backend,
-                        ssmd=pipeline == "ssmd",
                         tokenizer_config=tokenizer_config,
                     )
                     harnesses[key] = harness

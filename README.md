@@ -74,6 +74,12 @@ timing reconstruction, waveform validation, tracing, and optional voice-level
 calibration. `discover_models()` and `discover_lexicons()` inspect supported runtime
 capabilities and lexicon metadata without loading a synthesis session.
 
+Oversized prepared-text requests use sentence-aware model chunking by default. Set
+`SynthesisConfig.long_text_split` to `"token"` for token-boundary chunking without
+PhraseSplit, or `"none"` to reject requests that exceed the model token limit. These
+chunks are internal to one request and do not introduce document parsing or planning.
+See [basic usage](docs/basic_usage.md#long-text-model-chunking) for details.
+
 ## Installation
 
 Python 3.10 or newer is required. Choose one ONNX Runtime provider extra per

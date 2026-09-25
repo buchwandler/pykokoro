@@ -18,7 +18,6 @@ from .schema import (
     Provenance,
     SegmentExpectation,
 )
-from .segmentation import PlanEvaluation, SegmentPlan, evaluate_plan
 
 __all__ = [
     "AcousticConstraints",
@@ -34,19 +33,16 @@ __all__ = [
     "NoOnnxFrontend",
     "PauseExpectation",
     "PhonemeObservation",
-    "PlanEvaluation",
     "Provenance",
     "PyKokoroFrontend",
     "SCHEMA_VERSION",
     "SegmentExpectation",
-    "SegmentPlan",
     "SUPPORTED_LANGUAGES",
     "SUPPORTED_LOCALES",
     "available_languages",
     "available_locales",
     "case_counts",
     "evaluate_case",
-    "evaluate_plan",
     "load_all_cases",
     "load_cases",
     "semantic_phoneme_key",

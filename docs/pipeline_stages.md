@@ -37,11 +37,23 @@ token IDs, speed, and a seed when supported to OnnxVoice.
 
 ## Inference and internal chunking
 
-PyKokoro may split a long request into token-limit chunks or make additional calls for
-its short-sentence strategy. Such chunks belong to the same public request and are
-stitched into that request's one result. Chunk timings are rebased to the stitched
-request-local waveform. No cross-request silence, markers, embedded clips, or
+For an oversized prepared-text request, `SynthesisConfig.long_text_split` selects
+model-input chunking:
+
+- `"sentence"` (default) lazily uses PhraseSplit's regex backend with `use_spacy=False`.
+  It packs complete sentences within the model token budget and falls back to token-safe
+  splitting when a sentence is too large.
+- `"token"` uses token-safe splitting without PhraseSplit.
+- `"none"` rejects an oversized request with `SynthesisInputTooLongError`.
+
+The model token limit remains authoritative. This is acoustic inference chunking, not
+document parsing or a public sentence plan. All internal chunks belong to the same
+public request and are stitched into one `RenderedSegment`. Chunk timings are rebased to
+that request-local waveform. No cross-request silence, markers, embedded clips, or
 caller-visible timeline data is added.
+
+Separately configured short-sentence handling may also issue extra inference calls; it
+does not change the long-text splitting policy.
 
 ## Result
 

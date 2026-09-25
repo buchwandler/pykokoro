@@ -3,31 +3,31 @@ import spokenform
 
 GERMAN_GOLDEN_CASES = {
     "14.05.2026": (
-        "vierzehnte Mai zweitausendsechsundzwanzig",
+        "Vierzehnte Mai zweitausendsechsundzwanzig",
         "fˈiːɾʦeːntə mˈI ʦvItWzɛnʣeːksʊndʦvanʦɪç",
     ),
     "18:20 Uhr": (
-        "achtzehn Uhr zwanzig",
+        "Achtzehn Uhr zwanzig",
         "ˈaxʦeːn ˈuːɾ ʦvˈanʦɪç",
     ),
     "1,5 kg": (
-        "eins Komma fünf Kilogramm",
+        "Eins Komma fünf Kilogramm",
         "ˈIns kˈɔmɑː fˈynf kˌiːlɔɡɾˈam",
     ),
     "500 g": (
-        "fünfhundert Gramm",
+        "Fünfhundert Gramm",
         "fˈynfhʊndɜt ɡɾˈam",
     ),
     "1 ltr.": (
-        "ein Liter.",
+        "Ein Liter.",
         "ˈIn lˈiːtɜ.",
     ),
     "45 Min.": (
-        "fünfundvierzig Minuten.",
+        "Fünfundvierzig Minuten.",
         "fˈynfʊndvˌiːɾʦɪç miːnˈuːtən.",
     ),
     "12,80 EUR": (
-        "zwölf Euro achtzig Cent",
+        "Zwölf Euro achtzig Cent",
         "ʦvˈœlf ˈɔøroː ˈaxʦɪç sˈɛnt",
     ),
     "Prof.": ("Professor", "pɾoːfˈɛsoːɾ"),

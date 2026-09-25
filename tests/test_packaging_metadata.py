@@ -86,8 +86,10 @@ def test_removed_document_dependencies_are_not_declared() -> None:
     }
 
     assert not names.intersection(
-        {"utterplan", "audiocompose", "ssmd", "phrasplit", "chardet", "charset-normalizer"}
+        {"utterplan", "audiocompose", "ssmd", "chardet", "charset-normalizer"}
     )
+    assert "phrasplit>=0.3.9,<0.4" in dependencies
+    assert not any(requirement.startswith("phrasplit[nlp]") for requirement in dependencies)
 
 
 def test_audiosig_is_the_only_declared_dsp_backend() -> None:
@@ -186,6 +188,7 @@ def test_lower_bound_workflow_pins_match_project_floors() -> None:
         "kokorog2p",
         "lexphon",
         "audiosig",
+        "phrasplit",
     }
 
     assert {package: pins[package] for package in expected_packages} == {

@@ -9,6 +9,7 @@ from typing import Any, Protocol, cast
 
 import numpy as np
 
+from .exceptions import SynthesisInputTooLongError
 from .model_profiles import get_model_profile
 from .prepared_g2p import PreparedSynthesis
 from .synthesis_config import SynthesisConfig, resolve_synthesis_config
@@ -84,11 +85,11 @@ class OnnxRequestRenderer:
         if voice is None:
             raise ValueError("A voice must resolve before ONNX rendering")
 
+        phoneme_segments = self._build_phoneme_segments(
+            request, prepared, resolved, profile.max_tokens, trace
+        )
         backend = self._get_backend(resolved)
         voice_style = backend.resolve_voice_style(voice)
-        phoneme_segments = self._build_phoneme_segments(
-            request, prepared, resolved, profile.max_tokens
-        )
 
         def context_phonemizer(text: str, language: str) -> Any:
             return self._g2p_adapter.phonemize_context(text, language, resolved)
@@ -219,28 +220,81 @@ class OnnxRequestRenderer:
         prepared: PreparedSynthesis,
         config: SynthesisConfig,
         max_tokens: int,
+        trace: Trace | None = None,
     ) -> list[PhonemeSegment]:
         token_ids = list(prepared.token_ids)
         if not token_ids:
             return []
+
+        if trace is not None:
+            trace.model.update(
+                {
+                    "long_text_split_mode": config.long_text_split,
+                    "model_token_count": len(token_ids),
+                    "model_max_tokens": max_tokens,
+                }
+            )
+
+        fallback_reason: str | None = None
+        sentence_count = 0
+        oversized_sentence = False
         if len(token_ids) <= max_tokens:
             groups = [(token_ids, list(prepared.alignment_tokens), prepared.phonemes)]
-        else:
-            aligned_groups = self._split_at_alignment_boundaries(
-                token_ids, prepared.alignment_tokens, max_tokens
+        elif config.long_text_split == "none":
+            raise SynthesisInputTooLongError(
+                f"request {request.id!r} contains {len(token_ids)} model tokens, "
+                f"model maximum is {max_tokens}, and long_text_split='none'; split the request "
+                "externally or use long_text_split='sentence'/'token'"
             )
-            if aligned_groups is None:
-                id_chunks = [
-                    token_ids[index : index + max_tokens]
-                    for index in range(0, len(token_ids), max_tokens)
-                ]
+        elif config.long_text_split == "token":
+            safe_groups, fallback_reason = self._model_safe_groups(
+                token_ids, prepared.alignment_tokens, config, max_tokens
+            )
+            groups = [
+                (
+                    chunk_ids,
+                    alignment,
+                    self._g2p_adapter.ids_to_phonemes(chunk_ids, self._target_model(config)),
+                )
+                for chunk_ids, alignment in safe_groups
+            ]
+        elif request.phonemes is not None:
+            fallback_reason = "direct-phoneme-input"
+            safe_groups, alignment_fallback = self._model_safe_groups(
+                token_ids, prepared.alignment_tokens, config, max_tokens
+            )
+            fallback_reason = fallback_reason or alignment_fallback
+            groups = [
+                (
+                    chunk_ids,
+                    alignment,
+                    self._g2p_adapter.ids_to_phonemes(chunk_ids, self._target_model(config)),
+                )
+                for chunk_ids, alignment in safe_groups
+            ]
+        else:
+            sentence_groups, sentence_count, sentence_reason, oversized_sentence = (
+                self._split_at_sentence_boundaries(
+                    text=request.text,
+                    language=request.language,
+                    token_ids=token_ids,
+                    alignments=prepared.alignment_tokens,
+                    max_tokens=max_tokens,
+                )
+            )
+            if sentence_groups is None:
+                fallback_reason = sentence_reason or "sentence-mapping-unavailable"
+                safe_groups, alignment_fallback = self._model_safe_groups(
+                    token_ids, prepared.alignment_tokens, config, max_tokens
+                )
+                fallback_reason = fallback_reason or alignment_fallback
                 groups = [
                     (
-                        chunk,
-                        [],
-                        self._g2p_adapter.ids_to_phonemes(chunk, self._target_model(config)),
+                        chunk_ids,
+                        alignment,
+                        self._g2p_adapter.ids_to_phonemes(chunk_ids, self._target_model(config)),
                     )
-                    for chunk in id_chunks
+                    for chunk_ids, alignment in safe_groups
                 ]
             else:
                 groups = [
@@ -249,8 +303,27 @@ class OnnxRequestRenderer:
                         alignment,
                         self._g2p_adapter.ids_to_phonemes(chunk_ids, self._target_model(config)),
                     )
-                    for chunk_ids, alignment in aligned_groups
+                    for chunk_ids, alignment in sentence_groups
                 ]
+                if oversized_sentence:
+                    fallback_reason = "oversized-sentence"
+
+        if trace is not None:
+            trace.model.update(
+                {
+                    "sentence_count": sentence_count,
+                    "acoustic_chunk_count": len(groups),
+                    "fallback_used": fallback_reason is not None,
+                }
+            )
+            if fallback_reason is not None:
+                trace.model["fallback_reason"] = fallback_reason
+                trace.warnings.append(f"long_text.fallback reason={fallback_reason}")
+            if config.long_text_split == "sentence" and len(token_ids) > max_tokens:
+                trace.warnings.append(
+                    f"long_text.split mode=sentence sentences={sentence_count} "
+                    f"chunks={len(groups)} max_tokens={max_tokens}"
+                )
 
         voice = config.voice
         voice_name = voice if isinstance(voice, str) else None
@@ -260,7 +333,9 @@ class OnnxRequestRenderer:
                 (item.char_start, item.char_end)
                 for item in alignment
                 if isinstance(item.char_start, int)
+                and not isinstance(item.char_start, bool)
                 and isinstance(item.char_end, int)
+                and not isinstance(item.char_end, bool)
                 and 0 <= item.char_start <= item.char_end <= len(request.text)
             ]
             if char_offsets:
@@ -287,6 +362,162 @@ class OnnxRequestRenderer:
                 )
             )
         return result
+
+    def _model_safe_groups(
+        self,
+        token_ids: list[int],
+        alignments: Sequence[G2PAlignmentToken],
+        config: SynthesisConfig,
+        max_tokens: int,
+    ) -> tuple[list[tuple[list[int], list[G2PAlignmentToken]]], str | None]:
+        aligned_groups = self._split_at_alignment_boundaries(token_ids, alignments, max_tokens)
+        if aligned_groups is not None:
+            return aligned_groups, None
+
+        id_chunks = [
+            token_ids[index : index + max_tokens] for index in range(0, len(token_ids), max_tokens)
+        ]
+        return [(chunk, []) for chunk in id_chunks], "invalid-g2p-alignment"
+
+    @staticmethod
+    def _split_at_sentence_boundaries(
+        *,
+        text: str,
+        language: str,
+        token_ids: list[int],
+        alignments: Sequence[G2PAlignmentToken],
+        max_tokens: int,
+    ) -> tuple[list[tuple[list[int], list[G2PAlignmentToken]]] | None, int, str | None, bool]:
+        counts = [token.model_span_token_count for token in alignments]
+        if not counts or any(
+            not isinstance(count, int) or isinstance(count, bool) or count < 0 for count in counts
+        ):
+            return None, 0, "invalid-g2p-alignment", False
+        count_values = [cast(int, count) for count in counts]
+        if sum(count_values) != len(token_ids):
+            return None, 0, "invalid-g2p-alignment", False
+
+        from phrasplit import split_with_offsets
+
+        sentences = split_with_offsets(
+            text,
+            mode="sentence",
+            use_spacy=False,
+            language=language,
+        )
+        if not sentences:
+            return None, 0, "no-sentence-ranges", False
+
+        sentence_ranges: list[tuple[int, int]] = []
+        previous_end = 0
+        for sentence in sentences:
+            start = sentence.char_start
+            end = sentence.char_end
+            if (
+                not isinstance(start, int)
+                or isinstance(start, bool)
+                or not isinstance(end, int)
+                or isinstance(end, bool)
+                or not 0 <= start < end <= len(text)
+                or start < previous_end
+                or text[start:end] != sentence.text
+            ):
+                return None, len(sentences), "invalid-sentence-offsets", False
+            sentence_ranges.append((start, end))
+            previous_end = end
+
+        sentence_alignments: list[list[G2PAlignmentToken]] = [[] for _ in sentence_ranges]
+        sentence_token_ids: list[list[int]] = [[] for _ in sentence_ranges]
+        previous_sentence = 0
+        token_offset = 0
+        for alignment, count in zip(alignments, count_values, strict=True):
+            start = alignment.char_start
+            end = alignment.char_end
+            if (
+                not isinstance(start, int)
+                or isinstance(start, bool)
+                or not isinstance(end, int)
+                or isinstance(end, bool)
+                or not 0 <= start <= end <= len(text)
+            ):
+                return None, len(sentences), "invalid-g2p-alignment-offsets", False
+
+            overlaps = [
+                index
+                for index, (sentence_start, sentence_end) in enumerate(sentence_ranges)
+                if max(start, sentence_start) < min(end, sentence_end)
+            ]
+            if len(overlaps) > 1:
+                return None, len(sentences), "alignment-spans-sentences", False
+            if overlaps:
+                sentence_index = overlaps[0]
+            else:
+                preceding = [
+                    index
+                    for index, (_, sentence_end) in enumerate(sentence_ranges)
+                    if sentence_end <= start
+                ]
+                if preceding:
+                    sentence_index = preceding[-1]
+                else:
+                    following = [
+                        index
+                        for index, (sentence_start, _) in enumerate(sentence_ranges)
+                        if sentence_start >= end
+                    ]
+                    sentence_index = following[0] if following else len(sentences) - 1
+
+            if sentence_index < previous_sentence:
+                return None, len(sentences), "non-monotonic-alignment-offsets", False
+            previous_sentence = sentence_index
+            sentence_alignments[sentence_index].append(alignment)
+            sentence_token_ids[sentence_index].extend(
+                token_ids[token_offset : token_offset + count]
+            )
+            token_offset += count
+
+        if token_offset != len(token_ids) or any(
+            not sentence_alignments[index] or not sentence_token_ids[index]
+            for index in range(len(sentences))
+        ):
+            return None, len(sentences), "incomplete-sentence-alignment", False
+
+        groups: list[tuple[list[int], list[G2PAlignmentToken]]] = []
+        current_ids: list[int] = []
+        current_alignments: list[G2PAlignmentToken] = []
+        oversized_sentence = False
+        for sentence_ids, sentence_tokens in zip(
+            sentence_token_ids, sentence_alignments, strict=True
+        ):
+            if len(sentence_ids) > max_tokens:
+                if current_ids:
+                    groups.append((current_ids, current_alignments))
+                    current_ids = []
+                    current_alignments = []
+                split_groups = OnnxRequestRenderer._split_at_alignment_boundaries(
+                    sentence_ids, sentence_tokens, max_tokens
+                )
+                if split_groups is None:
+                    return None, len(sentences), "oversized-sentence-alignment-unusable", False
+                groups.extend(split_groups)
+                oversized_sentence = True
+                continue
+            if current_ids and len(current_ids) + len(sentence_ids) > max_tokens:
+                groups.append((current_ids, current_alignments))
+                current_ids = []
+                current_alignments = []
+            current_ids.extend(sentence_ids)
+            current_alignments.extend(sentence_tokens)
+
+        if current_ids:
+            groups.append((current_ids, current_alignments))
+        if (
+            not groups
+            or any(not chunk or len(chunk) > max_tokens for chunk, _ in groups)
+            or [token for chunk, _ in groups for token in chunk] != token_ids
+        ):
+            return None, len(sentences), "sentence-token-conservation-failed", False
+        return groups, len(sentences), None, oversized_sentence
 
     @staticmethod
     def _split_at_alignment_boundaries(

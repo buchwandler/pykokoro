@@ -15,6 +15,9 @@ from .short_sentence_handler import ShortSentenceConfig
 from .voice_level import VoiceLevelConfig
 from .voice_manager import VoiceBlend
 
+LongTextSplitMode = Literal["sentence", "token", "none"]
+
+
 if TYPE_CHECKING:
     from .tokenizer import EspeakConfig, TokenizerConfig
 
@@ -45,6 +48,7 @@ class SynthesisConfig:
     short_sentence_config: ShortSentenceConfig | None = None
     waveform_validation: Literal["off", "warn", "strict"] = "off"
     inference_audio_diagnostics: bool = False
+    long_text_split: LongTextSplitMode = "sentence"
     inference_cache_enabled: bool = True
     inference_cache_max_bytes: int = 128 * 1024 * 1024
     voice_level: VoiceLevelConfig = field(default_factory=VoiceLevelConfig)
@@ -63,6 +67,8 @@ class SynthesisConfig:
             raise TypeError("language_routing must be LanguageRoutingConfig or None")
         if self.waveform_validation not in ("off", "warn", "strict"):
             raise ValueError("waveform_validation must be 'off', 'warn', or 'strict'")
+        if self.long_text_split not in ("sentence", "token", "none"):
+            raise ValueError("long_text_split must be 'sentence', 'token', or 'none'")
         if isinstance(self.inference_cache_max_bytes, bool) or not isinstance(
             self.inference_cache_max_bytes, int
         ):

@@ -44,6 +44,60 @@ The supported combinations depend on model profiles and available artifacts. Use
 frontends without loading model weights. `model_path`, `voices_path`, and
 `model_config_path` can point at local artifacts when appropriate.
 
+## Long-text model chunking
+
+`SynthesisConfig.long_text_split` controls how an oversized request is divided for
+Kokoro inference. The default, `"sentence"`, lazily uses PhraseSplit's regex sentence
+splitter only when the request exceeds the model token limit. It packs complete
+sentences where possible and falls back to token-safe splitting when one sentence is too
+large. PyKokoro always enforces the model token limit; character count is not a
+substitute for it.
+
+Internal sentence splitting always uses `use_spacy=False`. It does not load spaCy, parse
+document markup, or create a public sentence plan. Internal chunks are stitched back
+into one `RenderedSegment` for the original request.
+
+Choose another mode when needed:
+
+- `long_text_split="token"` never invokes PhraseSplit and splits oversized input at safe
+  G2P/model-token boundaries.
+- `long_text_split="none"` disables internal splitting. An oversized request raises
+  `SynthesisInputTooLongError`; use this when you have already segmented and sized
+  requests yourself.
+
+For example, use externally selected boundaries and retain responsibility for combining
+the independent results:
+
+```python
+from phrasplit import split_with_offsets
+from pykokoro import (
+    GenerationConfig,
+    KokoroSynthesizer,
+    SynthesisConfig,
+    SynthesisSegment,
+)
+
+text = "A long passage. Another sentence."
+parts = split_with_offsets(
+    text, mode="sentence", use_spacy=True, language="en"
+)
+requests = [
+    SynthesisSegment(str(index), part.text, "en-us", voice="af_sarah")
+    for index, part in enumerate(parts)
+]
+config = SynthesisConfig(
+    generation=GenerationConfig(lang="en-us"),
+    long_text_split="none",
+)
+with KokoroSynthesizer(config) as synthesizer:
+    rendered_parts = list(synthesizer.synthesize_segments(requests))
+```
+
+Install PhraseSplit's optional spaCy extra with `pip install "phrasplit[nlp]"` and
+install a language model separately to use `use_spacy=True`. Each external part becomes
+an independent request and result. Verify that every part fits the model token limit
+when using `"none"`; this mode does not further split it.
+
 ## Per-request voice and independent batch output
 
 A request-level voice takes precedence over the configured default:
