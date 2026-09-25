@@ -2,17 +2,13 @@
 
 from __future__ import annotations
 
-import contextlib
 import queue
 import threading
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import numpy as np
 
-if TYPE_CHECKING:
-    from .pipeline import PreparedAudioUnits
-
-__all__ = ["SoundDevicePlayer", "play_audio", "play_prepared_units"]
+__all__ = ["SoundDevicePlayer", "play_audio"]
 
 
 def _import_sounddevice() -> Any:
@@ -230,43 +226,3 @@ class SoundDevicePlayer:
     def _raise_error(self) -> None:
         if self._error is not None:
             raise self._error
-
-
-def play_prepared_units(
-    prepared: PreparedAudioUnits,
-    *,
-    device: int | str | None = None,
-    queue_size: int = 2,
-) -> None:
-    """Play prepared audio units through one persistent output stream.
-
-    Audio generation remains sequential on the caller thread while the player
-    worker consumes copied waveforms from its bounded queue. Empty prepared
-    documents do not open an output stream.
-    """
-    player: SoundDevicePlayer | None = None
-    try:
-        for result in prepared.render():
-            try:
-                if player is None:
-                    samples = _validate_audio(result.audio)
-                    channels = 1 if samples.ndim == 1 else samples.shape[1]
-                    player = SoundDevicePlayer(
-                        result.sample_rate,
-                        device=device,
-                        queue_size=queue_size,
-                        channels=channels,
-                    ).start()
-                player.submit(result.audio)
-            finally:
-                result.release_audio()
-        if player is not None:
-            player.drain()
-    except BaseException:
-        if player is not None:
-            with contextlib.suppress(BaseException):
-                player.close()
-        raise
-    else:
-        if player is not None:
-            player.close()

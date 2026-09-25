@@ -6,27 +6,22 @@ import subprocess
 from examples import run_all
 
 
-def test_default_selection_excludes_opt_in_categories() -> None:
+def test_default_selection_contains_request_examples_and_excludes_showcase() -> None:
     paths = run_all._example_paths()
     names = {path.name for path in paths}
 
-    assert "play_audio.py" not in names
-    assert "cpu_benchmark.py" not in names
-    assert "english_clausal_comma_pause.py" not in names
-    assert not any(path.parent.name == "legacy" for path in paths)
+    assert {
+        "simple_synthesis.py",
+        "request_batch.py",
+        "pronunciation_overrides.py",
+        "linguistic_annotations.py",
+    } <= names
+    assert "all_voices.py" not in names
 
 
-def test_selection_flags_add_opt_in_categories() -> None:
-    paths = run_all._example_paths(
-        include_legacy=True, include_playback=True, include_optional=True
-    )
-    names = {path.name for path in paths}
-
-    assert "play_audio.py" in names
-    assert "cpu_benchmark.py" in names
-    assert "english_clausal_comma_pause.py" in names
-    assert "english_parenthetical_pause.py" in names
-    assert any(path.parent.name == "legacy" for path in paths)
+def test_optional_selection_adds_all_voices_showcase() -> None:
+    names = {path.name for path in run_all._example_paths(include_optional=True)}
+    assert "all_voices.py" in names
 
 
 def test_run_examples_continues_and_reports_failures(monkeypatch, tmp_path) -> None:
@@ -63,4 +58,4 @@ def test_list_mode_does_not_run(monkeypatch, capsys) -> None:
     monkeypatch.setattr(run_all.sys, "argv", ["run_all.py", "--list"])
 
     assert run_all.main() == 0
-    assert "examples/abbreviations.py" in capsys.readouterr().out
+    assert "examples/simple_synthesis.py" in capsys.readouterr().out

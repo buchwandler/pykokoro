@@ -10,21 +10,20 @@ import numpy as np
 import pytest
 
 from pykokoro.playback import play_audio
-from pykokoro.types import AudioResult, AudioUnitDescriptor, AudioUnitResult
+from pykokoro.synthesis_types import RenderedSegment
 
 
-def _unit_result(audio: np.ndarray) -> AudioUnitResult:
-    descriptor = AudioUnitDescriptor(
-        index=0,
-        paragraph_idx=0,
-        char_start=0,
-        char_end=5,
+def _rendered_result(audio: np.ndarray) -> RenderedSegment:
+    return RenderedSegment(
+        id="request-1",
+        audio=audio,
+        sample_rate=24_000,
         text="hello",
-        text_hash="hash",
-        segment_ids=(),
-        phoneme_segment_ids=(),
+        language="en-us",
+        voice="af_heart",
+        phonemes="həlˈoʊ",
+        token_ids=(1, 2, 3),
     )
-    return AudioUnitResult(descriptor=descriptor, audio=audio, sample_rate=24_000)
 
 
 def test_play_audio_delegates_waveform_and_options(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -71,10 +70,9 @@ def test_missing_sounddevice_has_actionable_error(monkeypatch: pytest.MonkeyPatc
         play_audio(np.ones(2, dtype=np.float32), 24_000)
 
 
-def test_result_methods_delegate_to_shared_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_rendered_segment_play_delegates_to_shared_helper(monkeypatch: pytest.MonkeyPatch) -> None:
     audio = np.ones(3, dtype=np.float32)
-    result = AudioResult(audio=audio, sample_rate=24_000)
-    unit_result = _unit_result(audio)
+    result = _rendered_result(audio)
     calls: list[tuple[np.ndarray, int, str | None]] = []
 
     def fake_play(samples: np.ndarray, sample_rate: int, *, device: str | None = None) -> None:
@@ -82,21 +80,8 @@ def test_result_methods_delegate_to_shared_helper(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr("pykokoro.playback.play_audio", fake_play)
     result.play(device="one")
-    unit_result.play(device="two")
 
-    assert calls == [(audio, 24_000, "one"), (audio, 24_000, "two")]
-
-
-def test_released_results_fail_before_backend_use() -> None:
-    result = AudioResult(audio=np.ones(2, dtype=np.float32), sample_rate=24_000)
-    unit_result = _unit_result(np.ones(2, dtype=np.float32))
-    result.release_audio()
-    unit_result.release_audio()
-
-    with pytest.raises(RuntimeError, match="empty|released"):
-        result.play()
-    with pytest.raises(RuntimeError, match="empty|released"):
-        unit_result.play()
+    assert calls == [(audio, 24_000, "one")]
 
 
 def test_import_boundary_without_sounddevice() -> None:
@@ -109,9 +94,9 @@ def blocked(name, *args, **kwargs):
     return real_import(name, *args, **kwargs)
 builtins.__import__ = blocked
 import pykokoro
-from pykokoro.types import AudioResult
+from pykokoro.synthesis_types import RenderedSegment
 import numpy as np
-AudioResult(audio=np.ones(1, dtype=np.float32), sample_rate=24000)
+RenderedSegment('request-1', np.ones(1, dtype=np.float32), 24000, 'x', 'en-us', None, '', ())
 print('ok')
 """
     completed = subprocess.run(

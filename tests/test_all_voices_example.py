@@ -195,21 +195,23 @@ def test_synthesize_streams_audio_and_separators(
     catalog = all_voices.ShowcaseCatalog(entries, (), "fixture")
     calls: list[dict[str, object]] = []
 
-    pipeline_configs: list[object] = []
+    configs: list[object] = []
 
-    class FakePipeline:
+    class FakeSynthesizer:
         def __init__(self, config: object) -> None:
             self.config = config
-            pipeline_configs.append(config)
+            configs.append(config)
 
-        def __enter__(self) -> FakePipeline:
+        def __enter__(self) -> FakeSynthesizer:
             return self
 
         def __exit__(self, *args: object) -> bool:
             return False
 
-        def run(self, text: str, **overrides: object) -> object:
-            calls.append({"text": text, **overrides})
+        def synthesize_text(self, text: str, *, language: str, voice: str) -> object:
+            calls.append(
+                {"text": text, "language": language, "voice": voice, "config": self.config}
+            )
             return SimpleNamespace(audio=np.array([0.1, 0.2], dtype=np.float32), sample_rate=24000)
 
     writes: list[np.ndarray] = []
@@ -229,7 +231,7 @@ def test_synthesize_streams_audio_and_separators(
 
     import pykokoro
 
-    monkeypatch.setattr(pykokoro, "KokoroPipeline", FakePipeline)
+    monkeypatch.setattr(pykokoro, "KokoroSynthesizer", FakeSynthesizer)
     monkeypatch.setattr(all_voices.sf, "SoundFile", FakeSoundFile)
     output = tmp_path / "all_voices.wav"
 
@@ -238,15 +240,15 @@ def test_synthesize_streams_audio_and_separators(
     assert output.is_file()
     assert len(calls) == 3
     assert [call["voice"] for call in calls] == ["voice_a", "af_maple", "zf_001"]
-    assert [call["model_source"] for call in calls] == ["github"] * 3
-    assert [call["model_variant"] for call in calls] == ["v1.0", "v1.1-zh", "v1.1-zh"]
-    assert [call["model_quality"] for call in calls] == ["fp32"] * 3
-    assert [call["lang"] for call in calls] == ["en-US", "en-US", "zh"]
-    assert [call["allow_experimental_frontend"] for call in calls] == [False, True, True]
+    assert [call["language"] for call in calls] == ["en-US", "en-US", "zh"]
+    assert [call["config"].model_source for call in calls] == ["github"] * 3
+    assert [call["config"].model_variant for call in calls] == ["v1.0", "v1.1-zh", "v1.1-zh"]
+    assert [call["config"].model_quality for call in calls] == ["fp32"] * 3
+    assert [call["config"].allow_experimental_frontend for call in calls] == [False, True, True]
     assert [write.size for write in writes] == [2, 6000, 2, 6000, 2]
     assert duration == pytest.approx((2 * 3 + 6000 * 2) / 24000)
-    assert len(pipeline_configs) == 1
-    short_sentence_config = pipeline_configs[0].short_sentence_config
+    assert len(configs) == 3
+    short_sentence_config = configs[0].short_sentence_config
     assert isinstance(short_sentence_config, ShortSentenceConfig)
     assert short_sentence_config.resolve_mode == "wrap"
 
@@ -263,7 +265,7 @@ def test_list_only_does_not_create_pipeline(
 
     import pykokoro
 
-    monkeypatch.setattr(pykokoro, "KokoroPipeline", fail_pipeline)
+    monkeypatch.setattr(pykokoro, "KokoroSynthesizer", fail_pipeline)
     assert all_voices.main(["--list-only"]) == 0
     assert "Voices scheduled: 1" in capsys.readouterr().out
 

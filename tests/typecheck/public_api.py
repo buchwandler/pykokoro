@@ -1,20 +1,19 @@
 from typing import assert_type
 
 from pykokoro import (
-    KokoroPipeline,
-    PipelineConfig,
-    PreparedAudioUnits,
-    PreparedFrontend,
+    GenerationConfig,
+    KokoroSynthesizer,
+    RenderedSegment,
+    SynthesisConfig,
+    SynthesisSegment,
     discover_models,
-    resolve_pipeline_config,
 )
 
-config = PipelineConfig()
+config = SynthesisConfig(voice="af_sarah", generation=GenerationConfig(lang="en-us"))
+request = SynthesisSegment("line-1", "Hello.", "en-us", voice="af_sarah")
 assert callable(discover_models)
-resolved = resolve_pipeline_config(config)
-assert_type(PipelineConfig, type[PipelineConfig])
-assert_type(KokoroPipeline, type[KokoroPipeline])
-assert_type(PreparedAudioUnits, type[PreparedAudioUnits])
-assert_type(PreparedFrontend, type[PreparedFrontend])
-assert_type(config, PipelineConfig)
-assert_type(resolved, PipelineConfig)
+assert_type(SynthesisConfig, type[SynthesisConfig])
+assert_type(KokoroSynthesizer, type[KokoroSynthesizer])
+assert_type(RenderedSegment, type[RenderedSegment])
+assert_type(config, SynthesisConfig)
+assert_type(request, SynthesisSegment)

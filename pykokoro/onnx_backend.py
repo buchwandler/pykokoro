@@ -34,12 +34,10 @@ from .config_types import (
 from .exceptions import ConfigurationError
 from .model_profiles import VOICE_ALIASES, get_model_profile
 from .tokenizer import EspeakConfig, Tokenizer, TokenizerConfig
-from .voice_level import VoiceCalibrationKey
+from .voice_level import VoiceCalibrationKey, VoiceLevelConfig
 from .voice_manager import VoiceBlend, VoiceManager
 
 if TYPE_CHECKING:
-    from .loudness_config import LoudnessConfig
-    from .prosody_config import ProsodyConfig
     from .short_sentence_handler import ShortSentenceConfig
     from .types import PhonemeSegment, Trace
 
@@ -436,12 +434,11 @@ class Kokoro:
         segments: list[PhonemeSegment],
         voice_style: np.ndarray,
         speed: float,
-        voice_resolver: Callable[[str], np.ndarray] | None,
         *,
         default_voice_name: str | None = None,
         trace: Trace | None = None,
     ) -> list[PhonemeSegment]:
-        """Generate raw audio for each phoneme segment."""
+        """Generate raw audio for each request-local phoneme segment."""
         self._init_kokoro()
         if getattr(self, "_audio_generator", None) is None and self._runtime is not None:
             default_voice = default_voice_name or next(iter(self._runtime.voices))
@@ -477,41 +474,21 @@ class Kokoro:
                 )
         assert self._audio_generator is not None
         return self._audio_generator._generate_raw_audio_segments(
-            segments, voice_style, speed, voice_resolver, trace
+            segments, voice_style, speed, trace
         )
 
     def postprocess_audio_segments(
         self,
         segments: list[PhonemeSegment],
         trim_silence: bool,
-        prosody_config: ProsodyConfig | None = None,
+        voice_level_config: VoiceLevelConfig | None = None,
         trace: Trace | None = None,
-        loudness_config: LoudnessConfig | None = None,
     ) -> list[PhonemeSegment]:
-        """Trim/prosody-process raw audio segments."""
+        """Apply optional silence trimming and request-local voice calibration."""
         self._init_kokoro()
         assert self._audio_generator is not None
         return self._audio_generator._postprocess_audio_segments(
-            segments,
-            trim_silence,
-            prosody_config,
-            trace,
-            loudness_config,
-        )
-
-    def concatenate_audio_segments(
-        self,
-        segments: list[PhonemeSegment],
-        prosody_config: ProsodyConfig | None = None,
-        trace: Trace | None = None,
-    ) -> np.ndarray:
-        """Concatenate processed segments into a single waveform."""
-        self._init_kokoro()
-        assert self._audio_generator is not None
-        return self._audio_generator._concatenate_audio_segments(
-            segments,
-            prosody_config,
-            trace,
+            segments, trim_silence, voice_level_config, trace
         )
 
     # Voice Database Integration (from kokovoicelab)
@@ -588,38 +565,6 @@ class Kokoro:
         diff_vector = style2 - style1
         midpoint = (style1 + style2) / 2
         return midpoint + (diff_vector * factor / 2)
-
-    def _generate_from_segments(
-        self,
-        segments: list[PhonemeSegment],
-        voice_style: np.ndarray,
-        speed: float,
-        trim_silence: bool,
-        enable_short_sentence_override: bool | None = None,
-        random_seed: int | None = None,
-        prosody_config: ProsodyConfig | None = None,
-    ) -> np.ndarray:
-        """Delegate to AudioGenerator with voice resolution support."""
-        self._init_kokoro()
-        assert self._audio_generator is not None
-
-        def voice_resolver(voice_name: str) -> np.ndarray:
-            """Resolve voice name to style vector."""
-            assert self._voice_manager is not None
-            return self._voice_manager.resolve_voice(
-                voice_name, voice_db_lookup=self.get_voice_from_database
-            )
-
-        return self._audio_generator.generate_from_segments(
-            segments,
-            voice_style,
-            speed,
-            trim_silence,
-            voice_resolver=voice_resolver,
-            enable_short_sentence_override=enable_short_sentence_override,
-            random_seed=random_seed,
-            prosody_config=prosody_config,
-        )
 
     @property
     def runtime_metadata(self) -> dict[str, Any]:

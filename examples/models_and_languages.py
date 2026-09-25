@@ -15,7 +15,7 @@ try:
 except ImportError:
     from _output import artifact_dir
 
-from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroSynthesizer, SynthesisConfig
 from pykokoro.model_profiles import (
     get_registry_model_profile,
     normalize_language_code,
@@ -172,7 +172,7 @@ def synthesize(
     selected_voice = _choose_voice(model, voice)
     selected_quality = _choose_quality(model, quality)
     profile = get_registry_model_profile(model_id, registry=registry)
-    config = PipelineConfig(
+    config = SynthesisConfig(
         model_source=profile.source,
         model_variant=profile.variant,
         model_quality=selected_quality,
@@ -186,9 +186,12 @@ def synthesize(
         f"Synthesizing {model_id} ({selected_language}, voice={selected_voice}, "
         f"quality={selected_quality})"
     )
-    with KokoroPipeline(config) as pipeline:
-        result = pipeline.run(_sample_text(selected_language))
-
+    with KokoroSynthesizer(config) as synthesizer:
+        result = synthesizer.synthesize_text(
+            _sample_text(selected_language),
+            language=selected_language,
+            voice=selected_voice,
+        )
     output_dir.mkdir(parents=True, exist_ok=True)
     output = output_dir / (
         f"{_safe_filename_part(model_id)}_{_safe_filename_part(selected_language)}_"

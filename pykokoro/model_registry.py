@@ -470,7 +470,7 @@ def select_distribution(
 
 
 def distribution_source(distribution: RuntimeDistribution) -> str:
-    """Return the PipelineConfig model source for a registry distribution."""
+    """Return the configured model source for a registry distribution."""
     if distribution.provider == "github-release":
         return "github"
     if distribution.provider == "huggingface":

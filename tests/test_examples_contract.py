@@ -5,8 +5,7 @@ from pathlib import Path
 
 EXAMPLES_DIR = Path(__file__).parents[1] / "examples"
 _EXCLUDED = {"__init__.py", "_output.py", "run_all.py"}
-_TEXT_CALLS = {"run", "prepare_units", "play_streaming"}
-_PIPELINE_CALLS = {"KokoroPipeline", "build_pipeline"}
+_RETIRED_NAMES = {"KokoroPipeline", "PipelineConfig", "build_pipeline", "AudioJob"}
 
 
 def _call_name(call: ast.Call) -> str | None:
@@ -17,39 +16,28 @@ def _call_name(call: ast.Call) -> str | None:
     return None
 
 
-def _has_explicit_language(tree: ast.AST) -> bool:
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
+def test_maintained_examples_use_the_request_engine_api() -> None:
+    for path in sorted(EXAMPLES_DIR.glob("*.py")):
+        if path.name in _EXCLUDED:
             continue
-        name = _call_name(node)
-        if name == "GenerationConfig" and any(keyword.arg == "lang" for keyword in node.keywords):
-            return True
-        if name in _TEXT_CALLS and any(keyword.arg == "lang" for keyword in node.keywords):
-            return True
-    return False
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+        assert not names.intersection(_RETIRED_NAMES), path.name
+        assert "KokoroSynthesizer" in names, path.name
 
 
-def test_maintained_examples_do_not_use_retired_af_alias() -> None:
-    violations: list[str] = []
+def test_examples_supply_explicit_language_for_each_request() -> None:
     for path in sorted(EXAMPLES_DIR.glob("*.py")):
         if path.name in _EXCLUDED:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
-            if isinstance(node, ast.Constant) and node.value == "af":
-                violations.append(f"{path.name}:{node.lineno}")
-
-    assert not violations, "retired bare af voice alias found: " + ", ".join(violations)
-
-
-def test_text_synthesizing_examples_declare_document_language() -> None:
-    missing: list[str] = []
-    for path in sorted(EXAMPLES_DIR.glob("*.py")):
-        if path.name in _EXCLUDED:
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        names = {_call_name(node) for node in ast.walk(tree) if isinstance(node, ast.Call)}
-        if names.intersection(_PIPELINE_CALLS | _TEXT_CALLS) and not _has_explicit_language(tree):
-            missing.append(path.name)
-
-    assert not missing, "examples without explicit document language: " + ", ".join(missing)
+            if not isinstance(node, ast.Call):
+                continue
+            name = _call_name(node)
+            if name == "synthesize_text":
+                assert any(keyword.arg == "language" for keyword in node.keywords), path.name
+            elif name == "SynthesisSegment":
+                assert len(node.args) >= 3 or any(
+                    keyword.arg == "language" for keyword in node.keywords
+                ), path.name

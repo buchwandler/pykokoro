@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pykokoro import PipelineConfig, with_spacy_model
-from pykokoro.pipeline import KokoroPipeline
 from pykokoro.spacy_models import make_spacy_model_request
 from pykokoro.tokenizer import TokenizerConfig
 
@@ -18,8 +16,7 @@ def test_explicit_model_wins_over_size_in_request() -> None:
     assert request.size == "sm"
 
 
-def test_with_spacy_model_updates_pipeline_configuration() -> None:
-    config = with_spacy_model(size="lg")(PipelineConfig())
-    assert isinstance(config.tokenizer_config, TokenizerConfig)
-    assert config.tokenizer_config.spacy_model_size == "lg"
-    assert isinstance(KokoroPipeline(config), KokoroPipeline)
+def test_tokenizer_config_normalizes_spacy_model_selection() -> None:
+    config = TokenizerConfig(spacy_model_size="lg")
+    assert config.spacy_model is None
+    assert config.spacy_model_size == "lg"

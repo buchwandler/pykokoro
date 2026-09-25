@@ -1,8 +1,9 @@
 # PyKokoro Documentation
 
-PyKokoro is a Python library for text-to-speech synthesis using the Kokoro TTS model. It
-provides high-quality, natural-sounding speech generation with support for multiple
-languages, voices, and advanced features like pause control and text splitting.
+PyKokoro is a request-centric Kokoro speech-synthesis engine. It accepts prepared speech
+requests and returns independent rendered waveforms. Parsing, speech planning, document
+semantics, timeline composition, and final-output mastering belong to the calling
+application and its other tools.
 
 ```{toctree}
 :caption: 'Contents:'
@@ -15,85 +16,39 @@ advanced_features
 pipeline_stages
 api_reference
 examples
-polynorm_benchmark
+languages
+breaking-change-0.10.0
 changelog
 ```
 
-## Features
+## Engine responsibilities
 
-- **High-Quality TTS**: Natural-sounding speech synthesis using the Kokoro model
-- **Multiple Languages**: Support for English (US/GB), Spanish, French, German, Italian,
-  Portuguese, Hindi, Japanese, Korean, and Chinese
-- **Voice Selection**: Choose from 54 voices (v1.0) or 103 voices (v1.1-zh) with various
-  styles and accents
-- **Voice Blending**: Create custom voice styles by blending multiple voices
-- **Text Normalization**: Automatic say-as support for numbers, dates, phone numbers,
-  and more using SSMD markup
-- **Pause Control**: Add precise pauses using SSMD break syntax: `...c`, `...s`, `...p`,
-  `...500ms`
-- **Smart Text Splitting**: Automatically split long text at sentence, paragraph, or
-  clause boundaries
-- **Language-Aware spaCy Models**: Auto-resolve spaCy package names from language + size
-- **Phoneme-Based Generation**: Generate speech directly from phonemes for precise
-  control
-- **GPU Acceleration**: Optional GPU support for faster generation
-- **Flexible Audio Processing**: Trim silence, adjust speed, and more
-- **Composable Pipeline Stages**: Swap doc parsing, splitting, g2p, and audio stages
+- KokoroG2P prepared-text integration with explicit pronunciation languages,
+  source-aligned overrides, and linguistic annotations
+- Kokoro voice, model, and style selection, including blends
+- Model-limit chunking, short-sentence handling, and ONNX inference
+- Request-local timing reconstruction, waveform validation, tracing, and optional voice
+  calibration
+- Independent `RenderedSegment` results and standalone WAV writing
 
-## Quick Example
+PyKokoro does not parse SSMD or YAML, create UtterPlans or AudioJobs, compose caller
+requests, insert cross-request silence, or apply document-level effects. The planned
+0.10.0 breaking change and migration boundary are described in the
+[release note](breaking-change-0.10.0.md).
+
+## Quick example
 
 ```python
-from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
+from pykokoro import GenerationConfig, KokoroSynthesizer, SynthesisConfig
 
-config = PipelineConfig(
+config = SynthesisConfig(
+    voice="af_sarah",
     generation=GenerationConfig(lang="en-us"),
-    voice="af_bella",
-    generation=GenerationConfig(speed=1.0),
 )
-pipe = KokoroPipeline(config)
-result = pipe.run("Hello, world! This is a test.")
-
-# Save to file
-import soundfile as sf
-
-sf.write("output.wav", result.audio, result.sample_rate)
+with KokoroSynthesizer(config) as synthesizer:
+    result = synthesizer.synthesize_text("Hello, world.", language="en-us")
+result.save_wav("hello.wav")
 ```
 
-## Installation
-
-Install via pip:
-
-```bash
-pip install pykokoro
-```
-
-Or with GPU support:
-
-```bash
-pip install pykokoro[gpu]
-```
-
-## Requirements
-
-- Python 3.9 or higher
-- NumPy
-- ONNX Runtime
-- espeak-ng (for phonemization)
-- Optional: GPU with CUDA/ROCm for acceleration
-
-## Getting Help
-
-- **GitHub Issues**: <https://github.com/remixer-dec/pykokoro/issues>
-- **Documentation**: <https://pykokoro.readthedocs.io>
-- **Examples**: See the `examples/` directory in the repository
-
-## License
-
-PyKokoro is released under the MIT License. The Kokoro model itself is subject to its
-own license terms.
-
-# Indices and tables
-
-- {ref}`genindex`
-- {ref}`modindex`
-- {ref}`search`
+See the [maintained examples](../examples/README.md) for requests with pronunciation
+context, annotations, and independent batch results.

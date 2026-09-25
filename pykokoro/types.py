@@ -1,3 +1,5 @@
+"""Request-local engine data structures and timing geometry helpers."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -6,53 +8,6 @@ from typing import Any, Literal
 import numpy as np
 
 from .voice_level import VoiceCalibrationKey
-
-
-@dataclass(frozen=True)
-class AnnotationSpan:
-    """Span-based markup annotation (character offsets refer to clean_text)."""
-
-    char_start: int
-    char_end: int
-    attrs: dict[str, str]
-
-
-@dataclass(frozen=True)
-class BoundaryEvent:
-    """Boundary event for SSMD breaks or markers."""
-
-    pos: int
-    kind: Literal["pause", "marker"]
-    duration_s: float | None = None
-    attrs: dict[str, str] = field(default_factory=dict)
-
-
-@dataclass
-class TextPreparationInfo:
-    """Provenance for the structural-to-prepared spoken text transformation."""
-
-    source_text: str
-    spoken_text: str
-    replacements: tuple[dict[str, Any], ...] = ()
-    offset_map: dict[str, Any] | None = None
-    languages: tuple[str, ...] = ()
-    backend: str = "spokenform"
-    version: str | None = None
-    warnings: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class Segment:
-    """A chunk of input text with stable offsets into the document."""
-
-    id: str
-    text: str
-    char_start: int
-    char_end: int
-    meta: dict[str, Any] = field(default_factory=dict)
-    paragraph_idx: int | None = None
-    sentence_idx: int | None = None
-    clause_idx: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,7 +33,7 @@ class WordTiming:
 
 @dataclass(frozen=True, slots=True)
 class G2PAlignmentToken:
-    """Normalized third-party G2P token metadata used for timing alignment."""
+    """Normalized KokoroG2P token metadata used for request-local timing alignment."""
 
     text: str
     phonemes: str
@@ -114,8 +69,10 @@ class G2PAlignmentToken:
         return result
 
 
-def _exact_timing_geometry(token: G2PAlignmentToken | dict[str, Any]) -> tuple[int, int] | None:
-    """Return exact speech and total-span model positions for one item."""
+def _exact_timing_geometry(
+    token: G2PAlignmentToken | dict[str, Any],
+) -> tuple[int, int] | None:
+    """Return exact speech and total-span model positions for one alignment item."""
     if isinstance(token, G2PAlignmentToken):
         model_token_count = token.model_token_count
         explicit_span = token.model_span_token_count
@@ -170,11 +127,7 @@ def _model_span_token_count(token: G2PAlignmentToken | dict[str, Any]) -> int | 
 
 @dataclass
 class PhonemeSegment:
-    """A segment of text with its phoneme representation.
-
-    Each PhonemeSegment references the originating Segment via segment_id and can
-    represent a split portion of a longer segment via phoneme_id.
-    """
+    """One model-ready phoneme chunk belonging to a single synthesis request."""
 
     id: str
     segment_id: str
@@ -185,16 +138,8 @@ class PhonemeSegment:
     lang: str = "en-us"
     char_start: int = 0
     char_end: int = 0
-    paragraph_idx: int | None = None
-    sentence_idx: int | None = None
-    clause_idx: int | None = None
-    pause_before: float = 0.0
-    pause_after: float = 0.0
-    ssmd_metadata: dict[str, Any] | None = field(default=None, repr=False)
+    engine_metadata: dict[str, Any] | None = field(default=None, repr=False)
     voice_name: str | None = None
-    voice_language: str | None = None
-    voice_gender: str | None = None
-    voice_variant: str | None = None
     render_voice_key: VoiceCalibrationKey | None = field(default=None, kw_only=True)
     raw_audio: np.ndarray | None = field(default=None, repr=False)
     processed_audio: np.ndarray | None = field(default=None, repr=False)
@@ -206,8 +151,8 @@ class PhonemeSegment:
     )
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for JSON serialization."""
-        result = {
+        """Serialize engine-local phoneme data without document/timeline fields."""
+        result: dict[str, Any] = {
             "id": self.id,
             "segment_id": self.segment_id,
             "phoneme_id": self.phoneme_id,
@@ -217,21 +162,18 @@ class PhonemeSegment:
             "lang": self.lang,
             "char_start": self.char_start,
             "char_end": self.char_end,
-            "paragraph_idx": self.paragraph_idx,
-            "sentence_idx": self.sentence_idx,
-            "clause_idx": self.clause_idx,
-            "pause_before": self.pause_before,
-            "pause_after": self.pause_after,
         }
-        if self.ssmd_metadata is not None:
-            result["ssmd_metadata"] = self.ssmd_metadata
+        if self.engine_metadata is not None:
+            result["engine_metadata"] = self.engine_metadata
+        if self.voice_name is not None:
+            result["voice_name"] = self.voice_name
         if self.render_voice_key is not None:
             result["render_voice_key"] = str(self.render_voice_key)
         return result
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> PhonemeSegment:
-        """Create from dictionary."""
+        """Deserialize only the current request-local engine representation."""
         return cls(
             id=data["id"],
             segment_id=data["segment_id"],
@@ -242,12 +184,8 @@ class PhonemeSegment:
             lang=data.get("lang", "en-us"),
             char_start=data.get("char_start", 0),
             char_end=data.get("char_end", 0),
-            paragraph_idx=data.get("paragraph_idx"),
-            sentence_idx=data.get("sentence_idx"),
-            clause_idx=data.get("clause_idx"),
-            pause_before=data.get("pause_before", 0.0),
-            pause_after=data.get("pause_after", 0.0),
-            ssmd_metadata=data.get("ssmd_metadata"),
+            engine_metadata=data.get("engine_metadata"),
+            voice_name=data.get("voice_name"),
             render_voice_key=(
                 None
                 if data.get("render_voice_key") is None
@@ -256,7 +194,7 @@ class PhonemeSegment:
         )
 
     def format_readable(self) -> str:
-        """Format as human-readable string: text [phonemes]."""
+        """Format as human-readable text and phonemes."""
         return f"{self.text} [{self.phonemes}]"
 
 
@@ -274,7 +212,6 @@ class Trace:
 
     warnings: list[str] = field(default_factory=list)
     events: list[TraceEvent] = field(default_factory=list)
-    prosody: list[dict[str, Any]] = field(default_factory=list)
     inference: list[dict[str, Any]] = field(default_factory=list)
     model: dict[str, Any] = field(default_factory=dict)
     counters: dict[str, int] = field(default_factory=dict)
@@ -290,158 +227,21 @@ class Trace:
         misses = sum(1 for item in self.inference if item.get("cache_hit") is False)
         runtime_ms = sum(float(item.get("runtime_ms", 0.0)) for item in self.inference)
         audio_seconds = sum(float(item.get("audio_seconds", 0.0)) for item in self.inference)
-        return {
+        summary: dict[str, float | int | None] = {
             "onnx_calls": calls,
             "onnx_cache_hits": hits,
             "onnx_cache_misses": misses,
             "onnx_runtime_ms": runtime_ms,
             "onnx_audio_seconds": audio_seconds,
             "onnx_rtf": runtime_ms / 1000.0 / audio_seconds if audio_seconds else None,
-            "logical_phoneme_segments": self.counters.get("logical_phoneme_segments", 0),
-            "initial_onnx_calls": self.counters.get("initial_onnx_calls", 0),
-            "short_sentence_retry_calls": self.counters.get("short_sentence_retry_calls", 0),
-            "fallback_onnx_calls": self.counters.get("fallback_onnx_calls", 0),
-            "short_sentence_detected": self.counters.get("short_sentence_detected", 0),
-            "short_sentence_phrase_initial": self.counters.get("short_sentence_phrase_initial", 0),
-            "short_sentence_phrase_retry": self.counters.get("short_sentence_phrase_retry", 0),
-            "short_sentence_cut_strict_success": self.counters.get(
-                "short_sentence_cut_strict_success", 0
-            ),
-            "short_sentence_cut_adaptive_success": self.counters.get(
-                "short_sentence_cut_adaptive_success", 0
-            ),
-            "short_sentence_cut_failure": self.counters.get("short_sentence_cut_failure", 0),
-            "short_sentence_wrap_fallback": self.counters.get("short_sentence_wrap_fallback", 0),
         }
+        summary.update(self.counters)
+        return summary
 
     def event_summary(self) -> dict[tuple[str, str], float]:
-        """Return aggregate durations grouped by stage and event name.
-
-        Aggregate timing events are intentionally separate from diagnostic events.
-        Callers must not sum nested aggregate events as a critical-path total.
-        """
+        """Return aggregate durations grouped by stage and event name."""
         totals: dict[tuple[str, str], float] = {}
         for event in self.events:
             key = (event.stage, event.name)
             totals[key] = totals.get(key, 0.0) + event.ms
         return totals
-
-
-@dataclass
-class AudioResult:
-    """Generated audio and its diagnostic metadata.
-
-    The result owns references to its final waveform and per-segment audio arrays.
-    Callers may retain or copy ``audio`` before using :meth:`release_audio`, which is
-    destructive for this result object. Segment audio may be absent when compact
-    retention is enabled; callers that need raw or processed segment waveforms must
-    keep ``PipelineConfig.retain_segment_audio=True``.
-    """
-
-    audio: np.ndarray
-    sample_rate: int
-    segments: list[Segment] = field(default_factory=list)
-    phoneme_segments: list[PhonemeSegment] = field(default_factory=list)
-    trace: Trace | None = None
-    document_metadata: dict[str, Any] = field(default_factory=dict)
-    markers: list[dict[str, Any]] = field(default_factory=list)
-    word_timings: list[WordTiming] = field(default_factory=list)
-    clean_text: str = ""
-    source_text: str | None = None
-
-    def release_segment_audio(self) -> None:
-        """Release per-segment raw and processed audio arrays.
-
-        This operation is destructive and idempotent. Segment structure, phonemes,
-        tokens, metadata, trace data, and markers remain available.
-        """
-        for segment in self.phoneme_segments:
-            segment.raw_audio = None
-            segment.processed_audio = None
-
-    def release_audio(self) -> None:
-        """Release the final waveform and all per-segment audio arrays.
-
-        This operation is destructive and idempotent. After it returns, ``save_wav``
-        and ``play`` have no waveform to consume. Independently held array references
-        remain valid because only references owned by this result are replaced.
-        """
-        dtype = self.audio.dtype if isinstance(self.audio, np.ndarray) else np.dtype(np.float32)
-        self.audio = np.empty(0, dtype=dtype)
-        self.release_segment_audio()
-
-    def save_wav(self, path: str) -> None:
-        from audiocompose import write_wav
-
-        write_wav(path, self.audio, self.sample_rate, clip_policy="clamp")
-
-    def play(self, *, device: int | str | None = None) -> None:
-        """Play the generated waveform through the system audio output.
-
-        Playback is blocking, requires the optional ``sounddevice`` dependency,
-        and does not create an intermediate audio file.
-        """
-        from .playback import play_audio
-
-        play_audio(self.audio, self.sample_rate, device=device)
-
-
-AudioUnitKind = Literal["paragraph", "sentence"]
-
-
-@dataclass(frozen=True, slots=True)
-class AudioUnitDescriptor:
-    """Stable, lightweight identity and text metadata for one prepared unit."""
-
-    index: int
-    paragraph_idx: int
-    char_start: int
-    char_end: int
-    text: str
-    text_hash: str
-    segment_ids: tuple[str, ...]
-    phoneme_segment_ids: tuple[str, ...]
-    marker_names: tuple[str, ...] = ()
-    unit_kind: AudioUnitKind = "paragraph"
-    sentence_idx: int | None = None
-
-
-@dataclass(slots=True)
-class AudioUnitResult:
-    """Audio and metadata owned by one prepared render unit.
-
-    ``release_audio`` and ``release_segment_audio`` only clear references owned by
-    this result. Arrays retained independently by a caller remain valid.
-    """
-
-    descriptor: AudioUnitDescriptor
-    audio: np.ndarray
-    sample_rate: int
-    segments: list[Segment] = field(default_factory=list)
-    phoneme_segments: list[PhonemeSegment] = field(default_factory=list)
-    markers: list[dict[str, Any]] = field(default_factory=list)
-    trace: Trace | None = None
-    document_metadata: dict[str, Any] = field(default_factory=dict)
-    word_timings: list[WordTiming] = field(default_factory=list)
-
-    def release_segment_audio(self) -> None:
-        """Destructively release raw and processed arrays for this unit."""
-        for segment in self.phoneme_segments:
-            segment.raw_audio = None
-            segment.processed_audio = None
-
-    def release_audio(self) -> None:
-        """Destructively release final and per-segment audio, idempotently."""
-        dtype = self.audio.dtype if isinstance(self.audio, np.ndarray) else np.dtype(np.float32)
-        self.audio = np.empty(0, dtype=dtype)
-        self.release_segment_audio()
-
-    def play(self, *, device: int | str | None = None) -> None:
-        """Play this rendered unit through the system audio output."""
-        from .playback import play_audio
-
-        play_audio(self.audio, self.sample_rate, device=device)
-
-
-# Backward compatibility aliases
-Annotation = AnnotationSpan

@@ -7,17 +7,34 @@ import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import lru_cache
+from numbers import Real
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from audiosig import apply_gain_db
 
-from .loudness_config import LoudnessConfig
-
 if TYPE_CHECKING:
     from .types import Trace
 _CALIBRATION_METHODS = {"bs1770"}
+
+
+@dataclass(frozen=True, slots=True)
+class VoiceLevelConfig:
+    """Per-request static calibration settings owned by the synthesis engine."""
+
+    mode: Literal["off", "calibrated"] = "off"
+    gain_db: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.mode not in ("off", "calibrated"):
+            raise ValueError("voice level mode must be 'off' or 'calibrated'")
+        if self.gain_db is not None and (
+            isinstance(self.gain_db, bool)
+            or not isinstance(self.gain_db, Real)
+            or not math.isfinite(float(self.gain_db))
+        ):
+            raise ValueError("voice level gain_db must be a finite number or None")
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,35 +212,29 @@ def default_voice_calibration() -> VoiceCalibrationCatalog:
 
 def apply_voice_level_calibration(
     audio: np.ndarray,
-    config: LoudnessConfig,
+    config: VoiceLevelConfig,
     key: VoiceCalibrationKey | None,
     *,
-    external_audio: bool = False,
     trace: Trace | None = None,
     catalog: VoiceCalibrationCatalog | None = None,
     segment_id: str | None = None,
 ) -> np.ndarray:
     """Apply one static voice gain without measuring the runtime waveform."""
-    mode = config.voice_leveling
+    mode = config.mode
     source = "none"
     reason = "disabled" if mode == "off" else None
     calibration = None
-    if not external_audio:
-        if config.voice_gain_db is not None:
-            gain_db = config.voice_gain_db
-            source = "override"
-            reason = "override"
-        elif mode == "calibrated":
-            calibration = resolve_voice_calibration(catalog or default_voice_calibration(), key)
-            gain_db = calibration.gain_db if calibration is not None else 0.0
-            source = "registry" if calibration is not None else "none"
-            reason = "calibrated" if calibration is not None else "calibration_not_found"
-        else:
-            gain_db = 0.0
+    if config.gain_db is not None:
+        gain_db = config.gain_db
+        source = "override"
+        reason = "override"
+    elif mode == "calibrated":
+        calibration = resolve_voice_calibration(catalog or default_voice_calibration(), key)
+        gain_db = calibration.gain_db if calibration is not None else 0.0
+        source = "registry" if calibration is not None else "none"
+        reason = "calibrated" if calibration is not None else "calibration_not_found"
     else:
         gain_db = 0.0
-        source = "external_audio"
-        reason = "external_audio"
     if trace is not None:
         trace.model.setdefault("voice_leveling", []).append(
             {

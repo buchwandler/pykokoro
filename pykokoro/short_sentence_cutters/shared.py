@@ -71,7 +71,7 @@ def boundary_windows_from_metadata(
 
 
 def record_cut_failure(metadata: dict[str, object], reason: str, stage: str = "cut-window") -> None:
-    """Record the first cut failure and its pipeline stage."""
+    """Record the first cut failure and its processing stage."""
     metadata.setdefault("cut_failure_reason", reason)
     metadata.setdefault("failure_stage", stage)
 

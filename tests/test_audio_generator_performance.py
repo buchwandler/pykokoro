@@ -239,7 +239,7 @@ def test_phrase_cut_success_uses_one_model_call(waveform, cutter) -> None:
         phonemes="abc",
         tokens=[1, 2, 3],
         word_timings=[],
-        ssmd_metadata={"__short_sentence": _phrase_metadata(cutter=cutter)},
+        engine_metadata={"__short_sentence": _phrase_metadata(cutter=cutter)},
     )
 
     result = generator._prepare_short_sentence_phrase_audio(
@@ -248,7 +248,7 @@ def test_phrase_cut_success_uses_one_model_call(waveform, cutter) -> None:
 
     assert result.size > 0
     assert session.calls == 1
-    assert trace.inference_summary()["short_sentence_cut_failure"] == 0
+    assert trace.counters.get("short_sentence_cut_failure", 0) == 0
 
 
 def test_invalid_timestamps_use_one_retry(monkeypatch) -> None:
@@ -269,7 +269,7 @@ def test_invalid_timestamps_use_one_retry(monkeypatch) -> None:
         phonemes="abc",
         tokens=[1, 2, 3],
         word_timings=[],
-        ssmd_metadata={"__short_sentence": _phrase_metadata(valid=False)},
+        engine_metadata={"__short_sentence": _phrase_metadata(valid=False)},
     )
 
     result = generator._prepare_short_sentence_phrase_audio(
@@ -299,7 +299,7 @@ def test_retry_failure_uses_one_retry_and_wrap_fallback(monkeypatch) -> None:
         phonemes="abc",
         tokens=[1, 2, 3],
         word_timings=[],
-        ssmd_metadata={"__short_sentence": _phrase_metadata(valid=False)},
+        engine_metadata={"__short_sentence": _phrase_metadata(valid=False)},
     )
 
     result = generator._prepare_short_sentence_phrase_audio(

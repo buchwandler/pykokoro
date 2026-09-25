@@ -1,4 +1,4 @@
-"""Audio generation for PyKokoro."""
+"""Kokoro inference, short-sentence handling, and waveform diagnostics."""
 
 from __future__ import annotations
 
@@ -6,14 +6,12 @@ import dataclasses
 import hashlib
 import logging
 import random
-import re
 import time
 from collections import OrderedDict
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
-from audiosig import apply_gain_db, resample, resample_speed
 from audiosig import trim as trim_audio
 
 from ._onnxvoice import (
@@ -24,8 +22,6 @@ from ._onnxvoice import (
 )
 from .constants import MAX_PHONEME_LENGTH, SAMPLE_RATE
 from .exceptions import ConfigurationError
-from .loudness_config import LoudnessConfig
-from .prosody import apply_prosody, parse_pitch, parse_rate, parse_volume
 from .runtime_protocol import KokoroInferenceRuntime
 from .short_sentence_handler import (
     SHORT_SENTENCE_META_KEY,
@@ -35,12 +31,10 @@ from .short_sentence_handler import (
 )
 from .tokenizer import Tokenizer
 from .types import G2PAlignmentToken, PhonemeSegment, WordTiming, _exact_timing_geometry
-from .utils import generate_silence, seconds_to_samples
-from .voice_level import apply_voice_level_calibration
+from .voice_level import VoiceLevelConfig, apply_voice_level_calibration
 from .voice_manager import normalize_voice_style
 
 if TYPE_CHECKING:
-    from .prosody_config import ProsodyConfig
     from .short_sentence_handler import ShortSentenceConfig
     from .types import Trace
 
@@ -122,158 +116,6 @@ def _is_stationary_broadband_noise(audio: np.ndarray) -> tuple[bool, dict[str, f
         )
     )
     return is_noise, metrics
-
-
-def _has_prosody_metadata(segment: PhonemeSegment) -> bool:
-    metadata = segment.ssmd_metadata or {}
-    return bool(
-        metadata.get("prosody_volume")
-        or metadata.get("prosody_pitch")
-        or metadata.get("prosody_rate")
-    )
-
-
-def _should_condition_boundary(
-    left: PhonemeSegment,
-    right: PhonemeSegment,
-    config: ProsodyConfig | None,
-) -> bool:
-    return bool(
-        config is not None
-        and config.boundary_blend_ms > 0.0
-        and (_has_prosody_metadata(left) or _has_prosody_metadata(right))
-    )
-
-
-def _boundary_jump(left: np.ndarray, right: np.ndarray) -> float:
-    if left.size == 0 or right.size == 0:
-        return 0.0
-    return abs(float(left[-1]) - float(right[0]))
-
-
-def _condition_boundary(
-    left: np.ndarray,
-    right: np.ndarray,
-    *,
-    sample_rate: int,
-    blend_ms: float,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Smooth a small boundary window without changing either segment length."""
-
-    window = min(
-        round(sample_rate * blend_ms / 1000.0),
-        left.size,
-        right.size,
-    )
-    if window < 2:
-        return left, right
-
-    positions = np.linspace(0.0, window - 1.0, 2 * window)
-    source_positions = np.arange(window, dtype=np.float64)
-    left_curve = np.interp(positions, source_positions, left[-window:])
-    right_curve = np.interp(positions, source_positions, right[:window])
-    mix = np.linspace(0.0, 1.0, 2 * window)
-    transition = left_curve * (1.0 - mix) + right_curve * mix
-
-    conditioned_left = np.array(left, copy=True)
-    conditioned_right = np.array(right, copy=True)
-    conditioned_left[-window:] = transition[:window]
-    conditioned_right[:window] = transition[window:]
-    return conditioned_left, conditioned_right
-
-
-def _record_boundary_diagnostic(
-    trace: Trace | None,
-    segment: PhonemeSegment,
-    before: float,
-    after: float,
-    conditioned_samples: int,
-) -> None:
-    if trace is None:
-        return
-    trace.prosody.append(
-        {
-            "kind": "boundary",
-            "segment_id": segment.id,
-            "boundary_jump_before": before,
-            "boundary_jump_after": after,
-            "conditioned_samples": conditioned_samples,
-        }
-    )
-
-
-def resolve_audio_annotation(
-    metadata: dict[str, Any],
-    resolver: Any,
-    *,
-    sample_rate: int = SAMPLE_RATE,
-    max_bytes: int = 20_000_000,
-    max_duration_s: float = 120.0,
-) -> np.ndarray:
-    """Resolve and deterministically transform an SSMD audio annotation."""
-
-    source = metadata.get("audio_src")
-    if not isinstance(source, str) or not source:
-        raise ValueError("audio_src must be a non-empty string")
-    callback = getattr(resolver, "resolve", resolver)
-    if not callable(callback):
-        raise TypeError("audio_source_resolver must be callable or expose resolve()")
-    result = callback(source)
-    if not isinstance(result, tuple) or len(result) != 2:
-        raise ValueError("audio resolver must return (numpy_audio, sample_rate)")
-    audio, source_rate = result
-    audio = np.asarray(audio, dtype=np.float32).reshape(-1)
-    source_rate = int(source_rate)
-    if source_rate <= 0 or audio.nbytes > max_bytes:
-        raise ValueError("resolved audio exceeds configured source limits")
-
-    def seconds(value: object) -> float | None:
-        if value in (None, ""):
-            return None
-        match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*(ms|s)\s*", str(value), re.I)
-        if match is None:
-            raise ValueError(f"invalid audio duration {value!r}")
-        number = float(match.group(1))
-        return number / 1000.0 if match.group(2).lower() == "ms" else number
-
-    begin = seconds(metadata.get("audio_clip_begin"))
-    end = seconds(metadata.get("audio_clip_end"))
-    start_index = max(0, int((begin or 0.0) * source_rate))
-    end_index = len(audio) if end is None else min(len(audio), int(end * source_rate))
-    audio = audio[start_index : max(start_index, end_index)]
-
-    speed = metadata.get("audio_speed")
-    if speed:
-        match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)%\s*", str(speed))
-        if match is None or float(match.group(1)) <= 0:
-            raise ValueError(f"invalid audio speed {speed!r}")
-        factor = float(match.group(1)) / 100.0
-        audio = resample_speed(audio, factor)
-
-    repeat = metadata.get("audio_repeat_count")
-    if repeat:
-        audio = np.tile(audio, int(repeat))
-    repeat_duration = seconds(metadata.get("audio_repeat_dur"))
-    if repeat_duration is not None and audio.size:
-        target = max(0, round(repeat_duration * source_rate))
-        audio = np.resize(audio, target)
-
-    level = metadata.get("audio_sound_level")
-    if level:
-        match = re.fullmatch(r"\s*([+-]?\d+(?:\.\d+)?)\s*dB\s*", str(level), re.I)
-        if match is None:
-            raise ValueError(f"invalid audio level {level!r}")
-        audio = apply_gain_db(audio, float(match.group(1)))
-
-    if source_rate != sample_rate and audio.size:
-        audio = resample(
-            audio,
-            source_rate=source_rate,
-            target_rate=sample_rate,
-        )
-    if len(audio) > round(max_duration_s * sample_rate):
-        raise ValueError("resolved audio exceeds configured duration limit")
-    return audio.astype(np.float32, copy=False)
 
 
 # Model source type
@@ -609,199 +451,6 @@ class AudioGenerator:
                 diagnostic["audio"] = audio_metrics
         return audio, timing
 
-    def generate_from_phonemes(
-        self,
-        phonemes: str,
-        voice_style: np.ndarray,
-        speed: float,
-        *,
-        trace: Trace | None = None,
-    ) -> tuple[np.ndarray, int]:
-        """Generate audio from a single phoneme batch.
-
-        This is the lowest-level phoneme diagnostic path; it does not apply
-        segment preprocessing or short-sentence handling.
-
-        Args:
-            phonemes: Phoneme string (will be truncated if > MAX_PHONEME_LENGTH)
-            voice_style: Voice style vector
-            speed: Speech speed multiplier
-            trace: Optional trace collector for inference diagnostics
-
-        Returns:
-            Tuple of (audio samples, sample rate)
-        """
-        audio, _ = self._run_onnx(phonemes, voice_style, speed, trace=trace)
-        return audio, int(getattr(self._runtime, "sample_rate", SAMPLE_RATE))
-
-    def split_phonemes(self, phonemes: str) -> list[str]:  # noqa: C901
-        """Split phonemes into batches at sentence-ending punctuation marks.
-
-        Args:
-            phonemes: Full phoneme string
-
-        Returns:
-            List of phoneme batches, each <= MAX_PHONEME_LENGTH
-        """
-
-        batches: list[str] = []
-        current = ""
-        current_tokens = 0
-
-        def token_len(text: str) -> int:
-            if not text:
-                return 0
-            return len(self._tokenizer.tokenize(text))
-
-        def append_batch(text: str) -> None:
-            if text:
-                batches.append(text.strip())
-
-        def split_long_sentence(sentence: str) -> bool:
-            nonlocal current, current_tokens
-            if current:
-                append_batch(current)
-                current = ""
-                current_tokens = 0
-            words = re.split(r"([.,;:!?\s])", sentence)
-            if len(words) == 1:
-                word_tokens = self._tokenizer.tokenize(words[0]) if words[0] else []
-                if len(word_tokens) > MAX_PHONEME_LENGTH:
-                    for i in range(0, len(word_tokens), MAX_PHONEME_LENGTH):
-                        chunk_tokens = word_tokens[i : i + MAX_PHONEME_LENGTH]
-                        batches.append(self._tokenizer.detokenize(chunk_tokens))
-                    return True
-            for word in words:
-                if not word or word.isspace():
-                    if current:
-                        current += " "
-                        current_tokens = token_len(current)
-                    continue
-                word_tokens = self._tokenizer.tokenize(word)
-                if len(word_tokens) > MAX_PHONEME_LENGTH:
-                    if current:
-                        append_batch(current)
-                        current = ""
-                        current_tokens = 0
-                    for i in range(0, len(word_tokens), MAX_PHONEME_LENGTH):
-                        chunk_tokens = word_tokens[i : i + MAX_PHONEME_LENGTH]
-                        batches.append(self._tokenizer.detokenize(chunk_tokens))
-                    continue
-                if current_tokens + len(word_tokens) > MAX_PHONEME_LENGTH:
-                    if current:
-                        append_batch(current)
-                    current = word
-                    current_tokens = token_len(current)
-                else:
-                    if current and not current.endswith((".", "!", "?", ",", ";", ":")):
-                        current += " "
-                    current += word
-                    current_tokens = token_len(current)
-            return False
-
-        # Split on sentence-ending punctuation (., !, ?) while keeping them
-        # Use lookbehind to split AFTER the punctuation
-        sentences = re.split(r"(?<=[.!?])\s*", phonemes)
-
-        for sentence in sentences:
-            sentence = sentence.strip()
-            if not sentence:
-                continue
-
-            sentence_tokens = token_len(sentence)
-
-            # If adding sentence would exceed limit, save current batch, start new
-            if current and current_tokens + sentence_tokens > MAX_PHONEME_LENGTH:
-                append_batch(current)
-                current = sentence
-                current_tokens = sentence_tokens
-            # If the sentence itself is too long, we need to split it further
-            elif sentence_tokens > MAX_PHONEME_LENGTH:
-                if split_long_sentence(sentence):
-                    continue
-            else:
-                # Add sentence to current batch
-                if current:
-                    current += " "
-                current += sentence
-                current_tokens = token_len(current)
-
-        if current:
-            append_batch(current)
-
-        return batches if batches else [phonemes]
-
-    def generate_from_phoneme_batches(
-        self,
-        batches: list[str],
-        voice_style: np.ndarray,
-        speed: float,
-        trim_silence: bool,
-        *,
-        trace: Trace | None = None,
-    ) -> np.ndarray:
-        """Generate and concatenate audio from phoneme batches.
-
-        Args:
-            batches: List of phoneme strings (each <= MAX_PHONEME_LENGTH)
-            voice_style: Voice style vector
-            speed: Speech speed
-            trim_silence: Whether to trim silence from each batch
-            trace: Optional trace collector for inference diagnostics
-
-        Returns:
-            Concatenated audio array
-        """
-        audio_parts = []
-
-        for batch in batches:
-            audio, _ = self.generate_from_phonemes(batch, voice_style, speed, trace=trace)
-            if trim_silence:
-                audio, _ = trim_audio(audio)
-            audio_parts.append(audio)
-
-        return np.concatenate(audio_parts) if audio_parts else np.array([], dtype=np.float32)
-
-    def _resolve_segment_voice(
-        self,
-        segment: PhonemeSegment,
-        default_voice_style: np.ndarray,
-        voice_resolver: Callable[[str], np.ndarray] | None,
-    ) -> np.ndarray:
-        """Resolve voice style for a segment, checking SSMD voice metadata.
-
-        Args:
-            segment: Phoneme segment to process
-            default_voice_style: Default voice style if no metadata present
-            voice_resolver: Optional callback to resolve voice names
-
-        Returns:
-            Voice style array for this segment
-        """
-        # Use default voice by default
-        segment_voice_style = default_voice_style
-
-        # Check for SSMD voice metadata override
-        if voice_resolver and segment.ssmd_metadata:
-            voice_name = segment.ssmd_metadata.get("voice_name")
-            if not voice_name:
-                voice_name = segment.ssmd_metadata.get("voice")
-            if voice_name:
-                try:
-                    segment_voice_style = voice_resolver(voice_name)
-                except (KeyError, RuntimeError, OSError, ValueError) as exc:
-                    if segment.ssmd_metadata.get("missing_voice_policy") == "error":
-                        raise ConfigurationError(
-                            f"Unable to resolve SSMD voice target '{voice_name}'"
-                        ) from exc
-                    logger.warning(
-                        "Failed to resolve voice '%s' for segment; using default voice: %s",
-                        voice_name,
-                        exc,
-                    )
-
-        return segment_voice_style
-
     def _resolve_short_sentence_config(
         self, enable_short_sentence_override: bool | None
     ) -> ShortSentenceConfig | None:
@@ -913,9 +562,9 @@ class AudioGenerator:
                     phonemes = short_sentence.phonemes
                     tokens = short_sentence.tokens
                     if short_sentence.metadata is not None:
-                        metadata = dict(segment.ssmd_metadata or {})
+                        metadata = dict(segment.engine_metadata or {})
                         metadata[SHORT_SENTENCE_META_KEY] = short_sentence.metadata
-                        segment = dataclasses.replace(segment, ssmd_metadata=metadata)
+                        segment = dataclasses.replace(segment, engine_metadata=metadata)
                         if short_sentence.metadata.get("kind") in {
                             "phrase",
                             "randomized-phrase",
@@ -947,7 +596,6 @@ class AudioGenerator:
                     tokens[i : i + MAX_PHONEME_LENGTH]
                     for i in range(0, len(tokens), MAX_PHONEME_LENGTH)
                 ]
-                total_batches = len(batches)
                 for idx, batch_tokens in enumerate(batches):
                     batch_phonemes = self._tokenizer.detokenize(batch_tokens)
                     processed.append(
@@ -957,8 +605,6 @@ class AudioGenerator:
                             phoneme_id=idx,
                             phonemes=batch_phonemes,
                             tokens=list(batch_tokens),
-                            pause_before=segment.pause_before if idx == 0 else 0.0,
-                            pause_after=(segment.pause_after if idx == total_batches - 1 else 0.0),
                             raw_audio=None,
                             processed_audio=None,
                         )
@@ -969,8 +615,6 @@ class AudioGenerator:
                         segment,
                         phonemes=phonemes,
                         tokens=tokens,
-                        pause_before=segment.pause_before,
-                        pause_after=segment.pause_after,
                         raw_audio=None,
                         processed_audio=None,
                     )
@@ -983,12 +627,11 @@ class AudioGenerator:
         segments: list[PhonemeSegment],
         voice_style: np.ndarray,
         speed: float,
-        voice_resolver: Callable[[str], np.ndarray] | None,
         trace: Trace | None = None,
     ) -> list[PhonemeSegment]:
         noise_flags: list[bool] = []
         for segment in segments:
-            short_sentence_metadata = (segment.ssmd_metadata or {}).get(SHORT_SENTENCE_META_KEY)
+            short_sentence_metadata = (segment.engine_metadata or {}).get(SHORT_SENTENCE_META_KEY)
             if trace is not None and isinstance(short_sentence_metadata, dict):
                 trace.increment_counter("short_sentence_detected")
                 if short_sentence_metadata.get("kind") in {"phrase", "randomized-phrase"}:
@@ -1001,7 +644,7 @@ class AudioGenerator:
                 trace.counters["logical_phoneme_segments"] = (
                     trace.counters.get("logical_phoneme_segments", 0) + 1
                 )
-            segment_voice_style = self._resolve_segment_voice(segment, voice_style, voice_resolver)
+            segment_voice_style = voice_style
             if trace is None:
                 audio, pred_dur = self._run_onnx(
                     segment.phonemes, segment_voice_style, speed, tokens=segment.tokens or None
@@ -1019,7 +662,6 @@ class AudioGenerator:
                 trace.inference[-1].update(
                     {
                         "segment_id": segment.id,
-                        "sentence_idx": segment.sentence_idx,
                         "effective_voice": segment.voice_name,
                     }
                 )
@@ -1067,7 +709,7 @@ class AudioGenerator:
         pred_dur: KokoroTimingPayload | np.ndarray | None,
         audio_length: int,
     ) -> list[WordTiming]:
-        metadata = (segment.ssmd_metadata or {}).get(SHORT_SENTENCE_META_KEY)
+        metadata = (segment.engine_metadata or {}).get(SHORT_SENTENCE_META_KEY)
         if isinstance(metadata, dict) and isinstance(metadata.get("timing_tokens"), list):
             raw_tokens = [
                 dict(token) for token in metadata["timing_tokens"] if isinstance(token, dict)
@@ -1172,7 +814,7 @@ class AudioGenerator:
         segment: PhonemeSegment,
         pred_dur: KokoroTimingPayload | np.ndarray | None,
     ) -> None:
-        short_sentence_metadata = (segment.ssmd_metadata or {}).get(SHORT_SENTENCE_META_KEY)
+        short_sentence_metadata = (segment.engine_metadata or {}).get(SHORT_SENTENCE_META_KEY)
         if not isinstance(short_sentence_metadata, dict):
             return
         timing_tokens = short_sentence_metadata.get("timing_tokens")
@@ -1276,7 +918,7 @@ class AudioGenerator:
         trace: Trace | None = None,
     ) -> np.ndarray:
         """Accept confident phrase cuts or regenerate a wrap fallback."""
-        short_sentence_metadata = (segment.ssmd_metadata or {}).get(SHORT_SENTENCE_META_KEY)
+        short_sentence_metadata = (segment.engine_metadata or {}).get(SHORT_SENTENCE_META_KEY)
         if not isinstance(short_sentence_metadata, dict):
             return audio
         if short_sentence_metadata.get("kind") not in {"phrase", "randomized-phrase"}:
@@ -1587,27 +1229,17 @@ class AudioGenerator:
         self,
         segments: list[PhonemeSegment],
         trim_silence: bool,
-        prosody_config: ProsodyConfig | None = None,
+        voice_level_config: VoiceLevelConfig | None = None,
         trace: Trace | None = None,
-        loudness_config: LoudnessConfig | None = None,
     ) -> list[PhonemeSegment]:
+        config = voice_level_config or VoiceLevelConfig()
         for segment in segments:
             if segment.raw_audio is None:
                 segment.processed_audio = None
                 continue
 
-            if not trim_silence and not segment.ssmd_metadata:
-                segment.processed_audio = apply_voice_level_calibration(
-                    segment.raw_audio,
-                    loudness_config or LoudnessConfig(),
-                    segment.render_voice_key,
-                    trace=trace,
-                    segment_id=segment.id,
-                )
-                continue
-
             audio = segment.raw_audio
-            short_sentence_metadata = (segment.ssmd_metadata or {}).get(SHORT_SENTENCE_META_KEY)
+            short_sentence_metadata = (segment.engine_metadata or {}).get(SHORT_SENTENCE_META_KEY)
             if isinstance(short_sentence_metadata, dict) and not short_sentence_metadata.get(
                 "cut_applied"
             ):
@@ -1620,10 +1252,8 @@ class AudioGenerator:
                             segment.word_timings, left_cut, right_cut
                         )
                     audio = cut_audio
-            if (
-                trim_silence
-                or (segment.ssmd_metadata or {}).get("deterministic_pause_boundary") == "true"
-            ):
+
+            if trim_silence:
                 trim_result: Any = trim_audio(audio)
                 if isinstance(trim_result, tuple) and len(trim_result) == 2:
                     audio, trim_bounds = trim_result
@@ -1632,241 +1262,16 @@ class AudioGenerator:
                     )
                 else:
                     audio = trim_result
-            old_length = len(audio)
-            audio = apply_voice_level_calibration(
+
+            segment.processed_audio = apply_voice_level_calibration(
                 audio,
-                loudness_config or LoudnessConfig(),
+                config,
                 segment.render_voice_key,
-                external_audio=bool((segment.ssmd_metadata or {}).get("audio_src")),
                 trace=trace,
                 segment_id=segment.id,
             )
-            processed_audio = self._apply_segment_prosody(
-                audio,
-                segment,
-                prosody_config,
-                trace,
-            )
-            if old_length and len(processed_audio) != old_length:
-                segment.word_timings = _scale_word_timings(
-                    segment.word_timings, old_length, len(processed_audio)
-                )
-            segment.processed_audio = processed_audio
 
         return segments
-
-    def _concatenate_audio_segments(
-        self,
-        segments: list[PhonemeSegment],
-        prosody_config: ProsodyConfig | None = None,
-        trace: Trace | None = None,
-    ) -> np.ndarray:
-        audio_parts: list[np.ndarray] = []
-        previous_index: int | None = None
-        previous_segment: PhonemeSegment | None = None
-
-        for segment in segments:
-            if segment.pause_before > 0:
-                audio_parts.append(generate_silence(segment.pause_before, SAMPLE_RATE))
-                previous_index = None
-                previous_segment = None
-
-            if segment.processed_audio is not None:
-                current = np.asarray(segment.processed_audio)
-                if (
-                    previous_index is not None
-                    and previous_segment is not None
-                    and _should_condition_boundary(previous_segment, segment, prosody_config)
-                ):
-                    left = audio_parts[previous_index]
-                    boundary_before = _boundary_jump(left, current)
-                    conditioned_left, conditioned_right = _condition_boundary(
-                        left,
-                        current,
-                        sample_rate=SAMPLE_RATE,
-                        blend_ms=(
-                            prosody_config.boundary_blend_ms if prosody_config is not None else 0.0
-                        ),
-                    )
-                    audio_parts[previous_index] = conditioned_left
-                    current = conditioned_right
-                    _record_boundary_diagnostic(
-                        trace,
-                        segment,
-                        boundary_before,
-                        _boundary_jump(conditioned_left, conditioned_right),
-                        min(len(left), len(current)),
-                    )
-                audio_parts.append(current)
-                previous_index = len(audio_parts) - 1
-                previous_segment = segment
-            else:
-                previous_index = None
-                previous_segment = None
-
-            if segment.pause_after > 0:
-                audio_parts.append(generate_silence(segment.pause_after, SAMPLE_RATE))
-                previous_index = None
-                previous_segment = None
-
-        return np.concatenate(audio_parts) if audio_parts else np.array([], dtype=np.float32)
-
-    def generate_from_segments(
-        self,
-        segments: list[PhonemeSegment],
-        voice_style: np.ndarray,
-        speed: float,
-        trim_silence: bool,
-        voice_resolver: Callable[[str], np.ndarray] | None = None,
-        enable_short_sentence_override: bool | None = None,
-        random_seed: int | None = None,
-        prosody_config: ProsodyConfig | None = None,
-        trace: Trace | None = None,
-    ) -> np.ndarray:
-        """Generate audio from list of PhonemeSegment instances.
-
-        Unified audio generation method that handles:
-        - Segments with phonemes (generate speech)
-        - Empty segments (skip, only use pause_after)
-        - Pause insertion based on pause_before and pause_after fields
-        - Per-segment voice switching via SSMD voice metadata
-        - Optional silence trimming
-        - Per-call short sentence handling override
-
-        Args:
-            segments: List of PhonemeSegment instances
-            voice_style: Default voice style vector (used when no voice metadata)
-            speed: Speech speed multiplier
-            trim_silence: Whether to trim silence from segment boundaries
-            voice_resolver: Optional callback to resolve voice names to style vectors.
-                Takes voice name (str) and returns voice style array.
-                If provided and segment has voice metadata, uses per-segment voice.
-            enable_short_sentence_override: Override short sentence handling.
-                None (default): Use config setting
-                True: Force enable short sentence handling
-                False: Force disable short sentence handling
-            random_seed: Optional seed for reproducible randomized short-sentence
-                phrase selection.
-
-        Returns:
-            Concatenated audio array
-        """
-        preprocessed = self._preprocess_segments(
-            segments, enable_short_sentence_override, random_seed
-        )
-        generated = self._generate_raw_audio_segments(
-            preprocessed, voice_style, speed, voice_resolver, trace
-        )
-        processed = self._postprocess_audio_segments(generated, trim_silence, prosody_config)
-        return self._concatenate_audio_segments(processed, prosody_config)
-
-    def _apply_segment_prosody(
-        self,
-        audio: np.ndarray,
-        segment: PhonemeSegment,
-        prosody_config: ProsodyConfig | None = None,
-        trace: Trace | None = None,
-    ) -> np.ndarray:
-        """Apply prosody modifications from segment metadata to audio.
-
-        Args:
-            audio: Input audio array
-            segment: PhonemeSegment with potential prosody metadata
-
-        Returns:
-            Audio with prosody modifications applied
-        """
-        if not segment.ssmd_metadata:
-            return audio
-
-        volume = segment.ssmd_metadata.get("prosody_volume")
-        pitch = segment.ssmd_metadata.get("prosody_pitch")
-        rate = segment.ssmd_metadata.get("prosody_rate")
-
-        # Apply prosody if any prosody metadata is present
-        if volume or pitch or rate:
-            source_metrics = _waveform_metrics(audio)
-            resolved_config = prosody_config or ProsodyConfig()
-            parsed: dict[str, float | None] = {}
-            for name, value, parser in (
-                ("volume_db", volume, parse_volume),
-                ("pitch_semitones", pitch, parse_pitch),
-                ("rate_multiplier", rate, parse_rate),
-            ):
-                if value is None:
-                    parsed[name] = None
-                    continue
-                try:
-                    parsed[name] = float(parser(value))
-                except (TypeError, ValueError):
-                    parsed[name] = None
-
-            started = time.perf_counter()
-            audio = apply_prosody(
-                audio,
-                SAMPLE_RATE,
-                volume=volume,
-                pitch=pitch,
-                rate=rate,
-                config=resolved_config,
-            )
-            if trace is not None:
-                output_metrics = _waveform_metrics(audio)
-                short_sentence = (segment.ssmd_metadata or {}).get(SHORT_SENTENCE_META_KEY)
-                trace.prosody.append(
-                    {
-                        "segment_id": segment.id,
-                        "text": segment.text,
-                        "method": resolved_config.method,
-                        "strict": resolved_config.strict,
-                        "rate": rate,
-                        "pitch": pitch,
-                        "volume": volume,
-                        "rate_multiplier": parsed["rate_multiplier"],
-                        "pitch_semitones": parsed["pitch_semitones"],
-                        "volume_db": parsed["volume_db"],
-                        "short_sentence": dict(short_sentence)
-                        if isinstance(short_sentence, dict)
-                        else None,
-                        "runtime_ms": (time.perf_counter() - started) * 1000.0,
-                        "source": source_metrics,
-                        "output": output_metrics,
-                        "edge_jump_before": source_metrics["max_adjacent_jump"],
-                        "edge_jump_after": output_metrics["max_adjacent_jump"],
-                    }
-                )
-
-        return audio
-
-    def generate_from_tokens(
-        self,
-        tokens: list[int],
-        voice_style: np.ndarray,
-        speed: float,
-        *,
-        trace: Trace | None = None,
-    ) -> tuple[np.ndarray, int]:
-        """Generate audio from token IDs directly.
-
-        This provides the lowest-level interface, useful for pre-tokenized
-        content and maximum control.
-
-        Args:
-            tokens: List of token IDs
-            voice_style: Voice style vector
-            speed: Speech speed
-            trace: Optional trace collector for inference diagnostics
-
-        Returns:
-            Tuple of (audio samples as numpy array, sample rate)
-        """
-        phonemes = self._tokenizer.detokenize(tokens)
-        batches = self.split_phonemes(phonemes)
-        audio = self.generate_from_phoneme_batches(
-            batches, voice_style, speed, trim_silence=False, trace=trace
-        )
-
-        return audio, SAMPLE_RATE
 
 
 def _crop_word_timings(
@@ -1888,63 +1293,6 @@ def _crop_word_timings(
             )
         )
     return cropped
-
-
-def _scale_word_timings(
-    timings: list[WordTiming], old_length: int, new_length: int
-) -> list[WordTiming]:
-    if old_length <= 0 or new_length <= 0:
-        return []
-    return [
-        dataclasses.replace(
-            timing,
-            start_sample=max(
-                0, min(new_length, round(timing.start_sample * new_length / old_length))
-            ),
-            end_sample=max(0, min(new_length, round(timing.end_sample * new_length / old_length))),
-        )
-        for timing in timings
-        if timing.start_sample < timing.end_sample
-    ]
-
-
-def _translate_word_timings(timings: list[WordTiming], sample_offset: int) -> list[WordTiming]:
-    if not sample_offset:
-        return list(timings)
-    return [
-        dataclasses.replace(
-            timing,
-            start_sample=timing.start_sample + sample_offset,
-            end_sample=timing.end_sample + sample_offset,
-        )
-        for timing in timings
-    ]
-
-
-def _collect_unit_word_timings(
-    segments: Sequence[PhonemeSegment],
-    *,
-    sample_rate: int = SAMPLE_RATE,
-) -> list[WordTiming]:
-    """Translate segment-local timings into unit-local copies without mutation."""
-    result: list[WordTiming] = []
-    cursor = 0
-    for segment in segments:
-        cursor += seconds_to_samples(segment.pause_before, sample_rate)
-        if segment.processed_audio is not None:
-            waveform_length = len(np.asarray(segment.processed_audio).reshape(-1))
-            for index, timing in enumerate(segment.word_timings):
-                if not (0 <= timing.start_sample <= timing.end_sample <= waveform_length):
-                    raise ValueError(
-                        "word timing is not segment-local: "
-                        f"segment={segment.id!r} word_index={index} "
-                        f"range={timing.start_sample}:{timing.end_sample} "
-                        f"waveform_length={waveform_length}"
-                    )
-            result.extend(_translate_word_timings(segment.word_timings, cursor))
-            cursor += waveform_length
-        cursor += seconds_to_samples(segment.pause_after, sample_rate)
-    return result
 
 
 def _join_timestamps(

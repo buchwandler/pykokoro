@@ -107,9 +107,6 @@ def make_segment(text: str, phonemes: str) -> PhonemeSegment:
         tokens=[],
         char_start=0,
         char_end=len(text),
-        paragraph_idx=0,
-        sentence_idx=0,
-        clause_idx=0,
     )
 
 

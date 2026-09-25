@@ -173,7 +173,7 @@ def test_synthesis_uses_registry_profile_and_selected_output(monkeypatch, tmp_pa
         lambda model_id, *, registry: fake_profile,
     )
 
-    class FakePipeline:
+    class FakeSynthesizer:
         config = None
 
         def __init__(self, config) -> None:
@@ -185,12 +185,14 @@ def test_synthesis_uses_registry_profile_and_selected_output(monkeypatch, tmp_pa
         def __exit__(self, *args) -> None:
             return None
 
-        def run(self, text: str):
+        def synthesize_text(self, text: str, *, language: str, voice: str):
             assert text == showcase.SAMPLE_TEXTS["de"]
+            assert language == "de"
+            assert voice == "two"
             return SimpleNamespace(audio=np.zeros(4), sample_rate=24000)
 
     writes: list[Path] = []
-    monkeypatch.setattr(showcase, "KokoroPipeline", FakePipeline)
+    monkeypatch.setattr(showcase, "KokoroSynthesizer", FakeSynthesizer)
     monkeypatch.setattr(showcase.sf, "write", lambda path, audio, sample_rate: writes.append(path))
 
     output = showcase.synthesize(
@@ -205,8 +207,8 @@ def test_synthesis_uses_registry_profile_and_selected_output(monkeypatch, tmp_pa
 
     assert output == tmp_path / "selected_de_two.wav"
     assert writes == [output]
-    assert FakePipeline.config.model_source == "github"
-    assert FakePipeline.config.model_variant == "selected"
-    assert FakePipeline.config.model_quality == "q8"
-    assert FakePipeline.config.voice == "two"
-    assert FakePipeline.config.generation.lang == "de"
+    assert FakeSynthesizer.config.model_source == "github"
+    assert FakeSynthesizer.config.model_variant == "selected"
+    assert FakeSynthesizer.config.model_quality == "q8"
+    assert FakeSynthesizer.config.voice == "two"
+    assert FakeSynthesizer.config.generation.lang == "de"

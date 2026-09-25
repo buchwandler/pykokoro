@@ -4,7 +4,13 @@ import pytest
 
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.model_profiles import get_model_profile
-from pykokoro.pipeline_config import PipelineConfig, resolve_model_defaults
+from pykokoro.synthesis_config import SynthesisConfig, resolve_synthesis_config
+
+
+def _resolve(config: SynthesisConfig) -> SynthesisConfig:
+    return resolve_synthesis_config(
+        config, language=config.generation.lang or "en-us", voice=config.voice
+    )
 
 
 def test_runtime_profiles_do_not_duplicate_published_inventory():
@@ -72,8 +78,8 @@ def test_release_manifest_resolves_explicit_assets(tmp_path):
         encoding="utf-8",
     )
 
-    resolved = resolve_model_defaults(
-        PipelineConfig(
+    resolved = _resolve(
+        SynthesisConfig(
             release_manifest_path=manifest,
             model_variant="vi-contextbox",
             generation=GenerationConfig(lang="vi"),
@@ -101,8 +107,8 @@ def test_release_manifest_selects_requested_model_quality(tmp_path):
         encoding="utf-8",
     )
 
-    resolved = resolve_model_defaults(
-        PipelineConfig(
+    resolved = _resolve(
+        SynthesisConfig(
             release_manifest_path=manifest,
             model_source="github",
             model_variant="v1.0",
@@ -131,8 +137,8 @@ def test_release_manifest_automatic_quality_ignores_asset_order(tmp_path):
         encoding="utf-8",
     )
 
-    resolved = resolve_model_defaults(
-        PipelineConfig(
+    resolved = _resolve(
+        SynthesisConfig(
             release_manifest_path=manifest,
             model_source="github",
             model_variant="v1.0",
@@ -163,8 +169,8 @@ def test_release_manifest_rejects_unavailable_quality(tmp_path):
         ValueError,
         match=r"no model asset for quality 'q8'.*Available: fp32",
     ):
-        resolve_model_defaults(
-            PipelineConfig(
+        _resolve(
+            SynthesisConfig(
                 release_manifest_path=manifest,
                 model_source="github",
                 model_variant="v1.0",
@@ -191,8 +197,8 @@ def test_release_manifest_rejects_duplicate_quality(tmp_path):
     )
 
     with pytest.raises(ValueError, match=r"multiple model assets for quality 'q8'"):
-        resolve_model_defaults(
-            PipelineConfig(
+        _resolve(
+            SynthesisConfig(
                 release_manifest_path=manifest,
                 model_source="github",
                 model_variant="v1.0",
@@ -216,8 +222,8 @@ def test_release_manifest_preserves_single_unqualified_model(tmp_path):
         encoding="utf-8",
     )
 
-    resolved = resolve_model_defaults(
-        PipelineConfig(
+    resolved = _resolve(
+        SynthesisConfig(
             release_manifest_path=manifest,
             model_source="github",
             model_variant="v1.0",
@@ -246,8 +252,8 @@ def test_release_manifest_preserves_explicit_model_path_and_other_assets(tmp_pat
     )
     custom_model = tmp_path / "custom.onnx"
 
-    resolved = resolve_model_defaults(
-        PipelineConfig(
+    resolved = _resolve(
+        SynthesisConfig(
             release_manifest_path=manifest,
             model_source="github",
             model_variant="v1.0",

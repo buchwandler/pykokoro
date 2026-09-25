@@ -1,15 +1,23 @@
-"""PyKokoro public API with lazy ONNX-backed exports."""
+"""Public API for the request-centric Kokoro synthesis engine."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from .generation_config import GenerationConfig
-from .language_detection import LanguageDetectionConfig
-from .loudness_config import LoudnessConfig
-from .prosody_config import ProsodyConfig, ProsodyMethod
-from .ssmd_config import SSMDPauseOverrides, SSMDRenderConfig
-from .voice_level import VoiceCalibrationKey, VoiceLevelCalibration
+from .language_routing import LanguageRoutingConfig
+from .short_sentence_handler import ShortSentenceConfig
+from .synthesis_config import SynthesisConfig
+from .synthesis_types import (
+    LinguisticToken,
+    PronunciationOverride,
+    RenderedSegment,
+    SynthesisSegment,
+)
+from .tokenizer import EspeakConfig, TokenizerConfig
+from .types import WordTiming
+from .voice_level import VoiceLevelConfig
+from .voice_manager import VoiceBlend
 
 try:
     from ._version import __version__, __version_tuple__
@@ -18,35 +26,20 @@ except ImportError:
     __version_tuple__ = (0, 9, 2)
 
 
-if TYPE_CHECKING:
-    from .asset_progress import AssetProgressCallback, AssetProgressEvent, ConsoleAssetProgress
-    from .discovery import (
-        ModelCapabilities,
-        ModelDiscoveryResult,
-        VoiceCapabilities,
-        discover_models,
-    )
-    from .lexicon_discovery import LexiconCapabilities, LexiconDiscoveryResult, discover_lexicons
-    from .pipeline import (
-        KokoroPipeline,
-        PreparedAudioUnits,
-        PreparedFrontend,
-        PreparedAudioSegments,
-        RenderedPlanSegment,
-        build_pipeline,
-        with_spacy_model,
-        with_spacy_model_size,
-    )
-    from .pipeline_config import PipelineConfig, resolve_pipeline_config
-    from .types import AudioUnitDescriptor, AudioUnitKind, AudioUnitResult, WordTiming
-
-
 def __getattr__(name: str) -> Any:
+    if name in {"AssetProgressEvent", "AssetProgressCallback", "ConsoleAssetProgress"}:
+        from .asset_progress import AssetProgressCallback, AssetProgressEvent, ConsoleAssetProgress
+
+        return {
+            "AssetProgressEvent": AssetProgressEvent,
+            "AssetProgressCallback": AssetProgressCallback,
+            "ConsoleAssetProgress": ConsoleAssetProgress,
+        }[name]
     if name in {
-        "discover_models",
         "ModelCapabilities",
         "ModelDiscoveryResult",
         "VoiceCapabilities",
+        "discover_models",
     }:
         from .discovery import (
             ModelCapabilities,
@@ -56,10 +49,10 @@ def __getattr__(name: str) -> Any:
         )
 
         return {
-            "discover_models": discover_models,
             "ModelCapabilities": ModelCapabilities,
             "ModelDiscoveryResult": ModelDiscoveryResult,
             "VoiceCapabilities": VoiceCapabilities,
+            "discover_models": discover_models,
         }[name]
     if name in {"LexiconCapabilities", "LexiconDiscoveryResult", "discover_lexicons"}:
         from .lexicon_discovery import (
@@ -73,68 +66,10 @@ def __getattr__(name: str) -> Any:
             "LexiconDiscoveryResult": LexiconDiscoveryResult,
             "discover_lexicons": discover_lexicons,
         }[name]
-    if name in {"PipelineConfig", "resolve_pipeline_config"}:
-        from .pipeline_config import PipelineConfig, resolve_pipeline_config
+    if name == "KokoroSynthesizer":
+        from .synthesizer import KokoroSynthesizer
 
-        return {
-            "PipelineConfig": PipelineConfig,
-            "resolve_pipeline_config": resolve_pipeline_config,
-        }[name]
-    if name in {
-        "KokoroPipeline",
-        "PreparedAudioUnits",
-        "PreparedFrontend",
-        "PreparedAudioSegments",
-        "RenderedPlanSegment",
-        "build_pipeline",
-        "with_spacy_model",
-        "with_spacy_model_size",
-    }:
-        try:
-            from .pipeline import (
-                KokoroPipeline,
-                PreparedAudioUnits,
-                PreparedFrontend,
-                PreparedAudioSegments,
-                RenderedPlanSegment,
-                build_pipeline,
-                with_spacy_model,
-                with_spacy_model_size,
-            )
-        except ModuleNotFoundError as exc:
-            if exc.name == "onnxruntime":
-                raise RuntimeError(
-                    "ONNX-backed pipeline support requires ONNX Runtime; "
-                    "install pykokoro[cpu] or a platform provider extra."
-                ) from exc
-            raise
-        return {
-            "KokoroPipeline": KokoroPipeline,
-            "PreparedAudioUnits": PreparedAudioUnits,
-            "PreparedAudioSegments": PreparedAudioSegments,
-            "RenderedPlanSegment": RenderedPlanSegment,
-            "PreparedFrontend": PreparedFrontend,
-            "build_pipeline": build_pipeline,
-            "with_spacy_model": with_spacy_model,
-            "with_spacy_model_size": with_spacy_model_size,
-        }[name]
-    if name in {"AudioUnitDescriptor", "AudioUnitKind", "AudioUnitResult", "WordTiming"}:
-        from .types import AudioUnitDescriptor, AudioUnitKind, AudioUnitResult, WordTiming
-
-        return {
-            "AudioUnitDescriptor": AudioUnitDescriptor,
-            "AudioUnitKind": AudioUnitKind,
-            "AudioUnitResult": AudioUnitResult,
-            "WordTiming": WordTiming,
-        }[name]
-    if name in {"AssetProgressEvent", "AssetProgressCallback", "ConsoleAssetProgress"}:
-        from .asset_progress import AssetProgressCallback, AssetProgressEvent, ConsoleAssetProgress
-
-        return {
-            "AssetProgressEvent": AssetProgressEvent,
-            "AssetProgressCallback": AssetProgressCallback,
-            "ConsoleAssetProgress": ConsoleAssetProgress,
-        }[name]
+        return KokoroSynthesizer
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -142,36 +77,27 @@ __all__ = [
     "AssetProgressEvent",
     "AssetProgressCallback",
     "ConsoleAssetProgress",
-    "discover_models",
     "ModelCapabilities",
     "ModelDiscoveryResult",
     "VoiceCapabilities",
+    "discover_models",
     "LexiconCapabilities",
     "LexiconDiscoveryResult",
     "discover_lexicons",
     "GenerationConfig",
-    "LoudnessConfig",
-    "VoiceCalibrationKey",
-    "VoiceLevelCalibration",
-    "LanguageDetectionConfig",
-    "ProsodyConfig",
-    "ProsodyMethod",
-    "SSMDPauseOverrides",
-    "SSMDRenderConfig",
-    "KokoroPipeline",
-    "AudioUnitDescriptor",
-    "AudioUnitKind",
-    "AudioUnitResult",
+    "LanguageRoutingConfig",
+    "SynthesisConfig",
+    "VoiceLevelConfig",
+    "VoiceBlend",
+    "SynthesisSegment",
+    "RenderedSegment",
+    "PronunciationOverride",
+    "LinguisticToken",
     "WordTiming",
-    "PreparedAudioUnits",
-    "PreparedAudioSegments",
-    "RenderedPlanSegment",
-    "PreparedFrontend",
-    "PipelineConfig",
-    "resolve_pipeline_config",
+    "TokenizerConfig",
+    "EspeakConfig",
+    "ShortSentenceConfig",
+    "KokoroSynthesizer",
     "__version__",
     "__version_tuple__",
-    "build_pipeline",
-    "with_spacy_model",
-    "with_spacy_model_size",
 ]

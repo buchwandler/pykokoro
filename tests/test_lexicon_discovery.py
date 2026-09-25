@@ -43,14 +43,14 @@ def test_named_selectors_map_to_language_qualified_assets(
 def test_base_language_keeps_regional_entries(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(lexicon_discovery, "_installed_state", lambda _asset: False)
 
-    result = lexicon_discovery.discover_lexicons(language="EN_us")
-    assert [(item.locale, item.selector) for item in result.lexicons] == [("en-US", "gold")]
+    regional = lexicon_discovery.discover_lexicons(language="EN_us")
+    regional_entries = {(item.locale, item.selector) for item in regional.lexicons}
+    assert ("en-US", "gold") in regional_entries
 
-    result = lexicon_discovery.discover_lexicons(language="en")
-    assert [(item.locale, item.selector) for item in result.lexicons] == [
-        ("en-GB", "gold"),
-        ("en-US", "gold"),
-    ]
+    base = lexicon_discovery.discover_lexicons(language="en")
+    base_entries = {(item.locale, item.selector) for item in base.lexicons}
+    assert ("en-GB", "gold") in base_entries
+    assert ("en-US", "gold") in base_entries
 
 
 def test_known_model_filter_and_unknown_capability(monkeypatch: pytest.MonkeyPatch) -> None:

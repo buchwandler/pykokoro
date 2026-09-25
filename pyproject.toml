@@ -13,7 +13,7 @@ pykokoro = ["py.typed", "data/*.json"]
 
 [project]
 name = "pykokoro"
-description = "A python library for Kokoro TTS"
+description = "A request-centric Kokoro speech-synthesis engine"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {file = "LICENSE"}
@@ -23,15 +23,11 @@ authors = [
 keywords = ["tts", "text-to-speech", "kokoro", "phonemizer", "espeak"]
 dependencies = [
     "kokorog2p[espeak,en]>=0.9.9,<1.0",
-    "utterplan>=0.2.0,<0.3",
     "lexphon>=0.2.3,<0.3",
     "numpy",
     "audiosig>=0.1.4,<0.2",
     "platformdirs",
     "onnxvoice>=0.1.7,<0.2",
-    "audiocompose>=0.1,<0.2",
-    "chardet",
-    "charset-normalizer",
     "soundfile",
     "typing_extensions>=4.0"
 ]

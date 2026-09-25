@@ -1,118 +1,28 @@
-"""Tests for dependency-light imports and capability diagnostics."""
+"""Request-engine imports do not depend on document and composition packages."""
 
 from __future__ import annotations
 
 import subprocess
 import sys
 
-import pytest
 
-from pykokoro.stages.g2p.kokorog2p import KokoroG2PAdapter
-
-
-def test_lightweight_imports_do_not_require_onnxruntime() -> None:
-    code = (
-        "import builtins\n"
-        "real_import = builtins.__import__\n"
-        "def blocked(name, *args, **kwargs):\n"
-        "    if name == 'onnxruntime' or name.startswith('onnxruntime.'):\n"
-        "        raise ModuleNotFoundError('blocked onnxruntime', name='onnxruntime')\n"
-        "    return real_import(name, *args, **kwargs)\n"
-        "builtins.__import__ = blocked\n"
-        "import pykokoro.runtime.cache\n"
-        "import pykokoro.generation_config\n"
-        "print('ok')\n"
-    )
-    result = subprocess.run(
-        [sys.executable, "-c", code],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "ok"
-
-
-def test_custom_stage_pipeline_does_not_require_onnxruntime() -> None:
-    code = (
-        "import builtins\n"
-        "real_import = builtins.__import__\n"
-        "def blocked(name, *args, **kwargs):\n"
-        "    if name == 'onnxruntime' or name.startswith('onnxruntime.'):\n"
-        "        raise ModuleNotFoundError('blocked onnxruntime', name='onnxruntime')\n"
-        "    return real_import(name, *args, **kwargs)\n"
-        "builtins.__import__ = blocked\n"
-        "from pykokoro.pipeline import KokoroPipeline\n"
-        "from pykokoro.pipeline_config import PipelineConfig\n"
-        "assert KokoroPipeline(PipelineConfig())\n"
-        "print('ok')\n"
-    )
-    result = subprocess.run(
-        [sys.executable, "-c", code],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "ok"
-
-
-def test_default_pipeline_reports_missing_onnxruntime_extra() -> None:
-    code = (
-        "import builtins\n"
-        "real_import = builtins.__import__\n"
-        "def blocked(name, *args, **kwargs):\n"
-        "    if name == 'onnxruntime' or name.startswith('onnxruntime.'):\n"
-        "        raise ModuleNotFoundError('blocked onnxruntime', name='onnxruntime')\n"
-        "    return real_import(name, *args, **kwargs)\n"
-        "builtins.__import__ = blocked\n"
-        "from pykokoro.pipeline import KokoroPipeline\n"
-        "from pykokoro.pipeline_config import PipelineConfig\n"
-        "from pykokoro.exceptions import ConfigurationError\n"
-        "try:\n"
-        "    KokoroPipeline(PipelineConfig()).run('Hello.', lang='en-us')\n"
-        "except (RuntimeError, ConfigurationError) as exc:\n"
-        "    msg = str(exc)\n"
-        "    assert 'onnxvoice' in msg or 'pykokoro' in msg\n"
-        "else:\n"
-        "    raise AssertionError('default backend unexpectedly succeeded')\n"
-        "print('ok')\n"
-    )
-    result = subprocess.run(
-        [sys.executable, "-c", code],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "ok"
-
-
-def test_missing_kokorog2p_has_distinct_diagnostic(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    adapter = KokoroG2PAdapter()
-    real_import = __import__
-
-    def blocked_import(name, *args, **kwargs):
-        if name == "kokorog2p":
-            raise ModuleNotFoundError("missing kokorog2p", name="kokorog2p")
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr("builtins.__import__", blocked_import)
-    with pytest.raises(RuntimeError, match="not installed"):
-        adapter._load()
-
-
-def test_top_level_public_api_keeps_lazy_pipeline_import() -> None:
-    code = (
-        "import sys\n"
-        "import pykokoro\n"
-        "assert 'pykokoro.pipeline' not in sys.modules\n"
-        "assert 'onnxruntime' not in sys.modules\n"
-        "assert 'PipelineConfig' in pykokoro.__all__\n"
-        "print('ok')\n"
-    )
+def test_request_engine_imports_without_document_extras() -> None:
+    code = """
+import importlib.abc
+import sys
+blocked = {"audiocompose", "utterplan", "ssmd"}
+class Blocker(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split(".", 1)[0] in blocked:
+            raise ModuleNotFoundError("blocked optional document dependency", name=fullname)
+        return None
+sys.meta_path.insert(0, Blocker())
+import pykokoro
+from pykokoro import SynthesisConfig, SynthesisSegment, RenderedSegment, KokoroSynthesizer
+assert SynthesisConfig and SynthesisSegment and RenderedSegment and KokoroSynthesizer
+assert not hasattr(pykokoro, "KokoroPipeline")
+print("ok")
+"""
     result = subprocess.run(
         [sys.executable, "-c", code],
         capture_output=True,

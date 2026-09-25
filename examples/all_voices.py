@@ -17,7 +17,7 @@ try:
 except ImportError:
     from _output import artifact_path
 
-from pykokoro import LoudnessConfig
+from pykokoro import SynthesisConfig
 from pykokoro.discovery import (
     ModelCapabilities,
     ModelDiscoveryResult,
@@ -26,9 +26,12 @@ from pykokoro.discovery import (
     discover_models,
 )
 from pykokoro.generation_config import GenerationConfig
-from pykokoro.pipeline_config import PipelineConfig
 from pykokoro.short_sentence_handler import ShortSentenceConfig
-from pykokoro.voice_level import VoiceCalibrationKey, default_voice_calibration
+from pykokoro.voice_level import (
+    VoiceCalibrationKey,
+    VoiceLevelConfig,
+    default_voice_calibration,
+)
 
 RUNNABLE_STATUSES = {"ready", "experimental"}
 MODEL_PRIORITY = {"v1.0": 0, "v1.1-zh": 1}
@@ -356,7 +359,7 @@ def synthesize_catalog(
     voice_leveling: str = "off",
     print_levels: bool = False,
 ) -> float:
-    """Render the catalog with one reusable pipeline into an atomic WAV."""
+    """Render independent requests and compose them in this caller-owned showcase."""
     if not catalog.entries:
         raise ShowcaseError("No runnable voices discovered")
     sample_rate = _common_sample_rate(catalog.entries)
@@ -365,45 +368,37 @@ def synthesize_catalog(
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_suffix(".part.wav")
     temporary.unlink(missing_ok=True)
-    first = catalog.entries[0]
-
-    from pykokoro import KokoroPipeline
-
-    config = PipelineConfig(
-        model_source=first.model_source,
-        model_variant=first.model_id,
-        model_quality=first.quality,
-        voice=first.voice,
-        allow_experimental_frontend=first.experimental,
-        generation=GenerationConfig(lang=first.locale, speed=1.0),
-        short_sentence_config=ShortSentenceConfig(resolve_mode="wrap"),
-        loudness=LoudnessConfig(voice_leveling=voice_leveling),
-    )
     frames = 0
+    from pykokoro import KokoroSynthesizer
+
     try:
-        with (
-            KokoroPipeline(config) as pipeline,
-            sf.SoundFile(
-                temporary,
-                mode="w",
-                samplerate=sample_rate,
-                channels=1,
-                format="WAV",
-                subtype="PCM_16",
-            ) as writer,
-        ):
+        with sf.SoundFile(
+            temporary,
+            mode="w",
+            samplerate=sample_rate,
+            channels=1,
+            format="WAV",
+            subtype="PCM_16",
+        ) as writer:
             for index, entry in enumerate(catalog.entries):
                 _progress(entry, len(catalog.entries))
+                config = SynthesisConfig(
+                    model_source=entry.model_source,
+                    model_variant=entry.model_id,
+                    model_quality=entry.quality,
+                    voice=entry.voice,
+                    allow_experimental_frontend=entry.experimental,
+                    generation=GenerationConfig(lang=entry.locale, speed=1.0),
+                    short_sentence_config=ShortSentenceConfig(resolve_mode="wrap"),
+                    voice_level=VoiceLevelConfig(mode=voice_leveling),
+                )
                 try:
-                    result = pipeline.run(
-                        announcement_for(entry),
-                        model_source=entry.model_source,
-                        model_variant=entry.model_id,
-                        model_quality=entry.quality,
-                        voice=entry.voice,
-                        lang=entry.locale,
-                        allow_experimental_frontend=entry.experimental,
-                    )
+                    with KokoroSynthesizer(config) as synthesizer:
+                        result = synthesizer.synthesize_text(
+                            announcement_for(entry),
+                            language=entry.locale,
+                            voice=entry.voice,
+                        )
                     audio = _validate_audio(result, entry, sample_rate)
                     if print_levels:
                         metrics = measure_loudness(audio, sample_rate=sample_rate)

@@ -393,7 +393,8 @@ def profile_for_voice(voice: str) -> RuntimeProfile | None:
     matches = [
         profile
         for profile in MODEL_PROFILES.values()
-        if profile.auto_select_for_voice and voice in profile.voice_names
+        if profile.auto_select_for_voice
+        and (voice in profile.voice_names or voice == profile.default_voice)
     ]
     return matches[0] if len(matches) == 1 else None
 

@@ -1,4 +1,4 @@
-"""Run the maintained examples sequentially."""
+"""Run the maintained request-centric synthesis examples sequentially."""
 
 from __future__ import annotations
 
@@ -15,35 +15,25 @@ except ModuleNotFoundError:
     from _output import ARTIFACT_DIR, PROJECT_ROOT
 
 _OUTPUT_ENV = "PYKOKORO_EXAMPLE_OUTPUT_DIR"
-_EXCLUDED_FILES = {"__init__.py", "run_all.py", "_output.py"}
-_PLAYBACK_EXAMPLES = {"play_audio.py", "play_paragraphs.py", "play_streaming.py"}
-_OPTIONAL_EXAMPLES = {
-    "backend_comparison.py",
-    "all_voices.py",
-    "cpu_benchmark.py",
-    "provider_info.py",
-    "spokenform_phoneme_equivalence.py",
-    "english_clausal_comma_pause.py",
-    "english_parenthetical_pause.py",
-    "termux_android_onnx.py",
+_DEFAULT_EXAMPLES = {
+    "linguistic_annotations.py",
+    "models_and_languages.py",
+    "pronunciation_overrides.py",
+    "request_batch.py",
+    "simple_synthesis.py",
 }
+_OPTIONAL_EXAMPLES = {"all_voices.py"}
 
 RunCommand = Callable[..., subprocess.CompletedProcess[str]]
 
 
-def _example_paths(
-    *, include_legacy: bool = False, include_playback: bool = False, include_optional: bool = False
-) -> list[Path]:
-    paths = [
+def _example_paths(*, include_optional: bool = False) -> list[Path]:
+    selected = _DEFAULT_EXAMPLES | (_OPTIONAL_EXAMPLES if include_optional else set())
+    return [
         path
         for path in sorted(PROJECT_ROOT.joinpath("examples").glob("*.py"))
-        if path.name not in _EXCLUDED_FILES
-        and (include_playback or path.name not in _PLAYBACK_EXAMPLES)
-        and (include_optional or path.name not in _OPTIONAL_EXAMPLES)
+        if path.name in selected
     ]
-    if include_legacy:
-        paths.extend(sorted(PROJECT_ROOT.joinpath("examples", "legacy").glob("*.py")))
-    return paths
 
 
 def _label(path: Path) -> str:
@@ -78,30 +68,16 @@ def run_examples(paths: Sequence[Path], *, runner: RunCommand = subprocess.run) 
     return failures
 
 
-def parse_args() -> argparse.Namespace:
+def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--list", action="store_true", help="list selected examples without running them"
-    )
-    parser.add_argument("--include-legacy", action="store_true", help="include archived examples")
-    parser.add_argument(
-        "--include-playback", action="store_true", help="include direct playback examples"
+        "--list", action="store_true", help="list selected examples without running"
     )
     parser.add_argument(
-        "--include-optional",
-        action="store_true",
-        help="include hardware-dependent and otherwise optional examples",
+        "--include-optional", action="store_true", help="include the all-voices showcase"
     )
-    return parser.parse_args()
-
-
-def main() -> int:
-    args = parse_args()
-    paths = _example_paths(
-        include_legacy=args.include_legacy,
-        include_playback=args.include_playback,
-        include_optional=args.include_optional,
-    )
+    args = parser.parse_args()
+    paths = _example_paths(include_optional=args.include_optional)
     if args.list:
         for path in paths:
             print(_label(path))

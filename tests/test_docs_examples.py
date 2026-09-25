@@ -47,19 +47,6 @@ def test_maintained_examples_compile_and_import_without_running_main() -> None:
         _import_example(path)
 
 
-def test_spokenform_example_imports_without_running_main() -> None:
-    _import_example(ROOT / "examples" / "spokenform_phoneme_equivalence.py")
-
-
-def test_removed_api_is_confined_to_archived_examples() -> None:
-    current_files = [ROOT / "README.md", *sorted((ROOT / "docs").glob("*.md"))]
-    current_files.extend(MAINTAINED_EXAMPLES)
-    for path in current_files:
-        text = path.read_text(encoding="utf-8")
-        assert "Kokoro(" not in text, path
-        assert ".create(" not in text, path
-
-
 def _import_example(path: Path) -> None:
     ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     module_name = f"pykokoro_smoke_{path.stem}"

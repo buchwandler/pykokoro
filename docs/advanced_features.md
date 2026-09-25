@@ -1,163 +1,100 @@
-# Advanced Features
+# Advanced request features
 
-This guide covers the supported pipeline-first API for controlled generation and
-long-form rendering.
+All text passed to PyKokoro is prepared speech text. The engine applies the KokoroG2P
+prepared-text behavior but does not interpret SSMD, YAML, or document-level directives.
 
-## Unit-wise rendering
+## Source-aligned pronunciation overrides
 
-`prepare_units()` prepares the complete document once, then renders selected paragraph
-or sentence units one at a time. This preserves document-global SSMD offsets, voice
-bindings, pauses, and marker ownership while bounding live generated waveform memory to
-the selected unit:
-
-```python
-from pathlib import Path
-
-import soundfile as sf
-
-from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
-
-with KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_sarah")) as pipeline:
-    with pipeline.prepare_units(script, unit="paragraph") as prepared:
-        for result in prepared.render(skip_indices={0, 1}):
-            try:
-                sf.write(
-                    Path(f"paragraph-{result.descriptor.index:04d}.wav"),
-                    result.audio,
-                    result.sample_rate,
-                )
-            finally:
-                result.release_audio()
-```
-
-Sentence units provide the low-startup-latency direct-playback path:
+`PronunciationOverride` carries an already-resolved pronunciation instruction for a
+half-open range `[start, end)` in `SynthesisSegment.text`. A language override selects
+the pronunciation language for that range:
 
 ```python
-from pykokoro import GenerationConfig
+from pykokoro import PronunciationOverride, SynthesisSegment
 
-with KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_sarah")) as pipeline:
-    pipeline.play_streaming(script, unit="sentence", queue_size=2)
-```
-
-Playback starts after the first sentence and uses one persistent bounded output stream.
-
-Descriptors are available before inference and contain source-order indices, clean-text
-offsets, segment ownership, marker names, and a `text_hash`. Store the
-`pykokoro-audio-unit-v1` schema beside hashes in a resume manifest. Hashes include
-audio-semantic settings, not tracing, retention, cache directories, or machine-local
-runtime toggles. Set `PipelineConfig(model_identity="model-v1")` to give a local model a
-stable resume identity.
-
-`AudioUnitResult.release_audio()` is destructive and idempotent. The iterator releases
-the previous result before yielding the next one, so callers must persist or copy its
-array inside the loop. Closing prepared units releases prepared segment arrays but does
-not close the reusable pipeline backend.
-
-Preparation is global rather than text-streaming: parsing, segmentation, G2P, and
-phoneme preprocessing still operate on the full document. The bounded part is unit audio
-generation and postprocessing.
-
-## SSMD 0.8 metadata
-
-Portable YAML headers can define logical voices, pause defaults, title metadata, and
-markers. Bind logical roles to provider voices through `SSMDRenderConfig` and render
-either paragraph or sentence units with the same lifecycle shown above. See
-`examples/paragraph_ssmd_voices.py` for a complete script and marker offsets.
-
-## Generation and pauses
-
-```python
-from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
-
-generation = GenerationConfig(
-    lang="en-us",
-    speed=1.05,
-    pause_mode="manual",
-    pause_clause=0.2,
-    pause_sentence=0.5,
-    pause_paragraph=1.0,
+request = SynthesisSegment(
+    id="code-switch",
+    text="Hello Welt.",
+    language="en-us",
+    voice="af_sarah",
+    pronunciation_overrides=(PronunciationOverride(6, 10, language="de"),),
 )
-
-with KokoroPipeline(PipelineConfig(voice="af_bella", generation=generation)) as pipeline:
-    result = pipeline.run("A short sentence ...s followed by another.")
-    result.save_wav("pauses.wav")
-    result.release_audio()
 ```
 
-Automatic pauses use local SSMD/header defaults when present and otherwise the
-configured `GenerationConfig` values. Explicit break events take precedence; explicit
-zero durations remain zero.
-
-## Voice blending
-
-Voice blending is represented by `VoiceBlend` from the concrete voice-manager module and
-passed through `PipelineConfig`:
+A direct phoneme override uses the same source-coordinate contract. Supply a phoneme
+sequence that is valid for the selected Kokoro frontend and model vocabulary:
 
 ```python
-import soundfile as sf
+from pykokoro import PronunciationOverride, SynthesisSegment
 
-from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
-from pykokoro.voice_manager import VoiceBlend
-
-blend = VoiceBlend.parse("af_bella:50,af_sarah:50")
-with KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice=blend)) as pipeline:
-    result = pipeline.run("This is a blended voice.")
-    sf.write("blended.wav", result.audio, result.sample_rate)
-    result.release_audio()
+request = SynthesisSegment(
+    id="direct-phonemes",
+    text="Hello",
+    language="en-us",
+    voice="af_sarah",
+    pronunciation_overrides=(PronunciationOverride(0, 5, phonemes="hˈɛloʊ"),),
+)
 ```
 
-## Composable stages
+Whole-request direct input can instead be set with `SynthesisSegment.phonemes`; it
+cannot be combined with span-level direct-phoneme overrides. Ambiguous overlapping
+direct overrides are rejected. Offsets refer to the exact prepared request string, not
+an earlier source file or markup document.
 
-The pipeline stages follow this order:
+## Caller-provided linguistic annotations
 
-`doc_parser -> g2p -> phoneme_processing -> audio_generation -> audio_postprocessing`
-
-Custom stages can be injected into `KokoroPipeline` for tests, experiments, and
-dependency-light processing. Importing the pipeline and running fully custom stages does
-not require ONNX Runtime. Default audio stages require one of the provider extras.
-
-## Word timings
-
-Timestamp-capable Kokoro ONNX models expose model-derived word timings from the named
-duration outputs `pred_dur`, `pred_duration`, or `durations`. The G2P alignment cache is
-schema-versioned; after upgrading, stale entries are rebuilt so alignment metadata is
-available. `WordTiming.start_sample` and `end_sample` address the exact final waveform
-after phrase cutting, trimming, prosody, pauses, and unit concatenation. Character
-offsets address `document.clean_text`, not source SSMD markup. If duration output is
-missing or incomplete, the public timing list is empty rather than partially fabricated.
-
-When an external SSMD audio source replaces generated TTS, timings for that segment are
-cleared because model timings cannot describe the replacement audio. Unsupported
-waveform-only models likewise return no fabricated estimates. `release_audio()`
-preserves timing metadata. Use `examples/stream_with_word_timings.py` as a GUI-neutral
-integration pattern.
-
-## spaCy policy
-
-`TokenizerConfig(use_spacy=...)` is tri-state and local-only:
-
-- `False`: never use spaCy;
-- `None`: choose the best compatible installed model or fall back;
-- `True`: require a compatible local model;
-- explicit model or size: require that exact local request.
-
-No path downloads a spaCy model automatically. Selection metadata is retained in the
-prepared document metadata for both sentence splitting and G2P.
-
-## Migration from the removed API
-
-The old single-object API is not part of the current package. Use the pipeline
-lifecycle:
+`LinguisticToken` supplies source-aligned POS, tag, lemma, and optional language context
+to KokoroG2P. The caller owns text analysis and passes only these simple values:
 
 ```python
-from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
+from pykokoro import LinguisticToken, SynthesisSegment
 
-with KokoroPipeline(PipelineConfig(generation=GenerationConfig(lang="en-us"), voice="af_bella")) as pipeline:
-    result = pipeline.run(text)
-    audio = result.audio.copy()
-    sample_rate = result.sample_rate
-    result.release_audio()
+request = SynthesisSegment(
+    id="homograph",
+    text="I read the note yesterday.",
+    language="en-us",
+    voice="af_sarah",
+    annotations=(
+        LinguisticToken(2, 6, text="read", pos="VERB", tag="VBD", lemma="read"),
+    ),
+)
 ```
 
-Historical scripts are retained under `examples/legacy/` for reference only and are not
-indexed or tested as maintained usage examples.
+PyKokoro does not require Utterplan, spaCy documents, or planner node objects.
+Annotation ranges are validated against the supplied request text; if token text is
+present, it must match the slice at those offsets.
+
+## Automatic pronunciation-language routing
+
+The request still requires an explicit main language. Optional routing asks KokoroG2P to
+select among configured pronunciation candidates:
+
+```python
+from pykokoro import LanguageRoutingConfig, SynthesisConfig
+
+config = SynthesisConfig(
+    language_routing=LanguageRoutingConfig(mode="auto", languages=("en", "de")),
+)
+```
+
+Explicit request language overrides and token language annotations are passed through
+the prepared-text API; routing does not change the selected acoustic model, voice, or
+runtime.
+
+## Tracing and voice calibration
+
+Set `return_trace=True` for request-local engine trace information. `voice_level` can
+enable engine-local voice calibration:
+
+```python
+from pykokoro import SynthesisConfig, VoiceLevelConfig
+
+config = SynthesisConfig(
+    return_trace=True,
+    voice_level=VoiceLevelConfig(mode="calibrated"),
+)
+```
+
+This calibration is distinct from mastering a complete program or audiobook. For short
+sentences, token-limit handling, and model profiles, see
+[the request lifecycle](pipeline_stages.md) and [language profiles](languages.md).

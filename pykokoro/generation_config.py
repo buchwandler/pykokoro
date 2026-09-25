@@ -1,202 +1,33 @@
-"""Configuration for audio generation in PyKokoro.
+"""Kokoro inference controls for request-centric speech synthesis."""
 
-This module provides the GenerationConfig dataclass for configuring
-audio generation parameters in the KokoroPipeline.
-"""
+from __future__ import annotations
 
 import math
 from dataclasses import dataclass
 from numbers import Real
-from typing import Any, Literal
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class GenerationConfig:
-    """Configuration for audio generation in the KokoroPipeline.
+    """Acoustic speed, default language, and short-sentence inference settings."""
 
-    Groups all generation-time parameters for easier reuse and documentation.
-    Instances are immutable (frozen) to prevent accidental modification.
-
-    This config groups generation parameters into a reusable configuration object
-    for PipelineConfig. You can create a config once and reuse it across multiple
-    runs, with the ability to override individual parameters using kwargs.
-
-    Priority order when using both config and kwargs:
-        1. kwargs (highest priority - explicit per-call overrides)
-        2. config (medium priority - structured configuration)
-        3. defaults (lowest priority - fallback values)
-
-    Attributes:
-        speed: Speech speed multiplier. 1.0 = normal speed, 0.5 = half speed,
-            2.0 = double speed. Must be > 0.0. Default: 1.0
-        lang: Required default language code for text-to-phoneme conversion.
-            Pass it explicitly for each document, or override it with ``run(lang=...)``.
-            Can be overridden per-segment with SSMD ``[text]{lang="fr"}`` syntax.
-            regular text, bypassing text-to-phoneme conversion. Default: False
-        pause_mode: Pause handling strategy:
-            - "tts" (default): TTS generates pauses naturally at sentence
-              boundaries. SSMD pauses are preserved. Best for natural speech.
-            - "manual": PyKokoro controls pauses with precision. Silence is
-              trimmed from segment boundaries and SSMD pauses are preserved.
-              Best for precise timing control.
-            - "auto": PyKokoro automatically inserts pauses at sentence and
-              paragraph boundaries, and adds clause pauses when long sentences
-              are split. Silence is trimmed from segment boundaries.
-            Default: "tts"
-        pause_clause: Duration in seconds for SSMD ...c (comma) breaks and
-            automatic clause boundary pauses when pause_mode="manual" or "auto".
-            Must be >= 0.0. Default: 0.3
-        pause_parenthetical: Duration in seconds for automatically detected parenthetical-aside
-            boundaries when pause_mode="auto". Must be >= 0.0. Default: 0.15
-        pause_sentence: Duration in seconds for SSMD ...s (sentence) breaks and
-            automatic sentence boundary pauses when pause_mode="manual" or "auto".
-            Must be >= 0.0. Default: 0.6
-        pause_paragraph: Duration in seconds for SSMD ...p (paragraph) breaks and
-            automatic paragraph boundary pauses when pause_mode="manual" or "auto".
-            Must be >= 0.0. Default: 1.0
-        pause_variance: Standard deviation in seconds for Gaussian variance added
-            to automatic pauses. Only applies when pause_mode="manual" or "auto".
-            Default 0.05 (±100ms at 95% confidence). Set to 0.0 to disable
-            variance. Must be >= 0.0. Default: 0.05
-        random_seed: Optional random seed for reproducible pause variance.
-            If None, pauses will vary between runs. If set to an integer,
-            pause variance will be reproducible. Default: None
-        enable_short_sentence: Override short sentence handling for this run.
-            - None (default): Use config setting from PipelineConfig
-            - True: Force enable short sentence handling
-            - False: Force disable short sentence handling
-            Default: None
-
-    Example:
-        Basic usage with config:
-
-        >>> from pykokoro import KokoroPipeline, PipelineConfig
-        >>> config = GenerationConfig(lang="en-us", speed=1.2, pause_mode="manual")
-        >>> pipe = KokoroPipeline(PipelineConfig(voice="af_sarah", generation=config))
-        >>> res = pipe.run("Hello world")
-
-        Reuse config across multiple generations:
-
-        >>> config = GenerationConfig(
-        ...     speed=1.2,
-        ...     pause_mode="manual",
-        ...     pause_clause=0.25,
-        ...     pause_sentence=0.5,
-        ... )
-        >>> res1 = pipe.run("First sentence.")
-        >>> res2 = pipe.run("Second sentence.")
-
-        Override specific parameters using kwargs:
-
-        >>> res = pipe.run(
-        ...     "Fast speech",
-        ...     generation=GenerationConfig(speed=2.0, pause_mode="manual"),
-        ... )
-    """
-
-    # Speed and language
     speed: float = 1.0
     lang: str | None = None
-
-    # Processing modes
-    is_phonemes: bool = False
-
-    # Pause control
-    pause_mode: Literal["tts", "manual", "auto"] = "tts"
-    pause_clause: float = 0.3
-    pause_parenthetical: float = 0.15
-    pause_sentence: float = 0.6
-    pause_paragraph: float = 1.0
-    pause_variance: float = 0.05
     random_seed: int | None = None
-
-    # Short sentence handling override
     enable_short_sentence: bool | None = None
 
     def __post_init__(self) -> None:
-        """Validate configuration parameters after initialization."""
-        _validate_real("speed", self.speed, minimum=0.0, exclusive_minimum=True)
-        for field_name in (
-            "pause_clause",
-            "pause_parenthetical",
-            "pause_sentence",
-            "pause_paragraph",
-            "pause_variance",
-        ):
-            _validate_real(field_name, getattr(self, field_name), minimum=0.0)
-
+        if isinstance(self.speed, bool) or not isinstance(self.speed, Real):
+            raise ValueError("speed must be a real number greater than zero")
+        if not math.isfinite(float(self.speed)) or self.speed <= 0:
+            raise ValueError("speed must be finite and greater than zero")
+        if self.lang is not None and (not isinstance(self.lang, str) or not self.lang.strip()):
+            raise ValueError("lang must be a non-empty string or None")
         if self.random_seed is not None and (
             isinstance(self.random_seed, bool) or not isinstance(self.random_seed, int)
         ):
-            raise ValueError(f"random_seed must be an integer or None, got {self.random_seed!r}")
-
-        # Validate pause_mode
-        if self.pause_mode not in ("tts", "manual", "auto"):
-            raise ValueError(
-                f"pause_mode must be 'tts', 'manual', or 'auto', got '{self.pause_mode}'"
-            )
-
-        # Document language is required by the production pipeline boundary, not by
-        # lightweight configuration construction.
-        if self.lang is not None and (not isinstance(self.lang, str) or not self.lang):
-            raise ValueError(f"lang must be a non-empty string or None, got {self.lang!r}")
-
-    def merge_with_kwargs(self, **kwargs: Any) -> dict[str, Any]:
-        """Merge config with kwargs, with kwargs taking priority.
-
-        This is used internally by KokoroPipeline to merge the config
-        object with individual parameter overrides. Only non-None kwargs
-        will override config values.
-
-        Args:
-            **kwargs: Individual parameter overrides (None values are ignored)
-
-        Returns:
-            Dictionary with merged parameters (non-None kwargs override config)
-
-        Example:
-            >>> config = GenerationConfig(speed=1.5, lang="en-gb")
-            >>> merged = config.merge_with_kwargs(speed=2.0, lang=None)
-            >>> merged["speed"]
-            2.0
-            >>> merged["lang"]  # Not overridden because kwarg was None
-            'en-gb'
-        """
-        # Start with config values
-        result = {
-            "speed": self.speed,
-            "lang": self.lang,
-            "is_phonemes": self.is_phonemes,
-            "pause_mode": self.pause_mode,
-            "pause_clause": self.pause_clause,
-            "pause_parenthetical": self.pause_parenthetical,
-            "pause_sentence": self.pause_sentence,
-            "pause_paragraph": self.pause_paragraph,
-            "pause_variance": self.pause_variance,
-            "random_seed": self.random_seed,
-            "enable_short_sentence": self.enable_short_sentence,
-        }
-
-        # Override with kwargs (only non-None values override)
-        for key in result:
-            if key in kwargs and kwargs[key] is not None:
-                result[key] = kwargs[key]
-
-        return result
-
-
-def _validate_real(
-    field_name: str,
-    value: object,
-    *,
-    minimum: float,
-    exclusive_minimum: bool = False,
-) -> None:
-    if isinstance(value, bool) or not isinstance(value, Real):
-        raise ValueError(f"{field_name} must be a real number, got {value!r}")
-    numeric_value = float(value)
-    if not math.isfinite(numeric_value):
-        raise ValueError(f"{field_name} must be finite, got {value!r}")
-    if (numeric_value <= minimum) if exclusive_minimum else (numeric_value < minimum):
-        comparator = ">" if exclusive_minimum else ">="
-        raise ValueError(f"{field_name} must be {comparator} {minimum}, got {value!r}")
+            raise ValueError("random_seed must be an integer or None")
+        if self.enable_short_sentence is not None and not isinstance(
+            self.enable_short_sentence, bool
+        ):
+            raise ValueError("enable_short_sentence must be a boolean or None")

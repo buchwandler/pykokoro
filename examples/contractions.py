@@ -12,15 +12,12 @@ Output:
     contractions_demo.wav - Generated English speech testing contractions
 """
 
-import soundfile as sf
-
 try:
     from ._output import artifact_path
 except ImportError:
     from _output import artifact_path
 
-from pykokoro import KokoroPipeline, PipelineConfig
-from pykokoro.generation_config import GenerationConfig
+from pykokoro import GenerationConfig, KokoroSynthesizer, SynthesisConfig
 
 # Text with extensive contraction usage
 TEXT = """
@@ -71,26 +68,26 @@ VOICE = "af_bella"  # American Female voice (good for clear articulation)
 LANG = "en-us"  # American English
 
 
-def main():
+def main() -> None:
     """Generate English speech testing contractions and past tense forms."""
     print("Initializing TTS engine...")
-    pipe = KokoroPipeline(
-        PipelineConfig(voice=VOICE, generation=GenerationConfig(lang=LANG, speed=1.0))
+    config = SynthesisConfig(
+        voice=VOICE,
+        generation=GenerationConfig(lang=LANG, speed=1.0),
     )
-
     print("Testing contractions: 've (have), 's (has/is), 'd (had/would)")
     print("Testing past tense: -ed endings and irregular forms")
     print(f"Voice: {VOICE}")
     print(f"Language: {LANG}")
 
     print("\nGenerating audio...")
-    res = pipe.run(TEXT)
-    samples, sample_rate = res.audio, res.sample_rate
+    with KokoroSynthesizer(config) as synthesizer:
+        rendered = synthesizer.synthesize_text(TEXT, language=LANG, voice=VOICE)
 
     output_file = artifact_path("contractions_demo.wav")
-    sf.write(output_file, samples, sample_rate)
+    rendered.save_wav(output_file)
 
-    duration = len(samples) / sample_rate
+    duration = len(rendered.audio) / rendered.sample_rate
     print(f"\nCreated {output_file}")
     print(f"Duration: {duration:.2f} seconds")
 
