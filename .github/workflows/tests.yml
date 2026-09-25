@@ -100,7 +100,7 @@ jobs:
         assert g2p.phonemize("مَرْحَبًا") == "mˈarħabˌan"
         '@ | python -
     - name: Install Lexphon data
-      run: lexphon data install en-us:gold pt-pt:lexhint
+      run: lexphon data install de-de:gold en-us:gold pt-pt:lexhint
     - name: Tests
       run: pytest -m "not slow"
 
@@ -121,7 +121,7 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install pytest
         python -m pip install \
-          "kokorog2p[all]==0.9.9" \
+          "kokorog2p[all]==0.9.15" \
           "lexphon==0.2.3" \
           "phrasplit==0.3.9" \
           "audiosig==0.1.4" \
@@ -147,7 +147,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        kokorog2p-version: ["0.9.9"]
+        kokorog2p-version: ["0.9.15"]
     steps:
     - uses: actions/checkout@v4
     - name: Install espeak-ng
