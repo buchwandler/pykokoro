@@ -3,7 +3,7 @@ import spokenform
 
 GERMAN_GOLDEN_CASES = {
     "14.05.2026": (
-        "Vierzehnte Mai zweitausendsechsundzwanzig",
+        "vierzehnte Mai zweitausendsechsundzwanzig",
         "fˈiːɾʦeːntə mˈI ʦvItWzɛnʣeːksʊndʦvanʦɪç",
     ),
     "18:20 Uhr": (
