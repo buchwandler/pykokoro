@@ -76,7 +76,7 @@ jobs:
                   Requirement(value) for value in metadata.get_all("Requires-Dist", [])
               ]
               assert has_minimum(requirements, "kokorog2p", "0.9.15")
-              assert has_minimum(requirements, "lexphon", "0.2.3")
+              assert has_minimum(requirements, "lexphon", "0.2.5")
               assert has_minimum(requirements, "phrasplit", "0.3.9")
               assert has_minimum(requirements, "audiosig", "0.1.4")
               assert has_minimum(requirements, "onnxvoice", "0.1.7")

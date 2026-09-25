@@ -122,7 +122,7 @@ jobs:
         python -m pip install pytest
         python -m pip install \
           "kokorog2p[all]==0.9.15" \
-          "lexphon==0.2.3" \
+          "lexphon==0.2.5" \
           "phrasplit==0.3.9" \
           "audiosig==0.1.4" \
           "onnxvoice[cpu]==0.1.7" \

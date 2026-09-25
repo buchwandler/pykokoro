@@ -43,7 +43,7 @@ def test_companion_dependency_floors_match_current_integration_contract() -> Non
     ]
 
     assert "kokorog2p[espeak,en]>=0.9.15,<1.0" in dependencies
-    assert "lexphon>=0.2.3,<0.3" in dependencies
+    assert "lexphon>=0.2.5,<0.3" in dependencies
     assert "phrasplit>=0.3.9,<0.4" in dependencies
     assert "audiosig>=0.1.4,<0.2" in dependencies
     assert "onnxvoice>=0.1.7,<0.2" in dependencies
@@ -52,7 +52,7 @@ def test_companion_dependency_floors_match_current_integration_contract() -> Non
 def test_test_requirements_keep_kokorog2p_in_supported_window() -> None:
     requirements = (ROOT / "requirements-test.txt").read_text(encoding="utf-8")
     assert "kokorog2p[all]>=0.9.8,<1.0" in requirements
-    assert "lexphon>=0.2.3,<0.3" in requirements
+    assert "lexphon>=0.2.5,<0.3" in requirements
 
 
 def test_provider_extras_do_not_install_every_runtime_distribution() -> None:
@@ -228,7 +228,7 @@ def test_publish_workflow_validates_artifacts_before_upload() -> None:
     assert "from packaging.version import Version" in workflow
     assert "def has_minimum(requirements, name, minimum):" in workflow
     assert 'has_minimum(requirements, "kokorog2p", "0.9.15")' in workflow
-    assert 'has_minimum(requirements, "lexphon", "0.2.3")' in workflow
+    assert 'has_minimum(requirements, "lexphon", "0.2.5")' in workflow
     assert 'has_minimum(requirements, "phrasplit", "0.3.9")' in workflow
     assert 'has_minimum(requirements, "audiosig", "0.1.4")' in workflow
     assert 'has_minimum(requirements, "onnxvoice", "0.1.7")' in workflow
