@@ -177,8 +177,8 @@ def test_successful_probe_reports_geometry_timestamps_and_cut(monkeypatch) -> No
     assert "TIMING TOKENS" in format_case_report(result)
 
 
-def test_probe_distinguishes_unresolved_geometry(monkeypatch) -> None:
-    def unresolved(_text: str, _language: str) -> SimpleNamespace:
+def test_probe_reports_count_mismatch_when_inferred_geometry_disagrees() -> None:
+    def without_model_counts(_text: str, _language: str) -> SimpleNamespace:
         result = _context_result(_text, _language)
         for token in result.tokens:
             token.model_token_count = None
@@ -189,14 +189,14 @@ def test_probe_distinguishes_unresolved_geometry(monkeypatch) -> None:
         build_diagnostic_cases(matrix="alignment")[0],
         segment=_segment(),
         backend=_Backend(),
-        context_phonemizer=unresolved,
+        context_phonemizer=without_model_counts,
     )
-    assert result.metadata["timing_model_position_count"] == 0
-    assert result.metadata["timing_failure_detail"] == "unresolved-model-span"
+    assert result.metadata["timing_model_position_count"] == 27
+    assert result.metadata["timing_failure_detail"] == "alignment-position-count-mismatch"
     assert result.failure_stage == "timing-alignment"
     report = format_case_report(result)
     assert "model_count span_count" in report
-    assert "None None" in report
+    assert " 3 4 0 3 4" in report
 
 
 def test_probe_duration_mismatch_is_an_alignment_failure(monkeypatch) -> None:

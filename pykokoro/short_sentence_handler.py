@@ -454,6 +454,7 @@ def phonemize_short_sentence_phrase(
     context_phonemizer: Callable[[str, str], Any] | None = None,
     *,
     phrase_language: str | None = None,
+    tokenize: Callable[[str], list[int]] | None = None,
 ) -> tuple[str, list[int], list[dict[str, object]]]:
     """Phonemize a phrase containing the short segment text."""
     phrase_text = phrase_template.replace("{segment}", segment.text)
@@ -501,6 +502,7 @@ def phonemize_short_sentence_phrase(
         getattr(result, "tokens", []),
         segment_start=segment_start,
         segment_end=segment_end,
+        tokenize=tokenize,
     )
     return str(phonemes), list(tokens), timing_tokens
 
@@ -590,12 +592,11 @@ def apply_short_sentence_mode(
         limit=config.phrase_fallback_tries,
     )
     try:
-        phrase_result = (
-            phonemize_short_sentence_phrase(segment, phrase_template)
-            if context_phonemizer is None
-            else phonemize_short_sentence_phrase(
-                segment, phrase_template, context_phonemizer=context_phonemizer
-            )
+        phrase_result = phonemize_short_sentence_phrase(
+            segment,
+            phrase_template,
+            context_phonemizer=context_phonemizer,
+            tokenize=tokenize,
         )
     except (RuntimeError, ValueError, KeyError) as exc:
         logger.warning(
@@ -653,15 +654,15 @@ def build_short_sentence_phrase_retry(
     phrase_template: str,
     base_metadata: dict[str, object],
     context_phonemizer: Callable[[str, str], Any] | None = None,
+    tokenize: Callable[[str], list[int]] | None = None,
 ) -> ShortSentenceApplication | None:
     """Build a retry phrase application using the original phrase-cut settings."""
     try:
-        phrase_result = (
-            phonemize_short_sentence_phrase(segment, phrase_template)
-            if context_phonemizer is None
-            else phonemize_short_sentence_phrase(
-                segment, phrase_template, context_phonemizer=context_phonemizer
-            )
+        phrase_result = phonemize_short_sentence_phrase(
+            segment,
+            phrase_template,
+            context_phonemizer=context_phonemizer,
+            tokenize=tokenize,
         )
     except (RuntimeError, ValueError, KeyError) as exc:
         logger.warning(
@@ -1009,10 +1010,11 @@ def _build_timing_tokens(
     *,
     segment_start: int,
     segment_end: int,
+    tokenize: Callable[[str], list[int]] | None = None,
 ) -> list[dict[str, object]]:
     timing_tokens: list[dict[str, object]] = []
     for token in cast(list[object], tokens or []):
-        phonemes = _token_attr(token, "phonemes") or _token_attr(token, "phoneme") or ""
+        phonemes = str(_token_attr(token, "phonemes") or _token_attr(token, "phoneme") or "")
         text = str(_token_attr(token, "text") or "")
         whitespace = str(_token_attr(token, "whitespace") or "")
         char_start = _token_attr(token, "char_start")
@@ -1032,25 +1034,33 @@ def _build_timing_tokens(
             max(0, char_end - segment_start) if isinstance(char_end, int) and is_target else None
         )
         raw_model_token_count = _token_attr(token, "model_token_count")
-        model_token_count = (
-            raw_model_token_count
-            if isinstance(raw_model_token_count, int)
+        if (
+            isinstance(raw_model_token_count, int)
             and not isinstance(raw_model_token_count, bool)
             and raw_model_token_count >= 0
-            else None
-        )
+        ):
+            model_token_count = raw_model_token_count
+        elif tokenize is not None:
+            model_token_count = len(tokenize(phonemes))
+        else:
+            model_token_count = None
         raw_model_span_count = _token_attr(token, "model_span_token_count")
-        model_span_token_count = (
-            raw_model_span_count
-            if isinstance(raw_model_span_count, int)
+        if (
+            isinstance(raw_model_span_count, int)
             and not isinstance(raw_model_span_count, bool)
             and raw_model_span_count >= 0
-            else None
-        )
+        ):
+            model_span_token_count = raw_model_span_count
+        elif tokenize is not None:
+            model_span_token_count = len(tokenize(phonemes + whitespace))
+        elif isinstance(model_token_count, int):
+            model_span_token_count = model_token_count + (1 if whitespace else 0)
+        else:
+            model_span_token_count = None
         timing_tokens.append(
             ShortSentenceTimingToken(
                 text=text,
-                phonemes=str(phonemes),
+                phonemes=phonemes,
                 whitespace=whitespace,
                 is_target=is_target,
                 char_start=source_start,

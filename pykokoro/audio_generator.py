@@ -1088,15 +1088,12 @@ class AudioGenerator:
                 failed_template if isinstance(failed_template, str) else "",
             )
 
-            retry = (
-                build_short_sentence_phrase_retry(segment, template, short_sentence_metadata)
-                if context_phonemizer is None
-                else build_short_sentence_phrase_retry(
-                    segment,
-                    template,
-                    short_sentence_metadata,
-                    context_phonemizer=context_phonemizer,
-                )
+            retry = build_short_sentence_phrase_retry(
+                segment,
+                template,
+                short_sentence_metadata,
+                context_phonemizer=context_phonemizer,
+                tokenize=self._tokenizer.tokenize,
             )
             if retry is None or retry.metadata is None:
                 failed_retry_metadata = dict(short_sentence_metadata)

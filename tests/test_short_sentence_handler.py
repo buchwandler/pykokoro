@@ -1,5 +1,7 @@
 """Tests for pykokoro.short_sentence_handler module."""
 
+from types import SimpleNamespace
+
 import pytest
 
 from pykokoro.short_sentence_handler import (
@@ -211,6 +213,59 @@ def test_custom_phrase_catalog_is_selected_for_segment_language() -> None:
     assert result.metadata["phrase_language"] == "xx"
     assert result.metadata["phrase_template"] == "LOCAL {segment}"
     assert calls == [("LOCAL word", "xx")]
+
+
+def test_phrase_timing_tokens_infer_model_geometry_from_tokenizer() -> None:
+    phrase_set = ShortSentencePhraseSet(
+        language="xx",
+        declarative=("A {segment} B",),
+        question=("A {segment} B?",),
+        exclamation=("A {segment} B!",),
+        ellipsis=("A {segment} B…",),
+        fragment=("A {segment} B",),
+    )
+    config = ShortSentenceConfig(
+        phrase_catalog={"xx": phrase_set},
+        resolve_mode="phrase",
+    )
+    segment = make_segment("Hi", "hI")
+    segment.lang = "xx"
+
+    def context_phonemizer(text: str, language: str) -> SimpleNamespace:
+        assert text == "A Hi B"
+        assert language == "xx"
+        return SimpleNamespace(
+            phonemes="a bc d",
+            token_ids=[1, 2, 3, 4, 5, 6],
+            tokens=[
+                SimpleNamespace(
+                    text="A", char_start=0, char_end=1, meta={"phonemes": "a", "whitespace": " "}
+                ),
+                SimpleNamespace(
+                    text="Hi", char_start=2, char_end=4, meta={"phonemes": "bc", "whitespace": " "}
+                ),
+                SimpleNamespace(
+                    text="B", char_start=5, char_end=6, meta={"phonemes": "d", "whitespace": ""}
+                ),
+            ],
+        )
+
+    result = apply_short_sentence_mode(
+        segment,
+        segment.phonemes,
+        [1],
+        config,
+        lambda phonemes: list(range(len(phonemes))),
+        context_phonemizer=context_phonemizer,
+    )
+
+    assert result.metadata is not None
+    timing_tokens = result.metadata["timing_tokens"]
+    assert isinstance(timing_tokens, list)
+    assert [token["model_token_count"] for token in timing_tokens] == [1, 2, 1]
+    assert [token["model_span_token_count"] for token in timing_tokens] == [2, 3, 1]
+    assert sum(token["model_span_token_count"] for token in timing_tokens) == len(result.tokens)
+    assert timing_tokens[1]["is_target"] is True
 
 
 def test_unsupported_phrase_language_uses_wrap_without_english_context() -> None:
