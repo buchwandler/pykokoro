@@ -26,7 +26,7 @@ changelog
 - KokoroG2P prepared-text integration with explicit pronunciation languages,
   source-aligned overrides, and linguistic annotations
 - Kokoro voice, model, and style selection, including blends
-- Model-limit chunking, short-sentence handling, and ONNX inference
+- Model token-capacity validation, explicit short-sentence handling, and ONNX inference
 - Request-local timing reconstruction, waveform validation, tracing, and optional voice
   calibration
 - Independent `RenderedSegment` results and standalone WAV writing

@@ -3,10 +3,14 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+import pytest
 
+from pykokoro import SynthesisInputTooLongError
+from pykokoro.exceptions import InvalidVoiceError
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.prepared_g2p import PreparedSynthesis
 from pykokoro.request_renderer import OnnxRequestRenderer
+from pykokoro.short_sentence_handler import ShortSentenceConfig
 from pykokoro.synthesis_config import SynthesisConfig
 from pykokoro.synthesis_types import SynthesisSegment
 from pykokoro.types import G2PAlignmentToken, PhonemeSegment, WordTiming
@@ -113,6 +117,16 @@ def test_renderer_keeps_one_request_independent_and_rebases_timings() -> None:
     assert rendered.token_ids == (1, 2, 3)
     assert rendered.word_timings == (WordTiming("Hello", 0, 5, 0, 2, request.id),)
     assert rendered.diagnostics == ("frontend note",)
+    assert rendered.synthesis_identity is not None
+    assert rendered.synthesis_identity.voice == "af_sarah"
+    assert rendered.synthesis_identity.language == "en-us"
+    assert rendered.synthesis_identity.voice_level_gain_db == -2.5
+    assert len(rendered.synthesis_identity.cache_key) == 64
+    assert len(rendered.voice_level_applications) == 1
+    assert rendered.voice_level_applications[0].applied is True
+    assert rendered.voice_level_applications[0].gain_db == -2.5
+    assert rendered.voice_level_applications[0].source == "override"
+    assert rendered.short_sentence_mode is None
     assert rendered.trace is not None
     assert rendered.trace.warnings == ["frontend note"]
     assert backend.preprocessed[0].tokens == [1, 2, 3]
@@ -130,48 +144,112 @@ def test_renderer_keeps_one_request_independent_and_rebases_timings() -> None:
     assert backend.closed
 
 
-def test_chunk_split_uses_exact_g2p_alignment_boundaries() -> None:
-    token_ids = [10, 11, 12, 13, 14, 15, 16]
-    alignments = [
-        G2PAlignmentToken("a", "a", char_start=0, char_end=1, model_span_token_count=2),
-        G2PAlignmentToken("b", "b", char_start=2, char_end=3, model_span_token_count=2),
-        G2PAlignmentToken("c", "c", char_start=4, char_end=5, model_span_token_count=3),
-    ]
-
-    groups = OnnxRequestRenderer._split_at_alignment_boundaries(token_ids, alignments, 4)
-
-    assert groups == [
-        (token_ids[:4], alignments[:2]),
-        (token_ids[4:], alignments[2:]),
-    ]
-    assert OnnxRequestRenderer._split_at_alignment_boundaries(token_ids, alignments, 2) is None
-
-
-def test_renderer_stitches_model_sized_chunks_without_losing_local_timings() -> None:
+def test_renderer_rejects_oversized_request_before_model_inference() -> None:
     adapter = FakeG2PAdapter()
     backend = FakeBackend()
     renderer = OnnxRequestRenderer(adapter, backend_factory=lambda config: backend)
     text = "x" * 511
     request = SynthesisSegment("long-request", text, "en-us")
-    alignment = tuple(
-        G2PAlignmentToken("x", "x", char_start=index, char_end=index + 1, model_span_token_count=1)
-        for index in range(len(text))
-    )
     prepared = PreparedSynthesis(
         request_id=request.id,
-        text=text,
+        text=request.text,
         language=request.language,
         voice="af_heart",
         phonemes=text,
-        token_ids=tuple(range(len(text))),
-        alignment_tokens=alignment,
+        token_ids=tuple(range(511)),
     )
 
-    rendered = renderer.render(prepared, request, _config())
+    with pytest.raises(SynthesisInputTooLongError) as raised:
+        renderer.render(prepared, request, _config())
 
-    assert [len(segment.tokens) for segment in backend.generated] == [510, 1]
-    assert len(rendered.audio) == 6
-    assert [timing.start_sample for timing in rendered.word_timings] == [0, 3]
-    assert [timing.end_sample for timing in rendered.word_timings] == [2, 5]
-    assert all(timing.segment_id == request.id for timing in rendered.word_timings)
-    assert [len(ids) for ids, _ in adapter.decoded] == [510, 1]
+    assert raised.value.text_length == len(text)
+    assert raised.value.token_count == 511
+    assert raised.value.max_tokens == 510
+    assert backend.generated == []
+
+
+def test_renderer_reports_invalid_voice_as_typed_error() -> None:
+    class MissingVoiceBackend(FakeBackend):
+        def resolve_voice_style(self, voice: str) -> str:
+            raise KeyError(voice)
+
+    request = SynthesisSegment("bad-voice", "Hello", "en-us", voice="not-a-voice")
+    prepared = PreparedSynthesis(
+        request_id=request.id,
+        text=request.text,
+        language=request.language,
+        voice=request.voice,
+        phonemes="hello",
+        token_ids=(1, 2),
+    )
+    renderer = OnnxRequestRenderer(
+        FakeG2PAdapter(), backend_factory=lambda config: MissingVoiceBackend()
+    )
+
+    with pytest.raises(InvalidVoiceError, match="not-a-voice"):
+        renderer.render(prepared, request, _config())
+
+
+def test_renderer_checks_capacity_after_frontend_postprocessing() -> None:
+    class ExpandingBackend(FakeBackend):
+        def preprocess_segments(self, segments, enable_short_sentence, **kwargs):
+            result = super().preprocess_segments(segments, enable_short_sentence, **kwargs)
+            result[0].tokens.append(511)
+            return result
+
+    backend = ExpandingBackend()
+    renderer = OnnxRequestRenderer(FakeG2PAdapter(), backend_factory=lambda config: backend)
+    request = SynthesisSegment("expanded", "Hello", "en-us")
+    prepared = PreparedSynthesis(
+        request_id=request.id,
+        text=request.text,
+        language=request.language,
+        voice="af_heart",
+        phonemes="hello",
+        token_ids=tuple(range(510)),
+    )
+
+    with pytest.raises(SynthesisInputTooLongError) as raised:
+        renderer.render(prepared, request, _config())
+
+    assert raised.value.token_count == 511
+    assert raised.value.max_tokens == 510
+    assert backend.generated == []
+
+
+def test_rendered_result_exposes_short_sentence_mode_without_context_text() -> None:
+    class WrappedBackend(FakeBackend):
+        def preprocess_segments(self, segments, enable_short_sentence, **kwargs):
+            result = super().preprocess_segments(segments, enable_short_sentence, **kwargs)
+            result[0].engine_metadata = {
+                "__short_sentence": {
+                    "kind": "wrap",
+                    "phrase_template": "synthetic context around {segment}",
+                }
+            }
+            return result
+
+    request = SynthesisSegment("wrapped", "Hello", "en-us")
+    prepared = PreparedSynthesis(
+        request_id=request.id,
+        text=request.text,
+        language=request.language,
+        voice="af_heart",
+        phonemes="həlˈoʊ",
+        token_ids=(1, 2, 3),
+    )
+    renderer = OnnxRequestRenderer(
+        FakeG2PAdapter(), backend_factory=lambda config: WrappedBackend()
+    )
+    result = renderer.render(
+        prepared,
+        request,
+        _config(short_sentence_config=ShortSentenceConfig(resolve_mode="wrap")),
+    )
+
+    assert result.text == request.text
+    assert result.phonemes == prepared.phonemes
+    assert result.short_sentence_mode == "wrap"
+    assert result.synthesis_identity is not None
+    assert result.synthesis_identity.resolved_short_sentence_mode == "wrap"
+    assert "synthetic context" not in result.synthesis_identity.short_sentence

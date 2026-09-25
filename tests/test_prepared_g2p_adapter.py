@@ -66,7 +66,9 @@ def test_prepared_adapter_forwards_request_text_overrides_annotations_and_routin
             PronunciationOverride(0, 5, phonemes="hˈɛloʊ"),
             PronunciationOverride(6, 11, language="de"),
         ),
-        annotations=(LinguisticToken(0, 5, text="Hello", pos="INTJ", lemma="hello"),),
+        tokens=(
+            LinguisticToken(0, 5, text="Hello", pos="INTJ", lemma="hello", morph="Number=Sing"),
+        ),
     )
     config = _config()
 
@@ -84,6 +86,8 @@ def test_prepared_adapter_forwards_request_text_overrides_annotations_and_routin
     assert isinstance(kwargs["annotations"][0], TokenAnnotation)
     assert kwargs["annotations"][0].pos == "INTJ"
     assert kwargs["annotations"][0].lemma == "hello"
+    assert kwargs["annotations"][0].morph == "Number=Sing"
+    assert module.g2p_creations[0][0]["use_spacy"] is False
     assert kwargs["g2p"].__class__ is object
     assert result.request_id == request.id
     assert result.alignment_tokens[1].char_start == 6

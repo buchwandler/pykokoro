@@ -24,9 +24,10 @@ RenderedSegment
 
 ## Prepared-text G2P
 
-PyKokoro forwards the request's text, explicit language, pronunciation overrides,
-linguistic token annotations, routing settings, and model target to KokoroG2P's
-prepared-text API. It does not parse a document, build a plan, or interpret markup.
+PyKokoro forwards the request's exact text, explicit language, pronunciation overrides,
+and linguistic annotations, including morphology, to KokoroG2P. Supplied tokens take
+precedence and prevent internal spaCy analysis. It does not parse a document, build a
+plan, or interpret markup.
 
 ## Model and voice preparation
 
@@ -35,30 +36,30 @@ voice on `SynthesisSegment` overrides the configured default; a `VoiceBlend` can
 supplied as the request voice. The engine prepares model-ready style data and sends
 token IDs, speed, and a seed when supported to OnnxVoice.
 
-## Inference and internal chunking
+## Atomic inference and capacity
 
-For an oversized prepared-text request, `SynthesisConfig.long_text_split` selects
-model-input chunking:
+Each request is one indivisible inference unit. After G2P, PyKokoro checks its
+model-token count against the resolved profile. Oversized input raises
+`SynthesisInputTooLongError` with the source-text length, actual token count, maximum,
+and model identity. PyKokoro never splits or chunks a request; the caller owns
+segmentation and composition.
 
-- `"sentence"` (default) lazily uses PhraseSplit's regex backend with `use_spacy=False`.
-  It packs complete sentences within the model token budget and falls back to token-safe
-  splitting when a sentence is too large.
-- `"token"` uses token-safe splitting without PhraseSplit.
-- `"none"` rejects an oversized request with `SynthesisInputTooLongError`.
+`SynthesisConfig.long_text_split` remains only as a migration surface. It accepts
+`"none"`; explicit `"sentence"` or `"token"` values raise `ConfigurationError`.
 
-The model token limit remains authoritative. This is acoustic inference chunking, not
-document parsing or a public sentence plan. All internal chunks belong to the same
-public request and are stitched into one `RenderedSegment`. Chunk timings are rebased to
-that request-local waveform. No cross-request silence, markers, embedded clips, or
-caller-visible timeline data is added.
-
-Separately configured short-sentence handling may also issue extra inference calls; it
-does not change the long-text splitting policy.
+Short-sentence handling is also explicit and disabled when no short-sentence
+configuration or enable override is supplied. Callers can opt in with
+`GenerationConfig(enable_short_sentence=True)` or `ShortSentenceConfig`. It may use
+context and retry inference internally, but returned text, phonemes, and timings remain
+request-local. `RenderedSegment.short_sentence_mode` reports the mode actually used
+without exposing generated context text.
 
 ## Result
 
-`RenderedSegment` contains the request ID, mono float32 audio, sample rate, prepared
-text, language, resolved voice name when applicable, phonemes, token IDs, diagnostics,
-and optional trace and word timings. Timings use sample offsets within the returned
-waveform. The caller owns any cross-request playback order, pause policy, resampling,
-and composition.
+`RenderedSegment` contains the request ID, mono float32 audio, sample rate, exact
+request text, language, resolved voice name when applicable, phonemes, token IDs,
+diagnostics, and word timings. Timings use source-text character ranges and ordered
+sample offsets inside the returned waveform. `synthesis_identity` exposes stable
+output-affecting settings; `voice_level_applications` records calibration mode, gain,
+source, and missing-custom-voice outcomes. The caller owns cross-request playback order,
+pause policy, resampling, and composition.

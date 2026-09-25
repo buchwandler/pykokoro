@@ -44,26 +44,18 @@ The supported combinations depend on model profiles and available artifacts. Use
 frontends without loading model weights. `model_path`, `voices_path`, and
 `model_config_path` can point at local artifacts when appropriate.
 
-## Long-text model chunking
+## Caller-owned request sizing
 
-`SynthesisConfig.long_text_split` controls how an oversized request is divided for
-Kokoro inference. The default, `"sentence"`, lazily uses PhraseSplit's regex sentence
-splitter only when the request exceeds the model token limit. It packs complete
-sentences where possible and falls back to token-safe splitting when one sentence is too
-large. PyKokoro always enforces the model token limit; character count is not a
-substitute for it.
+Every request is atomic. PyKokoro phonemizes exactly the supplied text and checks
+capacity after G2P tokenization. If the request exceeds the model limit,
+`SynthesisInputTooLongError` reports the source-text length, model-token count, maximum,
+and model identity. The engine never divides the request; callers choose text boundaries
+and compose separate results themselves.
 
-Internal sentence splitting always uses `use_spacy=False`. It does not load spaCy, parse
-document markup, or create a public sentence plan. Internal chunks are stitched back
-into one `RenderedSegment` for the original request.
-
-Choose another mode when needed:
-
-- `long_text_split="token"` never invokes PhraseSplit and splits oversized input at safe
-  G2P/model-token boundaries.
-- `long_text_split="none"` disables internal splitting. An oversized request raises
-  `SynthesisInputTooLongError`; use this when you have already segmented and sized
-  requests yourself.
+`SynthesisConfig.long_text_split` is retained for migration but accepts only `"none"`.
+Explicit legacy `"sentence"` or `"token"` values raise `ConfigurationError`; they are
+never silently mapped. Split requests before calling PyKokoro, then pass each span as
+its own request.
 
 For example, use externally selected boundaries and retain responsibility for combining
 the independent results:
@@ -87,16 +79,15 @@ requests = [
 ]
 config = SynthesisConfig(
     generation=GenerationConfig(lang="en-us"),
-    long_text_split="none",
 )
 with KokoroSynthesizer(config) as synthesizer:
     rendered_parts = list(synthesizer.synthesize_segments(requests))
 ```
 
-Install PhraseSplit's optional spaCy extra with `pip install "phrasplit[nlp]"` and
-install a language model separately to use `use_spacy=True`. Each external part becomes
-an independent request and result. Verify that every part fits the model token limit
-when using `"none"`; this mode does not further split it.
+Install PhraseSplit's optional spaCy extra with `pip install "phrasplit[nlp]"` only if
+the caller uses its `use_spacy=True` analysis mode. Each external part becomes an
+independent request and result. PyKokoro checks each request after G2P and never further
+divides it.
 
 ## Per-request voice and independent batch output
 
@@ -134,6 +125,10 @@ waveform; it is not a composition API.
   playback rate belongs to the caller's composition layer.
 - `GenerationConfig.random_seed` sets the inference seed when supported by the
   model/runtime.
+- `GenerationConfig.enable_short_sentence` or `SynthesisConfig.short_sentence_config`
+  explicitly enables short-sentence processing; leaving both unset keeps it off.
+- `RenderedSegment.synthesis_identity` and `voice_level_applications` expose cache
+  identity and calibration outcomes.
 - `SynthesisConfig.voice_level` controls optional engine-local voice calibration, not
   whole-program loudness mastering.
 - `SynthesisConfig.return_trace=True` attaches request-local engine trace information to

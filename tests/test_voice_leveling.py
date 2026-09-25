@@ -15,6 +15,7 @@ from pykokoro.voice_level import (
     apply_voice_level_calibration,
     default_voice_calibration,
     load_voice_calibrations,
+    resolve_voice_level_application,
 )
 
 
@@ -61,6 +62,23 @@ def test_override_replaces_registry_gain_and_missing_is_safe() -> None:
         ),
         audio,
     )
+
+
+def test_voice_level_application_reports_calibrated_and_missing_outcomes() -> None:
+    calibrated = resolve_voice_level_application(
+        VoiceLevelConfig(mode="calibrated"), _key(), catalog=_catalog()
+    )
+    missing = resolve_voice_level_application(
+        VoiceLevelConfig(mode="calibrated"), None, catalog=_catalog()
+    )
+
+    assert calibrated.applied is True
+    assert calibrated.gain_db == -2.0
+    assert calibrated.source == "registry"
+    assert calibrated.corpus == "test"
+    assert missing.applied is False
+    assert missing.reason == "calibration_not_found"
+    assert missing.key is None
 
 
 def test_calibration_trace_is_static_metadata() -> None:

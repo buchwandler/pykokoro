@@ -69,16 +69,25 @@ Kokoro acoustic inference control, not editorial timeline-rate policy.
 ## Engine behavior
 
 The engine owns Kokoro-specific G2P integration, request-local voice/model/style
-selection, voice blends, token-limit chunking, short-sentence handling, inference,
-timing reconstruction, waveform validation, tracing, and optional voice-level
-calibration. `discover_models()` and `discover_lexicons()` inspect supported runtime
-capabilities and lexicon metadata without loading a synthesis session.
+selection, voice blends, token-capacity validation, explicitly configured short-sentence
+handling, inference, timing reconstruction, waveform validation, tracing, and optional
+voice-level calibration. `discover_models()` and `discover_lexicons()` inspect supported
+runtime capabilities and lexicon metadata without loading a synthesis session.
 
-Oversized prepared-text requests use sentence-aware model chunking by default. Set
-`SynthesisConfig.long_text_split` to `"token"` for token-boundary chunking without
-PhraseSplit, or `"none"` to reject requests that exceed the model token limit. These
-chunks are internal to one request and do not introduce document parsing or planning.
-See [basic usage](docs/basic_usage.md#long-text-model-chunking) for details.
+Each call renders one atomic request with exactly the supplied text. PyKokoro runs its
+frontend on that text, then checks the resulting model-token count. Oversized requests
+raise `SynthesisInputTooLongError` with text length, token count, model capacity, and
+model identity. PyKokoro never divides an oversized request. The caller owns text
+splitting and composition.
+
+`SynthesisConfig.long_text_split` is retained only for migration and accepts `"none"`;
+explicit legacy `"sentence"` and `"token"` values raise `ConfigurationError`. A missing
+`short_sentence_config` leaves short-sentence processing disabled. Enable it explicitly
+with `GenerationConfig(enable_short_sentence=True)` or a `ShortSentenceConfig`. Results
+expose their resolved synthesis identity and structured voice-level application
+metadata. See
+[caller-owned request sizing](docs/basic_usage.md#caller-owned-request-sizing) for
+details.
 
 ## Installation
 

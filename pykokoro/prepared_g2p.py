@@ -52,9 +52,15 @@ class PreparedG2PAdapter:
         if profile is not None:
             require_frontend(profile.variant, allow_experimental=config.allow_experimental_frontend)
         language = segment.language
-        g2p = self._get_g2p_instance(language, config, tokenizer_config, profile)
+        g2p = self._get_g2p_instance(
+            language,
+            config,
+            tokenizer_config,
+            profile,
+            use_spacy=False if segment.tokens else None,
+        )
         overrides = tuple(self._to_override(item) for item in segment.pronunciation_overrides)
-        annotations = tuple(self._to_annotation(item) for item in segment.annotations)
+        annotations = tuple(self._to_annotation(item) for item in segment.tokens)
         routing = config.language_routing
         language_routing = (
             None
@@ -81,7 +87,11 @@ class PreparedG2PAdapter:
                 overlap="snap",
                 g2p=g2p,
                 g2p_resolver=lambda candidate: self._get_g2p_instance(
-                    candidate, config, tokenizer_config, profile
+                    candidate,
+                    config,
+                    tokenizer_config,
+                    profile,
+                    use_spacy=False if segment.tokens else None,
                 ),
             )
             phonemes = str(getattr(result, "phonemes", "") or "")
@@ -136,10 +146,6 @@ class PreparedG2PAdapter:
             ),
         )
 
-    def ids_to_phonemes(self, token_ids: list[int] | tuple[int, ...], target_model: str) -> str:
-        """Decode a bounded model-token chunk using KokoroG2P's active vocabulary."""
-        return str(self._load().ids_to_phonemes(list(token_ids), model=target_model))
-
     @staticmethod
     def _to_override(value: PronunciationOverride) -> OverrideSpan:
         attrs: dict[str, str] = {}
@@ -159,6 +165,7 @@ class PreparedG2PAdapter:
             tag=value.tag,
             lemma=value.lemma,
             language=value.language,
+            morph=value.morph,
         )
 
     @staticmethod
@@ -228,6 +235,8 @@ class PreparedG2PAdapter:
         config: SynthesisConfig,
         tokenizer_config: TokenizerConfig,
         profile: Any | None,
+        *,
+        use_spacy: bool | None = None,
     ) -> Any:
         from kokorog2p.language_codes import normalize_language_code
 
@@ -244,7 +253,7 @@ class PreparedG2PAdapter:
             "version": self._model_target(config)[0],
             "phoneme_quotes": "curly",
             **_fallback_kwargs(tokenizer_config.fallback),
-            "use_spacy": tokenizer_config.use_spacy,
+            "use_spacy": tokenizer_config.use_spacy if use_spacy is None else use_spacy,
             "spacy_model": tokenizer_config.spacy_model,
             "spacy_model_size": tokenizer_config.spacy_model_size,
             "backend": backend,

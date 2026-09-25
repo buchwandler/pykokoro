@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+from pykokoro.exceptions import AlignmentError, BackendError, SynthesisStateError
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.prepared_g2p import PreparedSynthesis
 from pykokoro.synthesis_config import SynthesisConfig
@@ -85,5 +86,26 @@ def test_synthesize_rejects_renderer_result_with_wrong_request_id():
 
     synthesizer = KokoroSynthesizer(g2p=FakeG2P(), renderer=WrongIdRenderer())
 
-    with pytest.raises(ValueError, match="ID must match"):
+    with pytest.raises(AlignmentError, match="ID must match"):
         synthesizer.synthesize(SynthesisSegment("expected", "Hello", "en-us"))
+
+
+def test_closed_synthesizer_raises_typed_state_error():
+    synthesizer = KokoroSynthesizer(g2p=FakeG2P(), renderer=FakeRenderer())
+    synthesizer.close()
+
+    with pytest.raises(SynthesisStateError, match="closed"):
+        synthesizer.synthesize(SynthesisSegment("line", "Hello", "en-us"))
+
+
+def test_backend_failure_is_wrapped_as_typed_error() -> None:
+    class BrokenRenderer(FakeRenderer):
+        def render(self, prepared, segment, config):
+            raise RuntimeError("inference failed")
+
+    synthesizer = KokoroSynthesizer(g2p=FakeG2P(), renderer=BrokenRenderer())
+
+    with pytest.raises(BackendError, match="Kokoro synthesis failed") as raised:
+        synthesizer.synthesize(SynthesisSegment("line", "Hello", "en-us"))
+
+    assert isinstance(raised.value.__cause__, RuntimeError)

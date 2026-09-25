@@ -1,11 +1,18 @@
 import numpy as np
 import pytest
 
+from pykokoro.exceptions import (
+    EmptyTextError,
+    InvalidLanguageError,
+    InvalidLinguisticTokensError,
+    InvalidVoiceError,
+)
 from pykokoro.synthesis_config import SynthesisConfig
 from pykokoro.synthesis_types import (
     LinguisticToken,
     PronunciationOverride,
     RenderedSegment,
+    SynthesisRequest,
     SynthesisSegment,
 )
 from pykokoro.types import WordTiming
@@ -32,6 +39,48 @@ def test_synthesis_segment_rejects_empty_id_and_unsupported_language():
         SynthesisSegment(id="  ", text="Hello", language="en-us")
     with pytest.raises(ValueError, match="unsupported"):
         SynthesisSegment(id="line", text="Hello", language="xx-unsupported")
+
+
+def test_synthesis_request_accepts_tokens_morph_and_legacy_segment_alias():
+    token = LinguisticToken(0, 5, text="Hello", pos="INTJ", morph="Number=Sing")
+    request = SynthesisRequest(id="line", text="Hello", language="en-us", tokens=(token,))
+
+    assert request.tokens == (token,)
+    assert request.annotations is request.tokens
+    assert request.tokens[0].morph == "Number=Sing"
+    assert isinstance(request, SynthesisSegment)
+
+
+def test_synthesis_request_rejects_empty_text_with_typed_error():
+    with pytest.raises(EmptyTextError, match="non-whitespace"):
+        SynthesisRequest(id="line", text=" \n", language="en-us")
+
+
+def test_synthesis_request_uses_typed_language_and_voice_errors():
+    with pytest.raises(InvalidLanguageError):
+        SynthesisRequest(id="line", text="Hello", language="xx-unsupported")
+    with pytest.raises(InvalidVoiceError):
+        SynthesisRequest(id="line", text="Hello", language="en-us", voice="  ")
+
+
+def test_synthesis_request_rejects_unsorted_and_overlapping_tokens():
+    with pytest.raises(InvalidLinguisticTokensError, match="sorted"):
+        SynthesisRequest(
+            id="line",
+            text="Hello world",
+            language="en-us",
+            tokens=(
+                LinguisticToken(6, 11, text="world"),
+                LinguisticToken(0, 5, text="Hello"),
+            ),
+        )
+    with pytest.raises(InvalidLinguisticTokensError, match="overlapping"):
+        SynthesisRequest(
+            id="line",
+            text="Hello",
+            language="en-us",
+            tokens=(LinguisticToken(0, 3, text="Hel"), LinguisticToken(2, 5, text="llo")),
+        )
 
 
 def test_override_and_annotation_offsets_are_bounded_and_source_aligned():
@@ -133,6 +182,51 @@ def test_rendered_segment_enforces_mono_float32_and_request_local_timing_bounds(
             phonemes="",
             token_ids=(),
             word_timings=(timing,),
+        )
+
+
+def test_rendered_segment_rejects_invalid_source_and_nonmonotonic_timings() -> None:
+    with pytest.raises(ValueError, match="text must match rendered text"):
+        RenderedSegment(
+            id="line",
+            audio=np.ones(8),
+            sample_rate=24000,
+            text="Hello",
+            language="en-us",
+            voice=None,
+            phonemes="hello",
+            token_ids=(1,),
+            word_timings=(WordTiming("World", 0, 5, 0, 4, "line"),),
+        )
+
+    with pytest.raises(ValueError, match="sample offsets must be monotonic"):
+        RenderedSegment(
+            id="line",
+            audio=np.ones(8),
+            sample_rate=24000,
+            text="Hello world",
+            language="en-us",
+            voice=None,
+            phonemes="hello world",
+            token_ids=(1, 2),
+            word_timings=(
+                WordTiming("Hello", 0, 5, 4, 6, "line"),
+                WordTiming("world", 6, 11, 1, 3, "line"),
+            ),
+        )
+
+
+def test_rendered_segment_rejects_empty_audio() -> None:
+    with pytest.raises(ValueError, match="must not be empty"):
+        RenderedSegment(
+            id="line",
+            audio=np.zeros(0),
+            sample_rate=24000,
+            text="Hello",
+            language="en-us",
+            voice=None,
+            phonemes="hello",
+            token_ids=(1,),
         )
 
 

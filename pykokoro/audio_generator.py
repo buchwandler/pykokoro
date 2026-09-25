@@ -468,8 +468,6 @@ class AudioGenerator:
             else:
                 if effective_config is not None:
                     effective_config = dataclasses.replace(effective_config, enabled=False)
-        elif effective_config is None:
-            effective_config = ShortSentenceConfig()
 
         if (
             effective_config is not None

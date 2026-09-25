@@ -14,7 +14,8 @@ the package.
 
 The main methods are:
 
-- `synthesize(segment)` renders one `SynthesisSegment`.
+- `synthesize(request)` renders one `SynthesisRequest` (`SynthesisSegment` remains a
+  compatibility alias).
 - `synthesize_text(text, language=..., voice=...)` creates and renders one plain
   prepared text request.
 - `synthesize_segments(segments)` yields independent results in input order.
@@ -25,6 +26,11 @@ The main methods are:
 ## Request and result types
 
 ```{eval-rst}
+.. autoclass:: pykokoro.synthesis_types.SynthesisRequest
+   :members:
+   :undoc-members:
+
+
 .. autoclass:: pykokoro.synthesis_types.SynthesisSegment
    :members:
    :undoc-members:
@@ -57,6 +63,11 @@ word timings are local to that result. `save_wav(path)` writes mono float32 WAV 
    :members:
    :undoc-members:
 
+.. autoclass:: pykokoro.synthesis_identity.SynthesisIdentity
+   :members:
+   :undoc-members:
+
+
 .. autoclass:: pykokoro.exceptions.SynthesisInputTooLongError
    :members:
    :undoc-members:
@@ -73,17 +84,23 @@ word timings are local to that result. `save_wav(path)` writes mono float32 WAV 
    :members:
    :undoc-members:
 
+.. autoclass:: pykokoro.voice_level.VoiceLevelApplication
+   :members:
+   :undoc-members:
+
 .. autoclass:: pykokoro.short_sentence_handler.ShortSentenceConfig
    :members:
    :undoc-members:
 ```
 
-`SynthesisConfig.long_text_split` defaults to sentence-aware chunking for oversized
-prepared-text requests. Its other modes, `"token"` and `"none"`, are described in the
-[long-text usage guide](basic_usage.md#long-text-model-chunking).
-`GenerationConfig.speed` is the acoustic inference speed passed to Kokoro, not an
-application-level playback-rate effect. `SynthesisConfig.voice_level` is engine-local
-voice calibration rather than whole-output mastering.
+Each synthesis request is atomic. Capacity is checked after frontend tokenization;
+oversized input raises `SynthesisInputTooLongError`. `SynthesisConfig.long_text_split`
+is migration-only, accepts only `"none"`, and rejects legacy splitting modes.
+`RenderedSegment.synthesis_identity` and `voice_level_applications` expose resolved
+output identity and calibration outcomes. `GenerationConfig.speed` is the acoustic
+inference speed passed to Kokoro, not an application-level playback-rate effect.
+`SynthesisConfig.voice_level` is engine-local voice calibration rather than whole-output
+mastering.
 
 ## Voice blends and discovery
 

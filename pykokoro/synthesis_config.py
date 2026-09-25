@@ -9,13 +9,14 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from .asset_progress import AssetProgressCallback
 from .config_types import ModelQuality, ModelSource, ModelVariant, ProviderType
+from .exceptions import ConfigurationError, InvalidModelError, InvalidVoiceError
 from .generation_config import GenerationConfig
 from .language_routing import LanguageRoutingConfig
 from .short_sentence_handler import ShortSentenceConfig
 from .voice_level import VoiceLevelConfig
 from .voice_manager import VoiceBlend
 
-LongTextSplitMode = Literal["sentence", "token", "none"]
+LongTextSplitMode = Literal["none"]
 
 
 if TYPE_CHECKING:
@@ -48,7 +49,7 @@ class SynthesisConfig:
     short_sentence_config: ShortSentenceConfig | None = None
     waveform_validation: Literal["off", "warn", "strict"] = "off"
     inference_audio_diagnostics: bool = False
-    long_text_split: LongTextSplitMode = "sentence"
+    long_text_split: LongTextSplitMode = "none"
     inference_cache_enabled: bool = True
     inference_cache_max_bytes: int = 128 * 1024 * 1024
     voice_level: VoiceLevelConfig = field(default_factory=VoiceLevelConfig)
@@ -58,17 +59,19 @@ class SynthesisConfig:
 
     def __post_init__(self) -> None:
         if self.voice is not None and not isinstance(self.voice, (str, VoiceBlend)):
-            raise TypeError("voice must be a voice name, VoiceBlend, or None")
+            raise InvalidVoiceError("voice must be a voice name, VoiceBlend, or None")
         if isinstance(self.voice, str) and not self.voice.strip():
-            raise ValueError("voice must be non-empty when supplied")
+            raise InvalidVoiceError("voice must be non-empty when supplied")
         if self.language_routing is not None and not isinstance(
             self.language_routing, LanguageRoutingConfig
         ):
             raise TypeError("language_routing must be LanguageRoutingConfig or None")
         if self.waveform_validation not in ("off", "warn", "strict"):
             raise ValueError("waveform_validation must be 'off', 'warn', or 'strict'")
-        if self.long_text_split not in ("sentence", "token", "none"):
-            raise ValueError("long_text_split must be 'sentence', 'token', or 'none'")
+        if self.long_text_split != "none":
+            raise ConfigurationError(
+                "long_text_split only accepts 'none'; split text in the caller before synthesis"
+            )
         if isinstance(self.inference_cache_max_bytes, bool) or not isinstance(
             self.inference_cache_max_bytes, int
         ):
@@ -177,7 +180,7 @@ def resolve_synthesis_config(
         if voice_model is not None:
             voice_profile = profile_for_voice(effective_voice)
             if voice_profile is None or voice_profile.variant != voice_model:
-                raise ValueError(
+                raise InvalidModelError(
                     f"Voice {effective_voice!r} maps to {voice_model!r} but has no compatible profile"
                 )
             variant = voice_model
@@ -206,9 +209,12 @@ def resolve_synthesis_config(
         source = "github"
 
     assert source is not None and variant is not None
-    profile = get_model_profile(variant, source)
+    try:
+        profile = get_model_profile(variant, source)
+    except ValueError as exc:
+        raise InvalidModelError(f"Invalid model {source!r}/{variant!r}: {exc}") from exc
     if profile.runtime_available is False and config.release_manifest_path is None:
-        raise ValueError(
+        raise InvalidModelError(
             f"Model profile {variant!r} is present but has no runtime-ready distribution"
         )
     quality = config.model_quality or cast(
@@ -225,7 +231,7 @@ def resolve_synthesis_config(
     )
     if source == "huggingface" and profile.quality_files and quality not in profile.quality_files:
         available = ", ".join(profile.quality_files) or "none"
-        raise ValueError(
+        raise InvalidModelError(
             f"Quality {quality!r} is not available for {source}/{variant}. Available: {available}"
         )
     if resolved.voice is None:
@@ -237,7 +243,7 @@ def resolve_synthesis_config(
         and resolved.voice not in profile.voice_names
     ):
         available = ", ".join(profile.voice_names)
-        raise ValueError(
+        raise InvalidVoiceError(
             f"Voice {resolved.voice!r} is not available for model variant {variant!r}. "
             f"Available voices: {available}"
         )

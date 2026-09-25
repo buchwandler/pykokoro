@@ -6,9 +6,17 @@ import uuid
 from collections.abc import Iterable, Iterator
 from typing import Protocol
 
+from .exceptions import (
+    AlignmentError,
+    BackendError,
+    InvalidLanguageError,
+    InvalidRequestError,
+    PyKokoroError,
+    SynthesisStateError,
+)
 from .prepared_g2p import PreparedG2PAdapter, PreparedSynthesis
 from .synthesis_config import SynthesisConfig, resolve_synthesis_config
-from .synthesis_types import RenderedSegment, SynthesisSegment
+from .synthesis_types import RenderedSegment, SynthesisRequest, SynthesisSegment
 from .voice_manager import VoiceBlend
 
 
@@ -47,7 +55,12 @@ class KokoroSynthesizer:
         config = resolve_synthesis_config(
             self.config, language=segment.language, voice=segment.voice
         )
-        return self.g2p.phonemize(segment, config)
+        try:
+            return self.g2p.phonemize(segment, config)
+        except PyKokoroError:
+            raise
+        except Exception as exc:
+            raise BackendError(f"Kokoro frontend failed for request {segment.id!r}") from exc
 
     def synthesize(self, segment: SynthesisSegment) -> RenderedSegment:
         """Render exactly one independent prepared speech request."""
@@ -56,12 +69,19 @@ class KokoroSynthesizer:
         config = resolve_synthesis_config(
             self.config, language=segment.language, voice=segment.voice
         )
-        prepared = self.g2p.phonemize(segment, config)
-        result = self._renderer.render(prepared, segment, config)
+        try:
+            prepared = self.g2p.phonemize(segment, config)
+            result = self._renderer.render(prepared, segment, config)
+        except PyKokoroError:
+            raise
+        except Exception as exc:
+            raise BackendError(f"Kokoro synthesis failed for request {segment.id!r}") from exc
         if not isinstance(result, RenderedSegment):
-            raise TypeError("request renderer must return a RenderedSegment")
-        if result.id != segment.id:
-            raise ValueError("rendered result ID must match the synthesis request ID")
+            raise BackendError("request renderer must return a RenderedSegment")
+        if result.id != segment.id or result.text != segment.text:
+            raise AlignmentError(
+                "rendered result ID must match request, and result text must match request text"
+            )
         return result
 
     def synthesize_text(
@@ -74,7 +94,7 @@ class KokoroSynthesizer:
         """Synthesize one already-prepared string without document parsing."""
         effective_language = language if language is not None else self.config.generation.lang
         if effective_language is None:
-            raise ValueError("a synthesis language is required")
+            raise InvalidLanguageError("a synthesis language is required")
         return self.synthesize(
             SynthesisSegment(
                 id=f"request-{uuid.uuid4().hex}",
@@ -102,12 +122,12 @@ class KokoroSynthesizer:
 
     @staticmethod
     def _validate_request(segment: SynthesisSegment) -> None:
-        if not isinstance(segment, SynthesisSegment):
-            raise TypeError("synthesize requires a SynthesisSegment")
+        if not isinstance(segment, SynthesisRequest):
+            raise InvalidRequestError("synthesize requires a SynthesisRequest")
 
     def _ensure_open(self) -> None:
         if self._closed:
-            raise RuntimeError("KokoroSynthesizer is closed")
+            raise SynthesisStateError("KokoroSynthesizer is closed")
 
     def __enter__(self) -> KokoroSynthesizer:
         self._ensure_open()

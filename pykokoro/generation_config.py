@@ -6,6 +6,8 @@ import math
 from dataclasses import dataclass
 from numbers import Real
 
+from .exceptions import ConfigurationError
+
 
 @dataclass(frozen=True, slots=True)
 class GenerationConfig:
@@ -18,9 +20,9 @@ class GenerationConfig:
 
     def __post_init__(self) -> None:
         if isinstance(self.speed, bool) or not isinstance(self.speed, Real):
-            raise ValueError("speed must be a real number greater than zero")
+            raise ConfigurationError("speed must be a real number greater than zero")
         if not math.isfinite(float(self.speed)) or self.speed <= 0:
-            raise ValueError("speed must be finite and greater than zero")
+            raise ConfigurationError("speed must be finite and greater than zero")
         if self.lang is not None and (not isinstance(self.lang, str) or not self.lang.strip()):
             raise ValueError("lang must be a non-empty string or None")
         if self.random_seed is not None and (

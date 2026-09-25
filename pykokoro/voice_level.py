@@ -38,6 +38,33 @@ class VoiceLevelConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class VoiceLevelApplication:
+    """Structured record of the calibration applied to one rendered voice."""
+
+    mode: Literal["off", "calibrated"]
+    applied: bool
+    gain_db: float
+    source: Literal["none", "override", "registry"]
+    reason: str | None
+    key: str | None
+    method: str | None
+    corpus: str | None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return JSON-safe application metadata."""
+        return {
+            "mode": self.mode,
+            "applied": self.applied,
+            "gain_db": self.gain_db,
+            "source": self.source,
+            "reason": self.reason,
+            "key": self.key,
+            "method": self.method,
+            "corpus": self.corpus,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class VoiceCalibrationKey:
     """Identity used to prevent calibration reuse across model variants."""
 
@@ -210,6 +237,48 @@ def default_voice_calibration() -> VoiceCalibrationCatalog:
     return load_voice_calibrations()
 
 
+def resolve_voice_level_application(
+    config: VoiceLevelConfig,
+    key: VoiceCalibrationKey | None,
+    *,
+    catalog: VoiceCalibrationCatalog | None = None,
+) -> VoiceLevelApplication:
+    """Resolve the static calibration that applies to one model voice."""
+    calibration = None
+    resolved_catalog = catalog
+    if config.gain_db is not None:
+        gain_db = float(config.gain_db)
+        source: Literal["none", "override", "registry"] = "override"
+        reason = "override"
+    elif config.mode == "calibrated":
+        resolved_catalog = catalog or default_voice_calibration()
+        calibration = resolve_voice_calibration(resolved_catalog, key)
+        gain_db = calibration.gain_db if calibration is not None else 0.0
+        source = "registry" if calibration is not None else "none"
+        reason = "calibrated" if calibration is not None else "calibration_not_found"
+    else:
+        gain_db = 0.0
+        source = "none"
+        reason = "disabled"
+    return VoiceLevelApplication(
+        mode=config.mode,
+        applied=gain_db != 0.0,
+        gain_db=gain_db,
+        source=source,
+        reason=reason,
+        key=None if key is None else str(key),
+        method=None if calibration is None else calibration.method,
+        corpus=(
+            None
+            if calibration is None
+            else (
+                calibration.corpus_version
+                or (resolved_catalog.corpus if resolved_catalog is not None else None)
+            )
+        ),
+    )
+
+
 def apply_voice_level_calibration(
     audio: np.ndarray,
     config: VoiceLevelConfig,
@@ -220,32 +289,19 @@ def apply_voice_level_calibration(
     segment_id: str | None = None,
 ) -> np.ndarray:
     """Apply one static voice gain without measuring the runtime waveform."""
-    mode = config.mode
-    source = "none"
-    reason = "disabled" if mode == "off" else None
-    calibration = None
-    if config.gain_db is not None:
-        gain_db = config.gain_db
-        source = "override"
-        reason = "override"
-    elif mode == "calibrated":
-        calibration = resolve_voice_calibration(catalog or default_voice_calibration(), key)
-        gain_db = calibration.gain_db if calibration is not None else 0.0
-        source = "registry" if calibration is not None else "none"
-        reason = "calibrated" if calibration is not None else "calibration_not_found"
-    else:
-        gain_db = 0.0
+    application = resolve_voice_level_application(config, key, catalog=catalog)
     if trace is not None:
         trace.model.setdefault("voice_leveling", []).append(
             {
                 "segment_id": segment_id,
-                "mode": mode,
-                "voice_key": None if key is None else str(key),
-                "gain_db": gain_db,
-                "source": source,
-                "reason": reason,
-                "method": None if calibration is None else calibration.method,
-                "corpus": None if calibration is None else calibration.corpus_version,
+                "mode": application.mode,
+                "voice_key": application.key,
+                "applied": application.applied,
+                "gain_db": application.gain_db,
+                "source": application.source,
+                "reason": application.reason,
+                "method": application.method,
+                "corpus": application.corpus,
             }
         )
-    return audio if gain_db == 0.0 else apply_gain_db(audio, gain_db)
+    return audio if not application.applied else apply_gain_db(audio, application.gain_db)

@@ -94,7 +94,7 @@ def test_unknown_timestamp_logging_reports_observed_count_without_payload(caplog
     )
 
 
-def test_implicit_short_sentence_default_uses_wrap_without_warning(caplog, capsys):
+def test_implicit_short_sentence_default_is_disabled(caplog, capsys):
     generator = AudioGenerator(
         session=cast(Any, _Session()),
         tokenizer=cast(Any, _Tokenizer()),
@@ -103,8 +103,7 @@ def test_implicit_short_sentence_default_uses_wrap_without_warning(caplog, capsy
 
     config = generator._resolve_short_sentence_config(None)
 
-    assert config is not None
-    assert config.resolve_mode == "wrap"
+    assert config is None
     assert not caplog.records
     assert capsys.readouterr().out == ""
 
@@ -131,13 +130,23 @@ def test_explicit_phrase_mode_without_timestamps_warns_once(caplog):
     assert len(messages) == 1
 
 
-def test_timestamp_capable_model_keeps_randomized_phrase_default():
+def test_implicit_short_sentence_default_stays_disabled_when_timestamps_exist():
     generator = AudioGenerator(
         session=cast(Any, _TimestampSession()),
         tokenizer=cast(Any, _Tokenizer()),
     )
 
-    config = generator._resolve_short_sentence_config(None)
+    assert generator._resolve_short_sentence_config(None) is None
+
+
+def test_explicit_enable_uses_short_sentence_configuration():
+    generator = AudioGenerator(
+        session=cast(Any, _TimestampSession()),
+        tokenizer=cast(Any, _Tokenizer()),
+    )
+
+    config = generator._resolve_short_sentence_config(True)
 
     assert config is not None
+    assert config.enabled is True
     assert config.resolve_mode == "randomized-phrase"
