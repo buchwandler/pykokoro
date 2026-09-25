@@ -7,7 +7,7 @@ GERMAN_GOLDEN_CASES = {
         "fˈiːɾʦeːntə mˈI ʦvItWzɛnʣeːksʊndʦvanʦɪç",
     ),
     "18:20 Uhr": (
-        "Achtzehn Uhr zwanzig",
+        "achtzehn Uhr zwanzig",
         "ˈaxʦeːn ˈuːɾ ʦvˈanʦɪç",
     ),
     "1,5 kg": (

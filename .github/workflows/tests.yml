@@ -177,15 +177,22 @@ jobs:
       working-directory: ${{ runner.temp }}
       run: |
         "$RUNNER_TEMP/pykokoro-wheel-venv/bin/python" - <<'PY'
-        from pykokoro.tokenizer import Tokenizer, TokenizerConfig
+        from pykokoro.prepared_g2p import PreparedG2PAdapter
+        from pykokoro.synthesis_config import SynthesisConfig
+        from pykokoro.synthesis_types import SynthesisSegment
+        from pykokoro.tokenizer import TokenizerConfig
 
-        tokenizer = Tokenizer(
-            config=TokenizerConfig(
-                backend="kokorog2p",
-                lexicons=(),
-                fallback="espeak",
-                use_spacy=False,
-            )
+        adapter = PreparedG2PAdapter()
+        result = adapter.phonemize(
+            SynthesisSegment(id="ci", text="Hello world", language="en-us"),
+            SynthesisConfig(
+                tokenizer_config=TokenizerConfig(
+                    backend="kokorog2p",
+                    lexicons=(),
+                    fallback="espeak",
+                    use_spacy=False,
+                )
+            ),
         )
-        assert tokenizer._get_g2p("en-us").phonemize("Hello world")
+        assert result.phonemes
         PY
