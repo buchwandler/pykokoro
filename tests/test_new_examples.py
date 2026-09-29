@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -22,7 +23,7 @@ def test_long_text_example_keeps_one_unmodified_request() -> None:
     config = long_text.make_config()
 
     assert request.text == long_text.LONG_TEXT
-    assert request.text.count(".") >= 90
+    assert request.text.count(".") == 8
     assert request.language == "en-us"
     assert config.long_text_split == "sentence"
     assert config.long_text_use_spacy is False
@@ -158,8 +159,9 @@ class _FakeSynthesizer:
             voice=request.voice,
         )
 
-    def synthesize_segments(self, requests) -> list[_FakeResult]:
-        return [self.synthesize(request) for request in requests]
+    def synthesize_segments(self, requests) -> Iterator[_FakeResult]:
+        for request in requests:
+            yield self.synthesize(request)
 
 
 def test_new_synthesis_examples_write_expected_outputs_without_inference(

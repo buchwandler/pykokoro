@@ -21,7 +21,7 @@ LONG_TEXT = " ".join(
         "When the weather changes, the explorer pauses, checks the map, and adapts.",
         "The purpose is not to hurry through the story but to preserve its meaning.",
     )
-    * 24
+    * 2
 )
 
 
@@ -48,7 +48,7 @@ def main() -> None:
     request = make_request()
     print("PyKokoro receives the complete original request; do not split it here.")
     with KokoroSynthesizer(make_config()) as synthesizer:
-        results = synthesizer.synthesize_segments((request,))
+        results = tuple(synthesizer.synthesize_segments((request,)))
     if len(results) != 1 or results[0].text != request.text:
         raise RuntimeError("long-text rendering did not preserve one original request/result")
     result = results[0]
