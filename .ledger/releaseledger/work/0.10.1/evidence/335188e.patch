@@ -1,0 +1,49 @@
+ benchmarks/short_sentence_latency.py         | 2 +-
+ benchmarks/short_sentence_parameter_sweep.py | 2 +-
+ benchmarks/startup_latency.py                | 3 ++-
+ 3 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/benchmarks/short_sentence_latency.py b/benchmarks/short_sentence_latency.py
+index c185d5e..4eed9c9 100644
+--- a/benchmarks/short_sentence_latency.py
++++ b/benchmarks/short_sentence_latency.py
+@@ -15,9 +15,9 @@ from pathlib import Path
+ from typing import Any
+
+ import numpy as np
++from pykokoro.pipeline import KokoroPipeline
+
+ from pykokoro import GenerationConfig, PipelineConfig
+-from pykokoro.pipeline import KokoroPipeline
+ from pykokoro.short_sentence_handler import PhraseResolveMode, ShortSentenceConfig
+
+ try:
+diff --git a/benchmarks/short_sentence_parameter_sweep.py b/benchmarks/short_sentence_parameter_sweep.py
+index ad53b48..73acb3d 100644
+--- a/benchmarks/short_sentence_parameter_sweep.py
++++ b/benchmarks/short_sentence_parameter_sweep.py
+@@ -10,9 +10,9 @@ from pathlib import Path
+ from typing import Any
+
+ import numpy as np
++from pykokoro.pipeline import KokoroPipeline
+
+ from pykokoro import GenerationConfig, PipelineConfig
+-from pykokoro.pipeline import KokoroPipeline
+ from pykokoro.short_sentence_handler import PhraseResolveMode, ShortSentenceConfig
+
+ try:
+diff --git a/benchmarks/startup_latency.py b/benchmarks/startup_latency.py
+index cb2c9b1..ddef894 100644
+--- a/benchmarks/startup_latency.py
++++ b/benchmarks/startup_latency.py
+@@ -16,8 +16,9 @@ from dataclasses import dataclass
+ from pathlib import Path
+ from typing import Any
+
+-from pykokoro import GenerationConfig, PipelineConfig
+ from pykokoro.pipeline import KokoroPipeline
++
++from pykokoro import GenerationConfig, PipelineConfig
+ from pykokoro.short_sentence_handler import PhraseResolveMode, ShortSentenceConfig
+ from pykokoro.tokenizer import TokenizerConfig

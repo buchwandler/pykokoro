@@ -1,0 +1,108 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 1
+release_version: 0.10.1
+git_base_ref: v0.10.0
+git_base_sha: 3c53e5d768d0465bde0a92e69f3e05d297a2d2da
+git_head_ref: HEAD
+git_head_sha: 4386ac2c538ee50e03415b0f6118f8e2d076da2e
+git_range: 3c53e5d768d0465bde0a92e69f3e05d297a2d2da..4386ac2c538ee50e03415b0f6118f8e2d076da2e
+commit_count: 3
+rows:
+  - sha: 335188ed2d0c8aaf96438789171f79a8609dc16c
+    source_ref: git:335188ed2d0c8aaf96438789171f79a8609dc16c
+    short_sha: 335188e
+    changed_paths:
+      - benchmarks/short_sentence_latency.py
+      - benchmarks/short_sentence_parameter_sweep.py
+      - benchmarks/startup_latency.py
+    stats:
+      files_changed: 3
+      insertions: 4
+      deletions: 3
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "fix: pre-commit"
+  - sha: 9d11eb7e34247f7733f916a77b2c0ed7a0c6f254
+    source_ref: git:9d11eb7e34247f7733f916a77b2c0ed7a0c6f254
+    short_sha: 9d11eb7
+    changed_paths:
+      - README.md
+      - docs/advanced_features.md
+      - docs/api_reference.md
+      - docs/basic_usage.md
+      - docs/breaking-change-0.10.0.md
+      - docs/examples.md
+      - docs/index.md
+      - docs/installation.md
+      - docs/languages.md
+      - docs/quickstart.md
+      - docs/short_sentence_quality.md
+      - examples/README.md
+      - examples/all_voices.py
+      - examples/asset_progress.py
+      - examples/english.py
+      - examples/error_handling.py
+      - examples/frontend_and_lexicons.py
+      - examples/language_routing.py
+      - examples/linguistic_tokens.py
+      - examples/long_text.py
+      - examples/models_and_languages.py
+      - examples/pronunciation_overrides.py
+      - examples/request_batch.py
+      - examples/result_metadata.py
+      - examples/run_all.py
+      - examples/short_sentence_demo.py
+      - examples/voice_blend.py
+      - pykokoro/__init__.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/request_renderer.py
+      - pykokoro/short_sentence_handler.py
+      - pykokoro/synthesis_config.py
+      - pykokoro/synthesis_identity.py
+      - pykokoro/tokenizer.py
+      - pykokoro/voice_manager.py
+      - tests/test_all_voices_example.py
+      - tests/test_docs_examples.py
+      - tests/test_example_runner.py
+      - tests/test_examples_contract.py
+      - tests/test_models_and_languages_example.py
+      - tests/test_new_examples.py
+      - tests/test_onnxvoice_boundary.py
+      - tests/test_public_engine_api.py
+      - tests/test_request_renderer.py
+      - tests/test_synthesis_config.py
+    stats:
+      files_changed: 45
+      insertions: 1849
+      deletions: 718
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: improved docu and examples"
+  - sha: 4386ac2c538ee50e03415b0f6118f8e2d076da2e
+    source_ref: git:4386ac2c538ee50e03415b0f6118f8e2d076da2e
+    short_sha: 4386ac2
+    changed_paths:
+      - examples/long_text.py
+      - tests/test_new_examples.py
+    stats:
+      files_changed: 2
+      insertions: 7
+      deletions: 5
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "fix: example fix"

@@ -1,0 +1,3615 @@
+ README.md                                          |  40 +++-
+ docs/advanced_features.md                          |  84 ++++++-
+ docs/api_reference.md                              | 266 ++++++++++++++++-----
+ docs/basic_usage.md                                |  76 ++++++
+ docs/breaking-change-0.10.0.md                     |  11 +-
+ docs/examples.md                                   |  86 ++++---
+ docs/index.md                                      |  16 +-
+ docs/installation.md                               |  71 +++++-
+ docs/languages.md                                  | 132 ++++++----
+ docs/quickstart.md                                 |  19 +-
+ docs/short_sentence_quality.md                     |  73 ++++--
+ examples/README.md                                 |  86 +++++--
+ examples/all_voices.py                             |  27 ++-
+ examples/asset_progress.py                         |  52 ++++
+ examples/english.py                                |  18 +-
+ examples/error_handling.py                         |  65 +++++
+ examples/frontend_and_lexicons.py                  |  46 ++++
+ examples/language_routing.py                       |  63 +++++
+ ...guistic_annotations.py => linguistic_tokens.py} |   3 +-
+ examples/long_text.py                              |  70 ++++++
+ examples/models_and_languages.py                   | 230 +++++++++---------
+ examples/pronunciation_overrides.py                |  32 ++-
+ examples/request_batch.py                          |   2 +-
+ examples/result_metadata.py                        |  59 +++++
+ examples/run_all.py                                |  58 +++--
+ examples/short_sentence_demo.py                    | 120 +++-------
+ examples/voice_blend.py                            |  49 ++++
+ pykokoro/__init__.py                               |   3 +-
+ pykokoro/onnx_backend.py                           |   9 +-
+ pykokoro/request_renderer.py                       |   4 +-
+ pykokoro/short_sentence_handler.py                 |  57 ++---
+ pykokoro/synthesis_config.py                       |   5 +-
+ pykokoro/synthesis_identity.py                     |   1 -
+ pykokoro/tokenizer.py                              |  10 -
+ pykokoro/voice_manager.py                          |  10 +-
+ tests/test_all_voices_example.py                   |   4 +-
+ tests/test_docs_examples.py                        |  38 +++
+ tests/test_example_runner.py                       |  57 ++++-
+ tests/test_examples_contract.py                    |   3 +-
+ tests/test_models_and_languages_example.py         | 245 ++++++-------------
+ tests/test_new_examples.py                         | 201 ++++++++++++++++
+ tests/test_onnxvoice_boundary.py                   |  33 +++
+ tests/test_public_engine_api.py                    |   8 +-
+ tests/test_request_renderer.py                     |  17 ++
+ tests/test_synthesis_config.py                     |   8 +
+ 45 files changed, 1849 insertions(+), 718 deletions(-)
+
+diff --git a/README.md b/README.md
+index 027c40d..5bf275c 100644
+--- a/README.md
++++ b/README.md
+@@ -38,7 +38,7 @@ use.
+
+ For orchestration, create a `SynthesisSegment` with an opaque request ID, prepared text,
+ an explicit pronunciation language, and an actual Kokoro voice. Optional source-aligned
+-pronunciation instructions and linguistic annotations use offsets into that exact text:
++pronunciation instructions and linguistic tokens use offsets into that exact text:
+
+ ```python
+ from pykokoro import (
+@@ -53,7 +53,7 @@ request = SynthesisSegment(
+     language="en-us",
+     voice="af_sarah",
+     pronunciation_overrides=(PronunciationOverride(6, 10, language="de"),),
+-    annotations=(LinguisticToken(0, 5, text="Hello", pos="INTJ"),),
++    tokens=(LinguisticToken(0, 5, text="Hello", pos="INTJ"),),
+ )
+ ```
+
+@@ -62,6 +62,31 @@ independent requests. Each request yields its own `RenderedSegment`; PyKokoro do
+ join batch results or insert cross-request silence. The caller can save, play, or pass
+ each waveform to a separate composition system.
+
++## Longer requests and optional discovery
++
++`long_text_split="none"` is the default and raises `SynthesisInputTooLongError` if a
++prepared request exceeds model capacity. Opt into lazy sentence splitting for oversized
++requests; the engine still returns one result for the original request:
++
++```python
++from pykokoro import GenerationConfig, KokoroSynthesizer, SynthesisConfig
++
++
++long_text = "A prepared request with several sentences. " * 100
++config = SynthesisConfig(
++    voice="af_sarah",
++    generation=GenerationConfig(lang="en-us"),
++    long_text_split="sentence",
++    long_text_use_spacy=False,
++)
++with KokoroSynthesizer(config) as synthesizer:
++    rendered = synthesizer.synthesize_text(long_text, language="en-us")
++```
++
++To inspect installed/runtime model profiles without loading weights, use
++`discover_models(offline=True)`. Profile data describes language/voice combinations; G2P
++language availability alone does not guarantee that every acoustic profile supports it.
++
+ Input text is prepared speech, not a document markup language. PyKokoro does not parse
+ SSMD, YAML front matter, or say-as/voice/pause directives. `GenerationConfig.speed` is a
+ Kokoro acoustic inference control, not editorial timeline-rate policy.
+@@ -103,6 +128,17 @@ For optional direct playback, install `pykokoro[cpu,playback]`. PyKokoro writes
+ files through `soundfile`; `RenderedSegment.play()` uses the optional `sounddevice`
+ dependency. Install `espeak-ng` when selecting an eSpeak frontend or fallback.
+
++## Feature guides
++
++- [Basic usage, request reuse, cache configuration, and typed errors](docs/basic_usage.md)
++- [Pronunciation tokens, language routing, VoiceBlend, calibration, and result metadata]
++  (docs/advanced_features.md)
++- [Language codes and model-profile discovery](docs/languages.md)
++- [Frontend, lexicon, asset-progress, and provider setup](docs/installation.md)
++- [Local/custom model artifacts and migration from pre-v0.10](docs/installation.md) and
++  [migration note](docs/breaking-change-0.10.0.md)
++- [Short-sentence policy](docs/short_sentence_quality.md)
++
+ ## Documentation and examples
+
+ - [Quickstart](docs/quickstart.md)
+diff --git a/docs/advanced_features.md b/docs/advanced_features.md
+index e8a3877..4fcbfc9 100644
+--- a/docs/advanced_features.md
++++ b/docs/advanced_features.md
+@@ -41,7 +41,7 @@ cannot be combined with span-level direct-phoneme overrides. Ambiguous overlappi
+ direct overrides are rejected. Offsets refer to the exact prepared request string, not
+ an earlier source file or markup document.
+
+-## Caller-provided linguistic annotations
++## Caller-provided linguistic tokens
+
+ `LinguisticToken` supplies source-aligned POS, tag, lemma, morphology, and optional
+ language context to KokoroG2P. The caller owns text analysis and passes only these
+@@ -65,7 +65,7 @@ request = SynthesisSegment(
+
+ PyKokoro does not require Utterplan, spaCy documents, or planner node objects. Supplied
+ tokens, including `morph`, take precedence and bypass engine-side spaCy. `annotations`
+-remains available as a compatibility alias for `tokens`. Annotation ranges are validated
++remains available as a compatibility alias for `tokens`. Token ranges are validated
+ against the request text; if token text is present, it must match the slice at those
+ offsets.
+
+@@ -82,9 +82,14 @@ config = SynthesisConfig(
+ )
+ ```
+
+-Explicit request language overrides and token language annotations are passed through
+-the prepared-text API; routing does not change the selected acoustic model, voice, or
+-runtime.
++Explicit request language overrides and token-level language information are passed
++through the prepared-text API; routing does not change the selected acoustic model,
++voice, or runtime.
++
++For a deterministic comparison, keep the main request language and apply a
++`PronunciationOverride(language=...)` to the exact source span; automatic routing and
++the deterministic variant are contrasted in
++[`language_routing.py`](../examples/language_routing.py).
+
+ ## Explicit short-sentence handling
+
+@@ -95,6 +100,15 @@ internally, but the result text and word timings remain aligned to the original
+ The `RenderedSegment.short_sentence_mode` field reports the mode used without exposing
+ the context.
+
++## Short-sentence modes
++
++This feature is off unless enabled through `ShortSentenceConfig` or
++`GenerationConfig.enable_short_sentence`. The public modes are `wrap`, `phrase`, and
++`randomized-phrase`; `ShortSentenceConfig(enabled=False)` explicitly disables it.
++Phrase-based modes require timestamp-capable model output and may fall back to `wrap`.
++See [short-sentence configuration](short_sentence_quality.md) and
++[`short_sentence_demo.py`](../examples/short_sentence_demo.py).
++
+ ## Tracing and voice calibration
+
+ Set `return_trace=True` for request-local engine trace information. `voice_level` can
+@@ -115,3 +129,63 @@ structured `calibration_not_found` outcome for custom voices.
+ `synthesis_identity.cache_key` provides a stable digest of output-affecting engine
+ settings. For capacity errors and model profiles, see
+ [the request lifecycle](pipeline_stages.md) and [language profiles](languages.md).
++
++## Voice blends
++
++Pass a real voice ID or an explicit `VoiceBlend` as the request/config voice. The
++structured form makes interpolation and weights visible; the compact form uses
++percentages:
++
++```python
++from pykokoro import VoiceBlend
++
++blend = VoiceBlend(
++    voices=[("af_sarah", 0.6), ("af_bella", 0.4)],
++    interpolation="linear",
++)
++compact = VoiceBlend.parse("af_sarah:60,af_bella:40")
++```
++
++Voice IDs and valid combinations come from model profiles; inspect `discover_models()`
++instead of assuming a voice is available for every language or model. See
++[`voice_blend.py`](../examples/voice_blend.py).
++
++## Prepared phoneme input
++
++A request may carry whole-request `phonemes` when the caller already prepared compatible
++Kokoro phonemes. Whole-request phonemes cannot be combined with span-level
++direct-phoneme overrides and must match the selected frontend, model vocabulary, and
++source-alignment requirements. Invalid or oversized input raises a typed request error.
++
++Call `synthesizer.prepare(request)` to inspect frontend output without ONNX inference:
++
++```python
++prepared = synthesizer.prepare(request)
++print(prepared.phonemes)
++print(prepared.token_ids)
++print(prepared.diagnostics)
++```
++
++`PreparedSynthesis` also reports the request ID, text, language, voice, and alignment
++tokens.
++
++## Result metadata and errors
++
++`RenderedSegment` carries the original request ID/text, audio and sample rate,
++request-local word timings, optional trace, `synthesis_identity`, short-sentence mode,
++and `voice_level_applications`. `build_synthesis_identity()` creates identity metadata
++without synthesizing. See [`result_metadata.py`](../examples/result_metadata.py) for a
++result-output walkthrough. For expected invalid-input, language, or voice failures,
++catch the narrow public exceptions rather than catching `Exception`; see
++[`error_handling.py`](../examples/error_handling.py).
++
++Use the canonical `SynthesisSegment.tokens` field for caller-provided linguistic tokens.
++Routing, G2P languages, and model/voice profiles are distinct: see
++[language support](languages.md).
++
++## Related recipes
++
++- [Long text and capacity behavior](basic_usage.md#render-longer-text)
++- [Short-sentence quality and explicit modes](short_sentence_quality.md)
++- [Frontend, lexicon, cache, and asset progress configuration](installation.md)
++- [All maintained example groups](examples.md)
+diff --git a/docs/api_reference.md b/docs/api_reference.md
+index 59a0d8d..5004111 100644
+--- a/docs/api_reference.md
++++ b/docs/api_reference.md
+@@ -1,148 +1,282 @@
+ # API reference
+
+-The supported public API represents one prepared synthesis request and one independent
+-rendered result. Document planning and composition APIs are intentionally not part of
+-the package.
++PyKokoro's supported API is exported by `pykokoro` and listed in `pykokoro.__all__`. It
++models prepared synthesis requests and their independent rendered results; document
++parsing, speech planning, and composition between requests remain caller-owned.
++
++```python
++from pykokoro import (
++    GenerationConfig,
++    KokoroSynthesizer,
++    SynthesisConfig,
++    SynthesisRequest,
++)
++```
++
++## Public root symbols
++
++| Area                      | Root exports                                                                                                                                                                                                                                                                                                                                                                        |
++| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
++| Synthesis                 | `KokoroSynthesizer`, `SynthesisRequest`, `SynthesisSegment`, `RenderedSegment`                                                                                                                                                                                                                                                                                                      |
++| Source context and timing | `PronunciationOverride`, `LinguisticToken`, `WordTiming`                                                                                                                                                                                                                                                                                                                            |
++| Configuration             | `SynthesisConfig`, `GenerationConfig`, `LanguageRoutingConfig`, `TokenizerConfig`, `ShortSentenceConfig`, `LongTextSplitMode`                                                                                                                                                                                                                                                       |
++| Voice level               | `VoiceLevelConfig`, `VoiceLevelApplication`, `VoiceBlend`                                                                                                                                                                                                                                                                                                                           |
++| Model discovery           | `ModelCapabilities`, `ModelDiscoveryResult`, `VoiceCapabilities`, `discover_models`                                                                                                                                                                                                                                                                                                 |
++| Lexicon discovery         | `LexiconCapabilities`, `LexiconDiscoveryResult`, `discover_lexicons`                                                                                                                                                                                                                                                                                                                |
++| Asset progress            | `AssetProgressEvent`, `AssetProgressCallback`, `ConsoleAssetProgress`                                                                                                                                                                                                                                                                                                               |
++| Synthesis identity        | `SynthesisIdentity`, `build_synthesis_identity`                                                                                                                                                                                                                                                                                                                                     |
++| Errors                    | `KokoroError`, `PyKokoroError`, `SynthesisError`, `ConfigurationError`, `InvalidRequestError`, `EmptyTextError`, `InvalidLanguageError`, `InvalidVoiceError`, `InvalidModelError`, `InvalidPronunciationError`, `InvalidLinguisticTokensError`, `UnsupportedFeatureError`, `CapabilityError`, `SynthesisStateError`, `AlignmentError`, `BackendError`, `SynthesisInputTooLongError` |
++| Version                   | `__version__`, `__version_tuple__`                                                                                                                                                                                                                                                                                                                                                  |
++
++`SynthesisSegment` is an alias of `SynthesisRequest`, and `PyKokoroError` is a
++compatibility alias of `KokoroError`. `AssetProgressCallback` and `LongTextSplitMode`
++are type aliases; they describe accepted Python values rather than runtime record
++classes.
+
+ ## Synthesizer
+
+ ```{eval-rst}
+-.. autoclass:: pykokoro.synthesizer.KokoroSynthesizer
++.. autoclass:: pykokoro.KokoroSynthesizer
+    :members:
+    :undoc-members:
+ ```
+
+-The main methods are:
+-
+-- `synthesize(request)` renders one `SynthesisRequest` (`SynthesisSegment` remains a
+-  compatibility alias).
+-- `synthesize_text(text, language=..., voice=...)` creates and renders one plain
+-  prepared text request.
+-- `synthesize_segments(segments)` yields independent results in input order.
+-- `prepare(segment)` returns model-ready Kokoro frontend data for diagnostics and
+-  advanced integrations.
+-- `close()` releases the owned renderer resources.
++Use it as a context manager or call `close()` when finished. `synthesize()` renders one
++request, `synthesize_text()` constructs and renders one prepared string, and
++`synthesize_segments()` yields independent results in input order. `prepare()` runs the
++frontend and returns `PreparedSynthesis` (request ID, text, language, voice, phonemes,
++token IDs, alignment tokens, and diagnostics) without running ONNX inference.
+
+-## Request and result types
++## Requests, results, and source alignment
+
+ ```{eval-rst}
+-.. autoclass:: pykokoro.synthesis_types.SynthesisRequest
++.. autoclass:: pykokoro.SynthesisRequest
+    :members:
+    :undoc-members:
+
++.. autoclass:: pykokoro.PronunciationOverride
++   :members:
++   :undoc-members:
+
+-.. autoclass:: pykokoro.synthesis_types.SynthesisSegment
++.. autoclass:: pykokoro.LinguisticToken
+    :members:
+    :undoc-members:
+
+-.. autoclass:: pykokoro.synthesis_types.PronunciationOverride
++.. autoclass:: pykokoro.RenderedSegment
+    :members:
+    :undoc-members:
+
+-.. autoclass:: pykokoro.synthesis_types.LinguisticToken
++.. autoclass:: pykokoro.WordTiming
+    :members:
+    :undoc-members:
++```
+
+-.. autoclass:: pykokoro.synthesis_types.RenderedSegment
++`SynthesisSegment` is the supported compatibility spelling for `SynthesisRequest`.
++Request language and voice are explicit. `PronunciationOverride` and `LinguisticToken`
++offsets are half-open character ranges into the exact `text` carried by that request;
++`tokens` is the canonical `SynthesisRequest` field.
++
++`RenderedSegment` contains one request's waveform and metadata. `save_wav()` writes mono
++float32 WAV audio. `play()` uses the optional playback dependency. Results from a batch
++remain separate: this API does not join independent requests or insert silence between
++them.
++
++## Configuration
++
++```{eval-rst}
++.. autoclass:: pykokoro.SynthesisConfig
+    :members:
+    :undoc-members:
+
+-.. autoclass:: pykokoro.types.WordTiming
++.. autoclass:: pykokoro.GenerationConfig
++   :members:
++   :undoc-members:
++
++.. autoclass:: pykokoro.LanguageRoutingConfig
++   :members:
++   :undoc-members:
++
++.. autoclass:: pykokoro.TokenizerConfig
++   :members:
++   :undoc-members:
++
++.. autoclass:: pykokoro.ShortSentenceConfig
+    :members:
+    :undoc-members:
+ ```
+
+-`SynthesisSegment` offsets are half-open Python character ranges into its exact `text`.
+-`RenderedSegment.audio` is one-dimensional float32 audio, `sample_rate` is positive, and
+-word timings are local to that result. `save_wav(path)` writes mono float32 WAV audio.
++`LongTextSplitMode` is `"none" | "sentence"`. The default `"none"` path raises
++`SynthesisInputTooLongError` for an oversized request. `"sentence"` lazily loads
++PhraseSplit only when a request exceeds capacity, then returns one result for the
++original request. `long_text_use_spacy=False` selects PhraseSplit's simple mode without
++spaCy.
+
+-## Configuration
++`GenerationConfig` controls Kokoro acoustic speed, the default language for
++`synthesize_text()`, inference random seed, and the per-request short-sentence override.
++Short-sentence handling is disabled unless explicitly enabled with `ShortSentenceConfig`
++or `GenerationConfig.enable_short_sentence`.
++
++## Voice blending and calibration
+
+ ```{eval-rst}
+-.. autoclass:: pykokoro.synthesis_config.SynthesisConfig
++.. autoclass:: pykokoro.VoiceBlend
+    :members:
+    :undoc-members:
+
+-.. autoclass:: pykokoro.synthesis_identity.SynthesisIdentity
++.. autoclass:: pykokoro.VoiceLevelConfig
+    :members:
+    :undoc-members:
+
+-
+-.. autoclass:: pykokoro.exceptions.SynthesisInputTooLongError
++.. autoclass:: pykokoro.VoiceLevelApplication
+    :members:
+    :undoc-members:
++```
++
++A `VoiceBlend` combines supported voice IDs for one request/model profile. Voice-level
++calibration is an engine-local option; it is not whole-program loudness mastering.
++
++## Model and lexicon discovery
+
+-.. autoclass:: pykokoro.generation_config.GenerationConfig
++```{eval-rst}
++.. autoclass:: pykokoro.ModelCapabilities
+    :members:
+    :undoc-members:
+
+-.. autoclass:: pykokoro.language_routing.LanguageRoutingConfig
++.. autoclass:: pykokoro.VoiceCapabilities
+    :members:
+    :undoc-members:
+
+-.. autoclass:: pykokoro.voice_level.VoiceLevelConfig
++.. autoclass:: pykokoro.ModelDiscoveryResult
+    :members:
+    :undoc-members:
+
+-.. autoclass:: pykokoro.voice_level.VoiceLevelApplication
++.. autofunction:: pykokoro.discover_models
++
++.. autoclass:: pykokoro.LexiconCapabilities
+    :members:
+    :undoc-members:
+
+-.. autoclass:: pykokoro.short_sentence_handler.ShortSentenceConfig
++.. autoclass:: pykokoro.LexiconDiscoveryResult
+    :members:
+    :undoc-members:
++
++.. autofunction:: pykokoro.discover_lexicons
+ ```
+
+-Each call returns one `RenderedSegment`, even when a single request is internally split.
+-G2P tokenization is checked against the selected model capacity. With the default
+-`long_text_split="none"`, oversized input raises `SynthesisInputTooLongError`. Set
+-`long_text_split="sentence"` to enable lazy PhraseSplit-based splitting only for
+-oversized requests. It packs source spans into model-safe chunks, falling back from
+-sentences to clauses and then safe word boundaries when needed. Chunk audio is joined
+-into the one request result, while request text and source-aligned context remain
+-intact. A word that cannot fit safely still raises `SynthesisInputTooLongError`.
+-
+-`long_text_use_spacy=False` selects PhraseSplit's simple mode without spaCy. `None`
+-permits a compatible local spaCy model with regex fallback; `True` requires spaCy and a
+-compatible model. Separate synthesis requests still produce separate results.
+-`RenderedSegment.synthesis_identity` and `voice_level_applications` expose resolved
+-output identity and calibration outcomes. `GenerationConfig.speed` is the acoustic
+-inference speed passed to Kokoro, not an application-level playback-rate effect.
+-`SynthesisConfig.voice_level` is engine-local voice calibration rather than whole-output
+-mastering.
+-
+-## Voice blends and discovery
++Discovery reports metadata and runtime capability without loading synthesis weights or
++creating an ONNX session. Offline discovery uses available local metadata; it does not
++install model or lexicon assets. Use the inventory to select an available
++model/language/voice rather than inferring compatibility from a voice name.
++
++## Asset progress
+
+ ```{eval-rst}
+-.. autoclass:: pykokoro.voice_manager.VoiceBlend
++.. autoclass:: pykokoro.AssetProgressEvent
++   :members:
++   :undoc-members:
++
++.. autoclass:: pykokoro.ConsoleAssetProgress
+    :members:
+    :undoc-members:
++```
++
++`AssetProgressCallback` is a callable receiving `AssetProgressEvent` values. Pass a
++callback or `ConsoleAssetProgress()` with `SynthesisConfig.asset_progress`. Progress
++notifications cover managed model assets, not lexicon data provisioning.
++
++## Synthesis identity
+
+-.. autofunction:: pykokoro.discovery.discover_models
++```{eval-rst}
++.. autoclass:: pykokoro.SynthesisIdentity
++   :members:
++   :undoc-members:
+
+-.. autofunction:: pykokoro.lexicon_discovery.discover_lexicons
++.. autofunction:: pykokoro.build_synthesis_identity
+ ```
+
+-`discover_models()` describes runtime capabilities without initializing ONNX inference
+-or downloading model weights. `discover_lexicons()` describes available named G2P
+-lexicons.
++The identity captures output-affecting synthesis settings and exposes a stable cache
++key. Building identity metadata does not run inference.
+
+-## Frontend configuration and model asset progress
++## Exceptions
+
+ ```{eval-rst}
+-.. autoclass:: pykokoro.tokenizer.TokenizerConfig
++.. autoclass:: pykokoro.KokoroError
++   :members:
++   :undoc-members:
++
++.. autoclass:: pykokoro.SynthesisError
++   :members:
++   :undoc-members:
++
++.. autoclass:: pykokoro.ConfigurationError
+    :members:
+    :undoc-members:
+
+-.. autoclass:: pykokoro.tokenizer.EspeakConfig
++.. autoclass:: pykokoro.InvalidRequestError
+    :members:
+    :undoc-members:
+
+-.. autoclass:: pykokoro.asset_progress.AssetProgressEvent
++.. autoclass:: pykokoro.EmptyTextError
++   :members:
++   :undoc-members:
++
++.. autoclass:: pykokoro.InvalidLanguageError
++   :members:
++   :undoc-members:
++
++.. autoclass:: pykokoro.InvalidVoiceError
++   :members:
++   :undoc-members:
++
++.. autoclass:: pykokoro.InvalidModelError
++   :members:
++   :undoc-members:
++
++.. autoclass:: pykokoro.InvalidPronunciationError
++   :members:
++   :undoc-members:
++
++.. autoclass:: pykokoro.InvalidLinguisticTokensError
++   :members:
++   :undoc-members:
++
++.. autoclass:: pykokoro.UnsupportedFeatureError
++   :members:
++   :undoc-members:
++
++.. autoclass:: pykokoro.CapabilityError
++   :members:
++   :undoc-members:
++
++.. autoclass:: pykokoro.SynthesisStateError
++   :members:
++   :undoc-members:
++
++.. autoclass:: pykokoro.AlignmentError
++   :members:
++   :undoc-members:
++
++.. autoclass:: pykokoro.BackendError
++   :members:
++   :undoc-members:
++
++.. autoclass:: pykokoro.SynthesisInputTooLongError
+    :members:
+    :undoc-members:
+ ```
+
+-For installation, request examples, and the breaking migration boundary, see the
+-[quickstart](quickstart.md), [advanced features](advanced_features.md), and
+-[release note](breaking-change-0.10.0.md).
++Catch the narrow exception that an application can act on; avoid treating every failure
++as a recoverable input error. `PyKokoroError` is the retained alias for `KokoroError`.
++
++## Version
++
++`pykokoro.__version__` is the package's version string and `pykokoro.__version_tuple__`
++is its parsed tuple. The package version is generated by setuptools-scm.
++
++## Related guides
++
++- [Quickstart](quickstart.md)
++- [Configuration and request behavior](basic_usage.md)
++- [Prepared text, routing, and result metadata](advanced_features.md)
++- [Languages and model profiles](languages.md)
++- [Installation and asset progress](installation.md)
+diff --git a/docs/basic_usage.md b/docs/basic_usage.md
+index 3780e3a..5044286 100644
+--- a/docs/basic_usage.md
++++ b/docs/basic_usage.md
+@@ -39,6 +39,21 @@ with KokoroSynthesizer(config) as synthesizer:
+     rendered = synthesizer.synthesize_text("Model-selected speech.", language="en-us")
+ ```
+
++## Managed asset cache location
++
++`SynthesisConfig.cache_dir` selects the OnnxVoice managed-asset cache directory and is
++forwarded to the backend at installation time. The default `None` delegates to the
++backend's normal cache. Explicit custom `model_path` or `voices_path` files continue to
++be used as given; this does not relocate caller-owned files.
++
++```python
++from pathlib import Path
++
++from pykokoro import SynthesisConfig
++
++config = SynthesisConfig(cache_dir=Path.home() / ".cache" / "pykokoro")
++```
++
+ The supported combinations depend on model profiles and available artifacts. Use
+ `discover_models()` to inspect runtime-ready models, languages, voices, qualities, and
+ frontends without loading model weights. `model_path`, `voices_path`, and
+@@ -125,3 +140,64 @@ waveform; it is not a composition API.
+
+ See [advanced features](advanced_features.md) for source-aligned G2P context and
+ routing.
++
++## Catch request failures
++
++The default oversized-input behavior is a typed error, not implicit splitting. Catch the
++specific error when the application wants to report, shorten, or retry a request:
++
++```python
++from pykokoro import (
++    GenerationConfig,
++    KokoroSynthesizer,
++    SynthesisConfig,
++    SynthesisInputTooLongError,
++)
++
++text = "One request that exceeds model capacity. " * 1000
++config = SynthesisConfig(generation=GenerationConfig(lang="en-us"))
++with KokoroSynthesizer(config) as synthesizer:
++    try:
++        rendered = synthesizer.synthesize_text(text, language="en-us")
++    except SynthesisInputTooLongError as exc:
++        print(f"Shorten the request or opt into sentence splitting: {exc}")
++```
++
++See [`error_handling.py`](../examples/error_handling.py) for narrow handling of
++supported language, voice, pronunciation, and length failures.
++
++## Inference cache and configuration groups
++
++`SynthesisConfig.inference_cache_enabled` and `inference_cache_max_bytes` control the
++renderer-side inference cache; the default budget is 128 MiB. Set
++`inference_cache_enabled=False` or the maximum to `0` to disable it. This is separate
++from the managed-asset `cache_dir`.
++
++```python
++from pykokoro import SynthesisConfig
++
++config = SynthesisConfig(
++    inference_cache_enabled=True,
++    inference_cache_max_bytes=64 * 1024 * 1024,
++)
++```
++
++Common `SynthesisConfig` settings can be grouped by ownership:
++
++| Concern                 | Representative settings                                              |
++| ----------------------- | -------------------------------------------------------------------- |
++| Model/profile selection | `voice`, `model_source`, `model_variant`, `model_quality`            |
++| Runtime/provider        | `provider`, `provider_options`, `session_options`                    |
++| Frontend/G2P            | `tokenizer_config`, `language_routing`                               |
++| Long text               | `long_text_split`, `long_text_use_spacy`                             |
++| Short sentences         | `short_sentence_config`, `generation.enable_short_sentence`          |
++| Diagnostics             | `return_trace`, `waveform_validation`, `inference_audio_diagnostics` |
++| Inference cache         | `inference_cache_enabled`, `inference_cache_max_bytes`               |
++| Voice level             | `voice_level`                                                        |
++| Local/custom assets     | `model_path`, `voices_path`, `model_config_path`, `cache_dir`        |
++
++`GenerationConfig` separately controls acoustic `speed`, the default language for
++`synthesize_text()`, `random_seed`, and the optional short-sentence override. For local
++or custom model paths, consult the
++[installation guide](installation.md#model-assets-and-discovery); discovery and path
++configuration do not silently provision a replacement for a supplied custom artifact.
+diff --git a/docs/breaking-change-0.10.0.md b/docs/breaking-change-0.10.0.md
+index f32beea..a5921f1 100644
+--- a/docs/breaking-change-0.10.0.md
++++ b/docs/breaking-change-0.10.0.md
+@@ -42,6 +42,8 @@ owns provider selection and ONNX session creation.
+ The new API keeps `SynthesisSegment` as an alias for `SynthesisRequest` and accepts
+ `annotations` as a compatibility alias for `tokens`. These aliases do not restore the
+ removed pipeline, document parsing, SSMD, planning, or composition APIs. Example:
++Current request code and maintained examples use `tokens=`; the compatibility keyword is
++retained only for existing callers.
+
+ ```python
+ from pykokoro import GenerationConfig, KokoroSynthesizer, SynthesisConfig
+@@ -93,8 +95,9 @@ model installation, resolution, and ONNX session concerns; AudioSig supplies DSP
+ primitives. PyKokoro retains request rendering, voice/model profile selection, timing
+ reconstruction, and metadata-only `discover_models()` and `discover_lexicons()` APIs.
+
+-The supported integration floors are KokoroG2P 0.9.9, Lexphon 0.2.3, PhraseSplit 0.3.9,
+-AudioSig 0.1.4, and OnnxVoice 0.1.7. PhraseSplit remains a runtime dependency for opt-in
+-long-text splitting, but neither it nor PyKokoro requires spaCy for the default simple
+-path. See the [quickstart](quickstart.md), [request examples](examples.md), and
++The supported integration floors are KokoroG2P 0.9.15, Lexphon 0.2.5, PhraseSplit 0.3.9,
++AudioSig 0.1.4, and OnnxVoice 0.1.7. The bounds come from package metadata. PhraseSplit
++remains an optional-path runtime dependency for sentence splitting, but neither it nor
++PyKokoro requires spaCy for the default simple path. See the
++[quickstart](quickstart.md), [request examples](examples.md), and
+ [API reference](api_reference.md) for the new boundary.
+diff --git a/docs/examples.md b/docs/examples.md
+index ece7bb0..06a6294 100644
+--- a/docs/examples.md
++++ b/docs/examples.md
+@@ -1,43 +1,75 @@
+ # Examples
+
+-The maintained scripts in `examples/` use the request-centric API. Run them from the
+-project root after installing `pykokoro[cpu]`:
++The maintained scripts in `examples/` use the request-centric API. Install one provider
++(for example, `pykokoro[cpu]`) before running a synthesis example. Uncached synthesis
++may download model assets; discovery-only scripts are identified below. Outputs go to
++`example-artifacts/` when run directly, and to `example-artifacts/<script>/` through the
++runner.
++
++## Runner groups
+
+ ```bash
+ python examples/run_all.py --list
+-python examples/run_all.py
++python examples/run_all.py --group core
++python examples/run_all.py --group feature
++python examples/run_all.py --group language-showcase
++python examples/run_all.py --group optional-heavy
++python examples/run_all.py --include-optional
+ ```
+
+-Synthesis examples download model assets on first use. The sequential runner gives each
+-script its own output directory below `example-artifacts/` and continues after a
+-failure.
++The default group is `core`. Feature examples and the language showcase are separate
++from it; `optional-heavy` is never added unless selected explicitly or
++`--include-optional` is used. The runner processes scripts sequentially, isolates each
++script's output directory, and continues after a script fails. Use `--list` to inspect a
++group without running it.
++
++## Core request examples
+
+-## Simple synthesis
++| Script / command                                                                                                        | Purpose and public API                                                                                                                                                                       | Assets, network, and cost                                                                                                                                                  | Expected output                                                                                                                      |
++| ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
++| [`simple_synthesis.py`](../examples/simple_synthesis.py)<br>`python examples/simple_synthesis.py`                       | Smallest request using `SynthesisConfig`, `KokoroSynthesizer.synthesize_text()`, and `RenderedSegment.save_wav()`.                                                                           | First run may download one model/voice asset; low CPU cost.                                                                                                                | `hello.wav`                                                                                                                          |
++| [`request_batch.py`](../examples/request_batch.py)<br>`python examples/request_batch.py`                                | Two explicit `SynthesisSegment` requests through `synthesize_segments()`. Results are saved independently; PyKokoro does not concatenate them or insert silence.                             | First run may download model assets; low-to-medium CPU cost for two short requests.                                                                                        | `greeting-a.wav`, `greeting-b.wav`                                                                                                   |
++| [`pronunciation_overrides.py`](../examples/pronunciation_overrides.py)<br>`python examples/pronunciation_overrides.py`  | Contrasts a source-span `PronunciationOverride(language=...)` with a direct phoneme span.                                                                                                    | First run may download model assets; low-to-medium cost for two short requests.                                                                                            | `language-override.wav`, `phoneme-span-override.wav`                                                                                 |
++| [`linguistic_tokens.py`](../examples/linguistic_tokens.py)<br>`python examples/linguistic_tokens.py`                    | Passes a source-aligned `LinguisticToken` through the canonical `tokens=` field.                                                                                                             | First run may download model assets; low CPU cost.                                                                                                                         | `contextual-pronunciation.wav`                                                                                                       |
++| [`long_text.py`](../examples/long_text.py)<br>`python examples/long_text.py`                                            | Sends one oversized original request with `long_text_split="sentence"`; engine-managed chunks return as one result.                                                                          | First run may download model assets; higher CPU cost for the long passage.                                                                                                 | `long_text.wav`                                                                                                                      |
++| [`voice_blend.py`](../examples/voice_blend.py)<br>`python examples/voice_blend.py`                                      | Shows structured and parsed `VoiceBlend` construction and synthesizes one blended voice.                                                                                                     | First run may download assets for the selected model/voices; low-to-medium CPU cost.                                                                                       | `voice_blend.wav`                                                                                                                    |
++| [`result_metadata.py`](../examples/result_metadata.py)<br>`python examples/result_metadata.py`                          | Prints request/result fields, token IDs, diagnostics, trace summary, synthesis identity, word timings, and voice-level applications.                                                         | First run may download model assets; low CPU cost for one request.                                                                                                         | `result_metadata.wav` and printed metadata                                                                                           |
++| [`models_and_languages.py`](../examples/models_and_languages.py)<br>`python examples/models_and_languages.py --offline` | Uses `discover_models()` to print runtime model/profile, language, and voice inventory without creating an ONNX session. `--model MODEL_ID` optionally synthesizes using a selected profile. | Default discovery may refresh registry metadata over the network; `--offline` uses cached metadata. No model download unless `--model` is supplied; discovery cost is low. | Default: printed inventory only. With `--model`: `<model>_<language>_<voice>.wav` under `example-artifacts/model_language_outputs/`. |
+
+-[`examples/simple_synthesis.py`](../examples/simple_synthesis.py) renders prepared text
+-with `synthesize_text()` and writes the independent result as a float32 WAV.
++## Feature examples
+
+-## Independent request batches
++| Script / command                                                                                                                                     | Purpose and public API                                                                                                                                       | Assets, network, and cost                                                                           | Expected output                                                           |
++| ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
++| [`english.py`](../examples/english.py)<br>`python examples/english.py`                                                                               | Synthesizes prepared English text, calls `prepare()`, and reuses its phonemes in a whole-request phoneme request.                                            | First run may download model assets; two short inferences, low-to-medium CPU cost.                  | `english_demo.wav`, `english_phonemes_demo.wav`                           |
++| [`language_routing.py`](../examples/language_routing.py)<br>`python examples/language_routing.py`                                                    | Contrasts automatic G2P language routing with an explicit deterministic language override on the same source span. Acoustic model and voice remain explicit. | First run may download model assets; low-to-medium cost for two short requests.                     | `automatic-routing.wav`, `explicit-german-span.wav`                       |
++| [`frontend_and_lexicons.py`](../examples/frontend_and_lexicons.py)<br>`python examples/frontend_and_lexicons.py`                                     | Runs offline `discover_lexicons()` and constructs an installed-only `TokenizerConfig`; it does not synthesize.                                               | No model assets or lexicon data are installed; offline discovery avoids metadata refresh. Low cost. | Printed lexicon inventory and frontend configuration; no file.            |
++| [`asset_progress.py`](../examples/asset_progress.py)<br>`python examples/asset_progress.py`<br>`python examples/asset_progress.py --custom-callback` | Demonstrates `ConsoleAssetProgress` or a typed `AssetProgressEvent` callback during managed model asset installation.                                        | May download model assets on first use; low CPU cost for one short request.                         | `asset_progress.wav` plus progress events                                 |
++| [`error_handling.py`](../examples/error_handling.py)<br>`python examples/error_handling.py`                                                          | Shows narrow catches for invalid language, voice, pronunciation, and oversized input errors.                                                                 | First run may download model assets on the valid path; low CPU cost for one short request.          | Normally `error_handling.wav`; a caught failure prints a message instead. |
+
+-[`examples/request_batch.py`](../examples/request_batch.py) passes two requests with
+-distinct voices to `synthesize_segments()` and writes each `RenderedSegment` separately.
+-It does not join them into one timeline.
++## Language showcase
+
+-## Pronunciation and linguistic context
++These scripts are separated from the default runner group because each performs
++synthesis; uncached runs may download model assets. Each is a short-to-medium
++single-language showcase unless noted. Run one directly with the command shown.
+
+-- [`examples/pronunciation_overrides.py`](../examples/pronunciation_overrides.py)
+-  supplies an explicit source-aligned pronunciation-language span.
+-- [`examples/linguistic_annotations.py`](../examples/linguistic_annotations.py) passes
+-  POS, tag, and lemma context without planner or spaCy objects.
++| Script / command                                                                      | Purpose and public API                                                                                                     | Assets, network, and cost                                                                     | Expected output                            |
++| ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------ |
++| [`chinese.py`](../examples/chinese.py)<br>`python examples/chinese.py`                | Synthesizes Mandarin with explicit `zh` language and the `v1.1-zh` model variant.                                          | May download the Chinese model/voice assets; medium CPU cost.                                 | `chinese_demo.wav`                         |
++| [`contractions.py`](../examples/contractions.py)<br>`python examples/contractions.py` | Exercises English contractions and past-tense endings through multiple requests; joins audio in this caller-owned example. | May download model assets; higher CPU cost than a single short sample.                        | `contractions_demo.wav` (caller-assembled) |
++| [`french.py`](../examples/french.py)<br>`python examples/french.py`                   | Synthesizes a prepared French passage with an explicit French voice/language.                                              | May download model assets; medium CPU cost.                                                   | `french_demo.wav`                          |
++| [`italian.py`](../examples/italian.py)<br>`python examples/italian.py`                | Synthesizes an Italian passage using the request API.                                                                      | May download model assets; medium CPU cost.                                                   | `italian_demo.wav`                         |
++| [`japanese.py`](../examples/japanese.py)<br>`python examples/japanese.py`             | Synthesizes a Japanese passage with an explicit `ja` request language.                                                     | May download model assets; medium CPU cost.                                                   | `japanese_demo.wav`                        |
++| [`korean.py`](../examples/korean.py)<br>`python examples/korean.py`                   | Demonstrates experimental Korean phonemization and a parsed `VoiceBlend`; pronunciation may be inaccurate.                 | Requires a compatible experimental frontend/profile and may download assets; medium CPU cost. | `korean_demo.wav`                          |
++| [`portuguese.py`](../examples/portuguese.py)<br>`python examples/portuguese.py`       | Synthesizes a Brazilian Portuguese passage with an explicit voice and language.                                            | May download model assets; medium CPU cost.                                                   | `portuguese_demo.wav`                      |
++| [`spanish.py`](../examples/spanish.py)<br>`python examples/spanish.py`                | Synthesizes a prepared Spanish passage with the request API.                                                               | May download model assets; medium CPU cost.                                                   | `spanish_demo.wav`                         |
+
+-## Model inventory
++## Optional heavy examples
+
+-[`examples/models_and_languages.py`](../examples/models_and_languages.py) displays
+-available model profiles without downloading weights. Pass `--model MODEL_ID` to
+-synthesize a sample with a selected runnable model; experimental frontends require
+-`--include-experimental`.
++| Script / command                                                                                                                                    | Purpose and public API                                                                                                                                                          | Assets, network, and cost                                                                                                                                                        | Expected output                                                                                   |
++| --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
++| [`all_voices.py`](../examples/all_voices.py)<br>`python examples/all_voices.py --list-only` (inventory)<br>`python examples/all_voices.py` (render) | Uses model discovery to enumerate profiles, then submits one independent synthesis request per selected voice. The script itself assembles a comparison WAV on the caller side. | Inventory may refresh registry metadata. Rendering can download many model/voice assets, use substantial storage, and run for a long time on CPU; list-only does not synthesize. | `all_voices.wav`; with `--compare-leveling`, `all_voices_raw.wav` and `all_voices_calibrated.wav` |
++| [`short_sentence_demo.py`](../examples/short_sentence_demo.py)<br>`python examples/short_sentence_demo.py`                                          | Compares disabled, wrap, phrase, and randomized-phrase `ShortSentenceConfig` modes; joins comparison sections in example code, not in the engine.                               | May download model assets; high CPU cost (many short requests across four modes).                                                                                                | `short_sentence_demo.wav` (caller-assembled)                                                      |
+
+-The optional [`examples/all_voices.py`](../examples/all_voices.py) showcase can take a
+-long time and download several model/voice assets. It requests each voice independently
+-and assembles its own WAV as caller-side example code; this composition behavior is not
+-part of PyKokoro's engine API.
++Every runnable script is listed above. `__init__.py`, `_output.py`, and `run_all.py` are
++support modules rather than synthesis examples. For API details, see the
++[reference](api_reference.md).
+diff --git a/docs/index.md b/docs/index.md
+index 97d2b7b..aa345d9 100644
+--- a/docs/index.md
++++ b/docs/index.md
+@@ -13,6 +13,7 @@ quickstart
+ installation
+ basic_usage
+ advanced_features
++short_sentence_quality
+ pipeline_stages
+ api_reference
+ examples
+@@ -24,7 +25,7 @@ changelog
+ ## Engine responsibilities
+
+ - KokoroG2P prepared-text integration with explicit pronunciation languages,
+-  source-aligned overrides, and linguistic annotations
++  source-aligned overrides, and linguistic tokens
+ - Kokoro voice, model, and style selection, including blends
+ - Model token-capacity validation and opt-in sentence-level splitting for oversized
+   requests, plus ONNX inference
+@@ -32,6 +33,15 @@ changelog
+   calibration
+ - Independent `RenderedSegment` results and standalone WAV writing
+
++## Feature guides
++
++- [Long-text capacity, splitting, and errors](basic_usage.md#render-longer-text)
++- [Direct phonemes, language routing, VoiceBlend, and result metadata]
++  (advanced_features.md)
++- [Language codes and acoustic-profile discovery](languages.md)
++- [Frontends, installed lexicons, cache location, and asset progress](installation.md)
++- [Short-sentence configuration and modes](short_sentence_quality.md)
++
+ PyKokoro does not parse SSMD or YAML, create UtterPlans or AudioJobs, compose separate
+ caller requests, insert cross-request silence, or apply document-level effects. The
+ v0.10.0 breaking boundary and migration examples are described in the
+@@ -51,5 +61,5 @@ with KokoroSynthesizer(config) as synthesizer:
+ result.save_wav("hello.wav")
+ ```
+
+-See the [maintained examples](../examples/README.md) for requests with pronunciation
+-context, annotations, and independent batch results.
++See the [maintained examples](examples.md) for requests with pronunciation context,
++linguistic tokens, and independent batch results.
+diff --git a/docs/installation.md b/docs/installation.md
+index 22ebf23..92513be 100644
+--- a/docs/installation.md
++++ b/docs/installation.md
+@@ -34,6 +34,26 @@ an espeak frontend or fallback. Named lexicon data can be provisioned by Lexphon
+ first use; for offline operation, install the required data ahead of time and select an
+ installed-only lexicon policy in `TokenizerConfig`.
+
++```python
++from pykokoro import TokenizerConfig, discover_lexicons
++
++inventory = discover_lexicons(language="de-de", offline=True)
++for lexicon in inventory.lexicons:
++    print(lexicon.selector, lexicon.installed, lexicon.model_support)
++
++tokenizer = TokenizerConfig(
++    backend="kokorog2p",
++    fallback="espeak",
++    lexicons=("gold",),
++    lexicon_data_policy="installed-only",
++    use_spacy=False,  # no spaCy model required for this recipe
++)
++```
++
++Discovery inspects metadata; it does not download or install lexicon data. The
++`installed-only` policy prevents implicit lexicon data provisioning during synthesis.
++See [`frontend_and_lexicons.py`](../examples/frontend_and_lexicons.py).
++
+ ```bash
+ lexphon data available de-DE
+ lexphon data install de-de:gold
+@@ -45,9 +65,19 @@ lists lexicon metadata without running synthesis.
+
+ ## Model assets and discovery
+
+-Model and voice assets are resolved lazily when synthesis first needs them. Use the
+-`asset_progress` callback in `SynthesisConfig` to report managed asset downloads. For
+-metadata-only runtime inventory, call:
++Model and voice assets are resolved lazily when synthesis first needs them.
++`SynthesisConfig.cache_dir` chooses the cache directory passed to OnnxVoice for managed
++model/voice assets. The default `None` delegates to the backend's normal cache.
++Caller-owned custom model and voice files are not moved or replaced.
++
++```python
++from pathlib import Path
++from pykokoro import SynthesisConfig
++
++config = SynthesisConfig(cache_dir=Path.home() / ".cache" / "pykokoro")
++```
++
++For metadata-only runtime inventory, call `discover_models(offline=True)`:
+
+ ```python
+ from pykokoro import discover_models
+@@ -57,9 +87,38 @@ for model in inventory.models:
+     print(model.model_id, model.languages, model.voices, model.status)
+ ```
+
+-This does not load model weights or create an ONNX session. Explicit custom `model_path`
+-and `voices_path` values are used in place and validated; they are not silently replaced
+-with a managed download.
++This does not load model weights or create an ONNX session.
++
++## Managed asset progress
++
++Attach `ConsoleAssetProgress()` for a ready-made terminal reporter, or provide a
++callback that receives typed `AssetProgressEvent` values. Notifications cover managed
++model assets; they do not report lexicon provisioning. First-time synthesis can download
++assets unless they are already cached. The example script may require network access and
++model storage:
++
++```python
++from pykokoro import ConsoleAssetProgress, SynthesisConfig
++
++config = SynthesisConfig(asset_progress=ConsoleAssetProgress())
++```
++
++For a custom callback, inspect `event.phase`, `filename`, and byte counts. See
++[`asset_progress.py`](../examples/asset_progress.py).
++
++A custom callback can use the public event fields directly:
++
++```python
++from pykokoro import AssetProgressEvent, SynthesisConfig
++
++def report_progress(event: AssetProgressEvent) -> None:
++    print(event.phase, event.filename, event.bytes_done, event.bytes_total)
++
++config = SynthesisConfig(asset_progress=report_progress)
++```
++
++Explicit custom `model_path` and `voices_path` values are used in place and validated;
++they are not silently replaced with managed downloads.
+
+ ## Development install
+
+diff --git a/docs/languages.md b/docs/languages.md
+index 5c56794..09a8562 100644
+--- a/docs/languages.md
++++ b/docs/languages.md
+@@ -1,38 +1,53 @@
+ # Languages and model profiles
+
+-Every `SynthesisSegment` supplies an explicit pronunciation language.
+-`GenerationConfig.lang` can provide the default for `synthesize_text()`, but a voice
+-name does not select language and PyKokoro does not inspect document headers or markup
+-for it.
+-
+-## Prepared-text languages
+-
+-The native KokoroG2P path supports these language codes and aliases:
+-
+-- English: `en-us`, `en-gb`, and `en`
+-- Spanish: `es`
+-- French: `fr`, `fr-fr`
+-- German: `de`
+-- Italian: `it`
+-- Portuguese: `pt`, `pt-pt`
+-- Korean: `ko`
+-- Japanese: `ja`
+-- Chinese: `zh`, `cmn`
+-- Arabic: `ar`
+-- Hebrew: `he`
+-- Kazakh: `kk`
+-- Swedish: `sv`
+-- Thai: `th`
+-- Vietnamese: `vi`
+-
+-Additional G2P languages may be available when the caller explicitly selects an
+-appropriate frontend backend, for example eSpeak or Goruut. The acoustic model must
+-still be compatible with the requested language and voice.
+-
+-## Pronunciation-language spans
+-
+-Use source-aligned overrides when one prepared string contains pronunciation material
+-that should use another language:
++Language support has two independent parts: a prepared-text G2P language supported by
++KokoroG2P, and an acoustic model/voice profile that can render the request. A language
++code being accepted for phonemization does **not** imply every model or voice supports
++it. The request language is always explicit; PyKokoro does not infer it from a voice ID,
++document headers, or text detection.
++
++## Prepared-text language codes
++
++The current KokoroG2P language-code contract accepts these canonical codes:
++
++| Language              | Canonical code |
++| --------------------- | -------------- |
++| Arabic                | `ar`           |
++| Czech                 | `cs-cz`        |
++| German                | `de-de`        |
++| English (UK)          | `en-gb`        |
++| English (US)          | `en-us`        |
++| Spanish               | `es-es`        |
++| French                | `fr-fr`        |
++| Hebrew                | `he`           |
++| Hindi                 | `hi-in`        |
++| Italian               | `it-it`        |
++| Japanese              | `ja-jp`        |
++| Kazakh                | `kk`           |
++| Korean                | `ko-kr`        |
++| Portuguese (Brazil)   | `pt-br`        |
++| Portuguese (Portugal) | `pt-pt`        |
++| Russian               | `ru-ru`        |
++| Swedish               | `sv-se`        |
++| Thai                  | `th-th`        |
++| Vietnamese            | `vi-vn`        |
++| Chinese (Mandarin)    | `zh`           |
++
++Common shorthand aliases are normalized by KokoroG2P before routing: `en` → `en-us`,
++`es` → `es-es`, `fr` → `fr-fr`, `de` → `de-de`, `it` → `it-it`, `pt` → `pt-br`, `vi` →
++`vi-vn`, `sv` → `sv-se`, `ru` → `ru-ru`, `hi` → `hi-in`, `ko` → `ko-kr`, `ja` → `ja-jp`,
++`th` → `th-th`, and `cs` → `cs-cz`. Both `zh` and `cmn` normalize to `zh`. Prefer
++canonical values in application data so the selected language is unambiguous.
++
++This table documents the G2P/frontend contract, not a guarantee about model artifacts. A
++frontend backend may have additional runtime requirements, such as an installed eSpeak
++NG executable. See [installation](installation.md#frontends-and-lexicons).
++
++## Explicit language and pronunciation spans
++
++`SynthesisSegment.language` is required and describes the request's main pronunciation
++language. A span override can select a different G2P language for a source-aligned
++range; it does not switch the acoustic model or voice:
+
+ ```python
+ from pykokoro import PronunciationOverride, SynthesisSegment
+@@ -42,34 +57,51 @@ request = SynthesisSegment(
+     text="Hello Welt.",
+     language="en-us",
+     voice="af_sarah",
+-    pronunciation_overrides=(PronunciationOverride(6, 10, language="de"),),
++    pronunciation_overrides=(PronunciationOverride(6, 10, language="de-de"),),
+ )
+ ```
+
+-This affects G2P for the indicated text range. It does not switch the acoustic model or
+-voice. For complete multilingual utterances that need different acoustic profiles,
+-submit separate requests and let the caller manage any composition.
++Offsets are half-open character ranges into the exact prepared request text. For
++complete multilingual utterances requiring different acoustic profiles, submit separate
++requests and let the caller manage any composition.
+
+ ## Automatic pronunciation routing
+
+-`LanguageRoutingConfig(mode="auto", languages=(...))` lets KokoroG2P consider an
+-explicit candidate set while the request retains its required main language. Routing is
+-optional; it is not document-language detection, voice inference, or an acoustic-model
+-switch. Explicit source-aligned language information remains attached to the request.
++`LanguageRoutingConfig(mode="auto", languages=(...))` asks KokoroG2P to consider a
++bounded candidate set for prepared-text pronunciation. The request still has its
++explicit main language; routing does not detect a document's language, change the
++acoustic model, or pick a voice. Explicit source-aligned request overrides and token
++language values remain available:
+
+-## Model and voice discovery
++```python
++from pykokoro import LanguageRoutingConfig, SynthesisConfig
++
++config = SynthesisConfig(
++    language_routing=LanguageRoutingConfig(mode="auto", languages=("en", "de")),
++)
++# Normalized candidate codes: ("en-us", "de-de")
++```
++
++See [`language_routing.py`](../examples/language_routing.py) for an automatic request
++beside a deterministic, explicitly annotated request.
++
++## Discover compatible model profiles and voices
+
+-Model defaults are resolved from the request's language and selected voice. To inspect
+-available profiles before synthesis, use the metadata-only discovery API:
++Use metadata-only discovery to check the profiles that the installed runtime can
++resolve. Do not hardcode voice compatibility from a voice name or from the G2P language
++table:
+
+ ```python
+ from pykokoro import discover_models
+
+-for model in discover_models(offline=True).models:
+-    print(model.model_id, model.languages, model.voices, model.status)
++inventory = discover_models(offline=True)
++for profile in inventory.models:
++    print(profile.model_id, profile.languages, profile.voices, profile.status)
+ ```
+
+-The inventory reports runtime status, voices, languages, qualities, frontend
+-information, and distribution metadata without loading model weights. See the
+-[model discovery example](../examples/models_and_languages.py) for optional synthesis of
+-a selected model.
++Discovery does not load model weights or create an ONNX inference session. It reports
++model profile metadata (including language and voice compatibility) and runtime status;
++offline mode avoids refreshing remote metadata. The result is a capability inventory,
++not a synthesis guarantee if the required model assets are not installed or cannot be
++reached. See [`models_and_languages.py`](../examples/models_and_languages.py) for
++inventory and optional selected-model synthesis.
+diff --git a/docs/quickstart.md b/docs/quickstart.md
+index ea938ce..6c96677 100644
+--- a/docs/quickstart.md
++++ b/docs/quickstart.md
+@@ -61,7 +61,7 @@ request = SynthesisSegment(
+     language="en-us",
+     voice="af_bella",
+     pronunciation_overrides=(PronunciationOverride(6, 10, language="de"),),
+-    annotations=(LinguisticToken(0, 5, text="Hello", pos="INTJ"),),
++    tokens=(LinguisticToken(0, 5, text="Hello", pos="INTJ"),),
+ )
+ config = SynthesisConfig(
+     voice="af_bella",
+@@ -97,10 +97,25 @@ The order and IDs are preserved. Each item is a separate waveform; PyKokoro does
+ concatenate them or insert silence between requests. The caller decides whether and how
+ to compose the resulting audio.
+
+-## Next steps
++## Where next?
+
+ - [Installation and model providers](installation.md)
+ - [Basic request and configuration patterns](basic_usage.md)
+ - [Pronunciation context, routing, and calibration](advanced_features.md)
+ - [Public API reference](api_reference.md)
+ - [Breaking change and migration note](breaking-change-0.10.0.md)
++- [Language codes and supported model profiles](languages.md)
++- [Frontends, lexicons, asset progress, and cache installation](installation.md)
++- [Maintained categorized examples](examples.md)
++
++- Need long text? → [basic usage](basic_usage.md#render-longer-text)
++- Need pronunciation control? → [advanced features](advanced_features.md)
++- Need a model/voice? → [language profiles](languages.md) and the
++  [discovery example](../examples/models_and_languages.py)
++- Need diagnostics? →
++  [advanced features](advanced_features.md#result-metadata-and-errors) and the
++  [result metadata example](../examples/result_metadata.py)
++
++`SynthesisInputTooLongError` is the expected default outcome for an oversized request;
++enable sentence splitting explicitly or catch the typed error and decide how the caller
++should continue.
+diff --git a/docs/short_sentence_quality.md b/docs/short_sentence_quality.md
+index 0d01c36..6649f13 100644
+--- a/docs/short_sentence_quality.md
++++ b/docs/short_sentence_quality.md
+@@ -1,27 +1,70 @@
+ # Short-sentence synthesis
+
+-Short-sentence handling is an engine-local Kokoro behavior. When enabled, the renderer
+-can try its configured phrase/cut strategy and fall back to a wrapped request result. It
+-must still return one waveform for the public request; callers do not receive an
+-engine-authored pause or cross-request timeline.
++Short-sentence processing is **disabled by default**. Enable it explicitly with
++`SynthesisConfig.short_sentence_config` or the per-request
++`GenerationConfig.enable_short_sentence` override. It is an engine-local inference aid
++for short utterances, not editorial pause insertion, cross-request composition, or a
++timeline API. The result remains one `RenderedSegment` aligned to the original request
++text.
+
+-Use `ShortSentenceConfig` through `SynthesisConfig` when a model/application needs
+-explicit short-sentence policy:
++## Public configuration
++
++`ShortSentenceConfig` supports these root-API choices:
+
+ ```python
+-from pykokoro import GenerationConfig, ShortSentenceConfig, SynthesisConfig
++from pykokoro import ShortSentenceConfig
++
++ShortSentenceConfig(enabled=False)                 # Explicitly off
++ShortSentenceConfig(resolve_mode="wrap")           # Fast phoneme-context wrapping
++ShortSentenceConfig(resolve_mode="phrase")         # Phrase context and audio cutting
++ShortSentenceConfig(resolve_mode="randomized-phrase")  # Varied phrase context and cutting
++```
++
++The default `ShortSentenceConfig()` is enabled and uses `randomized-phrase`; it does not
++become active unless the application supplies that config or turns on the generation
++override. The default `min_phoneme_length=30` threshold determines which prepared
++utterances are treated as short. The `wrap` strategy surrounds the target phonemes with
++configured phoneme pretext. Phrase strategies synthesize a surrounding sentence and cut
++the target region when timing geometry supports it; `randomized-phrase` varies the
++surrounding phrase. Phrase selection's built-in `auto` policy chooses a context style
++from the target form.
++
++Phrase-based strategies need a model ONNX output with duration/timestamp information. If
++that is unavailable, an explicitly configured phrase mode warns and falls back to `wrap`
++for the run. `wrap` does not require phrase timestamps. Phrase processing can require
++additional inference work; use `enabled=False` when that work is not appropriate.
++
++## Configure for a synthesizer
++
++```python
++from pykokoro import (
++    GenerationConfig,
++    KokoroSynthesizer,
++    ShortSentenceConfig,
++    SynthesisConfig,
++)
+
+ config = SynthesisConfig(
+     generation=GenerationConfig(lang="en-us"),
+-    short_sentence_config=ShortSentenceConfig(resolve_mode="wrap"),
++    short_sentence_config=ShortSentenceConfig(resolve_mode="phrase"),
+ )
++with KokoroSynthesizer(config) as synthesizer:
++    result = synthesizer.synthesize_text("Yes!", language="en-us")
++
++print(result.short_sentence_mode)
+ ```
+
+-The default behavior depends on the selected model and runtime profile. Prefer the
+-defaults unless a reproducible use case requires a specific strategy.
+-`return_trace=True` attaches request-local diagnostic events where available. Internal
+-attempts, retries, trimming, and chunk stitching are implementation details and do not
+-change the one-request/one-result contract.
++`GenerationConfig.enable_short_sentence=True` is an explicit per-request enable
++override; `False` disables processing even if a config is present. If left unset, the
++`ShortSentenceConfig` (when supplied) determines whether it is enabled. Keep the random
++seed fixed when reproducibility across randomized phrase choices matters.
++
++PyKokoro may use internal context, retries, and audio cutting, but it returns only the
++original request's waveform and metadata. The short-sentence mode used is available
++through `RenderedSegment.short_sentence_mode`; original text and word timings remain
++source-aligned. For diagnostics, opt into `return_trace=True` and inspect the
++request-local `trace`.
+
+-Short-sentence handling is separate from editorial pauses, cross-request silence,
+-playback rate, and final composition. Those policies remain with the caller.
++See the public-API-only [`short_sentence_demo.py`](../examples/short_sentence_demo.py)
++for the supported configuration forms. For speech outside this engine feature, such as
++pauses between requests, use the caller's composition layer.
+diff --git a/examples/README.md b/examples/README.md
+index 0540a10..aa2e0d4 100644
+--- a/examples/README.md
++++ b/examples/README.md
+@@ -1,30 +1,72 @@
+ # PyKokoro examples
+
+-These examples use the request-centric synthesis API. Run them from the repository root
+-with `pykokoro[cpu]` installed. Synthesis examples may download model assets on first
+-use; outputs are written below `example-artifacts/`.
+-
+-## Request API examples
+-
+-- `simple_synthesis.py` — synthesize one prepared string and save a floating-point WAV.
+-- `request_batch.py` — synthesize independent requests with per-request voices and save
+-  each result separately; PyKokoro does not concatenate the results.
+-- `pronunciation_overrides.py` — provide a source-aligned pronunciation-language
+-  override.
+-- `linguistic_annotations.py` — pass caller-owned POS/tag/lemma context without planner
+-  or spaCy objects.
+-- `models_and_languages.py` — inspect the model registry without loading weights, or
+-  select a runnable model and synthesize a sample with it.
+-- `all_voices.py` — optional, potentially slow showcase that renders independent
+-  requests and performs its own caller-side WAV assembly.
+-
+-List or run the maintained examples:
++The scripts use PyKokoro's request-centric root API. Install one ONNX Runtime provider
++(for example, `pykokoro[cpu]`) before synthesis. Uncached synthesis may download model
++assets. Direct runs write under `example-artifacts/`; the runner gives each script a
++separate `example-artifacts/<script>/` directory.
++
++## Runner groups
+
+ ```bash
+ python examples/run_all.py --list
+-python examples/run_all.py
++python examples/run_all.py --group core
++python examples/run_all.py --group feature
++python examples/run_all.py --group language-showcase
++python examples/run_all.py --group optional-heavy
+ python examples/run_all.py --include-optional
+ ```
+
+-The runner stores each script's artifacts in its own directory. The optional all-voices
+-showcase can download multiple model/voice assets and take a long time on CPU.
++`core` is the default. Feature demonstrations and language showcases do not run by
++default; optional-heavy scripts require explicit selection or `--include-optional`. The
++runner executes sequentially, isolates outputs, and continues after a failure. Listing
++does not run synthesis.
++
++## Core request examples
++
++| Script / command                                                                                            | Purpose and demonstrated API                                                                                                                                             | Assets, network, and cost                                                                                                                                                     | Expected output                                                                                                                 |
++| ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
++| [`simple_synthesis.py`](simple_synthesis.py)<br>`python examples/simple_synthesis.py`                       | One prepared string with `SynthesisConfig`, `KokoroSynthesizer.synthesize_text()`, and `RenderedSegment.save_wav()`.                                                     | May download one model/voice asset on first use; low CPU cost.                                                                                                                | `hello.wav`                                                                                                                     |
++| [`request_batch.py`](request_batch.py)<br>`python examples/request_batch.py`                                | Two `SynthesisSegment` values through `synthesize_segments()`. Each `RenderedSegment` stays independent; no cross-request silence is added.                              | May download assets; low-to-medium cost for two short requests.                                                                                                               | `greeting-a.wav`, `greeting-b.wav`                                                                                              |
++| [`pronunciation_overrides.py`](pronunciation_overrides.py)<br>`python examples/pronunciation_overrides.py`  | Compares a language span override and a direct-phoneme span using `PronunciationOverride`.                                                                               | May download assets; low-to-medium cost for two short requests.                                                                                                               | `language-override.wav`, `phoneme-span-override.wav`                                                                            |
++| [`linguistic_tokens.py`](linguistic_tokens.py)<br>`python examples/linguistic_tokens.py`                    | Supplies source-aligned POS/tag/lemma context with `LinguisticToken` and canonical `tokens=`.                                                                            | May download assets; low CPU cost for one request.                                                                                                                            | `contextual-pronunciation.wav`                                                                                                  |
++| [`long_text.py`](long_text.py)<br>`python examples/long_text.py`                                            | Passes the unsplit original request with `long_text_split="sentence"`; internal chunks remain one result.                                                                | May download assets; higher CPU cost for the long passage.                                                                                                                    | `long_text.wav`                                                                                                                 |
++| [`voice_blend.py`](voice_blend.py)<br>`python examples/voice_blend.py`                                      | Constructs `VoiceBlend` structurally and with `VoiceBlend.parse()`, then synthesizes a blend.                                                                            | May download selected voice/model assets; low-to-medium CPU cost.                                                                                                             | `voice_blend.wav`                                                                                                               |
++| [`result_metadata.py`](result_metadata.py)<br>`python examples/result_metadata.py`                          | Prints result metadata, token IDs, diagnostics, trace, synthesis identity, word timings, and voice-level applications.                                                   | May download assets; low CPU cost.                                                                                                                                            | `result_metadata.wav` and printed metadata                                                                                      |
++| [`models_and_languages.py`](models_and_languages.py)<br>`python examples/models_and_languages.py --offline` | Uses `discover_models()` to list profiles, languages, voices, and runtime status without ONNX inference. `--model MODEL_ID` optionally synthesizes one selected profile. | Default discovery may refresh registry metadata over the network; `--offline` uses cached metadata. No model asset download unless `--model` is supplied; low discovery cost. | Default: printed inventory. With `--model`: `<model>_<language>_<voice>.wav` under `example-artifacts/model_language_outputs/`. |
++
++## Feature examples
++
++| Script / command                                                                                                                         | Purpose and demonstrated API                                                                                                               | Assets, network, and cost                                               | Expected output                                                         |
++| ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- | ----------------------------------------------------------------------- |
++| [`english.py`](english.py)<br>`python examples/english.py`                                                                               | Synthesizes text, inspects `prepare()` phonemes, and resubmits them as whole-request `SynthesisSegment.phonemes`.                          | May download assets; two short inferences, low-to-medium CPU cost.      | `english_demo.wav`, `english_phonemes_demo.wav`                         |
++| [`language_routing.py`](language_routing.py)<br>`python examples/language_routing.py`                                                    | Compares automatic `LanguageRoutingConfig` with an explicit deterministic `PronunciationOverride`; acoustic model and voice stay explicit. | May download assets; low-to-medium cost for two requests.               | `automatic-routing.wav`, `explicit-german-span.wav`                     |
++| [`frontend_and_lexicons.py`](frontend_and_lexicons.py)<br>`python examples/frontend_and_lexicons.py`                                     | Inspects offline `discover_lexicons()` metadata and builds an installed-only `TokenizerConfig`; no inference is run.                       | No model/lexicon asset provisioning; offline metadata lookup, low cost. | Printed lexicon inventory and configuration; no file.                   |
++| [`asset_progress.py`](asset_progress.py)<br>`python examples/asset_progress.py`<br>`python examples/asset_progress.py --custom-callback` | Uses `ConsoleAssetProgress` or a typed `AssetProgressEvent` callback for managed model downloads.                                          | May download assets; low CPU cost for one request.                      | `asset_progress.wav` plus progress events                               |
++| [`error_handling.py`](error_handling.py)<br>`python examples/error_handling.py`                                                          | Shows narrow public catches for invalid language, voice, pronunciation, and input-too-long errors.                                         | On the valid path, may download assets; low CPU cost.                   | Normally `error_handling.wav`; caught failures print a message instead. |
++
++## Language showcase
++
++These synthesis scripts are separate from the default group. First use may download
++model assets; cost is typically medium for a short passage unless noted.
++
++| Script / command                                                          | Purpose and demonstrated API                                                                       | Assets, network, and cost                                                                | Expected output                            |
++| ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------ |
++| [`chinese.py`](chinese.py)<br>`python examples/chinese.py`                | Synthesizes Mandarin with explicit `zh` and the `v1.1-zh` model variant.                           | May download Chinese model/voice assets; medium CPU cost.                                | `chinese_demo.wav`                         |
++| [`contractions.py`](contractions.py)<br>`python examples/contractions.py` | Tests contractions and past-tense endings across requests; caller code assembles the output audio. | May download assets; higher cost than one short sample.                                  | `contractions_demo.wav` (caller-assembled) |
++| [`french.py`](french.py)<br>`python examples/french.py`                   | Synthesizes a prepared French passage with an explicit French voice/language.                      | May download assets; medium CPU cost.                                                    | `french_demo.wav`                          |
++| [`italian.py`](italian.py)<br>`python examples/italian.py`                | Synthesizes a prepared Italian passage through the request engine.                                 | May download assets; medium CPU cost.                                                    | `italian_demo.wav`                         |
++| [`japanese.py`](japanese.py)<br>`python examples/japanese.py`             | Synthesizes a Japanese passage with explicit `ja` request language.                                | May download assets; medium CPU cost.                                                    | `japanese_demo.wav`                        |
++| [`korean.py`](korean.py)<br>`python examples/korean.py`                   | Demonstrates experimental Korean phonemization and a parsed `VoiceBlend`; accuracy may be limited. | Requires compatible experimental frontend/profile; may download assets; medium CPU cost. | `korean_demo.wav`                          |
++| [`portuguese.py`](portuguese.py)<br>`python examples/portuguese.py`       | Synthesizes Brazilian Portuguese with explicit voice and language.                                 | May download assets; medium CPU cost.                                                    | `portuguese_demo.wav`                      |
++| [`spanish.py`](spanish.py)<br>`python examples/spanish.py`                | Synthesizes a prepared Spanish passage through the request engine.                                 | May download assets; medium CPU cost.                                                    | `spanish_demo.wav`                         |
++
++## Optional heavy examples
++
++| Script / command                                                                                                                        | Purpose and demonstrated API                                                                                                            | Assets, network, and cost                                                                                                                                  | Expected output                                                                                         |
++| --------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
++| [`all_voices.py`](all_voices.py)<br>`python examples/all_voices.py --list-only` (inventory)<br>`python examples/all_voices.py` (render) | Discovers profiles, synthesizes one independent request per selected voice, and assembles a comparison WAV in caller-side example code. | Discovery may refresh metadata. Rendering can download many assets, use substantial storage, and take a long time on CPU; list-only performs no inference. | `all_voices.wav`; `--compare-leveling` also writes `all_voices_raw.wav` and `all_voices_calibrated.wav` |
++| [`short_sentence_demo.py`](short_sentence_demo.py)<br>`python examples/short_sentence_demo.py`                                          | Compares disabled, wrap, phrase, and randomized-phrase `ShortSentenceConfig` modes; joins sections in this example only.                | May download assets; high CPU cost across many short requests and four modes.                                                                              | `short_sentence_demo.wav` (caller-assembled)                                                            |
++
++This catalog includes every runnable script. `__init__.py`, `_output.py`, and
++`run_all.py` are support modules. See the [API reference](../docs/api_reference.md) for
++the complete public API.
+diff --git a/examples/all_voices.py b/examples/all_voices.py
+index 7eb2533..2fe8dc9 100644
+--- a/examples/all_voices.py
++++ b/examples/all_voices.py
+@@ -1,4 +1,8 @@
+-"""Discover every runnable PyKokoro voice and render one identification WAV."""
++"""Render a caller-composed all-voices showcase using model discovery.
++
++This optional repository showcase uses the root API for synthesis/discovery.
++Its calibration comparison reads the internal calibration catalog.
++"""
+
+ from __future__ import annotations
+
+@@ -7,6 +11,7 @@ import sys
+ from collections.abc import Callable, Iterable, Sequence
+ from dataclasses import dataclass, replace
+ from pathlib import Path
++from typing import TypeAlias
+
+ import numpy as np
+ import soundfile as sf
+@@ -17,21 +22,20 @@ try:
+ except ImportError:
+     from _output import artifact_path
+
+-from pykokoro import SynthesisConfig
+-from pykokoro.discovery import (
++from pykokoro import (
++    GenerationConfig,
++    KokoroSynthesizer,
+     ModelCapabilities,
+     ModelDiscoveryResult,
++    ShortSentenceConfig,
++    SynthesisConfig,
+     VoiceCapabilities,
+-    VoiceGender,
+-    discover_models,
+-)
+-from pykokoro.generation_config import GenerationConfig
+-from pykokoro.short_sentence_handler import ShortSentenceConfig
+-from pykokoro.voice_level import (
+-    VoiceCalibrationKey,
+     VoiceLevelConfig,
+-    default_voice_calibration,
++    discover_models,
+ )
++from pykokoro.voice_level import VoiceCalibrationKey, default_voice_calibration
++
++VoiceGender: TypeAlias = str
+
+ RUNNABLE_STATUSES = {"ready", "experimental"}
+ MODEL_PRIORITY = {"v1.0": 0, "v1.1-zh": 1}
+@@ -369,7 +373,6 @@ def synthesize_catalog(
+     temporary = output.with_suffix(".part.wav")
+     temporary.unlink(missing_ok=True)
+     frames = 0
+-    from pykokoro import KokoroSynthesizer
+
+     try:
+         with sf.SoundFile(
+diff --git a/examples/asset_progress.py b/examples/asset_progress.py
+new file mode 100644
+index 0000000..75a896d
+--- /dev/null
++++ b/examples/asset_progress.py
+@@ -0,0 +1,52 @@
++#!/usr/bin/env python3
++"""Report managed asset downloads using the console reporter or a callback.
++
++The first synthesis may download model assets. Progress is emitted only for
++runtime-managed model assets, not lexicon provisioning.
++"""
++
++from __future__ import annotations
++
++import argparse
++
++from pykokoro import (
++    AssetProgressEvent,
++    ConsoleAssetProgress,
++    GenerationConfig,
++    KokoroSynthesizer,
++    SynthesisConfig,
++)
++
++try:
++    from ._output import artifact_path
++except ImportError:
++    from _output import artifact_path
++
++
++def progress(event: AssetProgressEvent) -> None:
++    """A minimal application-owned progress callback."""
++    print(event.phase, event.filename, event.bytes_done, event.bytes_total)
++
++
++def make_config(*, custom_callback: bool = False) -> SynthesisConfig:
++    reporter = progress if custom_callback else ConsoleAssetProgress()
++    return SynthesisConfig(
++        voice="af_sarah",
++        generation=GenerationConfig(lang="en-us"),
++        asset_progress=reporter,
++    )
++
++
++def main(argv: list[str] | None = None) -> None:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--custom-callback", action="store_true")
++    args = parser.parse_args(argv)
++    with KokoroSynthesizer(make_config(custom_callback=args.custom_callback)) as synthesizer:
++        result = synthesizer.synthesize_text("Tracking model asset progress.", language="en-us")
++    output = artifact_path("asset_progress.wav")
++    result.save_wav(output)
++    print(f"Wrote {output}")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/examples/english.py b/examples/english.py
+index 067d8cf..459037e 100644
+--- a/examples/english.py
++++ b/examples/english.py
+@@ -39,18 +39,18 @@ def main() -> None:
+
+         print("\n=== Example 2: Phonemes-to-Speech ===")
+         text_request = SynthesisSegment(id="english-text", text=TEXT, language=LANG, voice=VOICE)
+-        phonemes = synthesizer.prepare(text_request).phonemes
++        prepared = synthesizer.prepare(text_request)
++        phonemes = prepared.phonemes
+         print(f"Phonemes: {phonemes[:100]}...")
+         print(f"Phoneme length: {len(phonemes)} characters")
+-        phoneme_result = synthesizer.synthesize(
+-            SynthesisSegment(
+-                id="english-phonemes",
+-                text=phonemes,
+-                language=LANG,
+-                voice=VOICE,
+-                phonemes=phonemes,
+-            )
++        phoneme_request = SynthesisSegment(
++            id="english-phonemes",
++            text=TEXT,
++            language=LANG,
++            voice=VOICE,
++            phonemes=phonemes,
+         )
++        phoneme_result = synthesizer.synthesize(phoneme_request)
+         output = artifact_path("english_phonemes_demo.wav")
+         phoneme_result.save_wav(output)
+         print(
+diff --git a/examples/error_handling.py b/examples/error_handling.py
+new file mode 100644
+index 0000000..502b7b9
+--- /dev/null
++++ b/examples/error_handling.py
+@@ -0,0 +1,65 @@
++#!/usr/bin/env python3
++"""Catch expected request failures with narrow public exception types.
++
++The normal request is valid and should synthesize successfully; the catches show
++how an application can report invalid language, voice, pronunciation, or length.
++Synthesis may install model assets.
++"""
++
++from __future__ import annotations
++
++from pykokoro import (
++    GenerationConfig,
++    InvalidLanguageError,
++    InvalidPronunciationError,
++    InvalidVoiceError,
++    KokoroSynthesizer,
++    PronunciationOverride,
++    SynthesisConfig,
++    SynthesisInputTooLongError,
++    SynthesisSegment,
++)
++
++try:
++    from ._output import artifact_path
++except ImportError:
++    from _output import artifact_path
++
++
++def make_config() -> SynthesisConfig:
++    return SynthesisConfig(
++        voice="af_sarah",
++        generation=GenerationConfig(lang="en-us"),
++    )
++
++
++def make_request() -> SynthesisSegment:
++    return SynthesisSegment(
++        id="typed-error-handling",
++        text="Hello Welt.",
++        language="en-us",
++        voice="af_sarah",
++        pronunciation_overrides=(PronunciationOverride(start=6, end=10, language="de"),),
++    )
++
++
++def main() -> None:
++    with KokoroSynthesizer(make_config()) as synthesizer:
++        try:
++            result = synthesizer.synthesize(make_request())
++        except InvalidLanguageError as exc:
++            print(f"Choose a supported request language: {exc}")
++        except InvalidVoiceError as exc:
++            print(f"Choose a voice available for the selected model: {exc}")
++        except InvalidPronunciationError as exc:
++            print(f"Check pronunciation span offsets and values: {exc}")
++        except SynthesisInputTooLongError as exc:
++            print(f"Shorten the request or enable sentence splitting: {exc}")
++        else:
++            output = artifact_path("error_handling.wav")
++            result.save_wav(output)
++            print(f"Wrote {output}")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/examples/frontend_and_lexicons.py b/examples/frontend_and_lexicons.py
+new file mode 100644
+index 0000000..dd7f080
+--- /dev/null
++++ b/examples/frontend_and_lexicons.py
+@@ -0,0 +1,46 @@
++#!/usr/bin/env python3
++"""Inspect lexicon metadata and build an explicit offline frontend policy.
++
++Discovery does not provision lexicon or model assets. The returned configuration
++uses only installed lexicon data; actual synthesis is left to the caller.
++"""
++
++from __future__ import annotations
++
++from pykokoro import (
++    GenerationConfig,
++    SynthesisConfig,
++    TokenizerConfig,
++    discover_lexicons,
++)
++
++
++def make_tokenizer_config() -> TokenizerConfig:
++    return TokenizerConfig(
++        backend="kokorog2p",
++        fallback="espeak",
++        lexicons=("gold",),
++        lexicon_data_policy="installed-only",
++        use_spacy=False,
++    )
++
++
++def make_synthesis_config() -> SynthesisConfig:
++    return SynthesisConfig(
++        generation=GenerationConfig(lang="de"),
++        tokenizer_config=make_tokenizer_config(),
++    )
++
++
++def main() -> None:
++    inventory = discover_lexicons(language="de", offline=True)
++    print("Metadata discovery only; no lexicon data or model assets are installed.")
++    for item in inventory.lexicons:
++        print(item.selector, item.asset_id, item.installed, item.model_support)
++    config = make_synthesis_config()
++    print(f"Frontend configuration: {config.tokenizer_config}")
++    print("Use this configuration with synthesis after the selected lexicon is installed.")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/examples/language_routing.py b/examples/language_routing.py
+new file mode 100644
+index 0000000..7a75de0
+--- /dev/null
++++ b/examples/language_routing.py
+@@ -0,0 +1,63 @@
++#!/usr/bin/env python3
++"""Demonstrate prepared-text routing and deterministic source-span overrides.
++
++Synthesis may install model assets. Pronunciation-language routing affects G2P
++for prepared text only: it does not switch the acoustic model or voice. For a
++known span, an explicit ``PronunciationOverride(language=...)`` is deterministic.
++"""
++
++from __future__ import annotations
++
++from pykokoro import (
++    GenerationConfig,
++    KokoroSynthesizer,
++    LanguageRoutingConfig,
++    PronunciationOverride,
++    SynthesisConfig,
++    SynthesisSegment,
++)
++
++try:
++    from ._output import artifact_path
++except ImportError:
++    from _output import artifact_path
++
++
++def make_config() -> SynthesisConfig:
++    return SynthesisConfig(
++        voice="af_sarah",
++        generation=GenerationConfig(lang="en-us"),
++        language_routing=LanguageRoutingConfig(mode="auto", languages=("en", "de")),
++    )
++
++
++def make_requests() -> tuple[SynthesisSegment, SynthesisSegment]:
++    return (
++        SynthesisSegment(
++            id="automatic-routing",
++            text="Hello Welt.",
++            language="en-us",
++            voice="af_sarah",
++        ),
++        SynthesisSegment(
++            id="explicit-german-span",
++            text="Hello Welt.",
++            language="en-us",
++            voice="af_sarah",
++            pronunciation_overrides=(PronunciationOverride(start=6, end=10, language="de"),),
++        ),
++    )
++
++
++def main() -> None:
++    with KokoroSynthesizer(make_config()) as synthesizer:
++        for request in make_requests():
++            result = synthesizer.synthesize(request)
++            output = artifact_path(f"{request.id}.wav")
++            result.save_wav(output)
++            print(f"Wrote {request.id} to {output}")
++    print("Routing changed pronunciation analysis, not the acoustic model or voice.")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/examples/linguistic_annotations.py b/examples/linguistic_tokens.py
+similarity index 85%
+rename from examples/linguistic_annotations.py
+rename to examples/linguistic_tokens.py
+index 8a1ef7d..26be43b 100644
+--- a/examples/linguistic_annotations.py
++++ b/examples/linguistic_tokens.py
+@@ -22,8 +22,9 @@ def main() -> None:
+         text="I read the note yesterday.",
+         language="en-us",
+         voice="af_sarah",
+-        annotations=(LinguisticToken(2, 6, text="read", pos="VERB", tag="VBD", lemma="read"),),
++        tokens=(LinguisticToken(2, 6, text="read", pos="VERB", tag="VBD", lemma="read"),),
+     )
++    print(f"Source slice for token [2:6]: {request.text[2:6]!r}")
+     config = SynthesisConfig(
+         voice="af_sarah",
+         generation=GenerationConfig(lang="en-us"),
+diff --git a/examples/long_text.py b/examples/long_text.py
+new file mode 100644
+index 0000000..877d167
+--- /dev/null
++++ b/examples/long_text.py
+@@ -0,0 +1,70 @@
++#!/usr/bin/env python3
++"""Render one oversized request with engine-managed sentence splitting.
++
++This synthesis may install model assets. The input is never manually split:
++internal acoustic chunks still belong to one public request and one result.
++"""
++
++from __future__ import annotations
++
++from pykokoro import GenerationConfig, KokoroSynthesizer, SynthesisConfig, SynthesisSegment
++
++try:
++    from ._output import artifact_path
++except ImportError:
++    from _output import artifact_path
++
++LONG_TEXT = " ".join(
++    (
++        "A careful explorer studies the changing landscape before choosing a path.",
++        "Each observation adds context, and each small decision shapes the journey.",
++        "When the weather changes, the explorer pauses, checks the map, and adapts.",
++        "The purpose is not to hurry through the story but to preserve its meaning.",
++    )
++    * 24
++)
++
++
++def make_request() -> SynthesisSegment:
++    return SynthesisSegment(
++        id="long-text",
++        text=LONG_TEXT,
++        language="en-us",
++        voice="af_sarah",
++    )
++
++
++def make_config() -> SynthesisConfig:
++    return SynthesisConfig(
++        voice="af_sarah",
++        generation=GenerationConfig(lang="en-us"),
++        long_text_split="sentence",
++        long_text_use_spacy=False,
++        return_trace=True,
++    )
++
++
++def main() -> None:
++    request = make_request()
++    print("PyKokoro receives the complete original request; do not split it here.")
++    with KokoroSynthesizer(make_config()) as synthesizer:
++        results = synthesizer.synthesize_segments((request,))
++    if len(results) != 1 or results[0].text != request.text:
++        raise RuntimeError("long-text rendering did not preserve one original request/result")
++    result = results[0]
++    output = artifact_path("long_text.wav")
++    result.save_wav(output)
++    print(f"Wrote one rendered request to {output}")
++    if result.token_ids:
++        print(f"Model token count: {len(result.token_ids)}")
++    if result.word_timings:
++        print(f"Word timings: {len(result.word_timings)}")
++    if result.trace is not None:
++        print(
++            f"Internal acoustic chunks: {result.trace.model.get('acoustic_chunk_count', 'available')}"
++        )
++    print("Internal chunks are not separate public requests or results.")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/examples/models_and_languages.py b/examples/models_and_languages.py
+index 61080fd..19fa578 100644
+--- a/examples/models_and_languages.py
++++ b/examples/models_and_languages.py
+@@ -1,12 +1,16 @@
+ #!/usr/bin/env python3
+-"""Browse the canonical PyKokoro model registry and synthesize one model."""
++"""Discover public model/voice capabilities, then optionally synthesize one result.
++
++Discovery reads registry metadata only and never installs model assets. Unless
++``--offline`` is selected, registry metadata may be refreshed from its configured
++source. Selecting ``--model`` performs synthesis and may install model assets.
++"""
+
+ from __future__ import annotations
+
+ import argparse
+ import re
+ from pathlib import Path
+-from typing import Any
+
+ import soundfile as sf
+
+@@ -15,18 +19,19 @@ try:
+ except ImportError:
+     from _output import artifact_dir
+
+-from pykokoro import GenerationConfig, KokoroSynthesizer, SynthesisConfig
+-from pykokoro.model_profiles import (
+-    get_registry_model_profile,
+-    normalize_language_code,
+-    registry_support_status,
++from pykokoro import (
++    GenerationConfig,
++    KokoroSynthesizer,
++    ModelCapabilities,
++    ModelDiscoveryResult,
++    SynthesisConfig,
++    discover_models,
+ )
+-from pykokoro.model_registry import ModelRegistryError, load_registry
+
+ OUTPUT_DIR = Path("model_language_outputs")
+-
+ SAMPLE_TEXTS = {
+     "en": "Hello. This is PyKokoro speaking with the selected model.",
++    "de": "Hallo. Dies ist eine deutsche PyKokoro-Demonstration.",
+     "es": "Hola. Esta es una demostración de PyKokoro.",
+     "fr": "Bonjour. Ceci est une démonstration de PyKokoro.",
+     "hi": "नमस्ते। यह PyKokoro का एक छोटा सा उदाहरण है।",
+@@ -34,108 +39,93 @@ SAMPLE_TEXTS = {
+     "ja": "こんにちは。これは PyKokoro の音声サンプルです。",
+     "pt": "Olá. Esta é uma demonstração do PyKokoro.",
+     "zh": "你好。这是 PyKokoro 的语音示例。",
+-    "de": "Hallo. Dies ist eine deutsche PyKokoro-Demonstration.",
+     "vi": "Xin chào. Đây là một ví dụ giọng nói của PyKokoro.",
+-    "ar": "مَرْحَبًا. هٰذَا مِثَالٌ صَوْتِيٌّ لِـ PyKokoro.",
+     "sv": "Hej. Det här är ett röstexempel från PyKokoro.",
+     "th": "สวัสดี นี่คือตัวอย่างเสียงจาก PyKokoro",
+-    "kk": "Сәлем. Бұл PyKokoro дауыс үлгісі.",
+     "ru": "Привет. Это пример голоса PyKokoro.",
++    "cs": "Dobrý den. Toto je ukázka hlasu PyKokoro.",
+ }
+
+
+-def _status_for_model(model: Any, registry: Any) -> str:
+-    status = registry_support_status(model)
+-    if status == "ready":
+-        profile = get_registry_model_profile(model.model_id, registry=registry)
+-        if profile.frontend_experimental:
+-            return "experimental"
+-    return status
+-
+-
+-def _distribution_providers(model: Any) -> str:
+-    providers = sorted({distribution.provider for distribution in model.distributions})
+-    return ", ".join(providers) or "none"
+-
+-
+-def _qualities(model: Any) -> tuple[str, ...]:
+-    if not model.distributions:
+-        return ()
+-    distribution = model.distribution() if hasattr(model, "distribution") else None
+-    distributions = (distribution,) if distribution is not None else model.distributions
+-    qualities = {
+-        quality
+-        for selected_distribution in distributions
+-        for quality in selected_distribution.qualities
+-        if quality is not None
+-    }
+-    return tuple(sorted(qualities))
+-
+-
+-def list_models(registry: Any) -> None:
+-    """Print model metadata without downloading model weights."""
+-    print("PyKokoro model and language registry")
+-    print("(Inventory only; model weights and voice packs are not downloaded.)")
+-    for model_id, model in registry.models.items():
+-        status = _status_for_model(model, registry)
+-        print(f"\n{model_id} [{status}]")
+-        print(f"  Languages: {', '.join(model.language_codes) or 'none'}")
+-        print(f"  Provider: {_distribution_providers(model)}")
++def list_models(inventory: ModelDiscoveryResult) -> None:
++    """Print the current public model and voice inventory without installing assets."""
++    print("PyKokoro model and language capabilities")
++    print(f"Registry: {inventory.registry_source} (offline={inventory.offline})")
++    for model in inventory.models:
++        print(f"\n{model.model_id} [{model.status}] source={model.source}")
++        print(f"  Languages: {', '.join(model.languages) or 'none'}")
+         print(f"  Default voice: {model.default_voice}")
+-        print(f"  Voices ({len(model.voices)}): {', '.join(model.voices)}")
+-        print(f"  Qualities: {', '.join(_qualities(model)) or 'none'}")
++        print(f"  Voices ({len(model.voices)}): {', '.join(model.voices) or 'none'}")
++        print(f"  Qualities: {', '.join(model.qualities) or 'none'}")
++        print(f"  Provider: {model.provider or 'unspecified'}")
+         print(f"  Frontend: {model.frontend}")
+-        print(f"  Runtime layout: {model.layout}")
+         print(f"  Runtime available: {model.runtime_available}")
++        print(f"  Experimental: {model.experimental}")
+         print(f"  Redistribution allowed: {model.redistribution_allowed}")
+-
+-
+-def _choose_language(model: Any, language: str | None) -> str:
+-    declared = tuple(model.language_codes)
+-    if not declared:
+-        raise ValueError(f"Model {model.model_id!r} declares no language codes")
++        if model.sample_rate is not None:
++            print(f"  Sample rate: {model.sample_rate}")
++        if model.max_tokens is not None:
++            print(f"  Maximum tokens: {model.max_tokens}")
++        for voice in model.voice_details:
++            print(
++                f"  Voice detail: {voice.name} ({voice.language_label}, "
++                f"{voice.gender}, locale={voice.locale})"
++            )
++
++
++def _choose_language(model: ModelCapabilities, language: str | None) -> str:
++    if not model.languages:
++        raise ValueError(f"Model {model.model_id!r} declares no languages")
+     if language is None:
+-        return declared[0]
+-    normalized = normalize_language_code(language)
+-    for candidate in declared:
+-        if normalize_language_code(candidate) == normalized:
+-            return candidate
+-    available = ", ".join(declared)
+-    raise ValueError(
+-        f"Language {language!r} is not declared by model {model.model_id!r}. "
+-        f"Available languages: {available}"
++        return model.languages[0]
++    normalized = language.casefold().replace("_", "-")
++    exact = next(
++        (
++            candidate
++            for candidate in model.languages
++            if candidate.casefold().replace("_", "-") == normalized
++        ),
++        None,
++    )
++    if exact is not None:
++        return exact
++    base = normalized.split("-", 1)[0]
++    compatible = next(
++        (
++            candidate
++            for candidate in model.languages
++            if candidate.casefold().split("-", 1)[0] == base
++        ),
++        None,
+     )
++    if compatible is None:
++        raise ValueError(
++            f"Language {language!r} is not declared by model {model.model_id!r}. "
++            f"Available: {', '.join(model.languages)}"
++        )
++    return compatible
+
+
+-def _choose_voice(model: Any, voice: str | None) -> str:
++def _choose_voice(model: ModelCapabilities, voice: str | None) -> str:
+     selected = model.default_voice if voice is None else voice
+     if selected not in model.voices:
+         raise ValueError(
+-            f"Voice {selected!r} is not available for model {model.model_id!r}. "
+-            f"Available voices: {', '.join(model.voices)}"
++            f"Voice {selected!r} is not available for {model.model_id!r}. "
++            f"Available: {', '.join(model.voices)}"
+         )
+     return selected
+
+
+-def _choose_quality(model: Any, quality: str | None) -> str:
+-    available = _qualities(model)
+-    if not available:
+-        raise ValueError(f"Model {model.model_id!r} has no registry-declared qualities")
+-    if quality is None:
+-        return "fp32" if "fp32" in available else available[0]
+-    if quality not in available:
++def _choose_quality(model: ModelCapabilities, quality: str | None) -> str:
++    if not model.qualities:
++        raise ValueError(f"Model {model.model_id!r} declares no available qualities")
++    selected = quality or ("fp32" if "fp32" in model.qualities else model.qualities[0])
++    if selected not in model.qualities:
+         raise ValueError(
+-            f"Quality {quality!r} is not available for model {model.model_id!r}. "
+-            f"Available qualities: {', '.join(available)}"
++            f"Quality {selected!r} is not available for {model.model_id!r}. "
++            f"Available: {', '.join(model.qualities)}"
+         )
+-    return quality
+-
+-
+-def _sample_text(language: str) -> str:
+-    normalized = normalize_language_code(language)
+-    return SAMPLE_TEXTS.get(
+-        normalized, SAMPLE_TEXTS.get(normalized.split("-", 1)[0], SAMPLE_TEXTS["en"])
+-    )
++    return selected
+
+
+ def _safe_filename_part(value: str) -> str:
+@@ -144,7 +134,7 @@ def _safe_filename_part(value: str) -> str:
+
+
+ def synthesize(
+-    registry: Any,
++    inventory: ModelDiscoveryResult,
+     *,
+     model_id: str,
+     language: str | None,
+@@ -153,45 +143,32 @@ def synthesize(
+     include_experimental: bool,
+     output_dir: Path,
+ ) -> Path:
+-    """Synthesize one selected, runnable registry model."""
+-    model = registry.model(model_id)
+-    status = _status_for_model(model, registry)
+-    if status == "registry-unavailable":
+-        raise ValueError(f"Model {model_id!r} is registry-unavailable and cannot be synthesized")
+-    if status == "restricted":
+-        raise ValueError(f"Model {model_id!r} is restricted and cannot be synthesized")
+-    if status == "experimental" and not include_experimental:
+-        raise ValueError(
+-            f"Model {model_id!r} uses an experimental frontend; "
+-            "pass --include-experimental to enable it"
+-        )
+-    if status != "ready" and status != "experimental":
+-        raise ValueError(f"Model {model_id!r} is not runnable: {status}")
++    """Synthesize one model selected from public discovery metadata."""
++    model = next((item for item in inventory.models if item.model_id == model_id), None)
++    if model is None:
++        raise ValueError(f"Unknown model {model_id!r}")
++    if not model.runtime_available or not model.redistribution_allowed:
++        raise ValueError(f"Model {model_id!r} is not currently runnable")
++    if model.status not in {"ready", "experimental"}:
++        raise ValueError(f"Model {model_id!r} is not runnable: {model.status}")
++    if model.experimental and not include_experimental:
++        raise ValueError("This model uses an experimental frontend; pass --include-experimental")
+
+     selected_language = _choose_language(model, language)
+     selected_voice = _choose_voice(model, voice)
+     selected_quality = _choose_quality(model, quality)
+-    profile = get_registry_model_profile(model_id, registry=registry)
+     config = SynthesisConfig(
+-        model_source=profile.source,
+-        model_variant=profile.variant,
++        model_source=model.source,
++        model_variant=model.model_id,
+         model_quality=selected_quality,
+         voice=selected_voice,
+-        allow_experimental_frontend=profile.frontend_experimental and include_experimental,
+-        generation=GenerationConfig(lang=selected_language, speed=1.0),
++        allow_experimental_frontend=model.experimental and include_experimental,
++        generation=GenerationConfig(lang=selected_language),
+         return_trace=True,
+     )
+-
+-    print(
+-        f"Synthesizing {model_id} ({selected_language}, voice={selected_voice}, "
+-        f"quality={selected_quality})"
+-    )
++    text = SAMPLE_TEXTS.get(selected_language.casefold().split("-", 1)[0], SAMPLE_TEXTS["en"])
+     with KokoroSynthesizer(config) as synthesizer:
+-        result = synthesizer.synthesize_text(
+-            _sample_text(selected_language),
+-            language=selected_language,
+-            voice=selected_voice,
+-        )
++        result = synthesizer.synthesize_text(text, language=selected_language, voice=selected_voice)
+     output_dir.mkdir(parents=True, exist_ok=True)
+     output = output_dir / (
+         f"{_safe_filename_part(model_id)}_{_safe_filename_part(selected_language)}_"
+@@ -201,23 +178,30 @@ def synthesize(
+     return output
+
+
+-def main() -> int:
++def main(argv: list[str] | None = None) -> int:
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument("--model", metavar="MODEL_ID")
+     parser.add_argument("--language", metavar="LANGUAGE")
+     parser.add_argument("--voice", metavar="VOICE")
+     parser.add_argument("--quality", metavar="QUALITY")
++    parser.add_argument("--offline", action="store_true", help="use cached discovery metadata only")
++    parser.add_argument("--refresh", action="store_true", help="refresh registry metadata")
++    parser.add_argument(
++        "--preference", choices=("auto", "github", "huggingface", "upstream"), default="auto"
++    )
+     parser.add_argument("--include-experimental", action="store_true")
+     parser.add_argument("--output-dir", type=Path, default=artifact_dir() / OUTPUT_DIR)
+-    args = parser.parse_args()
++    args = parser.parse_args(argv)
+
+     try:
+-        registry = load_registry()
++        inventory = discover_models(
++            offline=args.offline, refresh=args.refresh, preference=args.preference
++        )
+         if args.model is None:
+-            list_models(registry)
++            list_models(inventory)
+             return 0
+         output = synthesize(
+-            registry,
++            inventory,
+             model_id=args.model,
+             language=args.language,
+             voice=args.voice,
+@@ -225,7 +209,7 @@ def main() -> int:
+             include_experimental=args.include_experimental,
+             output_dir=args.output_dir,
+         )
+-    except (ModelRegistryError, ValueError) as exc:
++    except (OSError, ValueError) as exc:
+         parser.error(str(exc))
+     else:
+         print(f"Created {output}")
+diff --git a/examples/pronunciation_overrides.py b/examples/pronunciation_overrides.py
+index 9efe66c..e5305f8 100644
+--- a/examples/pronunciation_overrides.py
++++ b/examples/pronunciation_overrides.py
+@@ -1,4 +1,4 @@
+-"""Apply an explicit source-aligned pronunciation-language override."""
++"""Compare language and direct-phoneme pronunciation overrides on source spans."""
+
+ from __future__ import annotations
+
+@@ -17,22 +17,32 @@ except ImportError:
+
+
+ def main() -> None:
+-    request = SynthesisSegment(
+-        id="mixed-language",
+-        text="Hello Welt.",
+-        language="en-us",
+-        voice="af_sarah",
+-        pronunciation_overrides=(PronunciationOverride(start=6, end=10, language="de"),),
++    requests = (
++        SynthesisSegment(
++            id="language-override",
++            text="Hello Welt.",
++            language="en-us",
++            voice="af_sarah",
++            pronunciation_overrides=(PronunciationOverride(start=6, end=10, language="de"),),
++        ),
++        SynthesisSegment(
++            id="phoneme-span-override",
++            text="Hello world.",
++            language="en-us",
++            voice="af_sarah",
++            pronunciation_overrides=(PronunciationOverride(start=6, end=11, phonemes="wˈɜɹld"),),
++        ),
+     )
+     config = SynthesisConfig(
+         voice="af_sarah",
+         generation=GenerationConfig(lang="en-us"),
+     )
+     with KokoroSynthesizer(config) as synthesizer:
+-        rendered = synthesizer.synthesize(request)
+-    output = artifact_path("mixed-language.wav")
+-    rendered.save_wav(output)
+-    print(f"Wrote {output}")
++        for request in requests:
++            rendered = synthesizer.synthesize(request)
++            output = artifact_path(f"{request.id}.wav")
++            rendered.save_wav(output)
++            print(f"Wrote {request.id} to {output}")
+
+
+ if __name__ == "__main__":
+diff --git a/examples/request_batch.py b/examples/request_batch.py
+index 7ae25de..32961b8 100644
+--- a/examples/request_batch.py
++++ b/examples/request_batch.py
+@@ -1,4 +1,4 @@
+-"""Render several independent speech requests without joining their waveforms."""
++"""Render independent requests; outputs remain separate and no silence is inserted."""
+
+ from __future__ import annotations
+
+diff --git a/examples/result_metadata.py b/examples/result_metadata.py
+new file mode 100644
+index 0000000..411d5fc
+--- /dev/null
++++ b/examples/result_metadata.py
+@@ -0,0 +1,59 @@
++#!/usr/bin/env python3
++"""Inspect request results, reproducibility identity, timing, and inference trace.
++
++Synthesis may install model assets. Fields are printed only when available for
++the selected frontend and runtime.
++"""
++
++from __future__ import annotations
++
++from pykokoro import GenerationConfig, KokoroSynthesizer, SynthesisConfig
++
++try:
++    from ._output import artifact_path
++except ImportError:
++    from _output import artifact_path
++
++
++def make_config() -> SynthesisConfig:
++    return SynthesisConfig(
++        voice="af_sarah",
++        generation=GenerationConfig(lang="en-us", random_seed=7),
++        return_trace=True,
++    )
++
++
++def main() -> None:
++    with KokoroSynthesizer(make_config()) as synthesizer:
++        result = synthesizer.synthesize_text(
++            "A reproducible request can include useful timing and diagnostics.",
++            language="en-us",
++        )
++    output = artifact_path("result_metadata.wav")
++    result.save_wav(output)
++
++    print(f"ID: {result.id}")
++    print(f"Sample rate: {result.sample_rate}")
++    print(f"Text: {result.text}")
++    print(f"Language: {result.language}")
++    print(f"Voice: {result.voice}")
++    print(f"Phonemes: {result.phonemes}")
++    print(f"Token IDs: {result.token_ids}")
++    print(f"Diagnostics: {result.diagnostics}")
++    print(f"Short-sentence mode: {result.short_sentence_mode}")
++    print(f"Voice-level applications: {result.voice_level_applications}")
++    if result.synthesis_identity is not None:
++        print(f"Synthesis cache key: {result.synthesis_identity.cache_key}")
++    for timing in result.word_timings:
++        print(
++            timing.text,
++            timing.start_seconds(result.sample_rate),
++            timing.end_seconds(result.sample_rate),
++        )
++    if result.trace is not None:
++        print(f"Inference summary: {result.trace.inference_summary()}")
++    print(f"Wrote {output}")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/examples/run_all.py b/examples/run_all.py
+index 558f877..207fe10 100644
+--- a/examples/run_all.py
++++ b/examples/run_all.py
+@@ -1,4 +1,5 @@
+-"""Run the maintained request-centric synthesis examples sequentially."""
++#!/usr/bin/env python3
++"""Run maintained PyKokoro examples by capability and cost category."""
+
+ from __future__ import annotations
+
+@@ -15,20 +16,44 @@ except ModuleNotFoundError:
+     from _output import ARTIFACT_DIR, PROJECT_ROOT
+
+ _OUTPUT_ENV = "PYKOKORO_EXAMPLE_OUTPUT_DIR"
+-_DEFAULT_EXAMPLES = {
+-    "linguistic_annotations.py",
+-    "models_and_languages.py",
+-    "pronunciation_overrides.py",
+-    "request_batch.py",
+-    "simple_synthesis.py",
++_GROUPS: dict[str, set[str]] = {
++    "core": {
++        "simple_synthesis.py",
++        "request_batch.py",
++        "pronunciation_overrides.py",
++        "linguistic_tokens.py",
++        "long_text.py",
++        "voice_blend.py",
++        "result_metadata.py",
++        "models_and_languages.py",
++    },
++    "feature": {
++        "english.py",
++        "language_routing.py",
++        "frontend_and_lexicons.py",
++        "asset_progress.py",
++        "error_handling.py",
++    },
++    "language-showcase": {
++        "chinese.py",
++        "contractions.py",
++        "french.py",
++        "italian.py",
++        "japanese.py",
++        "korean.py",
++        "portuguese.py",
++        "spanish.py",
++    },
++    "optional-heavy": {"all_voices.py", "short_sentence_demo.py"},
+ }
+-_OPTIONAL_EXAMPLES = {"all_voices.py"}
+-
++_GROUP_CHOICES = tuple(_GROUPS)
+ RunCommand = Callable[..., subprocess.CompletedProcess[str]]
+
+
+-def _example_paths(*, include_optional: bool = False) -> list[Path]:
+-    selected = _DEFAULT_EXAMPLES | (_OPTIONAL_EXAMPLES if include_optional else set())
++def _example_paths(*, group: str = "core", include_optional: bool = False) -> list[Path]:
++    selected = set(_GROUPS[group])
++    if include_optional and group != "optional-heavy":
++        selected.update(_GROUPS["optional-heavy"])
+     return [
+         path
+         for path in sorted(PROJECT_ROOT.joinpath("examples").glob("*.py"))
+@@ -68,16 +93,19 @@ def run_examples(paths: Sequence[Path], *, runner: RunCommand = subprocess.run)
+     return failures
+
+
+-def main() -> int:
++def main(argv: Sequence[str] | None = None) -> int:
+     parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--group", choices=_GROUP_CHOICES, default="core")
+     parser.add_argument(
+         "--list", action="store_true", help="list selected examples without running"
+     )
+     parser.add_argument(
+-        "--include-optional", action="store_true", help="include the all-voices showcase"
++        "--include-optional",
++        action="store_true",
++        help="also include optional-heavy examples (unless that group is selected explicitly)",
+     )
+-    args = parser.parse_args()
+-    paths = _example_paths(include_optional=args.include_optional)
++    args = parser.parse_args(argv)
++    paths = _example_paths(group=args.group, include_optional=args.include_optional)
+     if args.list:
+         for path in paths:
+             print(_label(path))
+diff --git a/examples/short_sentence_demo.py b/examples/short_sentence_demo.py
+index fdb15d1..812b39b 100644
+--- a/examples/short_sentence_demo.py
++++ b/examples/short_sentence_demo.py
+@@ -1,8 +1,9 @@
+ #!/usr/bin/env python3
+-"""Compare short-sentence handling modes with the request-centric synthesis API.
++"""Compare supported short-sentence modes using only the public configuration API.
+
+-Run with ``python examples/short_sentence_demo.py``. The combined recording is
+-written to ``example-artifacts/short_sentence_demo.wav`` by default.
++Run with ``python examples/short_sentence_demo.py``. The combined WAV is
++caller-side example composition, not a PyKokoro composition API; synthesis may
++install model assets.
+ """
+
+ from __future__ import annotations
+@@ -15,126 +16,61 @@ try:
+ except ImportError:
+     from _output import artifact_path
+
+-from pykokoro import KokoroSynthesizer, SynthesisConfig
+-from pykokoro.generation_config import GenerationConfig
+-from pykokoro.short_sentence_handler import (
+-    PhraseResolveMode,
++from pykokoro import (
++    GenerationConfig,
++    KokoroSynthesizer,
+     ShortSentenceConfig,
++    SynthesisConfig,
+ )
+
+ VOICE = "bm_fable"
+ LANG = "en-us"
+-TEST_SENTENCES = [
+-    "Hi!",
+-    "Why?",
+-    "No.",
+-    "No!",
+-    "Yes!",
+-    "Help!",
+-    "Oh!",
+-    "Stop!",
+-    "What?",
+-    "Don't!",
+-    "One … step. In front.",
+-    "Of.",
+-    "The other.",
+-    "Ah.",
+-    "Hush.",
+-    "Go on.",
+-    "Not yet.",
+-    "I know.",
+-    "Mm-hm.",
+-    "Mr. Vale.",
+-    "'Tis.",
+-    "Chapter 4",
+-    "Hermione.",
+-]
++SENTENCES = ("Hi!", "Why?", "No.", "Yes!", "Help!", "One step at a time.")
+
+
+-def neutral_phrase_short_sentence_config() -> ShortSentenceConfig:
+-    """Use phrase generation and timestamp-based cutting for short sentences."""
+-    return ShortSentenceConfig(
+-        resolve_modes={
+-            "phrase": PhraseResolveMode(
+-                neutral_phrase="The conversation stopped, {segment}, before someone answered.",
+-                end_phrase="The conversation stopped after one last reply: {segment}",
+-            )
+-        },
+-        min_phoneme_length=20,
+-        resolve_mode="phrase",
+-    )
+-
+-
+-def wrap_short_sentence_config() -> ShortSentenceConfig:
+-    """Use phoneme wrapping for short sentences."""
+-    return ShortSentenceConfig(min_phoneme_length=20, resolve_mode="wrap")
+-
+-
+-def render_section(
+-    label: str,
+-    config: ShortSentenceConfig,
+-) -> tuple[np.ndarray, int]:
+-    """Render one labeled set of examples using a single synthesizer instance."""
++def render_section(label: str, config: ShortSentenceConfig) -> tuple[np.ndarray, int]:
+     synthesis_config = SynthesisConfig(
+         voice=VOICE,
+-        generation=GenerationConfig(lang=LANG, speed=1.0),
++        generation=GenerationConfig(lang=LANG),
+         short_sentence_config=config,
+     )
+     samples: list[np.ndarray] = []
+     sample_rate: int | None = None
+-
+     with KokoroSynthesizer(synthesis_config) as synthesizer:
+-        for text in [label, *TEST_SENTENCES]:
++        for text in (label, *SENTENCES):
+             rendered = synthesizer.synthesize_text(text, language=LANG, voice=VOICE)
+-            current_rate = rendered.sample_rate
+-            if sample_rate is not None and current_rate != sample_rate:
+-                raise ValueError(
+-                    f"Sample rate changed within section: {sample_rate} to {current_rate}"
+-                )
+-            sample_rate = current_rate
+-            audio = np.asarray(rendered.audio, dtype=np.float32).reshape(-1)
+-            samples.append(audio)
+-            samples.append(np.zeros(round(current_rate * 0.1), dtype=np.float32))
+-            if text != label:
+-                print(f"  {text!r}: {len(audio) / current_rate:.3f}s")
+-
++            if sample_rate is not None and rendered.sample_rate != sample_rate:
++                raise ValueError("Sample rate changed within one comparison section")
++            sample_rate = rendered.sample_rate
++            samples.append(np.asarray(rendered.audio, dtype=np.float32).reshape(-1))
++            samples.append(np.zeros(round(sample_rate * 0.1), dtype=np.float32))
+     if sample_rate is None:
+         raise ValueError("No audio was rendered")
+-    print(f"Rendered {label!r} at {sample_rate} Hz")
+     return np.concatenate(samples), sample_rate
+
+
+ def main() -> None:
+-    """Generate a recording comparing short-sentence handling modes."""
+-    configurations = [
+-        ("Without short sentence handling", ShortSentenceConfig(enabled=False)),
+-        ("With wrap mode", wrap_short_sentence_config()),
+-        ("With phrase mode", neutral_phrase_short_sentence_config()),
+-    ]
++    configurations = (
++        ("Disabled", ShortSentenceConfig(enabled=False)),
++        ("Wrap", ShortSentenceConfig(resolve_mode="wrap")),
++        ("Phrase", ShortSentenceConfig(resolve_mode="phrase")),
++        ("Randomized phrase", ShortSentenceConfig(resolve_mode="randomized-phrase")),
++    )
+     sections: list[np.ndarray] = []
+     sample_rate: int | None = None
+-
+-    print(f"Voice: {VOICE}")
+-    print(f"Language: {LANG}")
+     for label, config in configurations:
+-        print(f"\nRendering {label}...")
++        print(f"Rendering short-sentence mode: {label}")
+         audio, current_rate = render_section(label, config)
+         if sample_rate is not None and current_rate != sample_rate:
+-            raise ValueError(
+-                f"Sample rate changed between sections: {sample_rate} to {current_rate}"
+-            )
++            raise ValueError("Sample rate changed between comparison sections")
+         sample_rate = current_rate
+         sections.extend((audio, np.zeros(round(current_rate * 0.5), dtype=np.float32)))
+
+     if sample_rate is None:
+         raise ValueError("No sections were rendered")
+-
+-    combined = np.concatenate(sections)
+-    output_file = artifact_path("short_sentence_demo.wav")
+-    sf.write(output_file, combined, sample_rate, subtype="FLOAT")
+-    duration = len(combined) / sample_rate
+-    print(f"\nCreated {output_file}")
+-    print(f"Total duration: {duration:.2f}s ({duration / 60:.2f} minutes)")
++    output = artifact_path("short_sentence_demo.wav")
++    sf.write(output, np.concatenate(sections), sample_rate, subtype="FLOAT")
++    print(f"Wrote caller-composed comparison recording to {output}")
+
+
+ if __name__ == "__main__":
+diff --git a/examples/voice_blend.py b/examples/voice_blend.py
+new file mode 100644
+index 0000000..ffc932b
+--- /dev/null
++++ b/examples/voice_blend.py
+@@ -0,0 +1,49 @@
++#!/usr/bin/env python3
++"""Blend voices with either the structured or compact public constructor.
++
++Synthesis may install model assets. SLERP is also available through
++``VoiceBlend.parse(...@slerp)`` and requires exactly two voices.
++"""
++
++from __future__ import annotations
++
++from pykokoro import GenerationConfig, KokoroSynthesizer, SynthesisConfig, VoiceBlend
++
++try:
++    from ._output import artifact_path
++except ImportError:
++    from _output import artifact_path
++
++
++def explicit_blend() -> VoiceBlend:
++    return VoiceBlend(
++        voices=[("af_sarah", 0.6), ("af_bella", 0.4)],
++        interpolation="linear",
++    )
++
++
++def parsed_blend() -> VoiceBlend:
++    return VoiceBlend.parse("af_sarah:60,af_bella:40")
++
++
++def make_config(blend: VoiceBlend | None = None) -> SynthesisConfig:
++    return SynthesisConfig(
++        voice=blend if blend is not None else explicit_blend(),
++        generation=GenerationConfig(lang="en-us"),
++    )
++
++
++def main() -> None:
++    structured = explicit_blend()
++    parsed = parsed_blend()
++    print(f"Structured blend: {structured}")
++    print(f"Parsed blend: {parsed}")
++    with KokoroSynthesizer(make_config(parsed)) as synthesizer:
++        result = synthesizer.synthesize_text("This voice combines two styles.", language="en-us")
++    output = artifact_path("voice_blend.wav")
++    result.save_wav(output)
++    print(f"Wrote {output}")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/pykokoro/__init__.py b/pykokoro/__init__.py
+index 4a2dfd4..4f4ed6e 100644
+--- a/pykokoro/__init__.py
++++ b/pykokoro/__init__.py
+@@ -54,7 +54,7 @@ from .synthesis_types import (
+     SynthesisRequest,
+     SynthesisSegment,
+ )
+-from .tokenizer import EspeakConfig, TokenizerConfig
++from .tokenizer import TokenizerConfig
+ from .types import WordTiming
+ from .voice_level import VoiceLevelApplication, VoiceLevelConfig
+ from .voice_manager import VoiceBlend
+@@ -157,7 +157,6 @@ __all__ = [
+     "LinguisticToken",
+     "WordTiming",
+     "TokenizerConfig",
+-    "EspeakConfig",
+     "ShortSentenceConfig",
+     "KokoroSynthesizer",
+     "__version__",
+diff --git a/pykokoro/onnx_backend.py b/pykokoro/onnx_backend.py
+index 4e07c73..02df287 100644
+--- a/pykokoro/onnx_backend.py
++++ b/pykokoro/onnx_backend.py
+@@ -33,7 +33,7 @@ from .config_types import (
+ )
+ from .exceptions import ConfigurationError
+ from .model_profiles import VOICE_ALIASES, get_model_profile
+-from .tokenizer import EspeakConfig, Tokenizer, TokenizerConfig
++from .tokenizer import Tokenizer, TokenizerConfig
+ from .voice_level import VoiceCalibrationKey, VoiceLevelConfig
+ from .voice_manager import VoiceBlend, VoiceManager
+
+@@ -117,7 +117,6 @@ class Kokoro:
+         session_options: Any | None = None,
+         provider_options: dict[str, Any] | None = None,
+         vocab_version: str = "v1.0",
+-        espeak_config: EspeakConfig | None = None,
+         tokenizer_config: TokenizerConfig | None = None,
+         model_quality: ModelQuality | None = None,
+         model_source: ModelSource = DEFAULT_MODEL_SOURCE,
+@@ -128,6 +127,7 @@ class Kokoro:
+         inference_cache_enabled: bool = True,
+         inference_cache_max_bytes: int = 128 * 1024 * 1024,
+         asset_progress: AssetProgressCallback | None = None,
++        cache_dir: str | Path | None = None,
+     ) -> None:
+         self._session: Any | None = None
+         self._voice_manager: VoiceManager | None = None
+@@ -182,6 +182,7 @@ class Kokoro:
+         self._model_path = model_path
+         self._voices_path = voices_path
+         self._asset_progress = asset_progress
++        self._cache_dir = cache_dir
+         # Voice database connection (for kokovoicelab integration)
+         self._voice_db: sqlite3.Connection | None = None
+
+@@ -193,7 +194,6 @@ class Kokoro:
+             ).tokenizer_vocab_version
+         except ValueError:
+             self._vocab_version = "1.0"
+-        self._espeak_config = espeak_config
+         self._tokenizer_config = tokenizer_config
+
+         # Short sentence handling configuration
+@@ -268,7 +268,6 @@ class Kokoro:
+             )
+             self._tokenizer = Tokenizer(
+                 config=self._tokenizer_config,
+-                espeak_config=self._espeak_config,
+                 vocab_version=self._vocab_version,
+                 vocab=vocab,
+             )
+@@ -312,7 +311,7 @@ class Kokoro:
+                 self._model_variant,
+                 quality=str(self._model_quality),
+                 source=self._model_source,
+-                cache_dir=None,
++                cache_dir=self._cache_dir,
+                 progress=self._asset_progress,
+             )
+             runtime = open_installed_kokoro(
+diff --git a/pykokoro/request_renderer.py b/pykokoro/request_renderer.py
+index 971a30f..050a1f1 100644
+--- a/pykokoro/request_renderer.py
++++ b/pykokoro/request_renderer.py
+@@ -224,7 +224,7 @@ class OnnxRequestRenderer:
+             "provider_options",
+             "session_options",
+             "tokenizer_config",
+-            "espeak_config",
++            "cache_dir",
+             "short_sentence_config",
+             "waveform_validation",
+             "inference_audio_diagnostics",
+@@ -250,7 +250,7 @@ class OnnxRequestRenderer:
+             session_options=config.session_options,
+             provider_options=config.provider_options,
+             vocab_version=profile.tokenizer_vocab_version,
+-            espeak_config=config.espeak_config,
++            cache_dir=config.cache_dir,
+             tokenizer_config=config.tokenizer_config,
+             model_quality=config.model_quality,
+             model_source=config.model_source or "github",
+diff --git a/pykokoro/short_sentence_handler.py b/pykokoro/short_sentence_handler.py
+index 74f3ac2..fab1f3b 100644
+--- a/pykokoro/short_sentence_handler.py
++++ b/pykokoro/short_sentence_handler.py
+@@ -238,46 +238,25 @@ class ShortSentenceTimingToken:
+
+ @dataclass
+ class ShortSentenceConfig:
+-    """Configuration for short sentence handling using single-word context.
+-
+-    Short or single-word phrases (< 30 phonemes) often sound robotic
+-    when generated alone in most voices. E.g. "Oh!" or "One step."
+-    This module improves quality by applying workarounds.
+-
+-    Mode: phrase and randomized-phrase (default when the model exposes duration timestamps)
+-    1. Add a full sentence around the phrase. "Phrase" uses a fixed
+-       sentence, "Randomized-Phrase" chooses from a list for variety.
+-    2. Cut out the phrase when timestamp geometry and a legal waveform boundary are available.
+-    3. Retry with another surrounding phrase only when alignment or timestamps are unusable.
+-    This mode works best, but can increase computation time.
+-    Accuracy is voice dependent, but a less accurate voice will only
+-    slow it down, not stop it from working.
+-    Phrase-based modes require an ONNX duration/timestamp output. When the
+-    implicit default is used with a model that lacks timestamps, the runtime
+-    selects `wrap`. An explicitly requested phrase mode also falls back to
+-    `wrap` and emits a warning.
+-
+-    Mode: Wrap
+-    1. Add phoneme pretext around the phrase. (e.g. "—" or "…")
+-    This mode is faster and still an improvement over no short-sentence handling.
+-
+-    Attributes:
+-        min_phoneme_length: Threshold below which sentences are
+-            considered "short" based on token count and will use
+-            context extraction. Default: 30 (decent for most voices).
+-            Set as low as you can without having garbled or stretched
+-            short phrases with your voice.
+-        phoneme_pretext: Phoneme(s) to add before and after the target word
+-            when generating combined audio for context. Default: "—".
+-        enabled: Whether short sentence handling is enabled. Default: True.
+-        resolve_mode: Resolve mode to apply to all short sentences. Default:
+-            "randomized-phrase".
+-        phrase_fallback_tries: Number of alternate phrase templates to
+-            try when alignment or timestamp geometry is unusable,
+-            before falling back to wrap mode. Default: 1
+-            Higher=more robust and possibly slower for less-accurate
+-            voices, Lower=falls back to wrap mode quicker.
++    """Configure context handling for short synthesis requests.
+
++    Short requests below ``min_phoneme_length`` may sound less natural when rendered
++    without phonetic context. This option is disabled unless explicitly supplied to
++    ``SynthesisConfig`` or enabled through ``GenerationConfig``.
++
++    The built-in modes are:
++
++    * ``wrap`` adds phoneme pretext around the request and does not require timestamps.
++    * ``phrase`` adds a surrounding phrase and cuts the target using model timing data.
++    * ``randomized-phrase`` chooses from varied phrases before cutting the target.
++
++    Phrase modes can require more inference work. They need duration/timestamp output;
++    when unavailable, the renderer falls back to ``wrap``.
++
++    Configuration fields include ``min_phoneme_length`` (default 30), ``enabled``
++    (default true), ``resolve_mode`` (default ``randomized-phrase``), ``phoneme_pretext``
++    (default em dash), ``phrase_fallback_tries`` (default 1), and the mode/template
++    configuration in ``resolve_modes`` and ``phrase_catalog``.
+     """
+
+     min_phoneme_length: int = 30
+diff --git a/pykokoro/synthesis_config.py b/pykokoro/synthesis_config.py
+index 952f659..1f76b65 100644
+--- a/pykokoro/synthesis_config.py
++++ b/pykokoro/synthesis_config.py
+@@ -20,7 +20,7 @@ LongTextSplitMode = Literal["none", "sentence"]
+
+
+ if TYPE_CHECKING:
+-    from .tokenizer import EspeakConfig, TokenizerConfig
++    from .tokenizer import TokenizerConfig
+
+
+ @dataclass(frozen=True, slots=True)
+@@ -45,7 +45,6 @@ class SynthesisConfig:
+
+     asset_progress: AssetProgressCallback | None = None
+     tokenizer_config: TokenizerConfig | None = None
+-    espeak_config: EspeakConfig | None = None
+     short_sentence_config: ShortSentenceConfig | None = None
+     waveform_validation: Literal["off", "warn", "strict"] = "off"
+     inference_audio_diagnostics: bool = False
+@@ -55,7 +54,7 @@ class SynthesisConfig:
+     inference_cache_max_bytes: int = 128 * 1024 * 1024
+     voice_level: VoiceLevelConfig = field(default_factory=VoiceLevelConfig)
+     return_trace: bool = False
+-    cache_dir: str | None = None
++    cache_dir: Path | str | None = None
+     allow_experimental_frontend: bool = False
+
+     def __post_init__(self) -> None:
+diff --git a/pykokoro/synthesis_identity.py b/pykokoro/synthesis_identity.py
+index c54f630..3bb7c93 100644
+--- a/pykokoro/synthesis_identity.py
++++ b/pykokoro/synthesis_identity.py
+@@ -110,7 +110,6 @@ def build_synthesis_identity(
+
+     frontend_identity = {
+         "tokenizer": config.tokenizer_config,
+-        "espeak_configured": config.espeak_config is not None,
+         "language_routing": config.language_routing,
+         "allow_experimental_frontend": config.allow_experimental_frontend,
+         "long_text_split": config.long_text_split,
+diff --git a/pykokoro/tokenizer.py b/pykokoro/tokenizer.py
+index 33a53d8..f89bfc9 100644
+--- a/pykokoro/tokenizer.py
++++ b/pykokoro/tokenizer.py
+@@ -83,25 +83,15 @@ def _effective_lexicons(config: TokenizerConfig) -> tuple[str, ...] | None:
+     return tuple(config.lexicons)
+
+
+-@dataclass
+-class EspeakConfig:
+-    """Optional eSpeak asset paths managed by KokoroG2P."""
+-
+-    lib_path: str | None = None
+-    data_path: str | None = None
+-
+-
+ class Tokenizer:
+     """Encode and decode phonemes using one Kokoro model vocabulary."""
+
+     def __init__(
+         self,
+-        espeak_config: EspeakConfig | None = None,
+         vocab_version: str = "v1.0",
+         vocab: dict[str, int] | None = None,
+         config: TokenizerConfig | None = None,
+     ) -> None:
+-        del espeak_config
+         self.vocab_version = vocab_version
+         self.config = config or TokenizerConfig()
+         self._kokorog2p_model = _normalize_kokorog2p_version(vocab_version)
+diff --git a/pykokoro/voice_manager.py b/pykokoro/voice_manager.py
+index e7bb192..9d5d860 100644
+--- a/pykokoro/voice_manager.py
++++ b/pykokoro/voice_manager.py
+@@ -193,13 +193,11 @@ def slerp_voices(
+
+ @dataclass
+ class VoiceBlend:
+-    """Configuration for blending multiple voices.
++    """Configuration for blending supported Kokoro voice styles.
+
+-    Args:
+-        voices: List of (voice_name, weight) tuples
+-        interpolation: Interpolation method - "linear" (weighted average) or
+-                      "slerp" (spherical linear interpolation). SLERP requires
+-                      exactly 2 voices and produces smoother transitions.
++    ``voices`` contains ``(voice_name, weight)`` pairs whose weights sum to one.
++    ``interpolation`` selects ``linear`` weighted blending or ``slerp`` spherical
++    interpolation. SLERP requires exactly two voices.
+     """
+
+     voices: list[tuple[str, float]]
+diff --git a/tests/test_all_voices_example.py b/tests/test_all_voices_example.py
+index 97bb351..699d64a 100644
+--- a/tests/test_all_voices_example.py
++++ b/tests/test_all_voices_example.py
+@@ -229,9 +229,7 @@ def test_synthesize_streams_audio_and_separators(
+         def write(self, audio: np.ndarray) -> None:
+             writes.append(np.asarray(audio))
+
+-    import pykokoro
+-
+-    monkeypatch.setattr(pykokoro, "KokoroSynthesizer", FakeSynthesizer)
++    monkeypatch.setattr(all_voices, "KokoroSynthesizer", FakeSynthesizer)
+     monkeypatch.setattr(all_voices.sf, "SoundFile", FakeSoundFile)
+     output = tmp_path / "all_voices.wav"
+
+diff --git a/tests/test_docs_examples.py b/tests/test_docs_examples.py
+index 3202e37..a041e96 100644
+--- a/tests/test_docs_examples.py
++++ b/tests/test_docs_examples.py
+@@ -9,6 +9,7 @@ import sys
+ from pathlib import Path
+
+ import pykokoro
++from examples import run_all
+
+ ROOT = Path(__file__).parents[1]
+ MAINTAINED_EXAMPLES = tuple(
+@@ -25,6 +26,8 @@ def test_current_docs_python_fences_parse_and_use_public_names() -> None:
+         for source in PYTHON_FENCE.findall(text):
+             tree = ast.parse(source, filename=str(path))
+             for node in ast.walk(tree):
++                if isinstance(node, ast.ImportFrom):
++                    assert not (node.module or "").startswith("pykokoro."), (path, node.module)
+                 if isinstance(node, ast.ImportFrom) and node.module == "pykokoro":
+                     imported = {alias.name for alias in node.names}
+                     assert imported <= public_names, (path, imported - public_names)
+@@ -64,3 +67,38 @@ def _import_example(path: Path) -> None:
+ def test_readme_has_no_undefined_playback_helper() -> None:
+     readme = (ROOT / "README.md").read_text(encoding="utf-8")
+     assert "play_audio(res.audio, res.sample_rate)" not in readme
++
++
++def test_api_reference_covers_every_root_export() -> None:
++    reference = (ROOT / "docs" / "api_reference.md").read_text(encoding="utf-8")
++    missing = sorted(name for name in pykokoro.__all__ if name not in reference)
++    assert not missing
++    assert "EspeakConfig" not in reference
++
++
++def test_example_catalogs_cover_every_runnable_script() -> None:
++    expected = {
++        path.name
++        for path in (ROOT / "examples").glob("*.py")
++        if path.name not in {"__init__.py", "_output.py", "run_all.py"}
++    }
++    grouped = set().union(*run_all._GROUPS.values())
++    assert grouped == expected
++
++    catalogs = (ROOT / "docs" / "examples.md", ROOT / "examples" / "README.md")
++    for catalog_path in catalogs:
++        text = catalog_path.read_text(encoding="utf-8")
++        assert "Assets, network, and cost" in text
++        assert "Expected output" in text
++        for name in sorted(expected):
++            assert f"python examples/{name}" in text, (catalog_path, name)
++
++
++def test_example_catalogs_document_runner_group_boundaries() -> None:
++    for catalog_path in (ROOT / "docs" / "examples.md", ROOT / "examples" / "README.md"):
++        text = catalog_path.read_text(encoding="utf-8")
++        assert "--group core" in text
++        assert "--group feature" in text
++        assert "--group language-showcase" in text
++        assert "--group optional-heavy" in text
++        assert "--include-optional" in text
+diff --git a/tests/test_example_runner.py b/tests/test_example_runner.py
+index e0a435c..f7ab6e1 100644
+--- a/tests/test_example_runner.py
++++ b/tests/test_example_runner.py
+@@ -6,22 +6,52 @@ import subprocess
+ from examples import run_all
+
+
+-def test_default_selection_contains_request_examples_and_excludes_showcase() -> None:
+-    paths = run_all._example_paths()
+-    names = {path.name for path in paths}
+-
++def test_default_selection_is_lightweight_core_examples() -> None:
++    names = {path.name for path in run_all._example_paths()}
+     assert {
+         "simple_synthesis.py",
+         "request_batch.py",
+         "pronunciation_overrides.py",
+-        "linguistic_annotations.py",
+-    } <= names
++        "linguistic_tokens.py",
++        "long_text.py",
++        "voice_blend.py",
++        "result_metadata.py",
++        "models_and_languages.py",
++    } == names
+     assert "all_voices.py" not in names
+-
+-
+-def test_optional_selection_adds_all_voices_showcase() -> None:
++    assert "short_sentence_demo.py" not in names
++    assert "french.py" not in names
++
++
++def test_feature_and_language_groups_are_separate() -> None:
++    feature = {path.name for path in run_all._example_paths(group="feature")}
++    language = {path.name for path in run_all._example_paths(group="language-showcase")}
++
++    assert feature == {
++        "english.py",
++        "language_routing.py",
++        "frontend_and_lexicons.py",
++        "asset_progress.py",
++        "error_handling.py",
++    }
++    assert language == {
++        "chinese.py",
++        "contractions.py",
++        "french.py",
++        "italian.py",
++        "japanese.py",
++        "korean.py",
++        "portuguese.py",
++        "spanish.py",
++    }
++    assert "simple_synthesis.py" not in language
++
++
++def test_optional_selection_adds_heavy_showcases() -> None:
+     names = {path.name for path in run_all._example_paths(include_optional=True)}
+-    assert "all_voices.py" in names
++    assert {"all_voices.py", "short_sentence_demo.py"} <= names
++    explicit = {path.name for path in run_all._example_paths(group="optional-heavy")}
++    assert explicit == {"all_voices.py", "short_sentence_demo.py"}
+
+
+ def test_run_examples_continues_and_reports_failures(monkeypatch, tmp_path) -> None:
+@@ -55,7 +85,8 @@ def test_list_mode_does_not_run(monkeypatch, capsys) -> None:
+     monkeypatch.setattr(
+         run_all, "run_examples", lambda paths: (_ for _ in ()).throw(AssertionError())
+     )
+-    monkeypatch.setattr(run_all.sys, "argv", ["run_all.py", "--list"])
+
+-    assert run_all.main() == 0
+-    assert "examples/simple_synthesis.py" in capsys.readouterr().out
++    assert run_all.main(["--list"]) == 0
++    output = capsys.readouterr().out
++    assert "examples/simple_synthesis.py" in output
++    assert "all_voices.py" not in output
+diff --git a/tests/test_examples_contract.py b/tests/test_examples_contract.py
+index e2d2ec1..74fb032 100644
+--- a/tests/test_examples_contract.py
++++ b/tests/test_examples_contract.py
+@@ -5,6 +5,7 @@ from pathlib import Path
+
+ EXAMPLES_DIR = Path(__file__).parents[1] / "examples"
+ _EXCLUDED = {"__init__.py", "_output.py", "run_all.py"}
++_DISCOVERY_ONLY = {"frontend_and_lexicons.py"}
+ _RETIRED_NAMES = {"KokoroPipeline", "PipelineConfig", "build_pipeline", "AudioJob"}
+
+
+@@ -18,7 +19,7 @@ def _call_name(call: ast.Call) -> str | None:
+
+ def test_maintained_examples_use_the_request_engine_api() -> None:
+     for path in sorted(EXAMPLES_DIR.glob("*.py")):
+-        if path.name in _EXCLUDED:
++        if path.name in _EXCLUDED | _DISCOVERY_ONLY:
+             continue
+         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+         names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+diff --git a/tests/test_models_and_languages_example.py b/tests/test_models_and_languages_example.py
+index bcaad6a..904c55a 100644
+--- a/tests/test_models_and_languages_example.py
++++ b/tests/test_models_and_languages_example.py
+@@ -7,171 +7,71 @@ import numpy as np
+ import pytest
+
+ from examples import models_and_languages as showcase
+-
+-
+-class FakeDistribution:
+-    def __init__(self, *qualities: str, provider: str = "github-release") -> None:
+-        self.provider = provider
+-        self.qualities = qualities
+-
+-
+-class FakeModel:
+-    def __init__(
+-        self,
+-        model_id: str,
+-        *,
+-        languages: tuple[str, ...] = ("en",),
+-        voices: tuple[str, ...] = ("default",),
+-        default_voice: str = "default",
+-        distributions: tuple[FakeDistribution, ...] = (FakeDistribution("fp32"),),
+-        frontend: str = "pykokoro-native-v1",
+-        layout: str = "single-onnx-v1",
+-        runtime_available: bool = True,
+-        redistribution_allowed: bool = True,
+-    ) -> None:
+-        self.model_id = model_id
+-        self.language_codes = languages
+-        self.voices = voices
+-        self.default_voice = default_voice
+-        self.distributions = distributions
+-        self.frontend = frontend
+-        self.layout = layout
+-        self.runtime_available = runtime_available
+-        self.redistribution_allowed = redistribution_allowed
+-
+-    def distribution(self) -> FakeDistribution:
+-        return self.distributions[0]
+-
+-
+-class FakeRegistry:
+-    def __init__(self, *models: FakeModel) -> None:
+-        self.models = {model.model_id: model for model in models}
+-
+-    def model(self, model_id: str) -> FakeModel:
+-        return self.models[model_id]
+-
+-
+-def _profile(model_id: str, *, experimental: bool = False):
+-    return SimpleNamespace(
++from pykokoro import ModelCapabilities, ModelDiscoveryResult, VoiceCapabilities
++
++
++def _model(
++    model_id: str = "v1.0",
++    *,
++    languages: tuple[str, ...] = ("de-de",),
++    voices: tuple[str, ...] = ("voice-a",),
++    qualities: tuple[str, ...] = ("fp32", "q8"),
++    status: str = "ready",
++    experimental: bool = False,
++) -> ModelCapabilities:
++    return ModelCapabilities(
++        model_id=model_id,
+         source="github",
+-        variant=model_id,
+-        frontend_experimental=experimental,
++        languages=languages,
++        voices=voices,
++        default_voice=voices[0],
++        qualities=qualities,
++        g2p_backend="kokorog2p",
++        lexicons=None,
++        frontend="kokorog2p",
++        status=status,
++        experimental=experimental,
++        runtime_available=True,
++        redistribution_allowed=True,
++        provider="github-release",
++        sample_rate=24_000,
++        max_tokens=510,
++        voice_details=(
++            VoiceCapabilities(voices[0], "female", languages[0], languages[0], "German"),
++        ),
+     )
+
+
+-def test_import_does_not_load_registry(monkeypatch) -> None:
+-    monkeypatch.setattr(showcase, "load_registry", lambda: pytest.fail("registry loaded at import"))
+-    assert Path("model_language_outputs") == showcase.OUTPUT_DIR
++def _inventory(*models: ModelCapabilities) -> ModelDiscoveryResult:
++    return ModelDiscoveryResult(tuple(models), "fixture", False)
+
+
+-def test_listing_uses_all_injected_models_and_languages(capsys, monkeypatch) -> None:
+-    registry = FakeRegistry(
+-        FakeModel("first", languages=("en", "fr"), voices=("a", "b"), default_voice="a"),
+-        FakeModel("second", languages=("de-de",), frontend="german-ipa-v1"),
+-        FakeModel("unavailable", runtime_available=False),
+-        FakeModel("restricted", redistribution_allowed=False),
+-    )
+-    monkeypatch.setattr(
+-        showcase,
+-        "get_registry_model_profile",
+-        lambda model_id, *, registry: _profile(model_id, experimental=model_id == "second"),
+-    )
+-
+-    showcase.list_models(registry)
++def test_listing_displays_public_model_capabilities(capsys) -> None:
++    showcase.list_models(_inventory(_model()))
+     output = capsys.readouterr().out
+
+-    for value in ("first", "second", "unavailable", "restricted", "en", "fr", "de-de"):
++    for value in ("v1.0", "de-de", "voice-a", "fp32", "github-release", "24000", "510"):
+         assert value in output
+-    assert "Provider: github-release" in output
+-    assert "Default voice: a" in output
+-    assert "Voices (2): a, b" in output
+-    assert "Qualities: fp32" in output
+-    assert "first [ready]" in output
+-    assert "second [experimental]" in output
+-    assert "unavailable [registry-unavailable]" in output
+-    assert "restricted [restricted]" in output
+-
+-
+-def test_unavailable_and_restricted_models_are_not_synthesized(monkeypatch, tmp_path) -> None:
+-    for status, model_id in (("registry-unavailable", "unavailable"), ("restricted", "restricted")):
+-        registry = FakeRegistry(FakeModel(model_id))
+-        monkeypatch.setattr(
+-            showcase,
+-            "_status_for_model",
+-            lambda model, registry, status=status: status,
+-        )
+-        with pytest.raises(ValueError, match=status):
+-            showcase.synthesize(
+-                registry,
+-                model_id=model_id,
+-                language=None,
+-                voice=None,
+-                quality=None,
+-                include_experimental=False,
+-                output_dir=tmp_path,
+-            )
+-
+-
+-def test_experimental_model_requires_opt_in(monkeypatch, tmp_path) -> None:
+-    registry = FakeRegistry(FakeModel("experimental"))
+-    monkeypatch.setattr(showcase, "_status_for_model", lambda model, registry: "experimental")
+-
+-    with pytest.raises(ValueError, match="include-experimental"):
+-        showcase.synthesize(
+-            registry,
+-            model_id="experimental",
+-            language=None,
+-            voice=None,
+-            quality=None,
+-            include_experimental=False,
+-            output_dir=tmp_path,
+-        )
+
+
+-def test_selection_validates_language_voice_and_quality(monkeypatch, tmp_path) -> None:
+-    model = FakeModel(
+-        "selected",
+-        languages=("de", "de-at"),
+-        voices=("one", "two"),
+-        default_voice="one",
+-        distributions=(FakeDistribution("fp32", "q8"),),
+-    )
+-    registry = FakeRegistry(model)
+-    monkeypatch.setattr(showcase, "_status_for_model", lambda model, registry: "ready")
+-
+-    for kwargs, message in (
+-        ({"language": "fr"}, "Language"),
+-        ({"voice": "missing"}, "Voice"),
+-        ({"quality": "q4"}, "Quality"),
+-    ):
+-        with pytest.raises(ValueError, match=message):
+-            showcase.synthesize(
+-                registry,
+-                model_id="selected",
+-                language=kwargs.get("language"),
+-                voice=kwargs.get("voice"),
+-                quality=kwargs.get("quality"),
+-                include_experimental=False,
+-                output_dir=tmp_path,
+-            )
+-
+-
+-def test_synthesis_uses_registry_profile_and_selected_output(monkeypatch, tmp_path) -> None:
+-    model = FakeModel(
+-        "selected",
+-        languages=("de",),
+-        voices=("one", "two"),
+-        default_voice="one",
+-        distributions=(FakeDistribution("fp32", "q8"),),
+-    )
+-    registry = FakeRegistry(model)
+-    fake_profile = _profile("selected")
+-    monkeypatch.setattr(showcase, "_status_for_model", lambda model, registry: "ready")
+-    monkeypatch.setattr(
+-        showcase,
+-        "get_registry_model_profile",
+-        lambda model_id, *, registry: fake_profile,
+-    )
++def test_public_selection_validates_language_voice_and_quality() -> None:
++    model = _model()
++    assert showcase._choose_language(model, "de") == "de-de"
++    assert showcase._choose_voice(model, None) == "voice-a"
++    assert showcase._choose_quality(model, None) == "fp32"
++
++    with pytest.raises(ValueError, match="Language"):
++        showcase._choose_language(model, "fr")
++    with pytest.raises(ValueError, match="Voice"):
++        showcase._choose_voice(model, "missing")
++    with pytest.raises(ValueError, match="Quality"):
++        showcase._choose_quality(model, "q4")
++
++
++def test_synthesis_uses_discovered_public_metadata_and_output(
++    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
++) -> None:
++    model = _model()
+
+     class FakeSynthesizer:
+         config = None
+@@ -187,28 +87,41 @@ def test_synthesis_uses_registry_profile_and_selected_output(monkeypatch, tmp_pa
+
+         def synthesize_text(self, text: str, *, language: str, voice: str):
+             assert text == showcase.SAMPLE_TEXTS["de"]
+-            assert language == "de"
+-            assert voice == "two"
+-            return SimpleNamespace(audio=np.zeros(4), sample_rate=24000)
++            assert language == "de-de"
++            assert voice == "voice-a"
++            return SimpleNamespace(audio=np.zeros(4), sample_rate=24_000)
+
+     writes: list[Path] = []
+     monkeypatch.setattr(showcase, "KokoroSynthesizer", FakeSynthesizer)
+-    monkeypatch.setattr(showcase.sf, "write", lambda path, audio, sample_rate: writes.append(path))
++    monkeypatch.setattr(showcase.sf, "write", lambda path, *args: writes.append(path))
+
+     output = showcase.synthesize(
+-        registry,
+-        model_id="selected",
++        _inventory(model),
++        model_id=model.model_id,
+         language="de",
+-        voice="two",
++        voice=None,
+         quality="q8",
+         include_experimental=False,
+         output_dir=tmp_path,
+     )
+
+-    assert output == tmp_path / "selected_de_two.wav"
++    assert output == tmp_path / "v1.0_de-de_voice-a.wav"
+     assert writes == [output]
+-    assert FakeSynthesizer.config.model_source == "github"
+-    assert FakeSynthesizer.config.model_variant == "selected"
++    assert FakeSynthesizer.config.model_source == model.source
++    assert FakeSynthesizer.config.model_variant == model.model_id
+     assert FakeSynthesizer.config.model_quality == "q8"
+-    assert FakeSynthesizer.config.voice == "two"
+-    assert FakeSynthesizer.config.generation.lang == "de"
++    assert FakeSynthesizer.config.voice == model.default_voice
++    assert FakeSynthesizer.config.generation.lang == "de-de"
++
++
++def test_experimental_model_requires_opt_in(tmp_path: Path) -> None:
++    with pytest.raises(ValueError, match="experimental frontend"):
++        showcase.synthesize(
++            _inventory(_model(status="experimental", experimental=True)),
++            model_id="v1.0",
++            language=None,
++            voice=None,
++            quality=None,
++            include_experimental=False,
++            output_dir=tmp_path,
++        )
+diff --git a/tests/test_new_examples.py b/tests/test_new_examples.py
+new file mode 100644
+index 0000000..6bdd3e0
+--- /dev/null
++++ b/tests/test_new_examples.py
+@@ -0,0 +1,201 @@
++from __future__ import annotations
++
++from pathlib import Path
++from types import SimpleNamespace
++
++import numpy as np
++
++from examples import (
++    asset_progress,
++    error_handling,
++    frontend_and_lexicons,
++    language_routing,
++    long_text,
++    result_metadata,
++    voice_blend,
++)
++from pykokoro import AssetProgressEvent, ConsoleAssetProgress
++
++
++def test_long_text_example_keeps_one_unmodified_request() -> None:
++    request = long_text.make_request()
++    config = long_text.make_config()
++
++    assert request.text == long_text.LONG_TEXT
++    assert request.text.count(".") >= 90
++    assert request.language == "en-us"
++    assert config.long_text_split == "sentence"
++    assert config.long_text_use_spacy is False
++    assert config.return_trace is True
++
++
++def test_voice_blend_example_shows_both_construction_forms() -> None:
++    explicit = voice_blend.explicit_blend()
++    parsed = voice_blend.parsed_blend()
++    config = voice_blend.make_config(parsed)
++
++    assert explicit.voices == [("af_sarah", 0.6), ("af_bella", 0.4)]
++    assert explicit.interpolation == "linear"
++    assert parsed.voices == explicit.voices
++    assert config.voice is parsed
++
++
++def test_language_routing_example_keeps_acoustic_request_explicit() -> None:
++    config = language_routing.make_config()
++    automatic, deterministic = language_routing.make_requests()
++
++    assert config.language_routing is not None
++    assert config.language_routing.mode == "auto"
++    assert config.language_routing.languages == ("en-us", "de-de")
++    assert automatic.language == deterministic.language == "en-us"
++    assert automatic.voice == deterministic.voice == "af_sarah"
++    override = deterministic.pronunciation_overrides[0]
++    assert deterministic.text[override.start : override.end] == "Welt"
++    assert override.language == "de-de"
++
++
++def test_frontend_example_separates_discovery_from_provisioning() -> None:
++    tokenizer = frontend_and_lexicons.make_tokenizer_config()
++    config = frontend_and_lexicons.make_synthesis_config()
++
++    assert tokenizer.backend == "kokorog2p"
++    assert tokenizer.fallback == "espeak"
++    assert tokenizer.lexicons == ("gold",)
++    assert tokenizer.lexicon_data_policy == "installed-only"
++    assert tokenizer.use_spacy is False
++    assert config.tokenizer_config is tokenizer or config.tokenizer_config == tokenizer
++
++
++def test_frontend_example_uses_offline_discovery_only(monkeypatch, capsys) -> None:
++    calls: list[dict[str, object]] = []
++
++    def discover(*, language: str, offline: bool):
++        calls.append({"language": language, "offline": offline})
++        return SimpleNamespace(lexicons=())
++
++    monkeypatch.setattr(frontend_and_lexicons, "discover_lexicons", discover)
++    frontend_and_lexicons.main()
++
++    assert calls == [{"language": "de", "offline": True}]
++    assert "no lexicon data or model assets are installed" in capsys.readouterr().out
++
++
++def test_asset_progress_supports_console_and_custom_callback(capsys) -> None:
++    assert isinstance(asset_progress.make_config().asset_progress, ConsoleAssetProgress)
++    callback = asset_progress.make_config(custom_callback=True).asset_progress
++    assert callback is asset_progress.progress
++    callback(
++        AssetProgressEvent(
++            phase="download-progress",
++            model_id="v1.0",
++            distribution_id="cpu",
++            artifact_id="model.onnx",
++            role="model",
++            filename="model.onnx",
++            bytes_done=10,
++            bytes_total=20,
++            target="cache",
++        )
++    )
++    assert "download-progress model.onnx 10 20" in capsys.readouterr().out
++
++
++def test_result_metadata_and_error_examples_use_public_configuration() -> None:
++    config = result_metadata.make_config()
++    request = error_handling.make_request()
++
++    assert config.generation.random_seed == 7
++    assert config.return_trace is True
++    assert request.text[6:10] == "Welt"
++    assert request.pronunciation_overrides[0].language == "de-de"
++
++
++class _FakeResult:
++    def __init__(self, *, id: str, text: str, language: str, voice: object) -> None:
++        self.id = id
++        self.text = text
++        self.language = language
++        self.voice = voice
++        self.audio = np.zeros(4, dtype=np.float32)
++        self.sample_rate = 24_000
++        self.phonemes = "test-phonemes"
++        self.token_ids = (1, 2, 3)
++        self.diagnostics = ()
++        self.short_sentence_mode = "off"
++        self.voice_level_applications = ()
++        self.synthesis_identity = SimpleNamespace(cache_key="offline-test-key")
++        self.word_timings = ()
++        self.trace = SimpleNamespace(
++            model={"acoustic_chunk_count": 1},
++            inference_summary=lambda: "offline test trace",
++        )
++
++    def save_wav(self, path: str | Path) -> None:
++        output = Path(path)
++        output.parent.mkdir(parents=True, exist_ok=True)
++        output.write_bytes(b"fake wav")
++
++
++class _FakeSynthesizer:
++    def __init__(self, config: object) -> None:
++        self.config = config
++
++    def __enter__(self) -> _FakeSynthesizer:
++        return self
++
++    def __exit__(self, *args: object) -> None:
++        return None
++
++    def synthesize_text(self, text: str, *, language: str, voice: object = None) -> _FakeResult:
++        selected_voice = voice if voice is not None else getattr(self.config, "voice", None)
++        return _FakeResult(id="fake", text=text, language=language, voice=selected_voice)
++
++    def synthesize(self, request) -> _FakeResult:
++        return _FakeResult(
++            id=request.id,
++            text=request.text,
++            language=request.language,
++            voice=request.voice,
++        )
++
++    def synthesize_segments(self, requests) -> list[_FakeResult]:
++        return [self.synthesize(request) for request in requests]
++
++
++def test_new_synthesis_examples_write_expected_outputs_without_inference(
++    monkeypatch, tmp_path: Path
++) -> None:
++    examples = (
++        asset_progress,
++        error_handling,
++        language_routing,
++        long_text,
++        result_metadata,
++        voice_blend,
++    )
++    for module in examples:
++        monkeypatch.setattr(module, "KokoroSynthesizer", _FakeSynthesizer)
++        monkeypatch.setattr(
++            module,
++            "artifact_path",
++            lambda name, module=module: tmp_path / module.__name__.removeprefix("examples.") / name,
++        )
++
++    asset_progress.main([])
++    error_handling.main()
++    language_routing.main()
++    long_text.main()
++    result_metadata.main()
++    voice_blend.main()
++
++    expected = {
++        "asset_progress/asset_progress.wav",
++        "error_handling/error_handling.wav",
++        "language_routing/automatic-routing.wav",
++        "language_routing/explicit-german-span.wav",
++        "long_text/long_text.wav",
++        "result_metadata/result_metadata.wav",
++        "voice_blend/voice_blend.wav",
++    }
++    actual = {path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*.wav")}
++    assert actual == expected
+diff --git a/tests/test_onnxvoice_boundary.py b/tests/test_onnxvoice_boundary.py
+index 770df87..d2e68f3 100644
+--- a/tests/test_onnxvoice_boundary.py
++++ b/tests/test_onnxvoice_boundary.py
+@@ -16,6 +16,39 @@ def test_normalize_kokoro_ref() -> None:
+     assert boundary.normalize_kokoro_ref("v1.0") == "kokoro:v1.0"
+     assert boundary.normalize_kokoro_ref("kokoro:v1.0") == "kokoro:v1.0"
+
++
++def test_backend_forwards_cache_dir_to_managed_install(
++    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
++) -> None:
++    import pykokoro.onnx_backend as onnx_backend
++
++    class InstallReached(Exception):
++        pass
++
++    calls: list[dict[str, object]] = []
++
++    def install(*args: object, **kwargs: object) -> object:
++        calls.append(kwargs)
++        raise InstallReached
++
++    monkeypatch.setattr(onnx_backend, "install_kokoro_model", install)
++    backend = object.__new__(onnx_backend.Kokoro)
++    backend._runtime = None
++    backend._audio_generator = None
++    backend._provider = None
++    backend._use_gpu = False
++    backend._model_variant = "v1.0"
++    backend._model_source = "github"
++    backend._model_quality = "fp32"
++    backend._model_path = None
++    backend._voices_path = None
++    backend._cache_dir = tmp_path
++    backend._asset_progress = None
++
++    with pytest.raises(InstallReached):
++        backend._init_kokoro_locked()
++
++    assert calls[0]["cache_dir"] == tmp_path
+     with pytest.raises(ConfigurationError, match="Not a Kokoro"):
+         boundary.normalize_kokoro_ref("piper:en_US")
+
+diff --git a/tests/test_public_engine_api.py b/tests/test_public_engine_api.py
+index 27bea79..91c3b72 100644
+--- a/tests/test_public_engine_api.py
++++ b/tests/test_public_engine_api.py
+@@ -73,7 +73,6 @@ def test_public_api_exports_request_and_result_types() -> None:
+         "LinguisticToken",
+         "WordTiming",
+         "TokenizerConfig",
+-        "EspeakConfig",
+         "ShortSentenceConfig",
+         "KokoroSynthesizer",
+         "__version__",
+@@ -122,6 +121,7 @@ def test_document_and_composition_apis_are_not_kept_as_aliases() -> None:
+         "VoiceCalibrationKey",
+         "VoiceLevelCalibration",
+         "resolve_synthesis_config",
++        "EspeakConfig",
+     }
+     assert removed_names.isdisjoint(pykokoro.__all__)
+     assert all(not hasattr(pykokoro, name) for name in removed_names)
+@@ -161,3 +161,9 @@ def test_rendered_segment_owns_one_mono_result() -> None:
+     )
+     assert result.audio.shape == (4,)
+     assert result.id == "request-1"
++
++
++def test_every_root_public_export_resolves() -> None:
++    assert all(getattr(pykokoro, name) is not None for name in pykokoro.__all__)
++    assert pykokoro.SynthesisSegment is pykokoro.SynthesisRequest
++    assert pykokoro.PyKokoroError is pykokoro.KokoroError
+diff --git a/tests/test_request_renderer.py b/tests/test_request_renderer.py
+index 80062b6..3d1ee23 100644
+--- a/tests/test_request_renderer.py
++++ b/tests/test_request_renderer.py
+@@ -76,6 +76,23 @@ def _config(**kwargs: Any) -> SynthesisConfig:
+     )
+
+
++def test_backend_factory_forwards_cache_dir(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
++    import pykokoro.onnx_backend as onnx_backend
++
++    captured: dict[str, Any] = {}
++
++    class Backend:
++        def __init__(self, **kwargs: Any) -> None:
++            captured.update(kwargs)
++
++    monkeypatch.setattr(onnx_backend, "Kokoro", Backend)
++    renderer = OnnxRequestRenderer(FakeG2PAdapter())
++
++    renderer._create_backend(_config(cache_dir=tmp_path))
++
++    assert captured["cache_dir"] == tmp_path
++
++
+ def test_renderer_keeps_one_request_independent_and_rebases_timings() -> None:
+     adapter = FakeG2PAdapter()
+     backend = FakeBackend()
+diff --git a/tests/test_synthesis_config.py b/tests/test_synthesis_config.py
+index ff485c4..02d07f2 100644
+--- a/tests/test_synthesis_config.py
++++ b/tests/test_synthesis_config.py
+@@ -67,3 +67,11 @@ def test_model_resolution_uses_typed_error() -> None:
+             SynthesisConfig(model_variant="unknown"),  # type: ignore[arg-type]
+             language="en-us",
+         )
++
++
++def test_cache_dir_survives_synthesis_config_resolution(tmp_path) -> None:
++    config = SynthesisConfig(cache_dir=tmp_path, voice="af_heart")
++
++    resolved = resolve_synthesis_config(config, language="en-us")
++
++    assert resolved.cache_dir == tmp_path

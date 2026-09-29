@@ -1,0 +1,82 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: 0.10.1
+git_base_ref: 3c53e5d768d0465bde0a92e69f3e05d297a2d2da
+git_base_sha: 3c53e5d768d0465bde0a92e69f3e05d297a2d2da
+git_head_ref: 4386ac2c538ee50e03415b0f6118f8e2d076da2e
+git_head_sha: 4386ac2c538ee50e03415b0f6118f8e2d076da2e
+include_merges: nontrivial
+entries:
+  - kind: fixed
+    summary:
+      Fixed forwarding of SynthesisConfig.cache_dir to OnnxVoice for managed model and
+      voice assets
+    status: accepted
+    source_refs:
+      - git:9d11eb7e34247f7733f916a77b2c0ed7a0c6f254
+    paths:
+      - pykokoro/synthesis_config.py
+      - pykokoro/request_renderer.py
+      - pykokoro/onnx_backend.py
+      - tests/test_onnxvoice_boundary.py
+    sources:
+      - git:9d11eb7e34247f7733f916a77b2c0ed7a0c6f254
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: removed
+    summary: Removed the no-op EspeakConfig and espeak_config options
+    status: accepted
+    breaking: true
+    source_refs: []
+    paths:
+      - pykokoro/__init__.py
+      - pykokoro/synthesis_config.py
+      - pykokoro/tokenizer.py
+      - tests/test_public_engine_api.py
+    sources:
+      - git:9d11eb7e34247f7733f916a77b2c0ed7a0c6f254
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: docs
+    summary:
+      Documented cache, discovery, asset progress, and request controls with expanded
+      API guides and grouped examples
+    status: accepted
+    source_refs: []
+    paths:
+      - README.md
+      - docs/api_reference.md
+      - docs/basic_usage.md
+      - docs/installation.md
+      - docs/examples.md
+      - examples/run_all.py
+      - examples/asset_progress.py
+      - examples/frontend_and_lexicons.py
+    sources:
+      - git:9d11eb7e34247f7733f916a77b2c0ed7a0c6f254
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: fixed
+    summary:
+      Fixed the long-text example to consume its result iterator before validating the
+      single rendered request
+    status: accepted
+    source_refs:
+      - git:4386ac2c538ee50e03415b0f6118f8e2d076da2e
+    paths:
+      - examples/long_text.py
+      - tests/test_new_examples.py
+    sources:
+      - git:4386ac2c538ee50e03415b0f6118f8e2d076da2e
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

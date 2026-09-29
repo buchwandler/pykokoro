@@ -1,0 +1,58 @@
+ examples/long_text.py      | 4 ++--
+ tests/test_new_examples.py | 8 +++++---
+ 2 files changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/examples/long_text.py b/examples/long_text.py
+index 877d167..51deda1 100644
+--- a/examples/long_text.py
++++ b/examples/long_text.py
+@@ -21,7 +21,7 @@ LONG_TEXT = " ".join(
+         "When the weather changes, the explorer pauses, checks the map, and adapts.",
+         "The purpose is not to hurry through the story but to preserve its meaning.",
+     )
+-    * 24
++    * 2
+ )
+
+
+@@ -48,7 +48,7 @@ def main() -> None:
+     request = make_request()
+     print("PyKokoro receives the complete original request; do not split it here.")
+     with KokoroSynthesizer(make_config()) as synthesizer:
+-        results = synthesizer.synthesize_segments((request,))
++        results = tuple(synthesizer.synthesize_segments((request,)))
+     if len(results) != 1 or results[0].text != request.text:
+         raise RuntimeError("long-text rendering did not preserve one original request/result")
+     result = results[0]
+diff --git a/tests/test_new_examples.py b/tests/test_new_examples.py
+index 6bdd3e0..e313c7c 100644
+--- a/tests/test_new_examples.py
++++ b/tests/test_new_examples.py
+@@ -1,5 +1,6 @@
+ from __future__ import annotations
+
++from collections.abc import Iterator
+ from pathlib import Path
+ from types import SimpleNamespace
+
+@@ -22,7 +23,7 @@ def test_long_text_example_keeps_one_unmodified_request() -> None:
+     config = long_text.make_config()
+
+     assert request.text == long_text.LONG_TEXT
+-    assert request.text.count(".") >= 90
++    assert request.text.count(".") == 8
+     assert request.language == "en-us"
+     assert config.long_text_split == "sentence"
+     assert config.long_text_use_spacy is False
+@@ -158,8 +159,9 @@ class _FakeSynthesizer:
+             voice=request.voice,
+         )
+
+-    def synthesize_segments(self, requests) -> list[_FakeResult]:
+-        return [self.synthesize(request) for request in requests]
++    def synthesize_segments(self, requests) -> Iterator[_FakeResult]:
++        for request in requests:
++            yield self.synthesize(request)
+
+
+ def test_new_synthesis_examples_write_expected_outputs_without_inference(
