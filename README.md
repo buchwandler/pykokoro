@@ -38,7 +38,7 @@ use.
 
 For orchestration, create a `SynthesisSegment` with an opaque request ID, prepared text,
 an explicit pronunciation language, and an actual Kokoro voice. Optional source-aligned
-pronunciation instructions and linguistic annotations use offsets into that exact text:
+pronunciation instructions and linguistic tokens use offsets into that exact text:
 
 ```python
 from pykokoro import (
@@ -53,7 +53,7 @@ request = SynthesisSegment(
     language="en-us",
     voice="af_sarah",
     pronunciation_overrides=(PronunciationOverride(6, 10, language="de"),),
-    annotations=(LinguisticToken(0, 5, text="Hello", pos="INTJ"),),
+    tokens=(LinguisticToken(0, 5, text="Hello", pos="INTJ"),),
 )
 ```
 
@@ -61,6 +61,31 @@ Use `synthesize()` for one request or `synthesize_segments()` for an ordered ite
 independent requests. Each request yields its own `RenderedSegment`; PyKokoro does not
 join batch results or insert cross-request silence. The caller can save, play, or pass
 each waveform to a separate composition system.
+
+## Longer requests and optional discovery
+
+`long_text_split="none"` is the default and raises `SynthesisInputTooLongError` if a
+prepared request exceeds model capacity. Opt into lazy sentence splitting for oversized
+requests; the engine still returns one result for the original request:
+
+```python
+from pykokoro import GenerationConfig, KokoroSynthesizer, SynthesisConfig
+
+
+long_text = "A prepared request with several sentences. " * 100
+config = SynthesisConfig(
+    voice="af_sarah",
+    generation=GenerationConfig(lang="en-us"),
+    long_text_split="sentence",
+    long_text_use_spacy=False,
+)
+with KokoroSynthesizer(config) as synthesizer:
+    rendered = synthesizer.synthesize_text(long_text, language="en-us")
+```
+
+To inspect installed/runtime model profiles without loading weights, use
+`discover_models(offline=True)`. Profile data describes language/voice combinations; G2P
+language availability alone does not guarantee that every acoustic profile supports it.
 
 Input text is prepared speech, not a document markup language. PyKokoro does not parse
 SSMD, YAML front matter, or say-as/voice/pause directives. `GenerationConfig.speed` is a
@@ -102,6 +127,17 @@ pip install "pykokoro[coreml]"     # Apple CoreML
 For optional direct playback, install `pykokoro[cpu,playback]`. PyKokoro writes WAV
 files through `soundfile`; `RenderedSegment.play()` uses the optional `sounddevice`
 dependency. Install `espeak-ng` when selecting an eSpeak frontend or fallback.
+
+## Feature guides
+
+- [Basic usage, request reuse, cache configuration, and typed errors](docs/basic_usage.md)
+- [Pronunciation tokens, language routing, VoiceBlend, calibration, and result metadata]
+  (docs/advanced_features.md)
+- [Language codes and model-profile discovery](docs/languages.md)
+- [Frontend, lexicon, asset-progress, and provider setup](docs/installation.md)
+- [Local/custom model artifacts and migration from pre-v0.10](docs/installation.md) and
+  [migration note](docs/breaking-change-0.10.0.md)
+- [Short-sentence policy](docs/short_sentence_quality.md)
 
 ## Documentation and examples
 

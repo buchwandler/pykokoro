@@ -1,148 +1,282 @@
 # API reference
 
-The supported public API represents one prepared synthesis request and one independent
-rendered result. Document planning and composition APIs are intentionally not part of
-the package.
+PyKokoro's supported API is exported by `pykokoro` and listed in `pykokoro.__all__`. It
+models prepared synthesis requests and their independent rendered results; document
+parsing, speech planning, and composition between requests remain caller-owned.
+
+```python
+from pykokoro import (
+    GenerationConfig,
+    KokoroSynthesizer,
+    SynthesisConfig,
+    SynthesisRequest,
+)
+```
+
+## Public root symbols
+
+| Area                      | Root exports                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Synthesis                 | `KokoroSynthesizer`, `SynthesisRequest`, `SynthesisSegment`, `RenderedSegment`                                                                                                                                                                                                                                                                                                      |
+| Source context and timing | `PronunciationOverride`, `LinguisticToken`, `WordTiming`                                                                                                                                                                                                                                                                                                                            |
+| Configuration             | `SynthesisConfig`, `GenerationConfig`, `LanguageRoutingConfig`, `TokenizerConfig`, `ShortSentenceConfig`, `LongTextSplitMode`                                                                                                                                                                                                                                                       |
+| Voice level               | `VoiceLevelConfig`, `VoiceLevelApplication`, `VoiceBlend`                                                                                                                                                                                                                                                                                                                           |
+| Model discovery           | `ModelCapabilities`, `ModelDiscoveryResult`, `VoiceCapabilities`, `discover_models`                                                                                                                                                                                                                                                                                                 |
+| Lexicon discovery         | `LexiconCapabilities`, `LexiconDiscoveryResult`, `discover_lexicons`                                                                                                                                                                                                                                                                                                                |
+| Asset progress            | `AssetProgressEvent`, `AssetProgressCallback`, `ConsoleAssetProgress`                                                                                                                                                                                                                                                                                                               |
+| Synthesis identity        | `SynthesisIdentity`, `build_synthesis_identity`                                                                                                                                                                                                                                                                                                                                     |
+| Errors                    | `KokoroError`, `PyKokoroError`, `SynthesisError`, `ConfigurationError`, `InvalidRequestError`, `EmptyTextError`, `InvalidLanguageError`, `InvalidVoiceError`, `InvalidModelError`, `InvalidPronunciationError`, `InvalidLinguisticTokensError`, `UnsupportedFeatureError`, `CapabilityError`, `SynthesisStateError`, `AlignmentError`, `BackendError`, `SynthesisInputTooLongError` |
+| Version                   | `__version__`, `__version_tuple__`                                                                                                                                                                                                                                                                                                                                                  |
+
+`SynthesisSegment` is an alias of `SynthesisRequest`, and `PyKokoroError` is a
+compatibility alias of `KokoroError`. `AssetProgressCallback` and `LongTextSplitMode`
+are type aliases; they describe accepted Python values rather than runtime record
+classes.
 
 ## Synthesizer
 
 ```{eval-rst}
-.. autoclass:: pykokoro.synthesizer.KokoroSynthesizer
+.. autoclass:: pykokoro.KokoroSynthesizer
    :members:
    :undoc-members:
 ```
 
-The main methods are:
+Use it as a context manager or call `close()` when finished. `synthesize()` renders one
+request, `synthesize_text()` constructs and renders one prepared string, and
+`synthesize_segments()` yields independent results in input order. `prepare()` runs the
+frontend and returns `PreparedSynthesis` (request ID, text, language, voice, phonemes,
+token IDs, alignment tokens, and diagnostics) without running ONNX inference.
 
-- `synthesize(request)` renders one `SynthesisRequest` (`SynthesisSegment` remains a
-  compatibility alias).
-- `synthesize_text(text, language=..., voice=...)` creates and renders one plain
-  prepared text request.
-- `synthesize_segments(segments)` yields independent results in input order.
-- `prepare(segment)` returns model-ready Kokoro frontend data for diagnostics and
-  advanced integrations.
-- `close()` releases the owned renderer resources.
-
-## Request and result types
+## Requests, results, and source alignment
 
 ```{eval-rst}
-.. autoclass:: pykokoro.synthesis_types.SynthesisRequest
+.. autoclass:: pykokoro.SynthesisRequest
    :members:
    :undoc-members:
 
-
-.. autoclass:: pykokoro.synthesis_types.SynthesisSegment
+.. autoclass:: pykokoro.PronunciationOverride
    :members:
    :undoc-members:
 
-.. autoclass:: pykokoro.synthesis_types.PronunciationOverride
+.. autoclass:: pykokoro.LinguisticToken
    :members:
    :undoc-members:
 
-.. autoclass:: pykokoro.synthesis_types.LinguisticToken
+.. autoclass:: pykokoro.RenderedSegment
    :members:
    :undoc-members:
 
-.. autoclass:: pykokoro.synthesis_types.RenderedSegment
-   :members:
-   :undoc-members:
-
-.. autoclass:: pykokoro.types.WordTiming
+.. autoclass:: pykokoro.WordTiming
    :members:
    :undoc-members:
 ```
 
-`SynthesisSegment` offsets are half-open Python character ranges into its exact `text`.
-`RenderedSegment.audio` is one-dimensional float32 audio, `sample_rate` is positive, and
-word timings are local to that result. `save_wav(path)` writes mono float32 WAV audio.
+`SynthesisSegment` is the supported compatibility spelling for `SynthesisRequest`.
+Request language and voice are explicit. `PronunciationOverride` and `LinguisticToken`
+offsets are half-open character ranges into the exact `text` carried by that request;
+`tokens` is the canonical `SynthesisRequest` field.
+
+`RenderedSegment` contains one request's waveform and metadata. `save_wav()` writes mono
+float32 WAV audio. `play()` uses the optional playback dependency. Results from a batch
+remain separate: this API does not join independent requests or insert silence between
+them.
 
 ## Configuration
 
 ```{eval-rst}
-.. autoclass:: pykokoro.synthesis_config.SynthesisConfig
+.. autoclass:: pykokoro.SynthesisConfig
    :members:
    :undoc-members:
 
-.. autoclass:: pykokoro.synthesis_identity.SynthesisIdentity
+.. autoclass:: pykokoro.GenerationConfig
    :members:
    :undoc-members:
 
-
-.. autoclass:: pykokoro.exceptions.SynthesisInputTooLongError
+.. autoclass:: pykokoro.LanguageRoutingConfig
    :members:
    :undoc-members:
 
-.. autoclass:: pykokoro.generation_config.GenerationConfig
+.. autoclass:: pykokoro.TokenizerConfig
    :members:
    :undoc-members:
 
-.. autoclass:: pykokoro.language_routing.LanguageRoutingConfig
-   :members:
-   :undoc-members:
-
-.. autoclass:: pykokoro.voice_level.VoiceLevelConfig
-   :members:
-   :undoc-members:
-
-.. autoclass:: pykokoro.voice_level.VoiceLevelApplication
-   :members:
-   :undoc-members:
-
-.. autoclass:: pykokoro.short_sentence_handler.ShortSentenceConfig
+.. autoclass:: pykokoro.ShortSentenceConfig
    :members:
    :undoc-members:
 ```
 
-Each call returns one `RenderedSegment`, even when a single request is internally split.
-G2P tokenization is checked against the selected model capacity. With the default
-`long_text_split="none"`, oversized input raises `SynthesisInputTooLongError`. Set
-`long_text_split="sentence"` to enable lazy PhraseSplit-based splitting only for
-oversized requests. It packs source spans into model-safe chunks, falling back from
-sentences to clauses and then safe word boundaries when needed. Chunk audio is joined
-into the one request result, while request text and source-aligned context remain
-intact. A word that cannot fit safely still raises `SynthesisInputTooLongError`.
+`LongTextSplitMode` is `"none" | "sentence"`. The default `"none"` path raises
+`SynthesisInputTooLongError` for an oversized request. `"sentence"` lazily loads
+PhraseSplit only when a request exceeds capacity, then returns one result for the
+original request. `long_text_use_spacy=False` selects PhraseSplit's simple mode without
+spaCy.
 
-`long_text_use_spacy=False` selects PhraseSplit's simple mode without spaCy. `None`
-permits a compatible local spaCy model with regex fallback; `True` requires spaCy and a
-compatible model. Separate synthesis requests still produce separate results.
-`RenderedSegment.synthesis_identity` and `voice_level_applications` expose resolved
-output identity and calibration outcomes. `GenerationConfig.speed` is the acoustic
-inference speed passed to Kokoro, not an application-level playback-rate effect.
-`SynthesisConfig.voice_level` is engine-local voice calibration rather than whole-output
-mastering.
+`GenerationConfig` controls Kokoro acoustic speed, the default language for
+`synthesize_text()`, inference random seed, and the per-request short-sentence override.
+Short-sentence handling is disabled unless explicitly enabled with `ShortSentenceConfig`
+or `GenerationConfig.enable_short_sentence`.
 
-## Voice blends and discovery
+## Voice blending and calibration
 
 ```{eval-rst}
-.. autoclass:: pykokoro.voice_manager.VoiceBlend
+.. autoclass:: pykokoro.VoiceBlend
    :members:
    :undoc-members:
 
-.. autofunction:: pykokoro.discovery.discover_models
+.. autoclass:: pykokoro.VoiceLevelConfig
+   :members:
+   :undoc-members:
 
-.. autofunction:: pykokoro.lexicon_discovery.discover_lexicons
+.. autoclass:: pykokoro.VoiceLevelApplication
+   :members:
+   :undoc-members:
 ```
 
-`discover_models()` describes runtime capabilities without initializing ONNX inference
-or downloading model weights. `discover_lexicons()` describes available named G2P
-lexicons.
+A `VoiceBlend` combines supported voice IDs for one request/model profile. Voice-level
+calibration is an engine-local option; it is not whole-program loudness mastering.
 
-## Frontend configuration and model asset progress
+## Model and lexicon discovery
 
 ```{eval-rst}
-.. autoclass:: pykokoro.tokenizer.TokenizerConfig
+.. autoclass:: pykokoro.ModelCapabilities
    :members:
    :undoc-members:
 
-.. autoclass:: pykokoro.tokenizer.EspeakConfig
+.. autoclass:: pykokoro.VoiceCapabilities
    :members:
    :undoc-members:
 
-.. autoclass:: pykokoro.asset_progress.AssetProgressEvent
+.. autoclass:: pykokoro.ModelDiscoveryResult
+   :members:
+   :undoc-members:
+
+.. autofunction:: pykokoro.discover_models
+
+.. autoclass:: pykokoro.LexiconCapabilities
+   :members:
+   :undoc-members:
+
+.. autoclass:: pykokoro.LexiconDiscoveryResult
+   :members:
+   :undoc-members:
+
+.. autofunction:: pykokoro.discover_lexicons
+```
+
+Discovery reports metadata and runtime capability without loading synthesis weights or
+creating an ONNX session. Offline discovery uses available local metadata; it does not
+install model or lexicon assets. Use the inventory to select an available
+model/language/voice rather than inferring compatibility from a voice name.
+
+## Asset progress
+
+```{eval-rst}
+.. autoclass:: pykokoro.AssetProgressEvent
+   :members:
+   :undoc-members:
+
+.. autoclass:: pykokoro.ConsoleAssetProgress
    :members:
    :undoc-members:
 ```
 
-For installation, request examples, and the breaking migration boundary, see the
-[quickstart](quickstart.md), [advanced features](advanced_features.md), and
-[release note](breaking-change-0.10.0.md).
+`AssetProgressCallback` is a callable receiving `AssetProgressEvent` values. Pass a
+callback or `ConsoleAssetProgress()` with `SynthesisConfig.asset_progress`. Progress
+notifications cover managed model assets, not lexicon data provisioning.
+
+## Synthesis identity
+
+```{eval-rst}
+.. autoclass:: pykokoro.SynthesisIdentity
+   :members:
+   :undoc-members:
+
+.. autofunction:: pykokoro.build_synthesis_identity
+```
+
+The identity captures output-affecting synthesis settings and exposes a stable cache
+key. Building identity metadata does not run inference.
+
+## Exceptions
+
+```{eval-rst}
+.. autoclass:: pykokoro.KokoroError
+   :members:
+   :undoc-members:
+
+.. autoclass:: pykokoro.SynthesisError
+   :members:
+   :undoc-members:
+
+.. autoclass:: pykokoro.ConfigurationError
+   :members:
+   :undoc-members:
+
+.. autoclass:: pykokoro.InvalidRequestError
+   :members:
+   :undoc-members:
+
+.. autoclass:: pykokoro.EmptyTextError
+   :members:
+   :undoc-members:
+
+.. autoclass:: pykokoro.InvalidLanguageError
+   :members:
+   :undoc-members:
+
+.. autoclass:: pykokoro.InvalidVoiceError
+   :members:
+   :undoc-members:
+
+.. autoclass:: pykokoro.InvalidModelError
+   :members:
+   :undoc-members:
+
+.. autoclass:: pykokoro.InvalidPronunciationError
+   :members:
+   :undoc-members:
+
+.. autoclass:: pykokoro.InvalidLinguisticTokensError
+   :members:
+   :undoc-members:
+
+.. autoclass:: pykokoro.UnsupportedFeatureError
+   :members:
+   :undoc-members:
+
+.. autoclass:: pykokoro.CapabilityError
+   :members:
+   :undoc-members:
+
+.. autoclass:: pykokoro.SynthesisStateError
+   :members:
+   :undoc-members:
+
+.. autoclass:: pykokoro.AlignmentError
+   :members:
+   :undoc-members:
+
+.. autoclass:: pykokoro.BackendError
+   :members:
+   :undoc-members:
+
+.. autoclass:: pykokoro.SynthesisInputTooLongError
+   :members:
+   :undoc-members:
+```
+
+Catch the narrow exception that an application can act on; avoid treating every failure
+as a recoverable input error. `PyKokoroError` is the retained alias for `KokoroError`.
+
+## Version
+
+`pykokoro.__version__` is the package's version string and `pykokoro.__version_tuple__`
+is its parsed tuple. The package version is generated by setuptools-scm.
+
+## Related guides
+
+- [Quickstart](quickstart.md)
+- [Configuration and request behavior](basic_usage.md)
+- [Prepared text, routing, and result metadata](advanced_features.md)
+- [Languages and model profiles](languages.md)
+- [Installation and asset progress](installation.md)

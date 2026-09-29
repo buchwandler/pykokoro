@@ -20,7 +20,7 @@ LongTextSplitMode = Literal["none", "sentence"]
 
 
 if TYPE_CHECKING:
-    from .tokenizer import EspeakConfig, TokenizerConfig
+    from .tokenizer import TokenizerConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,7 +45,6 @@ class SynthesisConfig:
 
     asset_progress: AssetProgressCallback | None = None
     tokenizer_config: TokenizerConfig | None = None
-    espeak_config: EspeakConfig | None = None
     short_sentence_config: ShortSentenceConfig | None = None
     waveform_validation: Literal["off", "warn", "strict"] = "off"
     inference_audio_diagnostics: bool = False
@@ -55,7 +54,7 @@ class SynthesisConfig:
     inference_cache_max_bytes: int = 128 * 1024 * 1024
     voice_level: VoiceLevelConfig = field(default_factory=VoiceLevelConfig)
     return_trace: bool = False
-    cache_dir: str | None = None
+    cache_dir: Path | str | None = None
     allow_experimental_frontend: bool = False
 
     def __post_init__(self) -> None:

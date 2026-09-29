@@ -1,4 +1,8 @@
-"""Discover every runnable PyKokoro voice and render one identification WAV."""
+"""Render a caller-composed all-voices showcase using model discovery.
+
+This optional repository showcase uses the root API for synthesis/discovery.
+Its calibration comparison reads the internal calibration catalog.
+"""
 
 from __future__ import annotations
 
@@ -7,6 +11,7 @@ import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import TypeAlias
 
 import numpy as np
 import soundfile as sf
@@ -17,21 +22,20 @@ try:
 except ImportError:
     from _output import artifact_path
 
-from pykokoro import SynthesisConfig
-from pykokoro.discovery import (
+from pykokoro import (
+    GenerationConfig,
+    KokoroSynthesizer,
     ModelCapabilities,
     ModelDiscoveryResult,
+    ShortSentenceConfig,
+    SynthesisConfig,
     VoiceCapabilities,
-    VoiceGender,
+    VoiceLevelConfig,
     discover_models,
 )
-from pykokoro.generation_config import GenerationConfig
-from pykokoro.short_sentence_handler import ShortSentenceConfig
-from pykokoro.voice_level import (
-    VoiceCalibrationKey,
-    VoiceLevelConfig,
-    default_voice_calibration,
-)
+from pykokoro.voice_level import VoiceCalibrationKey, default_voice_calibration
+
+VoiceGender: TypeAlias = str
 
 RUNNABLE_STATUSES = {"ready", "experimental"}
 MODEL_PRIORITY = {"v1.0": 0, "v1.1-zh": 1}
@@ -369,7 +373,6 @@ def synthesize_catalog(
     temporary = output.with_suffix(".part.wav")
     temporary.unlink(missing_ok=True)
     frames = 0
-    from pykokoro import KokoroSynthesizer
 
     try:
         with sf.SoundFile(

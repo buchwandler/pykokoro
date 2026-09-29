@@ -39,18 +39,18 @@ def main() -> None:
 
         print("\n=== Example 2: Phonemes-to-Speech ===")
         text_request = SynthesisSegment(id="english-text", text=TEXT, language=LANG, voice=VOICE)
-        phonemes = synthesizer.prepare(text_request).phonemes
+        prepared = synthesizer.prepare(text_request)
+        phonemes = prepared.phonemes
         print(f"Phonemes: {phonemes[:100]}...")
         print(f"Phoneme length: {len(phonemes)} characters")
-        phoneme_result = synthesizer.synthesize(
-            SynthesisSegment(
-                id="english-phonemes",
-                text=phonemes,
-                language=LANG,
-                voice=VOICE,
-                phonemes=phonemes,
-            )
+        phoneme_request = SynthesisSegment(
+            id="english-phonemes",
+            text=TEXT,
+            language=LANG,
+            voice=VOICE,
+            phonemes=phonemes,
         )
+        phoneme_result = synthesizer.synthesize(phoneme_request)
         output = artifact_path("english_phonemes_demo.wav")
         phoneme_result.save_wav(output)
         print(

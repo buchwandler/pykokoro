@@ -39,6 +39,21 @@ with KokoroSynthesizer(config) as synthesizer:
     rendered = synthesizer.synthesize_text("Model-selected speech.", language="en-us")
 ```
 
+## Managed asset cache location
+
+`SynthesisConfig.cache_dir` selects the OnnxVoice managed-asset cache directory and is
+forwarded to the backend at installation time. The default `None` delegates to the
+backend's normal cache. Explicit custom `model_path` or `voices_path` files continue to
+be used as given; this does not relocate caller-owned files.
+
+```python
+from pathlib import Path
+
+from pykokoro import SynthesisConfig
+
+config = SynthesisConfig(cache_dir=Path.home() / ".cache" / "pykokoro")
+```
+
 The supported combinations depend on model profiles and available artifacts. Use
 `discover_models()` to inspect runtime-ready models, languages, voices, qualities, and
 frontends without loading model weights. `model_path`, `voices_path`, and
@@ -125,3 +140,64 @@ waveform; it is not a composition API.
 
 See [advanced features](advanced_features.md) for source-aligned G2P context and
 routing.
+
+## Catch request failures
+
+The default oversized-input behavior is a typed error, not implicit splitting. Catch the
+specific error when the application wants to report, shorten, or retry a request:
+
+```python
+from pykokoro import (
+    GenerationConfig,
+    KokoroSynthesizer,
+    SynthesisConfig,
+    SynthesisInputTooLongError,
+)
+
+text = "One request that exceeds model capacity. " * 1000
+config = SynthesisConfig(generation=GenerationConfig(lang="en-us"))
+with KokoroSynthesizer(config) as synthesizer:
+    try:
+        rendered = synthesizer.synthesize_text(text, language="en-us")
+    except SynthesisInputTooLongError as exc:
+        print(f"Shorten the request or opt into sentence splitting: {exc}")
+```
+
+See [`error_handling.py`](../examples/error_handling.py) for narrow handling of
+supported language, voice, pronunciation, and length failures.
+
+## Inference cache and configuration groups
+
+`SynthesisConfig.inference_cache_enabled` and `inference_cache_max_bytes` control the
+renderer-side inference cache; the default budget is 128 MiB. Set
+`inference_cache_enabled=False` or the maximum to `0` to disable it. This is separate
+from the managed-asset `cache_dir`.
+
+```python
+from pykokoro import SynthesisConfig
+
+config = SynthesisConfig(
+    inference_cache_enabled=True,
+    inference_cache_max_bytes=64 * 1024 * 1024,
+)
+```
+
+Common `SynthesisConfig` settings can be grouped by ownership:
+
+| Concern                 | Representative settings                                              |
+| ----------------------- | -------------------------------------------------------------------- |
+| Model/profile selection | `voice`, `model_source`, `model_variant`, `model_quality`            |
+| Runtime/provider        | `provider`, `provider_options`, `session_options`                    |
+| Frontend/G2P            | `tokenizer_config`, `language_routing`                               |
+| Long text               | `long_text_split`, `long_text_use_spacy`                             |
+| Short sentences         | `short_sentence_config`, `generation.enable_short_sentence`          |
+| Diagnostics             | `return_trace`, `waveform_validation`, `inference_audio_diagnostics` |
+| Inference cache         | `inference_cache_enabled`, `inference_cache_max_bytes`               |
+| Voice level             | `voice_level`                                                        |
+| Local/custom assets     | `model_path`, `voices_path`, `model_config_path`, `cache_dir`        |
+
+`GenerationConfig` separately controls acoustic `speed`, the default language for
+`synthesize_text()`, `random_seed`, and the optional short-sentence override. For local
+or custom model paths, consult the
+[installation guide](installation.md#model-assets-and-discovery); discovery and path
+configuration do not silently provision a replacement for a supplied custom artifact.

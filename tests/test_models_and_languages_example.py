@@ -7,171 +7,71 @@ import numpy as np
 import pytest
 
 from examples import models_and_languages as showcase
+from pykokoro import ModelCapabilities, ModelDiscoveryResult, VoiceCapabilities
 
 
-class FakeDistribution:
-    def __init__(self, *qualities: str, provider: str = "github-release") -> None:
-        self.provider = provider
-        self.qualities = qualities
-
-
-class FakeModel:
-    def __init__(
-        self,
-        model_id: str,
-        *,
-        languages: tuple[str, ...] = ("en",),
-        voices: tuple[str, ...] = ("default",),
-        default_voice: str = "default",
-        distributions: tuple[FakeDistribution, ...] = (FakeDistribution("fp32"),),
-        frontend: str = "pykokoro-native-v1",
-        layout: str = "single-onnx-v1",
-        runtime_available: bool = True,
-        redistribution_allowed: bool = True,
-    ) -> None:
-        self.model_id = model_id
-        self.language_codes = languages
-        self.voices = voices
-        self.default_voice = default_voice
-        self.distributions = distributions
-        self.frontend = frontend
-        self.layout = layout
-        self.runtime_available = runtime_available
-        self.redistribution_allowed = redistribution_allowed
-
-    def distribution(self) -> FakeDistribution:
-        return self.distributions[0]
-
-
-class FakeRegistry:
-    def __init__(self, *models: FakeModel) -> None:
-        self.models = {model.model_id: model for model in models}
-
-    def model(self, model_id: str) -> FakeModel:
-        return self.models[model_id]
-
-
-def _profile(model_id: str, *, experimental: bool = False):
-    return SimpleNamespace(
+def _model(
+    model_id: str = "v1.0",
+    *,
+    languages: tuple[str, ...] = ("de-de",),
+    voices: tuple[str, ...] = ("voice-a",),
+    qualities: tuple[str, ...] = ("fp32", "q8"),
+    status: str = "ready",
+    experimental: bool = False,
+) -> ModelCapabilities:
+    return ModelCapabilities(
+        model_id=model_id,
         source="github",
-        variant=model_id,
-        frontend_experimental=experimental,
+        languages=languages,
+        voices=voices,
+        default_voice=voices[0],
+        qualities=qualities,
+        g2p_backend="kokorog2p",
+        lexicons=None,
+        frontend="kokorog2p",
+        status=status,
+        experimental=experimental,
+        runtime_available=True,
+        redistribution_allowed=True,
+        provider="github-release",
+        sample_rate=24_000,
+        max_tokens=510,
+        voice_details=(
+            VoiceCapabilities(voices[0], "female", languages[0], languages[0], "German"),
+        ),
     )
 
 
-def test_import_does_not_load_registry(monkeypatch) -> None:
-    monkeypatch.setattr(showcase, "load_registry", lambda: pytest.fail("registry loaded at import"))
-    assert Path("model_language_outputs") == showcase.OUTPUT_DIR
+def _inventory(*models: ModelCapabilities) -> ModelDiscoveryResult:
+    return ModelDiscoveryResult(tuple(models), "fixture", False)
 
 
-def test_listing_uses_all_injected_models_and_languages(capsys, monkeypatch) -> None:
-    registry = FakeRegistry(
-        FakeModel("first", languages=("en", "fr"), voices=("a", "b"), default_voice="a"),
-        FakeModel("second", languages=("de-de",), frontend="german-ipa-v1"),
-        FakeModel("unavailable", runtime_available=False),
-        FakeModel("restricted", redistribution_allowed=False),
-    )
-    monkeypatch.setattr(
-        showcase,
-        "get_registry_model_profile",
-        lambda model_id, *, registry: _profile(model_id, experimental=model_id == "second"),
-    )
-
-    showcase.list_models(registry)
+def test_listing_displays_public_model_capabilities(capsys) -> None:
+    showcase.list_models(_inventory(_model()))
     output = capsys.readouterr().out
 
-    for value in ("first", "second", "unavailable", "restricted", "en", "fr", "de-de"):
+    for value in ("v1.0", "de-de", "voice-a", "fp32", "github-release", "24000", "510"):
         assert value in output
-    assert "Provider: github-release" in output
-    assert "Default voice: a" in output
-    assert "Voices (2): a, b" in output
-    assert "Qualities: fp32" in output
-    assert "first [ready]" in output
-    assert "second [experimental]" in output
-    assert "unavailable [registry-unavailable]" in output
-    assert "restricted [restricted]" in output
 
 
-def test_unavailable_and_restricted_models_are_not_synthesized(monkeypatch, tmp_path) -> None:
-    for status, model_id in (("registry-unavailable", "unavailable"), ("restricted", "restricted")):
-        registry = FakeRegistry(FakeModel(model_id))
-        monkeypatch.setattr(
-            showcase,
-            "_status_for_model",
-            lambda model, registry, status=status: status,
-        )
-        with pytest.raises(ValueError, match=status):
-            showcase.synthesize(
-                registry,
-                model_id=model_id,
-                language=None,
-                voice=None,
-                quality=None,
-                include_experimental=False,
-                output_dir=tmp_path,
-            )
+def test_public_selection_validates_language_voice_and_quality() -> None:
+    model = _model()
+    assert showcase._choose_language(model, "de") == "de-de"
+    assert showcase._choose_voice(model, None) == "voice-a"
+    assert showcase._choose_quality(model, None) == "fp32"
+
+    with pytest.raises(ValueError, match="Language"):
+        showcase._choose_language(model, "fr")
+    with pytest.raises(ValueError, match="Voice"):
+        showcase._choose_voice(model, "missing")
+    with pytest.raises(ValueError, match="Quality"):
+        showcase._choose_quality(model, "q4")
 
 
-def test_experimental_model_requires_opt_in(monkeypatch, tmp_path) -> None:
-    registry = FakeRegistry(FakeModel("experimental"))
-    monkeypatch.setattr(showcase, "_status_for_model", lambda model, registry: "experimental")
-
-    with pytest.raises(ValueError, match="include-experimental"):
-        showcase.synthesize(
-            registry,
-            model_id="experimental",
-            language=None,
-            voice=None,
-            quality=None,
-            include_experimental=False,
-            output_dir=tmp_path,
-        )
-
-
-def test_selection_validates_language_voice_and_quality(monkeypatch, tmp_path) -> None:
-    model = FakeModel(
-        "selected",
-        languages=("de", "de-at"),
-        voices=("one", "two"),
-        default_voice="one",
-        distributions=(FakeDistribution("fp32", "q8"),),
-    )
-    registry = FakeRegistry(model)
-    monkeypatch.setattr(showcase, "_status_for_model", lambda model, registry: "ready")
-
-    for kwargs, message in (
-        ({"language": "fr"}, "Language"),
-        ({"voice": "missing"}, "Voice"),
-        ({"quality": "q4"}, "Quality"),
-    ):
-        with pytest.raises(ValueError, match=message):
-            showcase.synthesize(
-                registry,
-                model_id="selected",
-                language=kwargs.get("language"),
-                voice=kwargs.get("voice"),
-                quality=kwargs.get("quality"),
-                include_experimental=False,
-                output_dir=tmp_path,
-            )
-
-
-def test_synthesis_uses_registry_profile_and_selected_output(monkeypatch, tmp_path) -> None:
-    model = FakeModel(
-        "selected",
-        languages=("de",),
-        voices=("one", "two"),
-        default_voice="one",
-        distributions=(FakeDistribution("fp32", "q8"),),
-    )
-    registry = FakeRegistry(model)
-    fake_profile = _profile("selected")
-    monkeypatch.setattr(showcase, "_status_for_model", lambda model, registry: "ready")
-    monkeypatch.setattr(
-        showcase,
-        "get_registry_model_profile",
-        lambda model_id, *, registry: fake_profile,
-    )
+def test_synthesis_uses_discovered_public_metadata_and_output(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    model = _model()
 
     class FakeSynthesizer:
         config = None
@@ -187,28 +87,41 @@ def test_synthesis_uses_registry_profile_and_selected_output(monkeypatch, tmp_pa
 
         def synthesize_text(self, text: str, *, language: str, voice: str):
             assert text == showcase.SAMPLE_TEXTS["de"]
-            assert language == "de"
-            assert voice == "two"
-            return SimpleNamespace(audio=np.zeros(4), sample_rate=24000)
+            assert language == "de-de"
+            assert voice == "voice-a"
+            return SimpleNamespace(audio=np.zeros(4), sample_rate=24_000)
 
     writes: list[Path] = []
     monkeypatch.setattr(showcase, "KokoroSynthesizer", FakeSynthesizer)
-    monkeypatch.setattr(showcase.sf, "write", lambda path, audio, sample_rate: writes.append(path))
+    monkeypatch.setattr(showcase.sf, "write", lambda path, *args: writes.append(path))
 
     output = showcase.synthesize(
-        registry,
-        model_id="selected",
+        _inventory(model),
+        model_id=model.model_id,
         language="de",
-        voice="two",
+        voice=None,
         quality="q8",
         include_experimental=False,
         output_dir=tmp_path,
     )
 
-    assert output == tmp_path / "selected_de_two.wav"
+    assert output == tmp_path / "v1.0_de-de_voice-a.wav"
     assert writes == [output]
-    assert FakeSynthesizer.config.model_source == "github"
-    assert FakeSynthesizer.config.model_variant == "selected"
+    assert FakeSynthesizer.config.model_source == model.source
+    assert FakeSynthesizer.config.model_variant == model.model_id
     assert FakeSynthesizer.config.model_quality == "q8"
-    assert FakeSynthesizer.config.voice == "two"
-    assert FakeSynthesizer.config.generation.lang == "de"
+    assert FakeSynthesizer.config.voice == model.default_voice
+    assert FakeSynthesizer.config.generation.lang == "de-de"
+
+
+def test_experimental_model_requires_opt_in(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="experimental frontend"):
+        showcase.synthesize(
+            _inventory(_model(status="experimental", experimental=True)),
+            model_id="v1.0",
+            language=None,
+            voice=None,
+            quality=None,
+            include_experimental=False,
+            output_dir=tmp_path,
+        )

@@ -1,4 +1,4 @@
-"""Render several independent speech requests without joining their waveforms."""
+"""Render independent requests; outputs remain separate and no silence is inserted."""
 
 from __future__ import annotations
 

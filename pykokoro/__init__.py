@@ -54,7 +54,7 @@ from .synthesis_types import (
     SynthesisRequest,
     SynthesisSegment,
 )
-from .tokenizer import EspeakConfig, TokenizerConfig
+from .tokenizer import TokenizerConfig
 from .types import WordTiming
 from .voice_level import VoiceLevelApplication, VoiceLevelConfig
 from .voice_manager import VoiceBlend
@@ -157,7 +157,6 @@ __all__ = [
     "LinguisticToken",
     "WordTiming",
     "TokenizerConfig",
-    "EspeakConfig",
     "ShortSentenceConfig",
     "KokoroSynthesizer",
     "__version__",

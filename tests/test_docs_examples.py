@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import pykokoro
+from examples import run_all
 
 ROOT = Path(__file__).parents[1]
 MAINTAINED_EXAMPLES = tuple(
@@ -25,6 +26,8 @@ def test_current_docs_python_fences_parse_and_use_public_names() -> None:
         for source in PYTHON_FENCE.findall(text):
             tree = ast.parse(source, filename=str(path))
             for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom):
+                    assert not (node.module or "").startswith("pykokoro."), (path, node.module)
                 if isinstance(node, ast.ImportFrom) and node.module == "pykokoro":
                     imported = {alias.name for alias in node.names}
                     assert imported <= public_names, (path, imported - public_names)
@@ -64,3 +67,38 @@ def _import_example(path: Path) -> None:
 def test_readme_has_no_undefined_playback_helper() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "play_audio(res.audio, res.sample_rate)" not in readme
+
+
+def test_api_reference_covers_every_root_export() -> None:
+    reference = (ROOT / "docs" / "api_reference.md").read_text(encoding="utf-8")
+    missing = sorted(name for name in pykokoro.__all__ if name not in reference)
+    assert not missing
+    assert "EspeakConfig" not in reference
+
+
+def test_example_catalogs_cover_every_runnable_script() -> None:
+    expected = {
+        path.name
+        for path in (ROOT / "examples").glob("*.py")
+        if path.name not in {"__init__.py", "_output.py", "run_all.py"}
+    }
+    grouped = set().union(*run_all._GROUPS.values())
+    assert grouped == expected
+
+    catalogs = (ROOT / "docs" / "examples.md", ROOT / "examples" / "README.md")
+    for catalog_path in catalogs:
+        text = catalog_path.read_text(encoding="utf-8")
+        assert "Assets, network, and cost" in text
+        assert "Expected output" in text
+        for name in sorted(expected):
+            assert f"python examples/{name}" in text, (catalog_path, name)
+
+
+def test_example_catalogs_document_runner_group_boundaries() -> None:
+    for catalog_path in (ROOT / "docs" / "examples.md", ROOT / "examples" / "README.md"):
+        text = catalog_path.read_text(encoding="utf-8")
+        assert "--group core" in text
+        assert "--group feature" in text
+        assert "--group language-showcase" in text
+        assert "--group optional-heavy" in text
+        assert "--include-optional" in text

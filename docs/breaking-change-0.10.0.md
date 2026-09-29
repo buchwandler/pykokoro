@@ -42,6 +42,8 @@ owns provider selection and ONNX session creation.
 The new API keeps `SynthesisSegment` as an alias for `SynthesisRequest` and accepts
 `annotations` as a compatibility alias for `tokens`. These aliases do not restore the
 removed pipeline, document parsing, SSMD, planning, or composition APIs. Example:
+Current request code and maintained examples use `tokens=`; the compatibility keyword is
+retained only for existing callers.
 
 ```python
 from pykokoro import GenerationConfig, KokoroSynthesizer, SynthesisConfig
@@ -93,8 +95,9 @@ model installation, resolution, and ONNX session concerns; AudioSig supplies DSP
 primitives. PyKokoro retains request rendering, voice/model profile selection, timing
 reconstruction, and metadata-only `discover_models()` and `discover_lexicons()` APIs.
 
-The supported integration floors are KokoroG2P 0.9.9, Lexphon 0.2.3, PhraseSplit 0.3.9,
-AudioSig 0.1.4, and OnnxVoice 0.1.7. PhraseSplit remains a runtime dependency for opt-in
-long-text splitting, but neither it nor PyKokoro requires spaCy for the default simple
-path. See the [quickstart](quickstart.md), [request examples](examples.md), and
+The supported integration floors are KokoroG2P 0.9.15, Lexphon 0.2.5, PhraseSplit 0.3.9,
+AudioSig 0.1.4, and OnnxVoice 0.1.7. The bounds come from package metadata. PhraseSplit
+remains an optional-path runtime dependency for sentence splitting, but neither it nor
+PyKokoro requires spaCy for the default simple path. See the
+[quickstart](quickstart.md), [request examples](examples.md), and
 [API reference](api_reference.md) for the new boundary.

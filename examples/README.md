@@ -1,30 +1,72 @@
 # PyKokoro examples
 
-These examples use the request-centric synthesis API. Run them from the repository root
-with `pykokoro[cpu]` installed. Synthesis examples may download model assets on first
-use; outputs are written below `example-artifacts/`.
+The scripts use PyKokoro's request-centric root API. Install one ONNX Runtime provider
+(for example, `pykokoro[cpu]`) before synthesis. Uncached synthesis may download model
+assets. Direct runs write under `example-artifacts/`; the runner gives each script a
+separate `example-artifacts/<script>/` directory.
 
-## Request API examples
-
-- `simple_synthesis.py` — synthesize one prepared string and save a floating-point WAV.
-- `request_batch.py` — synthesize independent requests with per-request voices and save
-  each result separately; PyKokoro does not concatenate the results.
-- `pronunciation_overrides.py` — provide a source-aligned pronunciation-language
-  override.
-- `linguistic_annotations.py` — pass caller-owned POS/tag/lemma context without planner
-  or spaCy objects.
-- `models_and_languages.py` — inspect the model registry without loading weights, or
-  select a runnable model and synthesize a sample with it.
-- `all_voices.py` — optional, potentially slow showcase that renders independent
-  requests and performs its own caller-side WAV assembly.
-
-List or run the maintained examples:
+## Runner groups
 
 ```bash
 python examples/run_all.py --list
-python examples/run_all.py
+python examples/run_all.py --group core
+python examples/run_all.py --group feature
+python examples/run_all.py --group language-showcase
+python examples/run_all.py --group optional-heavy
 python examples/run_all.py --include-optional
 ```
 
-The runner stores each script's artifacts in its own directory. The optional all-voices
-showcase can download multiple model/voice assets and take a long time on CPU.
+`core` is the default. Feature demonstrations and language showcases do not run by
+default; optional-heavy scripts require explicit selection or `--include-optional`. The
+runner executes sequentially, isolates outputs, and continues after a failure. Listing
+does not run synthesis.
+
+## Core request examples
+
+| Script / command                                                                                            | Purpose and demonstrated API                                                                                                                                             | Assets, network, and cost                                                                                                                                                     | Expected output                                                                                                                 |
+| ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| [`simple_synthesis.py`](simple_synthesis.py)<br>`python examples/simple_synthesis.py`                       | One prepared string with `SynthesisConfig`, `KokoroSynthesizer.synthesize_text()`, and `RenderedSegment.save_wav()`.                                                     | May download one model/voice asset on first use; low CPU cost.                                                                                                                | `hello.wav`                                                                                                                     |
+| [`request_batch.py`](request_batch.py)<br>`python examples/request_batch.py`                                | Two `SynthesisSegment` values through `synthesize_segments()`. Each `RenderedSegment` stays independent; no cross-request silence is added.                              | May download assets; low-to-medium cost for two short requests.                                                                                                               | `greeting-a.wav`, `greeting-b.wav`                                                                                              |
+| [`pronunciation_overrides.py`](pronunciation_overrides.py)<br>`python examples/pronunciation_overrides.py`  | Compares a language span override and a direct-phoneme span using `PronunciationOverride`.                                                                               | May download assets; low-to-medium cost for two short requests.                                                                                                               | `language-override.wav`, `phoneme-span-override.wav`                                                                            |
+| [`linguistic_tokens.py`](linguistic_tokens.py)<br>`python examples/linguistic_tokens.py`                    | Supplies source-aligned POS/tag/lemma context with `LinguisticToken` and canonical `tokens=`.                                                                            | May download assets; low CPU cost for one request.                                                                                                                            | `contextual-pronunciation.wav`                                                                                                  |
+| [`long_text.py`](long_text.py)<br>`python examples/long_text.py`                                            | Passes the unsplit original request with `long_text_split="sentence"`; internal chunks remain one result.                                                                | May download assets; higher CPU cost for the long passage.                                                                                                                    | `long_text.wav`                                                                                                                 |
+| [`voice_blend.py`](voice_blend.py)<br>`python examples/voice_blend.py`                                      | Constructs `VoiceBlend` structurally and with `VoiceBlend.parse()`, then synthesizes a blend.                                                                            | May download selected voice/model assets; low-to-medium CPU cost.                                                                                                             | `voice_blend.wav`                                                                                                               |
+| [`result_metadata.py`](result_metadata.py)<br>`python examples/result_metadata.py`                          | Prints result metadata, token IDs, diagnostics, trace, synthesis identity, word timings, and voice-level applications.                                                   | May download assets; low CPU cost.                                                                                                                                            | `result_metadata.wav` and printed metadata                                                                                      |
+| [`models_and_languages.py`](models_and_languages.py)<br>`python examples/models_and_languages.py --offline` | Uses `discover_models()` to list profiles, languages, voices, and runtime status without ONNX inference. `--model MODEL_ID` optionally synthesizes one selected profile. | Default discovery may refresh registry metadata over the network; `--offline` uses cached metadata. No model asset download unless `--model` is supplied; low discovery cost. | Default: printed inventory. With `--model`: `<model>_<language>_<voice>.wav` under `example-artifacts/model_language_outputs/`. |
+
+## Feature examples
+
+| Script / command                                                                                                                         | Purpose and demonstrated API                                                                                                               | Assets, network, and cost                                               | Expected output                                                         |
+| ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| [`english.py`](english.py)<br>`python examples/english.py`                                                                               | Synthesizes text, inspects `prepare()` phonemes, and resubmits them as whole-request `SynthesisSegment.phonemes`.                          | May download assets; two short inferences, low-to-medium CPU cost.      | `english_demo.wav`, `english_phonemes_demo.wav`                         |
+| [`language_routing.py`](language_routing.py)<br>`python examples/language_routing.py`                                                    | Compares automatic `LanguageRoutingConfig` with an explicit deterministic `PronunciationOverride`; acoustic model and voice stay explicit. | May download assets; low-to-medium cost for two requests.               | `automatic-routing.wav`, `explicit-german-span.wav`                     |
+| [`frontend_and_lexicons.py`](frontend_and_lexicons.py)<br>`python examples/frontend_and_lexicons.py`                                     | Inspects offline `discover_lexicons()` metadata and builds an installed-only `TokenizerConfig`; no inference is run.                       | No model/lexicon asset provisioning; offline metadata lookup, low cost. | Printed lexicon inventory and configuration; no file.                   |
+| [`asset_progress.py`](asset_progress.py)<br>`python examples/asset_progress.py`<br>`python examples/asset_progress.py --custom-callback` | Uses `ConsoleAssetProgress` or a typed `AssetProgressEvent` callback for managed model downloads.                                          | May download assets; low CPU cost for one request.                      | `asset_progress.wav` plus progress events                               |
+| [`error_handling.py`](error_handling.py)<br>`python examples/error_handling.py`                                                          | Shows narrow public catches for invalid language, voice, pronunciation, and input-too-long errors.                                         | On the valid path, may download assets; low CPU cost.                   | Normally `error_handling.wav`; caught failures print a message instead. |
+
+## Language showcase
+
+These synthesis scripts are separate from the default group. First use may download
+model assets; cost is typically medium for a short passage unless noted.
+
+| Script / command                                                          | Purpose and demonstrated API                                                                       | Assets, network, and cost                                                                | Expected output                            |
+| ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------ |
+| [`chinese.py`](chinese.py)<br>`python examples/chinese.py`                | Synthesizes Mandarin with explicit `zh` and the `v1.1-zh` model variant.                           | May download Chinese model/voice assets; medium CPU cost.                                | `chinese_demo.wav`                         |
+| [`contractions.py`](contractions.py)<br>`python examples/contractions.py` | Tests contractions and past-tense endings across requests; caller code assembles the output audio. | May download assets; higher cost than one short sample.                                  | `contractions_demo.wav` (caller-assembled) |
+| [`french.py`](french.py)<br>`python examples/french.py`                   | Synthesizes a prepared French passage with an explicit French voice/language.                      | May download assets; medium CPU cost.                                                    | `french_demo.wav`                          |
+| [`italian.py`](italian.py)<br>`python examples/italian.py`                | Synthesizes a prepared Italian passage through the request engine.                                 | May download assets; medium CPU cost.                                                    | `italian_demo.wav`                         |
+| [`japanese.py`](japanese.py)<br>`python examples/japanese.py`             | Synthesizes a Japanese passage with explicit `ja` request language.                                | May download assets; medium CPU cost.                                                    | `japanese_demo.wav`                        |
+| [`korean.py`](korean.py)<br>`python examples/korean.py`                   | Demonstrates experimental Korean phonemization and a parsed `VoiceBlend`; accuracy may be limited. | Requires compatible experimental frontend/profile; may download assets; medium CPU cost. | `korean_demo.wav`                          |
+| [`portuguese.py`](portuguese.py)<br>`python examples/portuguese.py`       | Synthesizes Brazilian Portuguese with explicit voice and language.                                 | May download assets; medium CPU cost.                                                    | `portuguese_demo.wav`                      |
+| [`spanish.py`](spanish.py)<br>`python examples/spanish.py`                | Synthesizes a prepared Spanish passage through the request engine.                                 | May download assets; medium CPU cost.                                                    | `spanish_demo.wav`                         |
+
+## Optional heavy examples
+
+| Script / command                                                                                                                        | Purpose and demonstrated API                                                                                                            | Assets, network, and cost                                                                                                                                  | Expected output                                                                                         |
+| --------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| [`all_voices.py`](all_voices.py)<br>`python examples/all_voices.py --list-only` (inventory)<br>`python examples/all_voices.py` (render) | Discovers profiles, synthesizes one independent request per selected voice, and assembles a comparison WAV in caller-side example code. | Discovery may refresh metadata. Rendering can download many assets, use substantial storage, and take a long time on CPU; list-only performs no inference. | `all_voices.wav`; `--compare-leveling` also writes `all_voices_raw.wav` and `all_voices_calibrated.wav` |
+| [`short_sentence_demo.py`](short_sentence_demo.py)<br>`python examples/short_sentence_demo.py`                                          | Compares disabled, wrap, phrase, and randomized-phrase `ShortSentenceConfig` modes; joins sections in this example only.                | May download assets; high CPU cost across many short requests and four modes.                                                                              | `short_sentence_demo.wav` (caller-assembled)                                                            |
+
+This catalog includes every runnable script. `__init__.py`, `_output.py`, and
+`run_all.py` are support modules. See the [API reference](../docs/api_reference.md) for
+the complete public API.

@@ -1,38 +1,53 @@
 # Languages and model profiles
 
-Every `SynthesisSegment` supplies an explicit pronunciation language.
-`GenerationConfig.lang` can provide the default for `synthesize_text()`, but a voice
-name does not select language and PyKokoro does not inspect document headers or markup
-for it.
+Language support has two independent parts: a prepared-text G2P language supported by
+KokoroG2P, and an acoustic model/voice profile that can render the request. A language
+code being accepted for phonemization does **not** imply every model or voice supports
+it. The request language is always explicit; PyKokoro does not infer it from a voice ID,
+document headers, or text detection.
 
-## Prepared-text languages
+## Prepared-text language codes
 
-The native KokoroG2P path supports these language codes and aliases:
+The current KokoroG2P language-code contract accepts these canonical codes:
 
-- English: `en-us`, `en-gb`, and `en`
-- Spanish: `es`
-- French: `fr`, `fr-fr`
-- German: `de`
-- Italian: `it`
-- Portuguese: `pt`, `pt-pt`
-- Korean: `ko`
-- Japanese: `ja`
-- Chinese: `zh`, `cmn`
-- Arabic: `ar`
-- Hebrew: `he`
-- Kazakh: `kk`
-- Swedish: `sv`
-- Thai: `th`
-- Vietnamese: `vi`
+| Language              | Canonical code |
+| --------------------- | -------------- |
+| Arabic                | `ar`           |
+| Czech                 | `cs-cz`        |
+| German                | `de-de`        |
+| English (UK)          | `en-gb`        |
+| English (US)          | `en-us`        |
+| Spanish               | `es-es`        |
+| French                | `fr-fr`        |
+| Hebrew                | `he`           |
+| Hindi                 | `hi-in`        |
+| Italian               | `it-it`        |
+| Japanese              | `ja-jp`        |
+| Kazakh                | `kk`           |
+| Korean                | `ko-kr`        |
+| Portuguese (Brazil)   | `pt-br`        |
+| Portuguese (Portugal) | `pt-pt`        |
+| Russian               | `ru-ru`        |
+| Swedish               | `sv-se`        |
+| Thai                  | `th-th`        |
+| Vietnamese            | `vi-vn`        |
+| Chinese (Mandarin)    | `zh`           |
 
-Additional G2P languages may be available when the caller explicitly selects an
-appropriate frontend backend, for example eSpeak or Goruut. The acoustic model must
-still be compatible with the requested language and voice.
+Common shorthand aliases are normalized by KokoroG2P before routing: `en` → `en-us`,
+`es` → `es-es`, `fr` → `fr-fr`, `de` → `de-de`, `it` → `it-it`, `pt` → `pt-br`, `vi` →
+`vi-vn`, `sv` → `sv-se`, `ru` → `ru-ru`, `hi` → `hi-in`, `ko` → `ko-kr`, `ja` → `ja-jp`,
+`th` → `th-th`, and `cs` → `cs-cz`. Both `zh` and `cmn` normalize to `zh`. Prefer
+canonical values in application data so the selected language is unambiguous.
 
-## Pronunciation-language spans
+This table documents the G2P/frontend contract, not a guarantee about model artifacts. A
+frontend backend may have additional runtime requirements, such as an installed eSpeak
+NG executable. See [installation](installation.md#frontends-and-lexicons).
 
-Use source-aligned overrides when one prepared string contains pronunciation material
-that should use another language:
+## Explicit language and pronunciation spans
+
+`SynthesisSegment.language` is required and describes the request's main pronunciation
+language. A span override can select a different G2P language for a source-aligned
+range; it does not switch the acoustic model or voice:
 
 ```python
 from pykokoro import PronunciationOverride, SynthesisSegment
@@ -42,34 +57,51 @@ request = SynthesisSegment(
     text="Hello Welt.",
     language="en-us",
     voice="af_sarah",
-    pronunciation_overrides=(PronunciationOverride(6, 10, language="de"),),
+    pronunciation_overrides=(PronunciationOverride(6, 10, language="de-de"),),
 )
 ```
 
-This affects G2P for the indicated text range. It does not switch the acoustic model or
-voice. For complete multilingual utterances that need different acoustic profiles,
-submit separate requests and let the caller manage any composition.
+Offsets are half-open character ranges into the exact prepared request text. For
+complete multilingual utterances requiring different acoustic profiles, submit separate
+requests and let the caller manage any composition.
 
 ## Automatic pronunciation routing
 
-`LanguageRoutingConfig(mode="auto", languages=(...))` lets KokoroG2P consider an
-explicit candidate set while the request retains its required main language. Routing is
-optional; it is not document-language detection, voice inference, or an acoustic-model
-switch. Explicit source-aligned language information remains attached to the request.
+`LanguageRoutingConfig(mode="auto", languages=(...))` asks KokoroG2P to consider a
+bounded candidate set for prepared-text pronunciation. The request still has its
+explicit main language; routing does not detect a document's language, change the
+acoustic model, or pick a voice. Explicit source-aligned request overrides and token
+language values remain available:
 
-## Model and voice discovery
+```python
+from pykokoro import LanguageRoutingConfig, SynthesisConfig
 
-Model defaults are resolved from the request's language and selected voice. To inspect
-available profiles before synthesis, use the metadata-only discovery API:
+config = SynthesisConfig(
+    language_routing=LanguageRoutingConfig(mode="auto", languages=("en", "de")),
+)
+# Normalized candidate codes: ("en-us", "de-de")
+```
+
+See [`language_routing.py`](../examples/language_routing.py) for an automatic request
+beside a deterministic, explicitly annotated request.
+
+## Discover compatible model profiles and voices
+
+Use metadata-only discovery to check the profiles that the installed runtime can
+resolve. Do not hardcode voice compatibility from a voice name or from the G2P language
+table:
 
 ```python
 from pykokoro import discover_models
 
-for model in discover_models(offline=True).models:
-    print(model.model_id, model.languages, model.voices, model.status)
+inventory = discover_models(offline=True)
+for profile in inventory.models:
+    print(profile.model_id, profile.languages, profile.voices, profile.status)
 ```
 
-The inventory reports runtime status, voices, languages, qualities, frontend
-information, and distribution metadata without loading model weights. See the
-[model discovery example](../examples/models_and_languages.py) for optional synthesis of
-a selected model.
+Discovery does not load model weights or create an ONNX inference session. It reports
+model profile metadata (including language and voice compatibility) and runtime status;
+offline mode avoids refreshing remote metadata. The result is a capability inventory,
+not a synthesis guarantee if the required model assets are not installed or cannot be
+reached. See [`models_and_languages.py`](../examples/models_and_languages.py) for
+inventory and optional selected-model synthesis.

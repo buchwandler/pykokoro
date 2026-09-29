@@ -22,8 +22,9 @@ def main() -> None:
         text="I read the note yesterday.",
         language="en-us",
         voice="af_sarah",
-        annotations=(LinguisticToken(2, 6, text="read", pos="VERB", tag="VBD", lemma="read"),),
+        tokens=(LinguisticToken(2, 6, text="read", pos="VERB", tag="VBD", lemma="read"),),
     )
+    print(f"Source slice for token [2:6]: {request.text[2:6]!r}")
     config = SynthesisConfig(
         voice="af_sarah",
         generation=GenerationConfig(lang="en-us"),

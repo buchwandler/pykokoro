@@ -229,9 +229,7 @@ def test_synthesize_streams_audio_and_separators(
         def write(self, audio: np.ndarray) -> None:
             writes.append(np.asarray(audio))
 
-    import pykokoro
-
-    monkeypatch.setattr(pykokoro, "KokoroSynthesizer", FakeSynthesizer)
+    monkeypatch.setattr(all_voices, "KokoroSynthesizer", FakeSynthesizer)
     monkeypatch.setattr(all_voices.sf, "SoundFile", FakeSoundFile)
     output = tmp_path / "all_voices.wav"
 

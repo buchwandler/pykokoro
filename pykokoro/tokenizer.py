@@ -83,25 +83,15 @@ def _effective_lexicons(config: TokenizerConfig) -> tuple[str, ...] | None:
     return tuple(config.lexicons)
 
 
-@dataclass
-class EspeakConfig:
-    """Optional eSpeak asset paths managed by KokoroG2P."""
-
-    lib_path: str | None = None
-    data_path: str | None = None
-
-
 class Tokenizer:
     """Encode and decode phonemes using one Kokoro model vocabulary."""
 
     def __init__(
         self,
-        espeak_config: EspeakConfig | None = None,
         vocab_version: str = "v1.0",
         vocab: dict[str, int] | None = None,
         config: TokenizerConfig | None = None,
     ) -> None:
-        del espeak_config
         self.vocab_version = vocab_version
         self.config = config or TokenizerConfig()
         self._kokorog2p_model = _normalize_kokorog2p_version(vocab_version)

@@ -5,6 +5,7 @@ from pathlib import Path
 
 EXAMPLES_DIR = Path(__file__).parents[1] / "examples"
 _EXCLUDED = {"__init__.py", "_output.py", "run_all.py"}
+_DISCOVERY_ONLY = {"frontend_and_lexicons.py"}
 _RETIRED_NAMES = {"KokoroPipeline", "PipelineConfig", "build_pipeline", "AudioJob"}
 
 
@@ -18,7 +19,7 @@ def _call_name(call: ast.Call) -> str | None:
 
 def test_maintained_examples_use_the_request_engine_api() -> None:
     for path in sorted(EXAMPLES_DIR.glob("*.py")):
-        if path.name in _EXCLUDED:
+        if path.name in _EXCLUDED | _DISCOVERY_ONLY:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}

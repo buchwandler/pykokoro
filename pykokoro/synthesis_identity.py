@@ -110,7 +110,6 @@ def build_synthesis_identity(
 
     frontend_identity = {
         "tokenizer": config.tokenizer_config,
-        "espeak_configured": config.espeak_config is not None,
         "language_routing": config.language_routing,
         "allow_experimental_frontend": config.allow_experimental_frontend,
         "long_text_split": config.long_text_split,

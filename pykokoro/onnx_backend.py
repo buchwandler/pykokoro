@@ -33,7 +33,7 @@ from .config_types import (
 )
 from .exceptions import ConfigurationError
 from .model_profiles import VOICE_ALIASES, get_model_profile
-from .tokenizer import EspeakConfig, Tokenizer, TokenizerConfig
+from .tokenizer import Tokenizer, TokenizerConfig
 from .voice_level import VoiceCalibrationKey, VoiceLevelConfig
 from .voice_manager import VoiceBlend, VoiceManager
 
@@ -117,7 +117,6 @@ class Kokoro:
         session_options: Any | None = None,
         provider_options: dict[str, Any] | None = None,
         vocab_version: str = "v1.0",
-        espeak_config: EspeakConfig | None = None,
         tokenizer_config: TokenizerConfig | None = None,
         model_quality: ModelQuality | None = None,
         model_source: ModelSource = DEFAULT_MODEL_SOURCE,
@@ -128,6 +127,7 @@ class Kokoro:
         inference_cache_enabled: bool = True,
         inference_cache_max_bytes: int = 128 * 1024 * 1024,
         asset_progress: AssetProgressCallback | None = None,
+        cache_dir: str | Path | None = None,
     ) -> None:
         self._session: Any | None = None
         self._voice_manager: VoiceManager | None = None
@@ -182,6 +182,7 @@ class Kokoro:
         self._model_path = model_path
         self._voices_path = voices_path
         self._asset_progress = asset_progress
+        self._cache_dir = cache_dir
         # Voice database connection (for kokovoicelab integration)
         self._voice_db: sqlite3.Connection | None = None
 
@@ -193,7 +194,6 @@ class Kokoro:
             ).tokenizer_vocab_version
         except ValueError:
             self._vocab_version = "1.0"
-        self._espeak_config = espeak_config
         self._tokenizer_config = tokenizer_config
 
         # Short sentence handling configuration
@@ -268,7 +268,6 @@ class Kokoro:
             )
             self._tokenizer = Tokenizer(
                 config=self._tokenizer_config,
-                espeak_config=self._espeak_config,
                 vocab_version=self._vocab_version,
                 vocab=vocab,
             )
@@ -312,7 +311,7 @@ class Kokoro:
                 self._model_variant,
                 quality=str(self._model_quality),
                 source=self._model_source,
-                cache_dir=None,
+                cache_dir=self._cache_dir,
                 progress=self._asset_progress,
             )
             runtime = open_installed_kokoro(

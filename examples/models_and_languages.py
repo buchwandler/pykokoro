@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""Browse the canonical PyKokoro model registry and synthesize one model."""
+"""Discover public model/voice capabilities, then optionally synthesize one result.
+
+Discovery reads registry metadata only and never installs model assets. Unless
+``--offline`` is selected, registry metadata may be refreshed from its configured
+source. Selecting ``--model`` performs synthesis and may install model assets.
+"""
 
 from __future__ import annotations
 
 import argparse
 import re
 from pathlib import Path
-from typing import Any
 
 import soundfile as sf
 
@@ -15,18 +19,19 @@ try:
 except ImportError:
     from _output import artifact_dir
 
-from pykokoro import GenerationConfig, KokoroSynthesizer, SynthesisConfig
-from pykokoro.model_profiles import (
-    get_registry_model_profile,
-    normalize_language_code,
-    registry_support_status,
+from pykokoro import (
+    GenerationConfig,
+    KokoroSynthesizer,
+    ModelCapabilities,
+    ModelDiscoveryResult,
+    SynthesisConfig,
+    discover_models,
 )
-from pykokoro.model_registry import ModelRegistryError, load_registry
 
 OUTPUT_DIR = Path("model_language_outputs")
-
 SAMPLE_TEXTS = {
     "en": "Hello. This is PyKokoro speaking with the selected model.",
+    "de": "Hallo. Dies ist eine deutsche PyKokoro-Demonstration.",
     "es": "Hola. Esta es una demostración de PyKokoro.",
     "fr": "Bonjour. Ceci est une démonstration de PyKokoro.",
     "hi": "नमस्ते। यह PyKokoro का एक छोटा सा उदाहरण है।",
@@ -34,108 +39,93 @@ SAMPLE_TEXTS = {
     "ja": "こんにちは。これは PyKokoro の音声サンプルです。",
     "pt": "Olá. Esta é uma demonstração do PyKokoro.",
     "zh": "你好。这是 PyKokoro 的语音示例。",
-    "de": "Hallo. Dies ist eine deutsche PyKokoro-Demonstration.",
     "vi": "Xin chào. Đây là một ví dụ giọng nói của PyKokoro.",
-    "ar": "مَرْحَبًا. هٰذَا مِثَالٌ صَوْتِيٌّ لِـ PyKokoro.",
     "sv": "Hej. Det här är ett röstexempel från PyKokoro.",
     "th": "สวัสดี นี่คือตัวอย่างเสียงจาก PyKokoro",
-    "kk": "Сәлем. Бұл PyKokoro дауыс үлгісі.",
     "ru": "Привет. Это пример голоса PyKokoro.",
+    "cs": "Dobrý den. Toto je ukázka hlasu PyKokoro.",
 }
 
 
-def _status_for_model(model: Any, registry: Any) -> str:
-    status = registry_support_status(model)
-    if status == "ready":
-        profile = get_registry_model_profile(model.model_id, registry=registry)
-        if profile.frontend_experimental:
-            return "experimental"
-    return status
-
-
-def _distribution_providers(model: Any) -> str:
-    providers = sorted({distribution.provider for distribution in model.distributions})
-    return ", ".join(providers) or "none"
-
-
-def _qualities(model: Any) -> tuple[str, ...]:
-    if not model.distributions:
-        return ()
-    distribution = model.distribution() if hasattr(model, "distribution") else None
-    distributions = (distribution,) if distribution is not None else model.distributions
-    qualities = {
-        quality
-        for selected_distribution in distributions
-        for quality in selected_distribution.qualities
-        if quality is not None
-    }
-    return tuple(sorted(qualities))
-
-
-def list_models(registry: Any) -> None:
-    """Print model metadata without downloading model weights."""
-    print("PyKokoro model and language registry")
-    print("(Inventory only; model weights and voice packs are not downloaded.)")
-    for model_id, model in registry.models.items():
-        status = _status_for_model(model, registry)
-        print(f"\n{model_id} [{status}]")
-        print(f"  Languages: {', '.join(model.language_codes) or 'none'}")
-        print(f"  Provider: {_distribution_providers(model)}")
+def list_models(inventory: ModelDiscoveryResult) -> None:
+    """Print the current public model and voice inventory without installing assets."""
+    print("PyKokoro model and language capabilities")
+    print(f"Registry: {inventory.registry_source} (offline={inventory.offline})")
+    for model in inventory.models:
+        print(f"\n{model.model_id} [{model.status}] source={model.source}")
+        print(f"  Languages: {', '.join(model.languages) or 'none'}")
         print(f"  Default voice: {model.default_voice}")
-        print(f"  Voices ({len(model.voices)}): {', '.join(model.voices)}")
-        print(f"  Qualities: {', '.join(_qualities(model)) or 'none'}")
+        print(f"  Voices ({len(model.voices)}): {', '.join(model.voices) or 'none'}")
+        print(f"  Qualities: {', '.join(model.qualities) or 'none'}")
+        print(f"  Provider: {model.provider or 'unspecified'}")
         print(f"  Frontend: {model.frontend}")
-        print(f"  Runtime layout: {model.layout}")
         print(f"  Runtime available: {model.runtime_available}")
+        print(f"  Experimental: {model.experimental}")
         print(f"  Redistribution allowed: {model.redistribution_allowed}")
+        if model.sample_rate is not None:
+            print(f"  Sample rate: {model.sample_rate}")
+        if model.max_tokens is not None:
+            print(f"  Maximum tokens: {model.max_tokens}")
+        for voice in model.voice_details:
+            print(
+                f"  Voice detail: {voice.name} ({voice.language_label}, "
+                f"{voice.gender}, locale={voice.locale})"
+            )
 
 
-def _choose_language(model: Any, language: str | None) -> str:
-    declared = tuple(model.language_codes)
-    if not declared:
-        raise ValueError(f"Model {model.model_id!r} declares no language codes")
+def _choose_language(model: ModelCapabilities, language: str | None) -> str:
+    if not model.languages:
+        raise ValueError(f"Model {model.model_id!r} declares no languages")
     if language is None:
-        return declared[0]
-    normalized = normalize_language_code(language)
-    for candidate in declared:
-        if normalize_language_code(candidate) == normalized:
-            return candidate
-    available = ", ".join(declared)
-    raise ValueError(
-        f"Language {language!r} is not declared by model {model.model_id!r}. "
-        f"Available languages: {available}"
+        return model.languages[0]
+    normalized = language.casefold().replace("_", "-")
+    exact = next(
+        (
+            candidate
+            for candidate in model.languages
+            if candidate.casefold().replace("_", "-") == normalized
+        ),
+        None,
     )
+    if exact is not None:
+        return exact
+    base = normalized.split("-", 1)[0]
+    compatible = next(
+        (
+            candidate
+            for candidate in model.languages
+            if candidate.casefold().split("-", 1)[0] == base
+        ),
+        None,
+    )
+    if compatible is None:
+        raise ValueError(
+            f"Language {language!r} is not declared by model {model.model_id!r}. "
+            f"Available: {', '.join(model.languages)}"
+        )
+    return compatible
 
 
-def _choose_voice(model: Any, voice: str | None) -> str:
+def _choose_voice(model: ModelCapabilities, voice: str | None) -> str:
     selected = model.default_voice if voice is None else voice
     if selected not in model.voices:
         raise ValueError(
-            f"Voice {selected!r} is not available for model {model.model_id!r}. "
-            f"Available voices: {', '.join(model.voices)}"
+            f"Voice {selected!r} is not available for {model.model_id!r}. "
+            f"Available: {', '.join(model.voices)}"
         )
     return selected
 
 
-def _choose_quality(model: Any, quality: str | None) -> str:
-    available = _qualities(model)
-    if not available:
-        raise ValueError(f"Model {model.model_id!r} has no registry-declared qualities")
-    if quality is None:
-        return "fp32" if "fp32" in available else available[0]
-    if quality not in available:
+def _choose_quality(model: ModelCapabilities, quality: str | None) -> str:
+    if not model.qualities:
+        raise ValueError(f"Model {model.model_id!r} declares no available qualities")
+    selected = quality or ("fp32" if "fp32" in model.qualities else model.qualities[0])
+    if selected not in model.qualities:
         raise ValueError(
-            f"Quality {quality!r} is not available for model {model.model_id!r}. "
-            f"Available qualities: {', '.join(available)}"
+            f"Quality {selected!r} is not available for {model.model_id!r}. "
+            f"Available: {', '.join(model.qualities)}"
         )
-    return quality
-
-
-def _sample_text(language: str) -> str:
-    normalized = normalize_language_code(language)
-    return SAMPLE_TEXTS.get(
-        normalized, SAMPLE_TEXTS.get(normalized.split("-", 1)[0], SAMPLE_TEXTS["en"])
-    )
+    return selected
 
 
 def _safe_filename_part(value: str) -> str:
@@ -144,7 +134,7 @@ def _safe_filename_part(value: str) -> str:
 
 
 def synthesize(
-    registry: Any,
+    inventory: ModelDiscoveryResult,
     *,
     model_id: str,
     language: str | None,
@@ -153,45 +143,32 @@ def synthesize(
     include_experimental: bool,
     output_dir: Path,
 ) -> Path:
-    """Synthesize one selected, runnable registry model."""
-    model = registry.model(model_id)
-    status = _status_for_model(model, registry)
-    if status == "registry-unavailable":
-        raise ValueError(f"Model {model_id!r} is registry-unavailable and cannot be synthesized")
-    if status == "restricted":
-        raise ValueError(f"Model {model_id!r} is restricted and cannot be synthesized")
-    if status == "experimental" and not include_experimental:
-        raise ValueError(
-            f"Model {model_id!r} uses an experimental frontend; "
-            "pass --include-experimental to enable it"
-        )
-    if status != "ready" and status != "experimental":
-        raise ValueError(f"Model {model_id!r} is not runnable: {status}")
+    """Synthesize one model selected from public discovery metadata."""
+    model = next((item for item in inventory.models if item.model_id == model_id), None)
+    if model is None:
+        raise ValueError(f"Unknown model {model_id!r}")
+    if not model.runtime_available or not model.redistribution_allowed:
+        raise ValueError(f"Model {model_id!r} is not currently runnable")
+    if model.status not in {"ready", "experimental"}:
+        raise ValueError(f"Model {model_id!r} is not runnable: {model.status}")
+    if model.experimental and not include_experimental:
+        raise ValueError("This model uses an experimental frontend; pass --include-experimental")
 
     selected_language = _choose_language(model, language)
     selected_voice = _choose_voice(model, voice)
     selected_quality = _choose_quality(model, quality)
-    profile = get_registry_model_profile(model_id, registry=registry)
     config = SynthesisConfig(
-        model_source=profile.source,
-        model_variant=profile.variant,
+        model_source=model.source,
+        model_variant=model.model_id,
         model_quality=selected_quality,
         voice=selected_voice,
-        allow_experimental_frontend=profile.frontend_experimental and include_experimental,
-        generation=GenerationConfig(lang=selected_language, speed=1.0),
+        allow_experimental_frontend=model.experimental and include_experimental,
+        generation=GenerationConfig(lang=selected_language),
         return_trace=True,
     )
-
-    print(
-        f"Synthesizing {model_id} ({selected_language}, voice={selected_voice}, "
-        f"quality={selected_quality})"
-    )
+    text = SAMPLE_TEXTS.get(selected_language.casefold().split("-", 1)[0], SAMPLE_TEXTS["en"])
     with KokoroSynthesizer(config) as synthesizer:
-        result = synthesizer.synthesize_text(
-            _sample_text(selected_language),
-            language=selected_language,
-            voice=selected_voice,
-        )
+        result = synthesizer.synthesize_text(text, language=selected_language, voice=selected_voice)
     output_dir.mkdir(parents=True, exist_ok=True)
     output = output_dir / (
         f"{_safe_filename_part(model_id)}_{_safe_filename_part(selected_language)}_"
@@ -201,23 +178,30 @@ def synthesize(
     return output
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", metavar="MODEL_ID")
     parser.add_argument("--language", metavar="LANGUAGE")
     parser.add_argument("--voice", metavar="VOICE")
     parser.add_argument("--quality", metavar="QUALITY")
+    parser.add_argument("--offline", action="store_true", help="use cached discovery metadata only")
+    parser.add_argument("--refresh", action="store_true", help="refresh registry metadata")
+    parser.add_argument(
+        "--preference", choices=("auto", "github", "huggingface", "upstream"), default="auto"
+    )
     parser.add_argument("--include-experimental", action="store_true")
     parser.add_argument("--output-dir", type=Path, default=artifact_dir() / OUTPUT_DIR)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     try:
-        registry = load_registry()
+        inventory = discover_models(
+            offline=args.offline, refresh=args.refresh, preference=args.preference
+        )
         if args.model is None:
-            list_models(registry)
+            list_models(inventory)
             return 0
         output = synthesize(
-            registry,
+            inventory,
             model_id=args.model,
             language=args.language,
             voice=args.voice,
@@ -225,7 +209,7 @@ def main() -> int:
             include_experimental=args.include_experimental,
             output_dir=args.output_dir,
         )
-    except (ModelRegistryError, ValueError) as exc:
+    except (OSError, ValueError) as exc:
         parser.error(str(exc))
     else:
         print(f"Created {output}")

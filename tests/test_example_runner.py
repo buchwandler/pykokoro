@@ -6,22 +6,52 @@ import subprocess
 from examples import run_all
 
 
-def test_default_selection_contains_request_examples_and_excludes_showcase() -> None:
-    paths = run_all._example_paths()
-    names = {path.name for path in paths}
-
+def test_default_selection_is_lightweight_core_examples() -> None:
+    names = {path.name for path in run_all._example_paths()}
     assert {
         "simple_synthesis.py",
         "request_batch.py",
         "pronunciation_overrides.py",
-        "linguistic_annotations.py",
-    } <= names
+        "linguistic_tokens.py",
+        "long_text.py",
+        "voice_blend.py",
+        "result_metadata.py",
+        "models_and_languages.py",
+    } == names
     assert "all_voices.py" not in names
+    assert "short_sentence_demo.py" not in names
+    assert "french.py" not in names
 
 
-def test_optional_selection_adds_all_voices_showcase() -> None:
+def test_feature_and_language_groups_are_separate() -> None:
+    feature = {path.name for path in run_all._example_paths(group="feature")}
+    language = {path.name for path in run_all._example_paths(group="language-showcase")}
+
+    assert feature == {
+        "english.py",
+        "language_routing.py",
+        "frontend_and_lexicons.py",
+        "asset_progress.py",
+        "error_handling.py",
+    }
+    assert language == {
+        "chinese.py",
+        "contractions.py",
+        "french.py",
+        "italian.py",
+        "japanese.py",
+        "korean.py",
+        "portuguese.py",
+        "spanish.py",
+    }
+    assert "simple_synthesis.py" not in language
+
+
+def test_optional_selection_adds_heavy_showcases() -> None:
     names = {path.name for path in run_all._example_paths(include_optional=True)}
-    assert "all_voices.py" in names
+    assert {"all_voices.py", "short_sentence_demo.py"} <= names
+    explicit = {path.name for path in run_all._example_paths(group="optional-heavy")}
+    assert explicit == {"all_voices.py", "short_sentence_demo.py"}
 
 
 def test_run_examples_continues_and_reports_failures(monkeypatch, tmp_path) -> None:
@@ -55,7 +85,8 @@ def test_list_mode_does_not_run(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         run_all, "run_examples", lambda paths: (_ for _ in ()).throw(AssertionError())
     )
-    monkeypatch.setattr(run_all.sys, "argv", ["run_all.py", "--list"])
 
-    assert run_all.main() == 0
-    assert "examples/simple_synthesis.py" in capsys.readouterr().out
+    assert run_all.main(["--list"]) == 0
+    output = capsys.readouterr().out
+    assert "examples/simple_synthesis.py" in output
+    assert "all_voices.py" not in output

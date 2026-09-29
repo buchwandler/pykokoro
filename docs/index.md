@@ -13,6 +13,7 @@ quickstart
 installation
 basic_usage
 advanced_features
+short_sentence_quality
 pipeline_stages
 api_reference
 examples
@@ -24,13 +25,22 @@ changelog
 ## Engine responsibilities
 
 - KokoroG2P prepared-text integration with explicit pronunciation languages,
-  source-aligned overrides, and linguistic annotations
+  source-aligned overrides, and linguistic tokens
 - Kokoro voice, model, and style selection, including blends
 - Model token-capacity validation and opt-in sentence-level splitting for oversized
   requests, plus ONNX inference
 - Request-local timing reconstruction, waveform validation, tracing, and optional voice
   calibration
 - Independent `RenderedSegment` results and standalone WAV writing
+
+## Feature guides
+
+- [Long-text capacity, splitting, and errors](basic_usage.md#render-longer-text)
+- [Direct phonemes, language routing, VoiceBlend, and result metadata]
+  (advanced_features.md)
+- [Language codes and acoustic-profile discovery](languages.md)
+- [Frontends, installed lexicons, cache location, and asset progress](installation.md)
+- [Short-sentence configuration and modes](short_sentence_quality.md)
 
 PyKokoro does not parse SSMD or YAML, create UtterPlans or AudioJobs, compose separate
 caller requests, insert cross-request silence, or apply document-level effects. The
@@ -51,5 +61,5 @@ with KokoroSynthesizer(config) as synthesizer:
 result.save_wav("hello.wav")
 ```
 
-See the [maintained examples](../examples/README.md) for requests with pronunciation
-context, annotations, and independent batch results.
+See the [maintained examples](examples.md) for requests with pronunciation context,
+linguistic tokens, and independent batch results.

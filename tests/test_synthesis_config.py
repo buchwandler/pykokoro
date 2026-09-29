@@ -67,3 +67,11 @@ def test_model_resolution_uses_typed_error() -> None:
             SynthesisConfig(model_variant="unknown"),  # type: ignore[arg-type]
             language="en-us",
         )
+
+
+def test_cache_dir_survives_synthesis_config_resolution(tmp_path) -> None:
+    config = SynthesisConfig(cache_dir=tmp_path, voice="af_heart")
+
+    resolved = resolve_synthesis_config(config, language="en-us")
+
+    assert resolved.cache_dir == tmp_path

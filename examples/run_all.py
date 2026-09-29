@@ -1,4 +1,5 @@
-"""Run the maintained request-centric synthesis examples sequentially."""
+#!/usr/bin/env python3
+"""Run maintained PyKokoro examples by capability and cost category."""
 
 from __future__ import annotations
 
@@ -15,20 +16,44 @@ except ModuleNotFoundError:
     from _output import ARTIFACT_DIR, PROJECT_ROOT
 
 _OUTPUT_ENV = "PYKOKORO_EXAMPLE_OUTPUT_DIR"
-_DEFAULT_EXAMPLES = {
-    "linguistic_annotations.py",
-    "models_and_languages.py",
-    "pronunciation_overrides.py",
-    "request_batch.py",
-    "simple_synthesis.py",
+_GROUPS: dict[str, set[str]] = {
+    "core": {
+        "simple_synthesis.py",
+        "request_batch.py",
+        "pronunciation_overrides.py",
+        "linguistic_tokens.py",
+        "long_text.py",
+        "voice_blend.py",
+        "result_metadata.py",
+        "models_and_languages.py",
+    },
+    "feature": {
+        "english.py",
+        "language_routing.py",
+        "frontend_and_lexicons.py",
+        "asset_progress.py",
+        "error_handling.py",
+    },
+    "language-showcase": {
+        "chinese.py",
+        "contractions.py",
+        "french.py",
+        "italian.py",
+        "japanese.py",
+        "korean.py",
+        "portuguese.py",
+        "spanish.py",
+    },
+    "optional-heavy": {"all_voices.py", "short_sentence_demo.py"},
 }
-_OPTIONAL_EXAMPLES = {"all_voices.py"}
-
+_GROUP_CHOICES = tuple(_GROUPS)
 RunCommand = Callable[..., subprocess.CompletedProcess[str]]
 
 
-def _example_paths(*, include_optional: bool = False) -> list[Path]:
-    selected = _DEFAULT_EXAMPLES | (_OPTIONAL_EXAMPLES if include_optional else set())
+def _example_paths(*, group: str = "core", include_optional: bool = False) -> list[Path]:
+    selected = set(_GROUPS[group])
+    if include_optional and group != "optional-heavy":
+        selected.update(_GROUPS["optional-heavy"])
     return [
         path
         for path in sorted(PROJECT_ROOT.joinpath("examples").glob("*.py"))
@@ -68,16 +93,19 @@ def run_examples(paths: Sequence[Path], *, runner: RunCommand = subprocess.run) 
     return failures
 
 
-def main() -> int:
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--group", choices=_GROUP_CHOICES, default="core")
     parser.add_argument(
         "--list", action="store_true", help="list selected examples without running"
     )
     parser.add_argument(
-        "--include-optional", action="store_true", help="include the all-voices showcase"
+        "--include-optional",
+        action="store_true",
+        help="also include optional-heavy examples (unless that group is selected explicitly)",
     )
-    args = parser.parse_args()
-    paths = _example_paths(include_optional=args.include_optional)
+    args = parser.parse_args(argv)
+    paths = _example_paths(group=args.group, include_optional=args.include_optional)
     if args.list:
         for path in paths:
             print(_label(path))

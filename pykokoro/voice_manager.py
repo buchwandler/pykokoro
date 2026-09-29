@@ -193,13 +193,11 @@ def slerp_voices(
 
 @dataclass
 class VoiceBlend:
-    """Configuration for blending multiple voices.
+    """Configuration for blending supported Kokoro voice styles.
 
-    Args:
-        voices: List of (voice_name, weight) tuples
-        interpolation: Interpolation method - "linear" (weighted average) or
-                      "slerp" (spherical linear interpolation). SLERP requires
-                      exactly 2 voices and produces smoother transitions.
+    ``voices`` contains ``(voice_name, weight)`` pairs whose weights sum to one.
+    ``interpolation`` selects ``linear`` weighted blending or ``slerp`` spherical
+    interpolation. SLERP requires exactly two voices.
     """
 
     voices: list[tuple[str, float]]

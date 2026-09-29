@@ -238,46 +238,25 @@ class ShortSentenceTimingToken:
 
 @dataclass
 class ShortSentenceConfig:
-    """Configuration for short sentence handling using single-word context.
+    """Configure context handling for short synthesis requests.
 
-    Short or single-word phrases (< 30 phonemes) often sound robotic
-    when generated alone in most voices. E.g. "Oh!" or "One step."
-    This module improves quality by applying workarounds.
+    Short requests below ``min_phoneme_length`` may sound less natural when rendered
+    without phonetic context. This option is disabled unless explicitly supplied to
+    ``SynthesisConfig`` or enabled through ``GenerationConfig``.
 
-    Mode: phrase and randomized-phrase (default when the model exposes duration timestamps)
-    1. Add a full sentence around the phrase. "Phrase" uses a fixed
-       sentence, "Randomized-Phrase" chooses from a list for variety.
-    2. Cut out the phrase when timestamp geometry and a legal waveform boundary are available.
-    3. Retry with another surrounding phrase only when alignment or timestamps are unusable.
-    This mode works best, but can increase computation time.
-    Accuracy is voice dependent, but a less accurate voice will only
-    slow it down, not stop it from working.
-    Phrase-based modes require an ONNX duration/timestamp output. When the
-    implicit default is used with a model that lacks timestamps, the runtime
-    selects `wrap`. An explicitly requested phrase mode also falls back to
-    `wrap` and emits a warning.
+    The built-in modes are:
 
-    Mode: Wrap
-    1. Add phoneme pretext around the phrase. (e.g. "—" or "…")
-    This mode is faster and still an improvement over no short-sentence handling.
+    * ``wrap`` adds phoneme pretext around the request and does not require timestamps.
+    * ``phrase`` adds a surrounding phrase and cuts the target using model timing data.
+    * ``randomized-phrase`` chooses from varied phrases before cutting the target.
 
-    Attributes:
-        min_phoneme_length: Threshold below which sentences are
-            considered "short" based on token count and will use
-            context extraction. Default: 30 (decent for most voices).
-            Set as low as you can without having garbled or stretched
-            short phrases with your voice.
-        phoneme_pretext: Phoneme(s) to add before and after the target word
-            when generating combined audio for context. Default: "—".
-        enabled: Whether short sentence handling is enabled. Default: True.
-        resolve_mode: Resolve mode to apply to all short sentences. Default:
-            "randomized-phrase".
-        phrase_fallback_tries: Number of alternate phrase templates to
-            try when alignment or timestamp geometry is unusable,
-            before falling back to wrap mode. Default: 1
-            Higher=more robust and possibly slower for less-accurate
-            voices, Lower=falls back to wrap mode quicker.
+    Phrase modes can require more inference work. They need duration/timestamp output;
+    when unavailable, the renderer falls back to ``wrap``.
 
+    Configuration fields include ``min_phoneme_length`` (default 30), ``enabled``
+    (default true), ``resolve_mode`` (default ``randomized-phrase``), ``phoneme_pretext``
+    (default em dash), ``phrase_fallback_tries`` (default 1), and the mode/template
+    configuration in ``resolve_modes`` and ``phrase_catalog``.
     """
 
     min_phoneme_length: int = 30

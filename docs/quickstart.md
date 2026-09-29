@@ -61,7 +61,7 @@ request = SynthesisSegment(
     language="en-us",
     voice="af_bella",
     pronunciation_overrides=(PronunciationOverride(6, 10, language="de"),),
-    annotations=(LinguisticToken(0, 5, text="Hello", pos="INTJ"),),
+    tokens=(LinguisticToken(0, 5, text="Hello", pos="INTJ"),),
 )
 config = SynthesisConfig(
     voice="af_bella",
@@ -97,10 +97,25 @@ The order and IDs are preserved. Each item is a separate waveform; PyKokoro does
 concatenate them or insert silence between requests. The caller decides whether and how
 to compose the resulting audio.
 
-## Next steps
+## Where next?
 
 - [Installation and model providers](installation.md)
 - [Basic request and configuration patterns](basic_usage.md)
 - [Pronunciation context, routing, and calibration](advanced_features.md)
 - [Public API reference](api_reference.md)
 - [Breaking change and migration note](breaking-change-0.10.0.md)
+- [Language codes and supported model profiles](languages.md)
+- [Frontends, lexicons, asset progress, and cache installation](installation.md)
+- [Maintained categorized examples](examples.md)
+
+- Need long text? → [basic usage](basic_usage.md#render-longer-text)
+- Need pronunciation control? → [advanced features](advanced_features.md)
+- Need a model/voice? → [language profiles](languages.md) and the
+  [discovery example](../examples/models_and_languages.py)
+- Need diagnostics? →
+  [advanced features](advanced_features.md#result-metadata-and-errors) and the
+  [result metadata example](../examples/result_metadata.py)
+
+`SynthesisInputTooLongError` is the expected default outcome for an oversized request;
+enable sentence splitting explicitly or catch the typed error and decide how the caller
+should continue.

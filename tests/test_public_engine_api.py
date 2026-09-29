@@ -73,7 +73,6 @@ def test_public_api_exports_request_and_result_types() -> None:
         "LinguisticToken",
         "WordTiming",
         "TokenizerConfig",
-        "EspeakConfig",
         "ShortSentenceConfig",
         "KokoroSynthesizer",
         "__version__",
@@ -122,6 +121,7 @@ def test_document_and_composition_apis_are_not_kept_as_aliases() -> None:
         "VoiceCalibrationKey",
         "VoiceLevelCalibration",
         "resolve_synthesis_config",
+        "EspeakConfig",
     }
     assert removed_names.isdisjoint(pykokoro.__all__)
     assert all(not hasattr(pykokoro, name) for name in removed_names)
@@ -161,3 +161,9 @@ def test_rendered_segment_owns_one_mono_result() -> None:
     )
     assert result.audio.shape == (4,)
     assert result.id == "request-1"
+
+
+def test_every_root_public_export_resolves() -> None:
+    assert all(getattr(pykokoro, name) is not None for name in pykokoro.__all__)
+    assert pykokoro.SynthesisSegment is pykokoro.SynthesisRequest
+    assert pykokoro.PyKokoroError is pykokoro.KokoroError

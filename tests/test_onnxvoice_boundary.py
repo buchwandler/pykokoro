@@ -16,6 +16,39 @@ def test_normalize_kokoro_ref() -> None:
     assert boundary.normalize_kokoro_ref("v1.0") == "kokoro:v1.0"
     assert boundary.normalize_kokoro_ref("kokoro:v1.0") == "kokoro:v1.0"
 
+
+def test_backend_forwards_cache_dir_to_managed_install(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import pykokoro.onnx_backend as onnx_backend
+
+    class InstallReached(Exception):
+        pass
+
+    calls: list[dict[str, object]] = []
+
+    def install(*args: object, **kwargs: object) -> object:
+        calls.append(kwargs)
+        raise InstallReached
+
+    monkeypatch.setattr(onnx_backend, "install_kokoro_model", install)
+    backend = object.__new__(onnx_backend.Kokoro)
+    backend._runtime = None
+    backend._audio_generator = None
+    backend._provider = None
+    backend._use_gpu = False
+    backend._model_variant = "v1.0"
+    backend._model_source = "github"
+    backend._model_quality = "fp32"
+    backend._model_path = None
+    backend._voices_path = None
+    backend._cache_dir = tmp_path
+    backend._asset_progress = None
+
+    with pytest.raises(InstallReached):
+        backend._init_kokoro_locked()
+
+    assert calls[0]["cache_dir"] == tmp_path
     with pytest.raises(ConfigurationError, match="Not a Kokoro"):
         boundary.normalize_kokoro_ref("piper:en_US")
 

@@ -76,6 +76,23 @@ def _config(**kwargs: Any) -> SynthesisConfig:
     )
 
 
+def test_backend_factory_forwards_cache_dir(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    import pykokoro.onnx_backend as onnx_backend
+
+    captured: dict[str, Any] = {}
+
+    class Backend:
+        def __init__(self, **kwargs: Any) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr(onnx_backend, "Kokoro", Backend)
+    renderer = OnnxRequestRenderer(FakeG2PAdapter())
+
+    renderer._create_backend(_config(cache_dir=tmp_path))
+
+    assert captured["cache_dir"] == tmp_path
+
+
 def test_renderer_keeps_one_request_independent_and_rebases_timings() -> None:
     adapter = FakeG2PAdapter()
     backend = FakeBackend()
