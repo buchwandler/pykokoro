@@ -95,9 +95,10 @@ model installation, resolution, and ONNX session concerns; AudioSig supplies DSP
 primitives. PyKokoro retains request rendering, voice/model profile selection, timing
 reconstruction, and metadata-only `discover_models()` and `discover_lexicons()` APIs.
 
-The supported integration floors are KokoroG2P 0.9.15, Lexphon 0.2.5, PhraseSplit 0.3.9,
-AudioSig 0.1.4, and OnnxVoice 0.1.7. The bounds come from package metadata. PhraseSplit
-remains an optional-path runtime dependency for sentence splitting, but neither it nor
-PyKokoro requires spaCy for the default simple path. See the
-[quickstart](quickstart.md), [request examples](examples.md), and
-[API reference](api_reference.md) for the new boundary.
+For PyKokoro 0.10.0, the integration floors were KokoroG2P 0.9.15, Lexphon 0.2.5,
+PhraseSplit 0.3.9, AudioSig 0.1.4, and OnnxVoice 0.1.7. Current supported dependency
+bounds are defined by `pyproject.toml`. PhraseSplit remains an optional-path runtime
+dependency for sentence splitting, but neither it nor PyKokoro requires spaCy for the
+default simple path. See the [quickstart](quickstart.md),
+[request examples](examples.md), and [API reference](api_reference.md) for the new
+boundary.
