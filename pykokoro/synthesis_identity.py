@@ -13,6 +13,7 @@ from .reference_voice import ReferenceVoice
 from .synthesis_config import SynthesisConfig
 from .voice_level import default_voice_calibration
 from .voice_manager import VoiceBlend
+from .voice_pack import KokoroVoicePack
 
 
 def _identity_value(value: Any) -> Any:
@@ -83,7 +84,7 @@ def build_synthesis_identity(
     config: SynthesisConfig,
     *,
     language: str,
-    voice: str | VoiceBlend | ReferenceVoice | None,
+    voice: str | VoiceBlend | KokoroVoicePack | ReferenceVoice | None,
 ) -> SynthesisIdentity:
     """Build a stable identity from resolved settings that can affect output."""
     from . import __version__
@@ -91,6 +92,8 @@ def build_synthesis_identity(
 
     if isinstance(voice, ReferenceVoice):
         voice_identity = f"reference:{voice.fingerprint}"
+    elif isinstance(voice, KokoroVoicePack):
+        voice_identity = f"voicepack:{voice.fingerprint}"
     elif isinstance(voice, VoiceBlend):
         voice_identity = _canonical_json(
             {"voices": voice.voices, "interpolation": voice.interpolation}

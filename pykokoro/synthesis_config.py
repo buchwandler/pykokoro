@@ -22,6 +22,7 @@ from .reference_voice import ReferenceVoice
 from .short_sentence_handler import ShortSentenceConfig
 from .voice_level import VoiceLevelConfig
 from .voice_manager import VoiceBlend
+from .voice_pack import KokoroVoicePack
 
 LongTextSplitMode = Literal["none", "sentence"]
 
@@ -34,7 +35,7 @@ if TYPE_CHECKING:
 class SynthesisConfig:
     """Model, frontend, and inference settings for Kokoro speech synthesis."""
 
-    voice: str | VoiceBlend | ReferenceVoice | None = None
+    voice: str | VoiceBlend | KokoroVoicePack | ReferenceVoice | None = None
     generation: GenerationConfig = field(default_factory=GenerationConfig)
     language_routing: LanguageRoutingConfig | None = None
 
@@ -66,9 +67,11 @@ class SynthesisConfig:
     allow_experimental_frontend: bool = False
 
     def __post_init__(self) -> None:
-        if self.voice is not None and not isinstance(self.voice, (str, VoiceBlend, ReferenceVoice)):
+        if self.voice is not None and not isinstance(
+            self.voice, (str, VoiceBlend, KokoroVoicePack, ReferenceVoice)
+        ):
             raise InvalidVoiceError(
-                "voice must be a voice name, VoiceBlend, ReferenceVoice, or None"
+                "voice must be a voice name, VoiceBlend, KokoroVoicePack, ReferenceVoice, or None"
             )
         if isinstance(self.voice, str) and not self.voice.strip():
             raise InvalidVoiceError("voice must be non-empty when supplied")
@@ -253,7 +256,7 @@ def resolve_synthesis_config(
     config: SynthesisConfig,
     *,
     language: str,
-    voice: str | VoiceBlend | ReferenceVoice | None = None,
+    voice: str | VoiceBlend | KokoroVoicePack | ReferenceVoice | None = None,
     reference_enrollment: bool = False,
 ) -> SynthesisConfig:
     """Resolve one request's explicit language and voice to a concrete Kokoro profile."""
@@ -268,12 +271,12 @@ def resolve_synthesis_config(
     language = normalize_language_code(language)
     effective_voice = voice if voice is not None else config.voice
     if (
-        isinstance(effective_voice, ReferenceVoice)
+        isinstance(effective_voice, (ReferenceVoice, KokoroVoicePack))
         and config.voice_level.mode == "calibrated"
         and config.voice_level.gain_db is None
     ):
         raise ConfigurationError(
-            "automatic voice-level calibration is unavailable for reference voices"
+            "automatic voice-level calibration is unavailable for reference voices or voice packs"
         )
     source = config.model_source
     variant = config.model_variant
@@ -335,6 +338,8 @@ def resolve_synthesis_config(
             raise InvalidLanguageError(
                 f"Reference voice model {variant!r} does not support language {language!r}"
             )
+    elif isinstance(effective_voice, KokoroVoicePack) and profile.voice_mode != "static":
+        raise InvalidModelError("KokoroVoicePack requires a static Kokoro model")
     elif profile.voice_mode == "reference" and not reference_enrollment:
         raise InvalidVoiceError(
             "This model requires a ReferenceVoice. Enroll a reference voice before synthesis."

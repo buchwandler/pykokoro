@@ -61,6 +61,7 @@ def _model(
     source: str = "github",
     voice_mode: str = "static",
     layout: str = "single-onnx-v1",
+    voice_enrollers: list[dict] | None = None,
 ) -> dict:
     return {
         "runtime": {
@@ -72,6 +73,7 @@ def _model(
             "voice_mode": voice_mode,
             "sample_rate": 24000,
             "max_tokens": 510,
+            "voice_enrollers": voice_enrollers or [],
         },
         "runtime_available": runtime_available,
         "redistribution_allowed": redistribution_allowed,
@@ -115,6 +117,17 @@ def _registry() -> ModelRegistry:
                     languages=["de"],
                     voices=["df_anna"],
                     default_voice="df_anna",
+                    voice_enrollers=[
+                        {
+                            "id": "inno-v0.2",
+                            "kind": "zero-shot-tuner",
+                            "transcript_required": False,
+                            "min_seconds": 3.0,
+                            "max_seconds": 30.0,
+                            "recommended_seconds": 10.0,
+                            "output_format": "kokoro-voicepack-v1",
+                        }
+                    ],
                 ),
                 "de-thorsten": _model(
                     "de-thorsten",

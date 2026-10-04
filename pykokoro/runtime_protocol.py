@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, Protocol
 
 import numpy as np
@@ -11,6 +11,16 @@ import numpy as np
 class KokoroInferenceRuntime(Protocol):
     @property
     def sample_rate(self) -> int: ...
+
+    def enroll_voice(
+        self,
+        audio: np.ndarray,
+        *,
+        sample_rate: int,
+        enroller: str,
+        options: Mapping[str, Any] | None = None,
+        name: str | None = None,
+    ) -> Any: ...
 
     def prepare_reference(
         self,

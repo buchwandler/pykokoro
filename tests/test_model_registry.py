@@ -520,6 +520,45 @@ def _reference_registry() -> dict:
     }
 
 
+def test_registry_parses_voice_enroller_capability() -> None:
+    data = _registry()
+    data["models"]["v1.0"]["runtime"]["voice_enrollers"] = [
+        {
+            "id": "inno-v0.2",
+            "kind": "zero-shot-tuner",
+            "transcript_required": False,
+            "min_seconds": 3.0,
+            "max_seconds": 30.0,
+            "recommended_seconds": 10.0,
+            "output_format": "kokoro-voicepack-v1",
+        }
+    ]
+
+    _validate_registry(data)
+    model = ModelRegistry(data, "fixture").model("v1.0")
+
+    assert model.voice_enrollers[0].id == "inno-v0.2"
+    assert model.voice_enrollers[0].transcript_required is False
+    assert model.voice_enrollers[0].min_seconds == 3.0
+
+
+def test_registry_rejects_invalid_voice_enroller_capability() -> None:
+    data = _registry()
+    data["models"]["v1.0"]["runtime"]["voice_enrollers"] = [
+        {
+            "id": "inno-v0.2",
+            "kind": "zero-shot-tuner",
+            "transcript_required": False,
+            "min_seconds": 30.0,
+            "max_seconds": 3.0,
+            "output_format": "kokoro-voicepack-v1",
+        }
+    ]
+
+    with pytest.raises(ModelRegistryError, match="voice enroller metadata"):
+        _validate_registry(data)
+
+
 def test_reference_registry_allows_empty_voices_and_no_voice_artifact() -> None:
     data = _reference_registry()
 

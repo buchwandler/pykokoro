@@ -8,7 +8,9 @@ from pykokoro import (
     AssetProgressEvent,
     ConsoleAssetProgress,
     GenerationConfig,
+    InnoEnrollmentOptions,
     KokoroSynthesizer,
+    KokoroVoicePack,
     LexiconCapabilities,
     LexiconDiscoveryResult,
     ModelCapabilities,
@@ -18,6 +20,8 @@ from pykokoro import (
     SynthesisConfig,
     SynthesisSegment,
     VoiceCapabilities,
+    VoiceEnrollerSpec,
+    VoiceEnrollmentEngine,
     discover_lexicons,
     discover_models,
 )
@@ -34,12 +38,24 @@ reference_voice = ReferenceVoice(
 reference_request = SynthesisSegment("reference-1", "Hello.", "en-us", voice=reference_voice)
 reference_config = SynthesisConfig(voice=reference_voice)
 
+voice_pack = KokoroVoicePack.from_array(np.zeros((510, 1, 256), dtype=np.float32))
+voice_pack_request = SynthesisSegment("voice-pack-1", "Hello.", "en-us", voice=voice_pack)
+voice_pack_config = SynthesisConfig(voice=voice_pack)
+inno_options = InnoEnrollmentOptions(fmax=8_000.0)
+inno_enroller = VoiceEnrollerSpec(
+    "inno-v0.2", "zero-shot-tuner", False, 3.0, 30.0, 10.0, "kokoro-voicepack-v1"
+)
+engine: VoiceEnrollmentEngine = "inno"
+enrolled_voice = KokoroSynthesizer().enroll_voice("reference.wav", engine=engine)
 assert_type(AssetProgressCallback, type[AssetProgressCallback])
 assert_type(AssetProgressEvent, type[AssetProgressEvent])
 assert_type(ConsoleAssetProgress, type[ConsoleAssetProgress])
 assert_type(ModelCapabilities, type[ModelCapabilities])
 assert_type(ModelDiscoveryResult, type[ModelDiscoveryResult])
 assert_type(VoiceCapabilities, type[VoiceCapabilities])
+assert_type(VoiceEnrollerSpec, type[VoiceEnrollerSpec])
+assert_type(KokoroVoicePack, type[KokoroVoicePack])
+assert_type(InnoEnrollmentOptions, type[InnoEnrollmentOptions])
 model_discoverer: Callable[..., ModelDiscoveryResult] = discover_models
 assert_type(model_discoverer, Callable[..., ModelDiscoveryResult])
 assert_type(LexiconCapabilities, type[LexiconCapabilities])
@@ -52,5 +68,11 @@ assert_type(SynthesisConfig, type[SynthesisConfig])
 assert_type(ReferenceVoice, type[ReferenceVoice])
 assert_type(reference_request, SynthesisSegment)
 assert_type(reference_config, SynthesisConfig)
+assert_type(voice_pack, KokoroVoicePack)
+assert_type(voice_pack_request, SynthesisSegment)
+assert_type(voice_pack_config, SynthesisConfig)
+assert_type(inno_options, InnoEnrollmentOptions)
+assert_type(inno_enroller, VoiceEnrollerSpec)
+assert_type(enrolled_voice, KokoroVoicePack | ReferenceVoice)
 assert_type(request, SynthesisSegment)
 assert_type(config, SynthesisConfig)

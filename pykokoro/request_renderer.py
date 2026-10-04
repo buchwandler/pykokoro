@@ -22,12 +22,11 @@ from .reference_audio import PreparedReferenceAudio
 from .reference_voice import ReferenceVoice
 from .synthesis_config import SynthesisConfig, resolve_synthesis_config
 from .synthesis_identity import build_synthesis_identity
-from .synthesis_types import (
-    RenderedSegment,
-    SynthesisSegment,
-)
+from .synthesis_types import RenderedSegment, SynthesisSegment
 from .types import PhonemeSegment, Trace, WordTiming
+from .voice_enrollment import InnoEnrollmentOptions
 from .voice_level import resolve_voice_level_application
+from .voice_pack import KokoroVoicePack
 
 
 class _RequestG2PAdapter(Protocol):
@@ -76,7 +75,10 @@ class OnnxRequestRenderer:
         voice = resolved.voice
         voice_name = voice if isinstance(voice, str) else None
         reference_voice = voice if isinstance(voice, ReferenceVoice) else None
+        voice_pack = voice if isinstance(voice, KokoroVoicePack) else None
         rendered_voice = voice_name
+        if voice_pack is not None:
+            rendered_voice = f"voicepack:{voice_pack.fingerprint}"
         if reference_voice is not None:
             rendered_voice = f"reference:{reference_voice.fingerprint}"
             if resolved.generation.speed != 1.0:
@@ -89,7 +91,7 @@ class OnnxRequestRenderer:
                     "model_variant": resolved.model_variant,
                     "model_quality": resolved.model_quality,
                     "synthesis_identity": identity.to_dict(),
-                    "voice": voice_name,
+                    "voice": rendered_voice,
                 }
             )
             if reference_voice is not None:
@@ -98,6 +100,10 @@ class OnnxRequestRenderer:
                         "voice_mode": "reference",
                         "reference_fingerprint": reference_voice.fingerprint,
                     }
+                )
+            if voice_pack is not None:
+                trace.model.update(
+                    {"voice_mode": "static", "voicepack_fingerprint": voice_pack.fingerprint}
                 )
             trace.warnings.extend(prepared.diagnostics)
 
@@ -112,6 +118,8 @@ class OnnxRequestRenderer:
         backend = self._get_backend(resolved)
         if reference_voice is not None:
             voice_style = None
+        elif voice_pack is not None:
+            voice_style = voice_pack.data
         else:
             try:
                 voice_style = backend.resolve_voice_style(voice)
@@ -227,6 +235,31 @@ class OnnxRequestRenderer:
             synthesis_identity=identity,
             voice_level_applications=voice_level_applications,
             short_sentence_mode=short_sentence_mode,
+        )
+
+    def enroll_inno_voice(
+        self,
+        audio: PreparedReferenceAudio,
+        config: SynthesisConfig,
+        *,
+        enroller: str,
+        language: str,
+        options: InnoEnrollmentOptions,
+        name: str | None,
+    ) -> KokoroVoicePack:
+        resolved = resolve_synthesis_config(config, language=language)
+        profile = get_model_profile(
+            resolved.model_variant or "v1.0", resolved.model_source or "github"
+        )
+        if profile.voice_mode != "static":
+            raise InvalidVoiceError("Inno enrollment requires a static Kokoro model")
+        backend = self._get_backend(resolved)
+        return backend.enroll_voice(
+            audio.mono_audio,
+            sample_rate=audio.original_sample_rate,
+            enroller=enroller,
+            options=options.to_runtime_options(),
+            name=name,
         )
 
     def enroll_voice(

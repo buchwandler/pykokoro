@@ -7,10 +7,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from .config_types import ModelSource, ModelVariant
+from .exceptions import InvalidModelError, UnsupportedFeatureError
 
+if TYPE_CHECKING:
+    from .model_registry import VoiceEnrollerSpec
 VocabularySource = Literal["builtin-v1.0", "downloaded-config", "downloaded-release"]
 
 G2PBackend = Literal["kokorog2p", "espeak", "goruut"]
@@ -463,6 +466,36 @@ def registry_support_status(model: Any) -> str:
     if not model.redistribution_allowed:
         return "restricted"
     return "ready"
+
+
+def resolve_voice_enroller(
+    model_id: str | None,
+    enroller_id: str,
+    *,
+    registry: Any | None = None,
+) -> tuple[str, VoiceEnrollerSpec]:
+    """Resolve an enroller-capable model, defaulting Inno enrollment to Kokoro v1.0."""
+    from .model_registry import ModelRegistryError, RegistryClient
+
+    selected_model_id = model_id
+    if selected_model_id is None and enroller_id == "inno-v0.2":
+        selected_model_id = "v1.0"
+    if selected_model_id is None:
+        raise InvalidModelError(
+            f"No default model is configured for voice enroller {enroller_id!r}"
+        )
+
+    catalog = registry if registry is not None else RegistryClient().load()
+    try:
+        model = catalog.model(selected_model_id)
+    except ModelRegistryError as exc:
+        raise InvalidModelError(f"Unknown enrollment model {selected_model_id!r}") from exc
+    spec = next((item for item in model.voice_enrollers if item.id == enroller_id), None)
+    if spec is None:
+        raise UnsupportedFeatureError(
+            f"Model {selected_model_id!r} does not support voice enroller {enroller_id!r}"
+        )
+    return selected_model_id, spec
 
 
 def get_registry_model_profile(

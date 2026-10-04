@@ -7,7 +7,10 @@ parsing, speech planning, and composition between requests remain caller-owned.
 ```python
 from pykokoro import (
     GenerationConfig,
+    InnoEnrollmentOptions,
+    KokoroVoicePack,
     ReferenceVoice,
+    VoiceEnrollerSpec,
     KokoroSynthesizer,
     SynthesisConfig,
     SynthesisRequest,
@@ -22,8 +25,8 @@ from pykokoro import (
 | Source context and timing | `PronunciationOverride`, `LinguisticToken`, `WordTiming`                                                                                                                                                                                                                                                                                                                            |
 | Configuration             | `SynthesisConfig`, `GenerationConfig`, `LanguageRoutingConfig`, `TokenizerConfig`, `ShortSentenceConfig`, `LongTextSplitMode`                                                                                                                                                                                                                                                       |
 | Voice level               | `VoiceLevelConfig`, `VoiceLevelApplication`, `VoiceBlend`                                                                                                                                                                                                                                                                                                                           |
-| Reference voice           | `ReferenceVoice`, `KokoroSynthesizer.enroll_voice()`                                                                                                                                                                                                                                                                                                                                |
-| Model discovery           | `ModelCapabilities`, `ModelDiscoveryResult`, `VoiceCapabilities`, `discover_models`                                                                                                                                                                                                                                                                                                 |
+| Voice enrollment          | `KokoroVoicePack`, `ReferenceVoice`, `InnoEnrollmentOptions`, `KokoroSynthesizer.enroll_voice()`                                                                                                                                                                                                                                                                                    |
+| Model discovery           | `ModelCapabilities`, `ModelDiscoveryResult`, `VoiceCapabilities`, `VoiceEnrollerSpec`, `discover_models`                                                                                                                                                                                                                                                                            |
 | Lexicon discovery         | `LexiconCapabilities`, `LexiconDiscoveryResult`, `discover_lexicons`                                                                                                                                                                                                                                                                                                                |
 | Asset progress            | `AssetProgressEvent`, `AssetProgressCallback`, `ConsoleAssetProgress`                                                                                                                                                                                                                                                                                                               |
 | Synthesis identity        | `SynthesisIdentity`, `build_synthesis_identity`                                                                                                                                                                                                                                                                                                                                     |
@@ -31,9 +34,9 @@ from pykokoro import (
 | Version                   | `__version__`, `__version_tuple__`                                                                                                                                                                                                                                                                                                                                                  |
 
 `SynthesisSegment` is an alias of `SynthesisRequest`, and `PyKokoroError` is a
-compatibility alias of `KokoroError`. `AssetProgressCallback` and `LongTextSplitMode`
-are type aliases; they describe accepted Python values rather than runtime record
-classes.
+compatibility alias of `KokoroError`. `AssetProgressCallback`, `LongTextSplitMode`,
+`VoiceConditioning`, and `VoiceEnrollmentEngine` are type aliases; they describe
+accepted Python values rather than runtime record classes.
 
 ## Synthesizer
 
@@ -107,19 +110,32 @@ them.
    :undoc-members:
 ```
 
-## Reference voice cloning
+## Voice enrollment and packs
 
 ```{eval-rst}
+.. autoclass:: pykokoro.KokoroVoicePack
+   :members:
+   :undoc-members:
+
+.. autoclass:: pykokoro.InnoEnrollmentOptions
+   :members:
+   :undoc-members:
+
 .. autoclass:: pykokoro.ReferenceVoice
    :members:
    :undoc-members:
 ```
 
-`KokoroSynthesizer.enroll_voice()` accepts English reference audio and its exact
-transcript. The resulting state is bound to one cloning model build and can be saved
-with `save()` and reloaded with `ReferenceVoice.load()`. See the
-[reference voice guide](reference_voice.md) for audio limits, fixed-speed behavior,
-privacy, and permissions.
+`KokoroSynthesizer.enroll_voice()` defaults to `engine="inno"`. It accepts reference
+audio without a transcript and returns a portable `KokoroVoicePack` for ordinary static
+Kokoro synthesis. The versioned NPZ save/load format is pickle-free. Inno enrollment
+requires a runtime-supported `inno-v0.2` model capability. `VoiceEnrollerSpec` discovery
+metadata reports its requirements and output format without loading model weights.
+
+AkinVox remains a separate, explicit path. Use `engine="akinvox"` and provide the exact
+transcript to return a model-bound `ReferenceVoice`. The voice pack and reference state
+are not interchangeable. See the [voice enrollment guide](reference_voice.md) for engine
+requirements, audio limits, persistence, calibration limitations, privacy, and examples.
 
 `LongTextSplitMode` is `"none" | "sentence"`. The default `"none"` path raises
 `SynthesisInputTooLongError` for an oversized request. `"sentence"` lazily loads
@@ -162,6 +178,10 @@ calibration is an engine-local option; it is not whole-program loudness masterin
    :members:
    :undoc-members:
 
+.. autoclass:: pykokoro.VoiceEnrollerSpec
+   :members:
+   :undoc-members:
+
 .. autoclass:: pykokoro.ModelDiscoveryResult
    :members:
    :undoc-members:
@@ -179,10 +199,11 @@ calibration is an engine-local option; it is not whole-program loudness masterin
 .. autofunction:: pykokoro.discover_lexicons
 ```
 
-Discovery reports metadata and runtime capability without loading synthesis weights or
-creating an ONNX session. Offline discovery uses available local metadata; it does not
-install model or lexicon assets. Use the inventory to select an available
-model/language/voice rather than inferring compatibility from a voice name.
+Discovery reports metadata and runtime capability, including `VoiceEnrollerSpec`,
+without loading synthesis weights or creating an ONNX session. Offline discovery uses
+available local metadata; it does not install model or lexicon assets. Use the inventory
+to select an available model/language/voice rather than inferring compatibility from a
+voice name.
 
 ## Asset progress
 

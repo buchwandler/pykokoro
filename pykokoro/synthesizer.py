@@ -20,13 +20,19 @@ from .exceptions import (
     PyKokoroError,
     SynthesisStateError,
 )
-from .model_profiles import normalize_language_code
+from .model_profiles import normalize_language_code, resolve_voice_enroller
 from .prepared_g2p import PreparedG2PAdapter, PreparedSynthesis
 from .reference_audio import PreparedReferenceAudio, prepare_reference_audio
 from .reference_voice import ReferenceVoice
 from .synthesis_config import SynthesisConfig, resolve_synthesis_config
-from .synthesis_types import RenderedSegment, SynthesisRequest, SynthesisSegment
-from .voice_manager import VoiceBlend
+from .synthesis_types import (
+    RenderedSegment,
+    SynthesisRequest,
+    SynthesisSegment,
+    VoiceConditioning,
+)
+from .voice_enrollment import InnoEnrollmentOptions, VoiceEnrollmentEngine
+from .voice_pack import KokoroVoicePack
 
 
 class _RequestRenderer(Protocol):
@@ -45,6 +51,17 @@ class _RequestRenderer(Protocol):
         name: str | None,
         reference_text_sha256: str,
     ) -> ReferenceVoice: ...
+
+    def enroll_inno_voice(
+        self,
+        audio: PreparedReferenceAudio,
+        config: SynthesisConfig,
+        *,
+        enroller: str,
+        language: str,
+        options: InnoEnrollmentOptions,
+        name: str | None,
+    ) -> KokoroVoicePack: ...
 
 
 class KokoroSynthesizer:
@@ -107,7 +124,7 @@ class KokoroSynthesizer:
         text: str,
         *,
         language: str | None = None,
-        voice: str | VoiceBlend | ReferenceVoice | None = None,
+        voice: VoiceConditioning = None,
     ) -> RenderedSegment:
         """Synthesize one already-prepared string without document parsing."""
         effective_language = language if language is not None else self.config.generation.lang
@@ -125,21 +142,56 @@ class KokoroSynthesizer:
     def enroll_voice(
         self,
         reference_audio: str | Path | np.ndarray,
-        reference_text: str,
+        reference_text: str | None = None,
         *,
+        engine: VoiceEnrollmentEngine = "inno",
         sample_rate: int | None = None,
         language: str = "en",
         name: str | None = None,
-    ) -> ReferenceVoice:
-        """Enroll an English reference recording for model-bound synthesis."""
+        options: InnoEnrollmentOptions | None = None,
+    ) -> KokoroVoicePack | ReferenceVoice:
+        """Enroll a static voice pack or an AkinVox reference-conditioned voice."""
         self._ensure_open()
+        if engine not in ("inno", "akinvox"):
+            raise InvalidRequestError("engine must be 'inno' or 'akinvox'")
+        if not isinstance(language, str) or not language.strip():
+            raise InvalidLanguageError("a supported enrollment language is required")
+        normalized_language = normalize_language_code(language)
+
+        if engine == "inno":
+            if reference_text is not None:
+                raise InvalidRequestError("reference_text must be omitted for Inno enrollment")
+            if options is not None and not isinstance(options, InnoEnrollmentOptions):
+                raise InvalidRequestError("Inno options must be an InnoEnrollmentOptions instance")
+            audio = prepare_reference_audio(reference_audio, sample_rate=sample_rate)
+            model_variant, enroller = resolve_voice_enroller(self.config.model_variant, "inno-v0.2")
+            if enroller.transcript_required:
+                raise InvalidRequestError(
+                    "the selected Inno enroller unexpectedly requires a transcript"
+                )
+            config = replace(self.config, model_variant=model_variant, voice=None)
+            try:
+                return self._renderer.enroll_inno_voice(
+                    audio,
+                    config,
+                    language=normalized_language,
+                    enroller=enroller.id,
+                    options=options or InnoEnrollmentOptions(),
+                    name=name,
+                )
+            except PyKokoroError:
+                raise
+            except Exception as exc:
+                raise BackendError("Kokoro Inno voice enrollment failed") from exc
+
+        if options is not None:
+            raise InvalidRequestError("options are only supported for Inno enrollment")
         if not isinstance(reference_text, str) or not reference_text.strip():
             raise EmptyTextError("reference_text must be non-empty and match the reference speech")
-        if not isinstance(language, str) or not language.strip():
-            raise InvalidLanguageError("a supported English enrollment language is required")
-        normalized_language = normalize_language_code(language)
         if normalized_language not in {"en", "en-us"}:
-            raise InvalidLanguageError("reference voice enrollment currently supports English only")
+            raise InvalidLanguageError(
+                "AkinVox reference enrollment currently supports English only"
+            )
 
         audio = prepare_reference_audio(reference_audio, sample_rate=sample_rate)
         config = self.config
@@ -163,7 +215,7 @@ class KokoroSynthesizer:
         except PyKokoroError:
             raise
         except Exception as exc:
-            raise BackendError("Kokoro reference enrollment failed") from exc
+            raise BackendError("Kokoro AkinVox reference enrollment failed") from exc
 
     def synthesize_segments(
         self, segments: Iterable[SynthesisSegment]

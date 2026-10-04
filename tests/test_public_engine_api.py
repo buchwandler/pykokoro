@@ -9,7 +9,9 @@ import numpy as np
 import pykokoro
 from pykokoro import (
     GenerationConfig,
+    InnoEnrollmentOptions,
     KokoroSynthesizer,
+    KokoroVoicePack,
     LanguageRoutingConfig,
     LinguisticToken,
     LongTextSplitMode,
@@ -22,6 +24,9 @@ from pykokoro import (
     SynthesisRequest,
     SynthesisSegment,
     VoiceBlend,
+    VoiceConditioning,
+    VoiceEnrollerSpec,
+    VoiceEnrollmentEngine,
     VoiceLevelApplication,
     VoiceLevelConfig,
     build_synthesis_identity,
@@ -36,6 +41,7 @@ def test_public_api_exports_request_and_result_types() -> None:
         "ConsoleAssetProgress",
         "ModelCapabilities",
         "ModelDiscoveryResult",
+        "VoiceEnrollerSpec",
         "VoiceCapabilities",
         "discover_models",
         "LexiconCapabilities",
@@ -68,6 +74,10 @@ def test_public_api_exports_request_and_result_types() -> None:
         "VoiceLevelApplication",
         "VoiceBlend",
         "SynthesisSegment",
+        "KokoroVoicePack",
+        "InnoEnrollmentOptions",
+        "VoiceEnrollmentEngine",
+        "VoiceConditioning",
         "SynthesisRequest",
         "RenderedSegment",
         "PronunciationOverride",
@@ -101,6 +111,11 @@ def test_public_api_exports_request_and_result_types() -> None:
             ReferenceVoice,
             LinguisticToken,
             VoiceBlend,
+            InnoEnrollmentOptions,
+            KokoroVoicePack,
+            VoiceConditioning,
+            VoiceEnrollmentEngine,
+            VoiceEnrollerSpec,
         )
     )
 

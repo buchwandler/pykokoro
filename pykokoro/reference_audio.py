@@ -25,6 +25,7 @@ _MAX_CLIPPED_FRACTION = 0.001
 class PreparedReferenceAudio:
     """Canonical audio arrays and non-content metadata for voice enrollment."""
 
+    mono_audio: np.ndarray
     audio_24k: np.ndarray
     audio_16k: np.ndarray
     original_sample_rate: int
@@ -79,6 +80,7 @@ def prepare_reference_audio(
 
     return PreparedReferenceAudio(
         audio_24k=audio_24k,
+        mono_audio=mono,
         audio_16k=audio_16k,
         original_sample_rate=original_sample_rate,
         duration_seconds=duration_seconds,

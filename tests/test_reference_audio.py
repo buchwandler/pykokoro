@@ -25,6 +25,7 @@ def test_prepare_reference_audio_reads_wav_and_downmixes_stereo(tmp_path: Path) 
     prepared = prepare_reference_audio(path)
 
     assert prepared.original_sample_rate == 24_000
+    np.testing.assert_allclose(prepared.mono_audio, mono * 0.75, atol=1.0e-6)
     assert prepared.duration_seconds == pytest.approx(3.5, abs=1 / 24_000)
     np.testing.assert_allclose(prepared.audio_24k, mono * 0.75, atol=1.0e-6)
     assert prepared.audio_16k.shape == (round(prepared.audio_24k.size * 2 / 3),)

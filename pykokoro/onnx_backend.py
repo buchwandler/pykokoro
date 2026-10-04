@@ -416,6 +416,30 @@ class Kokoro:
         if profile.voice_mode == "reference":
             raise ConfigurationError(message)
 
+    def enroll_voice(
+        self,
+        audio: np.ndarray,
+        *,
+        sample_rate: int,
+        enroller: str,
+        options: Mapping[str, Any] | None = None,
+        name: str | None = None,
+    ) -> Any:
+        """Run a static Kokoro voice enroller through the runtime boundary."""
+        profile = get_model_profile(self._model_variant, self._model_source)
+        if profile.voice_mode != "static":
+            raise ConfigurationError("Voice-pack enrollment requires a static Kokoro model")
+        self._init_kokoro()
+        if self._runtime is None:
+            raise ConfigurationError("Voice enrollment runtime is not initialized")
+        return self._runtime.enroll_voice(
+            audio,
+            sample_rate=sample_rate,
+            enroller=enroller,
+            options=options,
+            name=name,
+        )
+
     def prepare_reference_voice(
         self,
         reference_token_ids: Sequence[int],

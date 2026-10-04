@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import numpy as np
+
 import pykokoro
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.synthesis_config import SynthesisConfig, resolve_synthesis_config
 from pykokoro.synthesis_identity import SynthesisIdentity, build_synthesis_identity
+from pykokoro.voice_pack import KokoroVoicePack
 
 
 def _identity(config: SynthesisConfig | None = None) -> SynthesisIdentity:
@@ -46,3 +49,22 @@ def test_synthesis_identity_does_not_include_transient_model_paths(tmp_path) -> 
     second = _identity(SynthesisConfig(model_path=tmp_path / "two.onnx"))
 
     assert first.cache_key == second.cache_key
+
+
+def test_voice_pack_identity_uses_its_precomputed_fingerprint() -> None:
+    first = KokoroVoicePack.from_array(
+        np.zeros((510, 1, 256), dtype=np.float32), engine="inno-v0.2"
+    )
+    changed = np.zeros((510, 1, 256), dtype=np.float32)
+    changed[0, 0, 0] = 1
+    second = KokoroVoicePack.from_array(changed, engine="inno-v0.2")
+
+    resolved = resolve_synthesis_config(SynthesisConfig(voice=first), language="en-us")
+    identity = build_synthesis_identity(resolved, language="en-us", voice=resolved.voice)
+    second_resolved = resolve_synthesis_config(SynthesisConfig(voice=second), language="en-us")
+    second_identity = build_synthesis_identity(
+        second_resolved, language="en-us", voice=second_resolved.voice
+    )
+
+    assert identity.voice == f"voicepack:{first.fingerprint}"
+    assert identity.cache_key != second_identity.cache_key

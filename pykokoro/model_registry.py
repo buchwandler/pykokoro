@@ -69,6 +69,67 @@ ArtifactPhaseProgress = Callable[[str], None]
 
 
 @dataclass(frozen=True, slots=True)
+class VoiceEnrollerSpec:
+    id: str
+    kind: str
+    transcript_required: bool
+    min_seconds: float
+    max_seconds: float
+    recommended_seconds: float | None
+    output_format: str
+
+
+def _voice_enroller_specs(
+    runtime: Mapping[str, Any], model_id: str
+) -> tuple[VoiceEnrollerSpec, ...]:
+    raw_specs = runtime.get("voice_enrollers", [])
+    if not isinstance(raw_specs, list):
+        raise ModelRegistryError(f"Model {model_id} has invalid voice enrollers")
+    specs: list[VoiceEnrollerSpec] = []
+    seen_ids: set[str] = set()
+    for raw in raw_specs:
+        if not isinstance(raw, Mapping):
+            raise ModelRegistryError(f"Model {model_id} has invalid voice enroller metadata")
+        enroller_id = raw.get("id")
+        kind = raw.get("kind")
+        output_format = raw.get("output_format")
+        transcript_required = raw.get("transcript_required")
+        minimum = raw.get("min_seconds")
+        maximum = raw.get("max_seconds")
+        recommended = raw.get("recommended_seconds")
+        if (
+            not isinstance(enroller_id, str)
+            or not enroller_id.strip()
+            or enroller_id in seen_ids
+            or not isinstance(kind, str)
+            or not kind.strip()
+            or not isinstance(output_format, str)
+            or not output_format.strip()
+            or not isinstance(transcript_required, bool)
+            or type(minimum) not in (int, float)
+            or type(maximum) not in (int, float)
+            or minimum < 0
+            or maximum <= minimum
+            or (recommended is not None and type(recommended) not in (int, float))
+            or (recommended is not None and not minimum <= recommended <= maximum)
+        ):
+            raise ModelRegistryError(f"Model {model_id} has invalid voice enroller metadata")
+        seen_ids.add(enroller_id)
+        specs.append(
+            VoiceEnrollerSpec(
+                id=enroller_id,
+                kind=kind,
+                transcript_required=transcript_required,
+                min_seconds=float(minimum),
+                max_seconds=float(maximum),
+                recommended_seconds=float(recommended) if recommended is not None else None,
+                output_format=output_format,
+            )
+        )
+    return tuple(specs)
+
+
+@dataclass(frozen=True, slots=True)
 class RuntimeDistribution:
     id: str
     provider: str
@@ -140,6 +201,10 @@ class RuntimeModel:
     @property
     def voice_mode(self) -> str:
         return str(self.runtime.get("voice_mode", "static"))
+
+    @property
+    def voice_enrollers(self) -> tuple[VoiceEnrollerSpec, ...]:
+        return _voice_enroller_specs(self.runtime, self.model_id)
 
     @property
     def runtime_available(self) -> bool:
@@ -378,6 +443,7 @@ def _validate_registry(data: Mapping[str, Any]) -> None:
         if not isinstance(runtime, dict):
             raise ModelRegistryError(f"Model {model_id} has invalid runtime metadata")
         voice_mode = runtime.get("voice_mode", "static")
+        _voice_enroller_specs(runtime, model_id)
         if voice_mode not in ("static", "reference"):
             raise ModelRegistryError(f"Model {model_id} has unknown voice mode: {voice_mode!r}")
         voices = runtime.get("voices")

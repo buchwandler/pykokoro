@@ -772,6 +772,39 @@ class KokoroRuntimeAdapter:
             )
         self._closed = False
 
+    def enroll_voice(
+        self,
+        audio: np.ndarray,
+        *,
+        sample_rate: int,
+        enroller: str,
+        options: Mapping[str, Any] | None = None,
+        name: str | None = None,
+    ) -> Any:
+        if self._closed:
+            raise RuntimeError("Kokoro runtime is closed")
+        enroll = getattr(self._runtime, "enroll_voice", None)
+        if not callable(enroll):
+            raise ConfigurationError("OnnxVoice runtime does not support voice enrollment")
+        result = _call(
+            "enroll",
+            lambda: enroll(
+                audio,
+                sample_rate=sample_rate,
+                enroller=enroller,
+                options=options,
+            ),
+        )
+        from .voice_pack import KokoroVoicePack
+
+        data = result if isinstance(result, np.ndarray) else getattr(result, "data", result)
+        metadata = getattr(result, "metadata", {})
+        if not isinstance(metadata, Mapping):
+            metadata = {}
+        return KokoroVoicePack.from_array(
+            np.asarray(data), name=name, engine=enroller, metadata=metadata
+        )
+
     def prepare_reference(
         self,
         reference_token_ids: Sequence[int],

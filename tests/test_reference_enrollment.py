@@ -77,7 +77,7 @@ def test_enroll_voice_uses_exact_transcript_and_selects_cloning_profile() -> Non
     transcript = 'Dr. Smith said, "Don\'t leave yet, um."'
 
     voice = synthesizer.enroll_voice(
-        tone(), transcript, sample_rate=24_000, language="en-US", name="speaker"
+        tone(), transcript, engine="akinvox", sample_rate=24_000, language="en-US", name="speaker"
     )
 
     request = g2p.requests[0]
@@ -104,7 +104,7 @@ def test_enroll_voice_reads_wav_without_normalizing_transcript(tmp_path: Path) -
     synthesizer = KokoroSynthesizer(g2p=g2p, renderer=renderer)
     transcript = "  Hello, exactly as spoken.  "
 
-    voice = synthesizer.enroll_voice(path, transcript)
+    voice = synthesizer.enroll_voice(path, transcript, engine="akinvox")
 
     assert g2p.requests[0].text == transcript
     assert (
@@ -119,9 +119,11 @@ def test_enroll_voice_rejects_empty_transcript_and_non_english() -> None:
     synthesizer = KokoroSynthesizer(g2p=FakeG2P(), renderer=FakeRenderer())
 
     with pytest.raises(EmptyTextError, match="reference_text"):
-        synthesizer.enroll_voice(tone(), "  ", sample_rate=24_000)
+        synthesizer.enroll_voice(tone(), "  ", engine="akinvox", sample_rate=24_000)
     with pytest.raises(InvalidLanguageError, match="English only"):
-        synthesizer.enroll_voice(tone(), "Hello.", sample_rate=24_000, language="de")
+        synthesizer.enroll_voice(
+            tone(), "Hello.", engine="akinvox", sample_rate=24_000, language="de"
+        )
 
 
 def test_onnx_request_renderer_bridges_prepared_reference_to_backend() -> None:

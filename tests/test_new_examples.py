@@ -210,7 +210,7 @@ def test_reference_voice_example_reloads_saved_state_before_synthesis(
         "enroll",
         tmp_path / "reference.wav",
         "Exact reference transcript.",
-        {"language": "en-us", "name": "speaker"},
+        {"engine": "akinvox", "language": "en-us", "name": "speaker"},
     )
     assert calls[1] == ("synthesize", "New target text.", "en-us", voice.fingerprint)
     assert output_path.read_bytes() == b"fake wav"

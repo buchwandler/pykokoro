@@ -19,6 +19,9 @@ from .exceptions import (
 )
 from .reference_voice import ReferenceVoice
 from .voice_manager import VoiceBlend
+from .voice_pack import KokoroVoicePack
+
+VoiceConditioning = str | VoiceBlend | KokoroVoicePack | ReferenceVoice | None
 
 if TYPE_CHECKING:
     from .synthesis_identity import SynthesisIdentity
@@ -117,7 +120,7 @@ class SynthesisRequest:
     id: str
     text: str
     language: str
-    voice: str | VoiceBlend | ReferenceVoice | None
+    voice: VoiceConditioning
     pronunciation_overrides: tuple[PronunciationOverride, ...]
     tokens: tuple[LinguisticToken, ...]
     phonemes: str | None
@@ -127,7 +130,7 @@ class SynthesisRequest:
         id: str,
         text: str,
         language: str,
-        voice: str | VoiceBlend | ReferenceVoice | None = None,
+        voice: VoiceConditioning = None,
         pronunciation_overrides: tuple[PronunciationOverride, ...]
         | list[PronunciationOverride] = (),
         annotations: tuple[LinguisticToken, ...] | list[LinguisticToken] | None = None,
@@ -164,9 +167,11 @@ class SynthesisRequest:
                 "synthesis text must contain at least one non-whitespace character"
             )
         object.__setattr__(self, "language", _normalize_language(self.language, "language"))
-        if self.voice is not None and not isinstance(self.voice, (str, VoiceBlend, ReferenceVoice)):
+        if self.voice is not None and not isinstance(
+            self.voice, (str, VoiceBlend, KokoroVoicePack, ReferenceVoice)
+        ):
             raise InvalidVoiceError(
-                "voice must be a voice name, VoiceBlend, ReferenceVoice, or None"
+                "voice must be a voice name, VoiceBlend, KokoroVoicePack, ReferenceVoice, or None"
             )
         if isinstance(self.voice, str) and not self.voice.strip():
             raise InvalidVoiceError("voice must be non-empty when supplied")

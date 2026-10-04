@@ -14,6 +14,7 @@ if TYPE_CHECKING:
         ModelCapabilities,
         ModelDiscoveryResult,
         VoiceCapabilities,
+        VoiceEnrollerSpec,
         discover_models,
     )
     from .lexicon_discovery import (
@@ -54,11 +55,14 @@ from .synthesis_types import (
     RenderedSegment,
     SynthesisRequest,
     SynthesisSegment,
+    VoiceConditioning,
 )
 from .tokenizer import TokenizerConfig
 from .types import WordTiming
+from .voice_enrollment import InnoEnrollmentOptions, VoiceEnrollmentEngine
 from .voice_level import VoiceLevelApplication, VoiceLevelConfig
 from .voice_manager import VoiceBlend
+from .voice_pack import KokoroVoicePack
 
 try:
     from ._version import __version__, __version_tuple__
@@ -79,6 +83,7 @@ def __getattr__(name: str) -> Any:
     if name in {
         "ModelCapabilities",
         "ModelDiscoveryResult",
+        "VoiceEnrollerSpec",
         "VoiceCapabilities",
         "discover_models",
     }:
@@ -86,12 +91,14 @@ def __getattr__(name: str) -> Any:
             ModelCapabilities,
             ModelDiscoveryResult,
             VoiceCapabilities,
+            VoiceEnrollerSpec,
             discover_models,
         )
 
         return {
             "ModelCapabilities": ModelCapabilities,
             "ModelDiscoveryResult": ModelDiscoveryResult,
+            "VoiceEnrollerSpec": VoiceEnrollerSpec,
             "VoiceCapabilities": VoiceCapabilities,
             "discover_models": discover_models,
         }[name]
@@ -120,6 +127,7 @@ __all__ = [
     "ConsoleAssetProgress",
     "ModelCapabilities",
     "ModelDiscoveryResult",
+    "VoiceEnrollerSpec",
     "VoiceCapabilities",
     "discover_models",
     "LexiconCapabilities",
@@ -151,12 +159,16 @@ __all__ = [
     "VoiceLevelConfig",
     "VoiceLevelApplication",
     "VoiceBlend",
+    "KokoroVoicePack",
+    "InnoEnrollmentOptions",
+    "VoiceEnrollmentEngine",
     "ReferenceVoice",
     "SynthesisRequest",
     "SynthesisSegment",
     "RenderedSegment",
     "PronunciationOverride",
     "LinguisticToken",
+    "VoiceConditioning",
     "WordTiming",
     "TokenizerConfig",
     "ShortSentenceConfig",

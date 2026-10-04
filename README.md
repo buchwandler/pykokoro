@@ -134,7 +134,7 @@ dependency. Install `espeak-ng` when selecting an eSpeak frontend or fallback.
 - [Basic usage, request reuse, cache configuration, and typed errors](docs/basic_usage.md)
 - [Pronunciation tokens, language routing, VoiceBlend, calibration, and result metadata]
   (docs/advanced_features.md)
-- [English reference voice cloning](docs/reference_voice.md)
+- [Voice enrollment with Inno packs and AkinVox cloning](docs/reference_voice.md)
 - [Language codes and model-profile discovery](docs/languages.md)
 - [Frontend, lexicon, asset-progress, and provider setup](docs/installation.md)
 - [Local/custom model artifacts and migration from pre-v0.10](docs/installation.md) and
@@ -146,7 +146,7 @@ dependency. Install `espeak-ng` when selecting an eSpeak frontend or fallback.
 - [Quickstart](docs/quickstart.md)
 - [Request API and advanced usage](docs/advanced_features.md)
 - [API reference](docs/api_reference.md)
-- [English reference voice cloning](docs/reference_voice.md)
+- [Voice enrollment with Inno packs and AkinVox cloning](docs/reference_voice.md)
 - [Language and model profiles](docs/languages.md)
 - [Maintained examples](examples/README.md)
 - [Breaking change and migration note for v0.10.0](docs/breaking-change-0.10.0.md)

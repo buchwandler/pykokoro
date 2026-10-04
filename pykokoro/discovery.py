@@ -17,6 +17,7 @@ from .model_registry import (
     RegistryClient,
     RuntimeDistribution,
     RuntimeModel,
+    VoiceEnrollerSpec,
     distribution_source,
 )
 
@@ -60,6 +61,12 @@ class ModelCapabilities:
     voice_mode: str = "static"
     supports_reference_enrollment: bool = False
     speed_supported: bool = True
+
+    voice_enrollers: tuple[VoiceEnrollerSpec, ...] = ()
+
+    @property
+    def supports_voice_enrollment(self) -> bool:
+        return self.supports_reference_enrollment or bool(self.voice_enrollers)
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,6 +192,7 @@ def _capabilities_for_model(
         voice_mode=voice_mode,
         supports_reference_enrollment=voice_mode == "reference",
         speed_supported=speed_supported,
+        voice_enrollers=model.voice_enrollers,
     )
 
 
@@ -211,6 +219,7 @@ def _source_for_model(model: RuntimeModel, distribution: RuntimeDistribution | N
 __all__ = [
     "ModelCapabilities",
     "ModelDiscoveryResult",
+    "VoiceEnrollerSpec",
     "VoiceCapabilities",
     "discover_models",
 ]

@@ -30,6 +30,7 @@ def run(
         enrolled = synthesizer.enroll_voice(
             reference_audio,
             reference_text,
+            engine="akinvox",
             language="en-us",
             name="speaker",
         )
