@@ -1,0 +1,2270 @@
+ README.md                              |   4 +-
+ docs/api_reference.md                  |  51 +++++---
+ docs/reference_voice.md                | 109 ++++++++++++----
+ examples/reference_voice.py            |   1 +
+ pykokoro/__init__.py                   |  12 ++
+ pykokoro/_onnxvoice.py                 |  33 +++++
+ pykokoro/discovery.py                  |   9 ++
+ pykokoro/model_profiles.py             |  35 +++++-
+ pykokoro/model_registry.py             |  66 ++++++++++
+ pykokoro/onnx_backend.py               |  24 ++++
+ pykokoro/reference_audio.py            |   2 +
+ pykokoro/request_renderer.py           |  43 ++++++-
+ pykokoro/runtime_protocol.py           |  12 +-
+ pykokoro/synthesis_config.py           |  17 ++-
+ pykokoro/synthesis_identity.py         |   5 +-
+ pykokoro/synthesis_types.py            |  13 +-
+ pykokoro/synthesizer.py                |  76 ++++++++++--
+ pykokoro/voice_enrollment.py           |  32 +++++
+ pykokoro/voice_pack.py                 | 221 +++++++++++++++++++++++++++++++++
+ tests/test_inno_enrollment.py          | 213 +++++++++++++++++++++++++++++++
+ tests/test_inno_synthesis.py           | 147 ++++++++++++++++++++++
+ tests/test_model_discovery.py          |  13 ++
+ tests/test_model_registry.py           |  39 ++++++
+ tests/test_new_examples.py             |   2 +-
+ tests/test_public_engine_api.py        |  15 +++
+ tests/test_reference_audio.py          |   1 +
+ tests/test_reference_enrollment.py     |  10 +-
+ tests/test_synthesis_identity.py       |  22 ++++
+ tests/test_voice_enroller_discovery.py | 119 ++++++++++++++++++
+ tests/test_voice_pack.py               | 114 +++++++++++++++++
+ tests/typecheck/public_api.py          |  22 ++++
+ 31 files changed, 1404 insertions(+), 78 deletions(-)
+
+diff --git a/README.md b/README.md
+index 528a527..1e1d438 100644
+--- a/README.md
++++ b/README.md
+@@ -134,7 +134,7 @@ dependency. Install `espeak-ng` when selecting an eSpeak frontend or fallback.
+ - [Basic usage, request reuse, cache configuration, and typed errors](docs/basic_usage.md)
+ - [Pronunciation tokens, language routing, VoiceBlend, calibration, and result metadata]
+   (docs/advanced_features.md)
+-- [English reference voice cloning](docs/reference_voice.md)
++- [Voice enrollment with Inno packs and AkinVox cloning](docs/reference_voice.md)
+ - [Language codes and model-profile discovery](docs/languages.md)
+ - [Frontend, lexicon, asset-progress, and provider setup](docs/installation.md)
+ - [Local/custom model artifacts and migration from pre-v0.10](docs/installation.md) and
+@@ -146,7 +146,7 @@ dependency. Install `espeak-ng` when selecting an eSpeak frontend or fallback.
+ - [Quickstart](docs/quickstart.md)
+ - [Request API and advanced usage](docs/advanced_features.md)
+ - [API reference](docs/api_reference.md)
+-- [English reference voice cloning](docs/reference_voice.md)
++- [Voice enrollment with Inno packs and AkinVox cloning](docs/reference_voice.md)
+ - [Language and model profiles](docs/languages.md)
+ - [Maintained examples](examples/README.md)
+ - [Breaking change and migration note for v0.10.0](docs/breaking-change-0.10.0.md)
+diff --git a/docs/api_reference.md b/docs/api_reference.md
+index d9ad4ad..3934e80 100644
+--- a/docs/api_reference.md
++++ b/docs/api_reference.md
+@@ -7,7 +7,10 @@ parsing, speech planning, and composition between requests remain caller-owned.
+ ```python
+ from pykokoro import (
+     GenerationConfig,
++    InnoEnrollmentOptions,
++    KokoroVoicePack,
+     ReferenceVoice,
++    VoiceEnrollerSpec,
+     KokoroSynthesizer,
+     SynthesisConfig,
+     SynthesisRequest,
+@@ -22,8 +25,8 @@ from pykokoro import (
+ | Source context and timing | `PronunciationOverride`, `LinguisticToken`, `WordTiming`                                                                                                                                                                                                                                                                                                                            |
+ | Configuration             | `SynthesisConfig`, `GenerationConfig`, `LanguageRoutingConfig`, `TokenizerConfig`, `ShortSentenceConfig`, `LongTextSplitMode`                                                                                                                                                                                                                                                       |
+ | Voice level               | `VoiceLevelConfig`, `VoiceLevelApplication`, `VoiceBlend`                                                                                                                                                                                                                                                                                                                           |
+-| Reference voice           | `ReferenceVoice`, `KokoroSynthesizer.enroll_voice()`                                                                                                                                                                                                                                                                                                                                |
+-| Model discovery           | `ModelCapabilities`, `ModelDiscoveryResult`, `VoiceCapabilities`, `discover_models`                                                                                                                                                                                                                                                                                                 |
++| Voice enrollment          | `KokoroVoicePack`, `ReferenceVoice`, `InnoEnrollmentOptions`, `KokoroSynthesizer.enroll_voice()`                                                                                                                                                                                                                                                                                    |
++| Model discovery           | `ModelCapabilities`, `ModelDiscoveryResult`, `VoiceCapabilities`, `VoiceEnrollerSpec`, `discover_models`                                                                                                                                                                                                                                                                            |
+ | Lexicon discovery         | `LexiconCapabilities`, `LexiconDiscoveryResult`, `discover_lexicons`                                                                                                                                                                                                                                                                                                                |
+ | Asset progress            | `AssetProgressEvent`, `AssetProgressCallback`, `ConsoleAssetProgress`                                                                                                                                                                                                                                                                                                               |
+ | Synthesis identity        | `SynthesisIdentity`, `build_synthesis_identity`                                                                                                                                                                                                                                                                                                                                     |
+@@ -31,9 +34,9 @@ from pykokoro import (
+ | Version                   | `__version__`, `__version_tuple__`                                                                                                                                                                                                                                                                                                                                                  |
+
+ `SynthesisSegment` is an alias of `SynthesisRequest`, and `PyKokoroError` is a
+-compatibility alias of `KokoroError`. `AssetProgressCallback` and `LongTextSplitMode`
+-are type aliases; they describe accepted Python values rather than runtime record
+-classes.
++compatibility alias of `KokoroError`. `AssetProgressCallback`, `LongTextSplitMode`,
++`VoiceConditioning`, and `VoiceEnrollmentEngine` are type aliases; they describe
++accepted Python values rather than runtime record classes.
+
+ ## Synthesizer
+
+@@ -107,19 +110,32 @@ them.
+    :undoc-members:
+ ```
+
+-## Reference voice cloning
++## Voice enrollment and packs
+
+ ```{eval-rst}
++.. autoclass:: pykokoro.KokoroVoicePack
++   :members:
++   :undoc-members:
++
++.. autoclass:: pykokoro.InnoEnrollmentOptions
++   :members:
++   :undoc-members:
++
+ .. autoclass:: pykokoro.ReferenceVoice
+    :members:
+    :undoc-members:
+ ```
+
+-`KokoroSynthesizer.enroll_voice()` accepts English reference audio and its exact
+-transcript. The resulting state is bound to one cloning model build and can be saved
+-with `save()` and reloaded with `ReferenceVoice.load()`. See the
+-[reference voice guide](reference_voice.md) for audio limits, fixed-speed behavior,
+-privacy, and permissions.
++`KokoroSynthesizer.enroll_voice()` defaults to `engine="inno"`. It accepts reference
++audio without a transcript and returns a portable `KokoroVoicePack` for ordinary static
++Kokoro synthesis. The versioned NPZ save/load format is pickle-free. Inno enrollment
++requires a runtime-supported `inno-v0.2` model capability. `VoiceEnrollerSpec` discovery
++metadata reports its requirements and output format without loading model weights.
++
++AkinVox remains a separate, explicit path. Use `engine="akinvox"` and provide the exact
++transcript to return a model-bound `ReferenceVoice`. The voice pack and reference state
++are not interchangeable. See the [voice enrollment guide](reference_voice.md) for engine
++requirements, audio limits, persistence, calibration limitations, privacy, and examples.
+
+ `LongTextSplitMode` is `"none" | "sentence"`. The default `"none"` path raises
+ `SynthesisInputTooLongError` for an oversized request. `"sentence"` lazily loads
+@@ -162,6 +178,10 @@ calibration is an engine-local option; it is not whole-program loudness masterin
+    :members:
+    :undoc-members:
+
++.. autoclass:: pykokoro.VoiceEnrollerSpec
++   :members:
++   :undoc-members:
++
+ .. autoclass:: pykokoro.ModelDiscoveryResult
+    :members:
+    :undoc-members:
+@@ -179,10 +199,11 @@ calibration is an engine-local option; it is not whole-program loudness masterin
+ .. autofunction:: pykokoro.discover_lexicons
+ ```
+
+-Discovery reports metadata and runtime capability without loading synthesis weights or
+-creating an ONNX session. Offline discovery uses available local metadata; it does not
+-install model or lexicon assets. Use the inventory to select an available
+-model/language/voice rather than inferring compatibility from a voice name.
++Discovery reports metadata and runtime capability, including `VoiceEnrollerSpec`,
++without loading synthesis weights or creating an ONNX session. Offline discovery uses
++available local metadata; it does not install model or lexicon assets. Use the inventory
++to select an available model/language/voice rather than inferring compatibility from a
++voice name.
+
+ ## Asset progress
+
+diff --git a/docs/reference_voice.md b/docs/reference_voice.md
+index 811a60f..3b20729 100644
+--- a/docs/reference_voice.md
++++ b/docs/reference_voice.md
+@@ -1,10 +1,68 @@
+-# English reference voice cloning
++# Voice enrollment
+
+-PyKokoro can enroll a reusable English reference voice and synthesize new text with it
+-through the ONNX Runtime backend. Ordinary synthesis without a `ReferenceVoice`
+-continues to use the existing static Kokoro voice profiles.
++PyKokoro exposes two distinct enrollment engines through
++`KokoroSynthesizer.enroll_voice()`. Inno creates a normal static Kokoro voice pack from
++reference audio only. AkinVox creates a transcript-conditioned `ReferenceVoice` for its
++cloning model. These outputs have separate formats and synthesis paths.
+
+-## Enroll, save, and reuse
++## Inno voice tuning
++
++Inno v0.2 is a zero-shot voice tuner, not a strong identity cloner. It requires
++reference audio but no transcript, and returns a standard `[510, 1, 256]`
++`KokoroVoicePack` usable immediately with ordinary static Kokoro synthesis:
++
++```python
++from pykokoro import KokoroSynthesizer, KokoroVoicePack
++
++with KokoroSynthesizer() as synthesizer:
++    pack = synthesizer.enroll_voice("reference.wav", engine="inno", language="en")
++    pack.save("speaker.npz")
++
++    rendered = synthesizer.synthesize_text(
++        "New words in the tuned voice.", language="en-us", voice=pack
++    )
++    rendered.save_wav("tuned.wav")
++
++reloaded = KokoroVoicePack.load("speaker.npz")
++```
++
++The default engine is Inno, so omit `reference_text`. Supplying a transcript to Inno is
++an error. `InnoEnrollmentOptions(fmax=...)` can forward the supported `fmax` tuning
++option. The reference audio is read, downmixed to finite mono float32, and passed with
++its original sample rate. No raw audio is stored in the voice pack.
++
++Enrollment requires a model whose runtime metadata advertises the `inno-v0.2` enroller.
++The default selection is Kokoro v1.0. For an explicitly selected model, enrollment is
++rejected unless that model advertises a compatible Inno capability. Inspect this
++metadata without loading model weights:
++
++```python
++from pykokoro import discover_models
++
++for model in discover_models(offline=True).models:
++    for enroller in model.voice_enrollers:
++        print(model.model_id, enroller.id, enroller.min_seconds, enroller.max_seconds)
++```
++
++Enroller metadata includes transcript requirements, supported reference duration, and
++output format. The installed OnnxVoice distribution must implement the advertised
++enrollment contract. PyKokoro does not depend on the Inno source package, PyTorch,
++torchaudio, or Transformers.
++
++`KokoroVoicePack.save()` writes a versioned, pickle-free NPZ archive with the style
++data, format, base-model, engine, metadata, and fingerprint. `KokoroVoicePack.load()`
++validates the archive and fingerprint. `KokoroVoicePack.from_array()` imports a plain
++compatible NumPy array. A pack is not a `ReferenceVoice`, and the two formats are not
++interchangeable.
++
++Generated packs have no catalog voice calibration. Voice-level mode `off` and an
++explicit gain override are supported. Automatic named-voice calibration is unavailable.
++Dynamic-pack blending and legacy `.pt` import are not provided.
++
++## AkinVox reference cloning
++
++AkinVox requires reference audio and its exact transcript. Select it explicitly. The
++result is a model-bound `ReferenceVoice` state, not a static voice pack:
+
+ ```python
+ from pykokoro import KokoroSynthesizer, ReferenceVoice
+@@ -13,22 +71,21 @@ with KokoroSynthesizer() as synthesizer:
+     voice = synthesizer.enroll_voice(
+         "reference.wav",
+         "The exact words spoken in the reference.",
++        engine="akinvox",
+         language="en-us",
+         name="speaker",
+     )
+-    voice.save("speaker.npz")
++    voice.save("speaker-reference.npz")
+
+-    reusable_voice = ReferenceVoice.load("speaker.npz")
+-    result = synthesizer.synthesize_text(
+-        "New words spoken with the enrolled voice.",
+-        language="en-us",
+-        voice=reusable_voice,
++    reusable = ReferenceVoice.load("speaker-reference.npz")
++    rendered = synthesizer.synthesize_text(
++        "New words with reference conditioning.", language="en-us", voice=reusable
+     )
+-    result.save_wav("cloned.wav")
++    rendered.save_wav("cloned.wav")
+ ```
+
+ The maintained [`reference_voice.py` example](../examples/reference_voice.py) accepts a
+-reference-audio path, its exact transcript, and the target text:
++reference-audio path, its exact transcript, and target text:
+
+ ```bash
+ python examples/reference_voice.py reference.wav \
+@@ -36,11 +93,10 @@ python examples/reference_voice.py reference.wav \
+   "New words spoken with the enrolled voice."
+ ```
+
+-The first enrollment or synthesis may provision the cloning model through OnnxVoice. To
+-reuse an already saved state in a later process, load it with `ReferenceVoice.load()`
+-and pass it as `voice`; reference audio is not needed again.
++AkinVox enrollment or synthesis may provision the cloning model through OnnxVoice. Reuse
++a saved state with `ReferenceVoice.load()`; reference audio is not needed again.
+
+-## Reference requirements and limits
++### Reference requirements and limits
+
+ - Version 1 supports English only. Use `en` or `en-us` for enrollment and synthesis.
+ - Reference audio must be 3 to 30 seconds long, mono or multichannel, and supplied as a
+@@ -51,7 +107,7 @@ and pass it as `voice`; reference audio is not needed again.
+   against the upstream resampler checks relative RMS error below `5e-4` and maximum
+   absolute error below `3e-4` on its deterministic test signal.
+ - Supply the exact words spoken in the reference. The transcript is phonemized by the
+-  English frontend to prepare the enrollment tokens; it is not inferred by ASR.
++  English frontend to prepare enrollment tokens; it is not inferred by ASR.
+ - `ReferenceVoice` is bound to its cloning model ID and model fingerprint. A state
+   cannot be used with a different model build. Keep the saved state when reusing the
+   same model.
+@@ -61,15 +117,16 @@ and pass it as `voice`; reference audio is not needed again.
+
+ ## Saved state and privacy
+
+-The NPZ file stores the model-bound conditioning tensors, their fingerprint, and
+-optional SHA-256 metadata. It does not contain the original audio or transcript.
+-Conditioning state is derived from a person's voice and should be handled as sensitive
+-data. Protect and share it only with the speaker's permission. You must have permission
+-to use the reference voice for synthesis.
++A `ReferenceVoice` NPZ stores model-bound conditioning tensors, their fingerprint, and
++optional SHA-256 metadata. It does not contain the original audio or transcript. A
++`KokoroVoicePack` stores only a normal static Kokoro style and metadata, not its source
++audio. Conditioning state is derived from a person's voice and should be handled as
++sensitive data. Protect and share it only with the speaker's permission. You must have
++permission to use reference voices for synthesis.
+
+ The runtime uses OnnxVoice and ONNX Runtime. PyKokoro does not require PyTorch,
+-Torchaudio, Transformers, or the AkinVox Python package for this feature. Reference
++torchaudio, Transformers, or the AkinVox Python package for these features. Reference
+ audio and transcript content are not written into synthesis traces by default.
+
+-See [API reference](api_reference.md) for the public `ReferenceVoice` type and
+-[model discovery](languages.md) for profile capability metadata.
++See the [API reference](api_reference.md) for public enrollment types and
++[model discovery](languages.md) for runtime capability metadata.
+diff --git a/examples/reference_voice.py b/examples/reference_voice.py
+index 4541cfc..d24386b 100644
+--- a/examples/reference_voice.py
++++ b/examples/reference_voice.py
+@@ -30,6 +30,7 @@ def run(
+         enrolled = synthesizer.enroll_voice(
+             reference_audio,
+             reference_text,
++            engine="akinvox",
+             language="en-us",
+             name="speaker",
+         )
+diff --git a/pykokoro/__init__.py b/pykokoro/__init__.py
+index db8ac14..6075a24 100644
+--- a/pykokoro/__init__.py
++++ b/pykokoro/__init__.py
+@@ -14,6 +14,7 @@ if TYPE_CHECKING:
+         ModelCapabilities,
+         ModelDiscoveryResult,
+         VoiceCapabilities,
++        VoiceEnrollerSpec,
+         discover_models,
+     )
+     from .lexicon_discovery import (
+@@ -54,11 +55,14 @@ from .synthesis_types import (
+     RenderedSegment,
+     SynthesisRequest,
+     SynthesisSegment,
++    VoiceConditioning,
+ )
+ from .tokenizer import TokenizerConfig
+ from .types import WordTiming
++from .voice_enrollment import InnoEnrollmentOptions, VoiceEnrollmentEngine
+ from .voice_level import VoiceLevelApplication, VoiceLevelConfig
+ from .voice_manager import VoiceBlend
++from .voice_pack import KokoroVoicePack
+
+ try:
+     from ._version import __version__, __version_tuple__
+@@ -79,6 +83,7 @@ def __getattr__(name: str) -> Any:
+     if name in {
+         "ModelCapabilities",
+         "ModelDiscoveryResult",
++        "VoiceEnrollerSpec",
+         "VoiceCapabilities",
+         "discover_models",
+     }:
+@@ -86,12 +91,14 @@ def __getattr__(name: str) -> Any:
+             ModelCapabilities,
+             ModelDiscoveryResult,
+             VoiceCapabilities,
++            VoiceEnrollerSpec,
+             discover_models,
+         )
+
+         return {
+             "ModelCapabilities": ModelCapabilities,
+             "ModelDiscoveryResult": ModelDiscoveryResult,
++            "VoiceEnrollerSpec": VoiceEnrollerSpec,
+             "VoiceCapabilities": VoiceCapabilities,
+             "discover_models": discover_models,
+         }[name]
+@@ -120,6 +127,7 @@ __all__ = [
+     "ConsoleAssetProgress",
+     "ModelCapabilities",
+     "ModelDiscoveryResult",
++    "VoiceEnrollerSpec",
+     "VoiceCapabilities",
+     "discover_models",
+     "LexiconCapabilities",
+@@ -151,12 +159,16 @@ __all__ = [
+     "VoiceLevelConfig",
+     "VoiceLevelApplication",
+     "VoiceBlend",
++    "KokoroVoicePack",
++    "InnoEnrollmentOptions",
++    "VoiceEnrollmentEngine",
+     "ReferenceVoice",
+     "SynthesisRequest",
+     "SynthesisSegment",
+     "RenderedSegment",
+     "PronunciationOverride",
+     "LinguisticToken",
++    "VoiceConditioning",
+     "WordTiming",
+     "TokenizerConfig",
+     "ShortSentenceConfig",
+diff --git a/pykokoro/_onnxvoice.py b/pykokoro/_onnxvoice.py
+index ad61b52..3b6b406 100644
+--- a/pykokoro/_onnxvoice.py
++++ b/pykokoro/_onnxvoice.py
+@@ -772,6 +772,39 @@ class KokoroRuntimeAdapter:
+             )
+         self._closed = False
+
++    def enroll_voice(
++        self,
++        audio: np.ndarray,
++        *,
++        sample_rate: int,
++        enroller: str,
++        options: Mapping[str, Any] | None = None,
++        name: str | None = None,
++    ) -> Any:
++        if self._closed:
++            raise RuntimeError("Kokoro runtime is closed")
++        enroll = getattr(self._runtime, "enroll_voice", None)
++        if not callable(enroll):
++            raise ConfigurationError("OnnxVoice runtime does not support voice enrollment")
++        result = _call(
++            "enroll",
++            lambda: enroll(
++                audio,
++                sample_rate=sample_rate,
++                enroller=enroller,
++                options=options,
++            ),
++        )
++        from .voice_pack import KokoroVoicePack
++
++        data = result if isinstance(result, np.ndarray) else getattr(result, "data", result)
++        metadata = getattr(result, "metadata", {})
++        if not isinstance(metadata, Mapping):
++            metadata = {}
++        return KokoroVoicePack.from_array(
++            np.asarray(data), name=name, engine=enroller, metadata=metadata
++        )
++
+     def prepare_reference(
+         self,
+         reference_token_ids: Sequence[int],
+diff --git a/pykokoro/discovery.py b/pykokoro/discovery.py
+index 480e293..7360e02 100644
+--- a/pykokoro/discovery.py
++++ b/pykokoro/discovery.py
+@@ -17,6 +17,7 @@ from .model_registry import (
+     RegistryClient,
+     RuntimeDistribution,
+     RuntimeModel,
++    VoiceEnrollerSpec,
+     distribution_source,
+ )
+
+@@ -61,6 +62,12 @@ class ModelCapabilities:
+     supports_reference_enrollment: bool = False
+     speed_supported: bool = True
+
++    voice_enrollers: tuple[VoiceEnrollerSpec, ...] = ()
++
++    @property
++    def supports_voice_enrollment(self) -> bool:
++        return self.supports_reference_enrollment or bool(self.voice_enrollers)
++
+
+ @dataclass(frozen=True, slots=True)
+ class ModelDiscoveryResult:
+@@ -185,6 +192,7 @@ def _capabilities_for_model(
+         voice_mode=voice_mode,
+         supports_reference_enrollment=voice_mode == "reference",
+         speed_supported=speed_supported,
++        voice_enrollers=model.voice_enrollers,
+     )
+
+
+@@ -211,6 +219,7 @@ def _source_for_model(model: RuntimeModel, distribution: RuntimeDistribution | N
+ __all__ = [
+     "ModelCapabilities",
+     "ModelDiscoveryResult",
++    "VoiceEnrollerSpec",
+     "VoiceCapabilities",
+     "discover_models",
+ ]
+diff --git a/pykokoro/model_profiles.py b/pykokoro/model_profiles.py
+index 5f94674..a3d6400 100644
+--- a/pykokoro/model_profiles.py
++++ b/pykokoro/model_profiles.py
+@@ -7,10 +7,13 @@ from __future__ import annotations
+
+ from collections.abc import Mapping
+ from dataclasses import dataclass, field
+-from typing import Any, Literal
++from typing import TYPE_CHECKING, Any, Literal
+
+ from .config_types import ModelSource, ModelVariant
++from .exceptions import InvalidModelError, UnsupportedFeatureError
+
++if TYPE_CHECKING:
++    from .model_registry import VoiceEnrollerSpec
+ VocabularySource = Literal["builtin-v1.0", "downloaded-config", "downloaded-release"]
+
+ G2PBackend = Literal["kokorog2p", "espeak", "goruut"]
+@@ -465,6 +468,36 @@ def registry_support_status(model: Any) -> str:
+     return "ready"
+
+
++def resolve_voice_enroller(
++    model_id: str | None,
++    enroller_id: str,
++    *,
++    registry: Any | None = None,
++) -> tuple[str, VoiceEnrollerSpec]:
++    """Resolve an enroller-capable model, defaulting Inno enrollment to Kokoro v1.0."""
++    from .model_registry import ModelRegistryError, RegistryClient
++
++    selected_model_id = model_id
++    if selected_model_id is None and enroller_id == "inno-v0.2":
++        selected_model_id = "v1.0"
++    if selected_model_id is None:
++        raise InvalidModelError(
++            f"No default model is configured for voice enroller {enroller_id!r}"
++        )
++
++    catalog = registry if registry is not None else RegistryClient().load()
++    try:
++        model = catalog.model(selected_model_id)
++    except ModelRegistryError as exc:
++        raise InvalidModelError(f"Unknown enrollment model {selected_model_id!r}") from exc
++    spec = next((item for item in model.voice_enrollers if item.id == enroller_id), None)
++    if spec is None:
++        raise UnsupportedFeatureError(
++            f"Model {selected_model_id!r} does not support voice enroller {enroller_id!r}"
++        )
++    return selected_model_id, spec
++
++
+ def get_registry_model_profile(
+     model_id: str,
+     *,
+diff --git a/pykokoro/model_registry.py b/pykokoro/model_registry.py
+index 67510cd..c247c2a 100644
+--- a/pykokoro/model_registry.py
++++ b/pykokoro/model_registry.py
+@@ -68,6 +68,67 @@ ArtifactByteProgress = Callable[[RuntimeArtifact, int, int], None]
+ ArtifactPhaseProgress = Callable[[str], None]
+
+
++@dataclass(frozen=True, slots=True)
++class VoiceEnrollerSpec:
++    id: str
++    kind: str
++    transcript_required: bool
++    min_seconds: float
++    max_seconds: float
++    recommended_seconds: float | None
++    output_format: str
++
++
++def _voice_enroller_specs(
++    runtime: Mapping[str, Any], model_id: str
++) -> tuple[VoiceEnrollerSpec, ...]:
++    raw_specs = runtime.get("voice_enrollers", [])
++    if not isinstance(raw_specs, list):
++        raise ModelRegistryError(f"Model {model_id} has invalid voice enrollers")
++    specs: list[VoiceEnrollerSpec] = []
++    seen_ids: set[str] = set()
++    for raw in raw_specs:
++        if not isinstance(raw, Mapping):
++            raise ModelRegistryError(f"Model {model_id} has invalid voice enroller metadata")
++        enroller_id = raw.get("id")
++        kind = raw.get("kind")
++        output_format = raw.get("output_format")
++        transcript_required = raw.get("transcript_required")
++        minimum = raw.get("min_seconds")
++        maximum = raw.get("max_seconds")
++        recommended = raw.get("recommended_seconds")
++        if (
++            not isinstance(enroller_id, str)
++            or not enroller_id.strip()
++            or enroller_id in seen_ids
++            or not isinstance(kind, str)
++            or not kind.strip()
++            or not isinstance(output_format, str)
++            or not output_format.strip()
++            or not isinstance(transcript_required, bool)
++            or type(minimum) not in (int, float)
++            or type(maximum) not in (int, float)
++            or minimum < 0
++            or maximum <= minimum
++            or (recommended is not None and type(recommended) not in (int, float))
++            or (recommended is not None and not minimum <= recommended <= maximum)
++        ):
++            raise ModelRegistryError(f"Model {model_id} has invalid voice enroller metadata")
++        seen_ids.add(enroller_id)
++        specs.append(
++            VoiceEnrollerSpec(
++                id=enroller_id,
++                kind=kind,
++                transcript_required=transcript_required,
++                min_seconds=float(minimum),
++                max_seconds=float(maximum),
++                recommended_seconds=float(recommended) if recommended is not None else None,
++                output_format=output_format,
++            )
++        )
++    return tuple(specs)
++
++
+ @dataclass(frozen=True, slots=True)
+ class RuntimeDistribution:
+     id: str
+@@ -141,6 +202,10 @@ class RuntimeModel:
+     def voice_mode(self) -> str:
+         return str(self.runtime.get("voice_mode", "static"))
+
++    @property
++    def voice_enrollers(self) -> tuple[VoiceEnrollerSpec, ...]:
++        return _voice_enroller_specs(self.runtime, self.model_id)
++
+     @property
+     def runtime_available(self) -> bool:
+         return bool(self.data.get("runtime_available", True))
+@@ -378,6 +443,7 @@ def _validate_registry(data: Mapping[str, Any]) -> None:
+         if not isinstance(runtime, dict):
+             raise ModelRegistryError(f"Model {model_id} has invalid runtime metadata")
+         voice_mode = runtime.get("voice_mode", "static")
++        _voice_enroller_specs(runtime, model_id)
+         if voice_mode not in ("static", "reference"):
+             raise ModelRegistryError(f"Model {model_id} has unknown voice mode: {voice_mode!r}")
+         voices = runtime.get("voices")
+diff --git a/pykokoro/onnx_backend.py b/pykokoro/onnx_backend.py
+index dfe4e19..3d0fc82 100644
+--- a/pykokoro/onnx_backend.py
++++ b/pykokoro/onnx_backend.py
+@@ -416,6 +416,30 @@ class Kokoro:
+         if profile.voice_mode == "reference":
+             raise ConfigurationError(message)
+
++    def enroll_voice(
++        self,
++        audio: np.ndarray,
++        *,
++        sample_rate: int,
++        enroller: str,
++        options: Mapping[str, Any] | None = None,
++        name: str | None = None,
++    ) -> Any:
++        """Run a static Kokoro voice enroller through the runtime boundary."""
++        profile = get_model_profile(self._model_variant, self._model_source)
++        if profile.voice_mode != "static":
++            raise ConfigurationError("Voice-pack enrollment requires a static Kokoro model")
++        self._init_kokoro()
++        if self._runtime is None:
++            raise ConfigurationError("Voice enrollment runtime is not initialized")
++        return self._runtime.enroll_voice(
++            audio,
++            sample_rate=sample_rate,
++            enroller=enroller,
++            options=options,
++            name=name,
++        )
++
+     def prepare_reference_voice(
+         self,
+         reference_token_ids: Sequence[int],
+diff --git a/pykokoro/reference_audio.py b/pykokoro/reference_audio.py
+index f1fce55..6fbe882 100644
+--- a/pykokoro/reference_audio.py
++++ b/pykokoro/reference_audio.py
+@@ -25,6 +25,7 @@ _MAX_CLIPPED_FRACTION = 0.001
+ class PreparedReferenceAudio:
+     """Canonical audio arrays and non-content metadata for voice enrollment."""
+
++    mono_audio: np.ndarray
+     audio_24k: np.ndarray
+     audio_16k: np.ndarray
+     original_sample_rate: int
+@@ -79,6 +80,7 @@ def prepare_reference_audio(
+
+     return PreparedReferenceAudio(
+         audio_24k=audio_24k,
++        mono_audio=mono,
+         audio_16k=audio_16k,
+         original_sample_rate=original_sample_rate,
+         duration_seconds=duration_seconds,
+diff --git a/pykokoro/request_renderer.py b/pykokoro/request_renderer.py
+index de58339..f04cd05 100644
+--- a/pykokoro/request_renderer.py
++++ b/pykokoro/request_renderer.py
+@@ -22,12 +22,11 @@ from .reference_audio import PreparedReferenceAudio
+ from .reference_voice import ReferenceVoice
+ from .synthesis_config import SynthesisConfig, resolve_synthesis_config
+ from .synthesis_identity import build_synthesis_identity
+-from .synthesis_types import (
+-    RenderedSegment,
+-    SynthesisSegment,
+-)
++from .synthesis_types import RenderedSegment, SynthesisSegment
+ from .types import PhonemeSegment, Trace, WordTiming
++from .voice_enrollment import InnoEnrollmentOptions
+ from .voice_level import resolve_voice_level_application
++from .voice_pack import KokoroVoicePack
+
+
+ class _RequestG2PAdapter(Protocol):
+@@ -76,7 +75,10 @@ class OnnxRequestRenderer:
+         voice = resolved.voice
+         voice_name = voice if isinstance(voice, str) else None
+         reference_voice = voice if isinstance(voice, ReferenceVoice) else None
++        voice_pack = voice if isinstance(voice, KokoroVoicePack) else None
+         rendered_voice = voice_name
++        if voice_pack is not None:
++            rendered_voice = f"voicepack:{voice_pack.fingerprint}"
+         if reference_voice is not None:
+             rendered_voice = f"reference:{reference_voice.fingerprint}"
+             if resolved.generation.speed != 1.0:
+@@ -89,7 +91,7 @@ class OnnxRequestRenderer:
+                     "model_variant": resolved.model_variant,
+                     "model_quality": resolved.model_quality,
+                     "synthesis_identity": identity.to_dict(),
+-                    "voice": voice_name,
++                    "voice": rendered_voice,
+                 }
+             )
+             if reference_voice is not None:
+@@ -99,6 +101,10 @@ class OnnxRequestRenderer:
+                         "reference_fingerprint": reference_voice.fingerprint,
+                     }
+                 )
++            if voice_pack is not None:
++                trace.model.update(
++                    {"voice_mode": "static", "voicepack_fingerprint": voice_pack.fingerprint}
++                )
+             trace.warnings.extend(prepared.diagnostics)
+
+         if not prepared.token_ids:
+@@ -112,6 +118,8 @@ class OnnxRequestRenderer:
+         backend = self._get_backend(resolved)
+         if reference_voice is not None:
+             voice_style = None
++        elif voice_pack is not None:
++            voice_style = voice_pack.data
+         else:
+             try:
+                 voice_style = backend.resolve_voice_style(voice)
+@@ -229,6 +237,31 @@ class OnnxRequestRenderer:
+             short_sentence_mode=short_sentence_mode,
+         )
+
++    def enroll_inno_voice(
++        self,
++        audio: PreparedReferenceAudio,
++        config: SynthesisConfig,
++        *,
++        enroller: str,
++        language: str,
++        options: InnoEnrollmentOptions,
++        name: str | None,
++    ) -> KokoroVoicePack:
++        resolved = resolve_synthesis_config(config, language=language)
++        profile = get_model_profile(
++            resolved.model_variant or "v1.0", resolved.model_source or "github"
++        )
++        if profile.voice_mode != "static":
++            raise InvalidVoiceError("Inno enrollment requires a static Kokoro model")
++        backend = self._get_backend(resolved)
++        return backend.enroll_voice(
++            audio.mono_audio,
++            sample_rate=audio.original_sample_rate,
++            enroller=enroller,
++            options=options.to_runtime_options(),
++            name=name,
++        )
++
+     def enroll_voice(
+         self,
+         prepared: PreparedSynthesis,
+diff --git a/pykokoro/runtime_protocol.py b/pykokoro/runtime_protocol.py
+index 72a1c9f..4429d03 100644
+--- a/pykokoro/runtime_protocol.py
++++ b/pykokoro/runtime_protocol.py
+@@ -2,7 +2,7 @@
+
+ from __future__ import annotations
+
+-from collections.abc import Sequence
++from collections.abc import Mapping, Sequence
+ from typing import Any, Protocol
+
+ import numpy as np
+@@ -12,6 +12,16 @@ class KokoroInferenceRuntime(Protocol):
+     @property
+     def sample_rate(self) -> int: ...
+
++    def enroll_voice(
++        self,
++        audio: np.ndarray,
++        *,
++        sample_rate: int,
++        enroller: str,
++        options: Mapping[str, Any] | None = None,
++        name: str | None = None,
++    ) -> Any: ...
++
+     def prepare_reference(
+         self,
+         reference_token_ids: Sequence[int],
+diff --git a/pykokoro/synthesis_config.py b/pykokoro/synthesis_config.py
+index 8e56b6f..f7e46b0 100644
+--- a/pykokoro/synthesis_config.py
++++ b/pykokoro/synthesis_config.py
+@@ -22,6 +22,7 @@ from .reference_voice import ReferenceVoice
+ from .short_sentence_handler import ShortSentenceConfig
+ from .voice_level import VoiceLevelConfig
+ from .voice_manager import VoiceBlend
++from .voice_pack import KokoroVoicePack
+
+ LongTextSplitMode = Literal["none", "sentence"]
+
+@@ -34,7 +35,7 @@ if TYPE_CHECKING:
+ class SynthesisConfig:
+     """Model, frontend, and inference settings for Kokoro speech synthesis."""
+
+-    voice: str | VoiceBlend | ReferenceVoice | None = None
++    voice: str | VoiceBlend | KokoroVoicePack | ReferenceVoice | None = None
+     generation: GenerationConfig = field(default_factory=GenerationConfig)
+     language_routing: LanguageRoutingConfig | None = None
+
+@@ -66,9 +67,11 @@ class SynthesisConfig:
+     allow_experimental_frontend: bool = False
+
+     def __post_init__(self) -> None:
+-        if self.voice is not None and not isinstance(self.voice, (str, VoiceBlend, ReferenceVoice)):
++        if self.voice is not None and not isinstance(
++            self.voice, (str, VoiceBlend, KokoroVoicePack, ReferenceVoice)
++        ):
+             raise InvalidVoiceError(
+-                "voice must be a voice name, VoiceBlend, ReferenceVoice, or None"
++                "voice must be a voice name, VoiceBlend, KokoroVoicePack, ReferenceVoice, or None"
+             )
+         if isinstance(self.voice, str) and not self.voice.strip():
+             raise InvalidVoiceError("voice must be non-empty when supplied")
+@@ -253,7 +256,7 @@ def resolve_synthesis_config(
+     config: SynthesisConfig,
+     *,
+     language: str,
+-    voice: str | VoiceBlend | ReferenceVoice | None = None,
++    voice: str | VoiceBlend | KokoroVoicePack | ReferenceVoice | None = None,
+     reference_enrollment: bool = False,
+ ) -> SynthesisConfig:
+     """Resolve one request's explicit language and voice to a concrete Kokoro profile."""
+@@ -268,12 +271,12 @@ def resolve_synthesis_config(
+     language = normalize_language_code(language)
+     effective_voice = voice if voice is not None else config.voice
+     if (
+-        isinstance(effective_voice, ReferenceVoice)
++        isinstance(effective_voice, (ReferenceVoice, KokoroVoicePack))
+         and config.voice_level.mode == "calibrated"
+         and config.voice_level.gain_db is None
+     ):
+         raise ConfigurationError(
+-            "automatic voice-level calibration is unavailable for reference voices"
++            "automatic voice-level calibration is unavailable for reference voices or voice packs"
+         )
+     source = config.model_source
+     variant = config.model_variant
+@@ -335,6 +338,8 @@ def resolve_synthesis_config(
+             raise InvalidLanguageError(
+                 f"Reference voice model {variant!r} does not support language {language!r}"
+             )
++    elif isinstance(effective_voice, KokoroVoicePack) and profile.voice_mode != "static":
++        raise InvalidModelError("KokoroVoicePack requires a static Kokoro model")
+     elif profile.voice_mode == "reference" and not reference_enrollment:
+         raise InvalidVoiceError(
+             "This model requires a ReferenceVoice. Enroll a reference voice before synthesis."
+diff --git a/pykokoro/synthesis_identity.py b/pykokoro/synthesis_identity.py
+index d8029f7..f94d11c 100644
+--- a/pykokoro/synthesis_identity.py
++++ b/pykokoro/synthesis_identity.py
+@@ -13,6 +13,7 @@ from .reference_voice import ReferenceVoice
+ from .synthesis_config import SynthesisConfig
+ from .voice_level import default_voice_calibration
+ from .voice_manager import VoiceBlend
++from .voice_pack import KokoroVoicePack
+
+
+ def _identity_value(value: Any) -> Any:
+@@ -83,7 +84,7 @@ def build_synthesis_identity(
+     config: SynthesisConfig,
+     *,
+     language: str,
+-    voice: str | VoiceBlend | ReferenceVoice | None,
++    voice: str | VoiceBlend | KokoroVoicePack | ReferenceVoice | None,
+ ) -> SynthesisIdentity:
+     """Build a stable identity from resolved settings that can affect output."""
+     from . import __version__
+@@ -91,6 +92,8 @@ def build_synthesis_identity(
+
+     if isinstance(voice, ReferenceVoice):
+         voice_identity = f"reference:{voice.fingerprint}"
++    elif isinstance(voice, KokoroVoicePack):
++        voice_identity = f"voicepack:{voice.fingerprint}"
+     elif isinstance(voice, VoiceBlend):
+         voice_identity = _canonical_json(
+             {"voices": voice.voices, "interpolation": voice.interpolation}
+diff --git a/pykokoro/synthesis_types.py b/pykokoro/synthesis_types.py
+index 581f142..58f718a 100644
+--- a/pykokoro/synthesis_types.py
++++ b/pykokoro/synthesis_types.py
+@@ -19,6 +19,9 @@ from .exceptions import (
+ )
+ from .reference_voice import ReferenceVoice
+ from .voice_manager import VoiceBlend
++from .voice_pack import KokoroVoicePack
++
++VoiceConditioning = str | VoiceBlend | KokoroVoicePack | ReferenceVoice | None
+
+ if TYPE_CHECKING:
+     from .synthesis_identity import SynthesisIdentity
+@@ -117,7 +120,7 @@ class SynthesisRequest:
+     id: str
+     text: str
+     language: str
+-    voice: str | VoiceBlend | ReferenceVoice | None
++    voice: VoiceConditioning
+     pronunciation_overrides: tuple[PronunciationOverride, ...]
+     tokens: tuple[LinguisticToken, ...]
+     phonemes: str | None
+@@ -127,7 +130,7 @@ class SynthesisRequest:
+         id: str,
+         text: str,
+         language: str,
+-        voice: str | VoiceBlend | ReferenceVoice | None = None,
++        voice: VoiceConditioning = None,
+         pronunciation_overrides: tuple[PronunciationOverride, ...]
+         | list[PronunciationOverride] = (),
+         annotations: tuple[LinguisticToken, ...] | list[LinguisticToken] | None = None,
+@@ -164,9 +167,11 @@ class SynthesisRequest:
+                 "synthesis text must contain at least one non-whitespace character"
+             )
+         object.__setattr__(self, "language", _normalize_language(self.language, "language"))
+-        if self.voice is not None and not isinstance(self.voice, (str, VoiceBlend, ReferenceVoice)):
++        if self.voice is not None and not isinstance(
++            self.voice, (str, VoiceBlend, KokoroVoicePack, ReferenceVoice)
++        ):
+             raise InvalidVoiceError(
+-                "voice must be a voice name, VoiceBlend, ReferenceVoice, or None"
++                "voice must be a voice name, VoiceBlend, KokoroVoicePack, ReferenceVoice, or None"
+             )
+         if isinstance(self.voice, str) and not self.voice.strip():
+             raise InvalidVoiceError("voice must be non-empty when supplied")
+diff --git a/pykokoro/synthesizer.py b/pykokoro/synthesizer.py
+index 7d4a23b..ae7ca50 100644
+--- a/pykokoro/synthesizer.py
++++ b/pykokoro/synthesizer.py
+@@ -20,13 +20,19 @@ from .exceptions import (
+     PyKokoroError,
+     SynthesisStateError,
+ )
+-from .model_profiles import normalize_language_code
++from .model_profiles import normalize_language_code, resolve_voice_enroller
+ from .prepared_g2p import PreparedG2PAdapter, PreparedSynthesis
+ from .reference_audio import PreparedReferenceAudio, prepare_reference_audio
+ from .reference_voice import ReferenceVoice
+ from .synthesis_config import SynthesisConfig, resolve_synthesis_config
+-from .synthesis_types import RenderedSegment, SynthesisRequest, SynthesisSegment
+-from .voice_manager import VoiceBlend
++from .synthesis_types import (
++    RenderedSegment,
++    SynthesisRequest,
++    SynthesisSegment,
++    VoiceConditioning,
++)
++from .voice_enrollment import InnoEnrollmentOptions, VoiceEnrollmentEngine
++from .voice_pack import KokoroVoicePack
+
+
+ class _RequestRenderer(Protocol):
+@@ -46,6 +52,17 @@ class _RequestRenderer(Protocol):
+         reference_text_sha256: str,
+     ) -> ReferenceVoice: ...
+
++    def enroll_inno_voice(
++        self,
++        audio: PreparedReferenceAudio,
++        config: SynthesisConfig,
++        *,
++        enroller: str,
++        language: str,
++        options: InnoEnrollmentOptions,
++        name: str | None,
++    ) -> KokoroVoicePack: ...
++
+
+ class KokoroSynthesizer:
+     """Phonemize and render prepared requests as independent Kokoro speech results."""
+@@ -107,7 +124,7 @@ class KokoroSynthesizer:
+         text: str,
+         *,
+         language: str | None = None,
+-        voice: str | VoiceBlend | ReferenceVoice | None = None,
++        voice: VoiceConditioning = None,
+     ) -> RenderedSegment:
+         """Synthesize one already-prepared string without document parsing."""
+         effective_language = language if language is not None else self.config.generation.lang
+@@ -125,21 +142,56 @@ class KokoroSynthesizer:
+     def enroll_voice(
+         self,
+         reference_audio: str | Path | np.ndarray,
+-        reference_text: str,
++        reference_text: str | None = None,
+         *,
++        engine: VoiceEnrollmentEngine = "inno",
+         sample_rate: int | None = None,
+         language: str = "en",
+         name: str | None = None,
+-    ) -> ReferenceVoice:
+-        """Enroll an English reference recording for model-bound synthesis."""
++        options: InnoEnrollmentOptions | None = None,
++    ) -> KokoroVoicePack | ReferenceVoice:
++        """Enroll a static voice pack or an AkinVox reference-conditioned voice."""
+         self._ensure_open()
+-        if not isinstance(reference_text, str) or not reference_text.strip():
+-            raise EmptyTextError("reference_text must be non-empty and match the reference speech")
++        if engine not in ("inno", "akinvox"):
++            raise InvalidRequestError("engine must be 'inno' or 'akinvox'")
+         if not isinstance(language, str) or not language.strip():
+-            raise InvalidLanguageError("a supported English enrollment language is required")
++            raise InvalidLanguageError("a supported enrollment language is required")
+         normalized_language = normalize_language_code(language)
++
++        if engine == "inno":
++            if reference_text is not None:
++                raise InvalidRequestError("reference_text must be omitted for Inno enrollment")
++            if options is not None and not isinstance(options, InnoEnrollmentOptions):
++                raise InvalidRequestError("Inno options must be an InnoEnrollmentOptions instance")
++            audio = prepare_reference_audio(reference_audio, sample_rate=sample_rate)
++            model_variant, enroller = resolve_voice_enroller(self.config.model_variant, "inno-v0.2")
++            if enroller.transcript_required:
++                raise InvalidRequestError(
++                    "the selected Inno enroller unexpectedly requires a transcript"
++                )
++            config = replace(self.config, model_variant=model_variant, voice=None)
++            try:
++                return self._renderer.enroll_inno_voice(
++                    audio,
++                    config,
++                    language=normalized_language,
++                    enroller=enroller.id,
++                    options=options or InnoEnrollmentOptions(),
++                    name=name,
++                )
++            except PyKokoroError:
++                raise
++            except Exception as exc:
++                raise BackendError("Kokoro Inno voice enrollment failed") from exc
++
++        if options is not None:
++            raise InvalidRequestError("options are only supported for Inno enrollment")
++        if not isinstance(reference_text, str) or not reference_text.strip():
++            raise EmptyTextError("reference_text must be non-empty and match the reference speech")
+         if normalized_language not in {"en", "en-us"}:
+-            raise InvalidLanguageError("reference voice enrollment currently supports English only")
++            raise InvalidLanguageError(
++                "AkinVox reference enrollment currently supports English only"
++            )
+
+         audio = prepare_reference_audio(reference_audio, sample_rate=sample_rate)
+         config = self.config
+@@ -163,7 +215,7 @@ class KokoroSynthesizer:
+         except PyKokoroError:
+             raise
+         except Exception as exc:
+-            raise BackendError("Kokoro reference enrollment failed") from exc
++            raise BackendError("Kokoro AkinVox reference enrollment failed") from exc
+
+     def synthesize_segments(
+         self, segments: Iterable[SynthesisSegment]
+diff --git a/pykokoro/voice_enrollment.py b/pykokoro/voice_enrollment.py
+new file mode 100644
+index 0000000..2ce2342
+--- /dev/null
++++ b/pykokoro/voice_enrollment.py
+@@ -0,0 +1,32 @@
++"""Public options for voice enrollment engines."""
++
++from __future__ import annotations
++
++import math
++from dataclasses import dataclass
++from typing import Literal
++
++from .exceptions import InvalidVoiceError
++
++VoiceEnrollmentEngine = Literal["inno", "akinvox"]
++
++
++@dataclass(frozen=True, slots=True)
++class InnoEnrollmentOptions:
++    """Tuning options supported by the Inno v0.2 enrollment engine."""
++
++    fmax: float | None = None
++
++    def __post_init__(self) -> None:
++        if self.fmax is not None and (
++            isinstance(self.fmax, bool)
++            or not isinstance(self.fmax, (int, float))
++            or not math.isfinite(self.fmax)
++            or self.fmax <= 0
++        ):
++            raise InvalidVoiceError("Inno fmax must be a finite positive number")
++
++    def to_runtime_options(self) -> dict[str, float]:
++        if self.fmax is None:
++            return {}
++        return {"fmax": float(self.fmax)}
+diff --git a/pykokoro/voice_pack.py b/pykokoro/voice_pack.py
+new file mode 100644
+index 0000000..22191d7
+--- /dev/null
++++ b/pykokoro/voice_pack.py
+@@ -0,0 +1,221 @@
++"""Portable, static Kokoro voice packs."""
++
++from __future__ import annotations
++
++import hashlib
++import json
++import zipfile
++from collections.abc import Mapping
++from dataclasses import dataclass, field
++from pathlib import Path
++from types import MappingProxyType
++from typing import Any
++
++import numpy as np
++
++from .exceptions import InvalidVoiceError
++
++_FORMAT = "pykokoro-voicepack-v1"
++_SCHEMA = 1
++_VOICE_SHAPE = (510, 1, 256)
++
++
++def _freeze_json(value: Any) -> Any:
++    if isinstance(value, dict):
++        return MappingProxyType({key: _freeze_json(item) for key, item in value.items()})
++    if isinstance(value, list):
++        return tuple(_freeze_json(item) for item in value)
++    return value
++
++
++def _thaw_json(value: Any) -> Any:
++    if isinstance(value, Mapping):
++        return {key: _thaw_json(item) for key, item in value.items()}
++    if isinstance(value, tuple):
++        return [_thaw_json(item) for item in value]
++    return value
++
++
++def _canonical_metadata(metadata: Mapping[str, Any]) -> tuple[dict[str, Any], Mapping[str, Any]]:
++    if not isinstance(metadata, Mapping):
++        raise InvalidVoiceError("voice pack metadata must be a mapping")
++    try:
++        encoded = json.dumps(dict(metadata), sort_keys=True, separators=(",", ":"), allow_nan=False)
++        canonical = json.loads(encoded)
++    except (TypeError, ValueError) as exc:
++        raise InvalidVoiceError("voice pack metadata must contain JSON-compatible values") from exc
++    if not isinstance(canonical, dict):
++        raise InvalidVoiceError("voice pack metadata must be a JSON object")
++    return canonical, _freeze_json(canonical)
++
++
++def _copy_voice_data(value: np.ndarray) -> np.ndarray:
++    data = np.asarray(value)
++    if data.dtype not in (np.dtype(np.float16), np.dtype(np.float32)):
++        raise InvalidVoiceError("voice pack data must have float16 or float32 dtype")
++    if data.shape != _VOICE_SHAPE:
++        raise InvalidVoiceError(f"voice pack data must have shape {_VOICE_SHAPE}")
++    if not np.isfinite(data).all():
++        raise InvalidVoiceError("voice pack data must contain only finite values")
++    contiguous = np.array(data, order="C", copy=True)
++    return np.frombuffer(contiguous.tobytes(order="C"), dtype=contiguous.dtype).reshape(
++        _VOICE_SHAPE
++    )
++
++
++def _fingerprint(
++    data: np.ndarray, name: str | None, engine: str | None, metadata: Mapping[str, Any]
++) -> str:
++    digest = hashlib.sha256()
++    identity = {"name": name, "engine": engine, "metadata": _thaw_json(metadata)}
++    digest.update(
++        json.dumps(identity, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
++    )
++    digest.update(data.dtype.str.encode("ascii"))
++    digest.update(json.dumps(data.shape, separators=(",", ":")).encode("ascii"))
++    digest.update(data.tobytes(order="C"))
++    return digest.hexdigest()
++
++
++@dataclass(frozen=True, slots=True)
++class KokoroVoicePack:
++    """A normal static Kokoro voice style with safe, portable persistence."""
++
++    data: np.ndarray
++    name: str | None = None
++    engine: str | None = None
++    metadata: Mapping[str, Any] = field(default_factory=dict, repr=False, compare=False)
++    fingerprint: str = field(init=False)
++
++    def __post_init__(self) -> None:
++        if self.name is not None and (not isinstance(self.name, str) or not self.name.strip()):
++            raise InvalidVoiceError("voice pack name must be non-empty when supplied")
++        if self.engine is not None and (
++            not isinstance(self.engine, str) or not self.engine.strip()
++        ):
++            raise InvalidVoiceError("voice pack engine must be non-empty when supplied")
++        data = _copy_voice_data(self.data)
++        canonical, metadata = _canonical_metadata(self.metadata)
++        del canonical
++        object.__setattr__(self, "data", data)
++        object.__setattr__(self, "metadata", metadata)
++        object.__setattr__(
++            self, "fingerprint", _fingerprint(data, self.name, self.engine, metadata)
++        )
++
++    @classmethod
++    def from_array(
++        cls,
++        array: np.ndarray,
++        *,
++        name: str | None = None,
++        engine: str | None = None,
++        metadata: Mapping[str, Any] | None = None,
++    ) -> KokoroVoicePack:
++        """Create a pack from a compatible array, canonicalizing it to float32."""
++        value = np.asarray(array)
++        if (
++            value.dtype.hasobject
++            or not np.issubdtype(value.dtype, np.number)
++            or np.issubdtype(value.dtype, np.complexfloating)
++        ):
++            raise InvalidVoiceError("voice pack data must be a real numeric tensor")
++        if value.shape != _VOICE_SHAPE:
++            raise InvalidVoiceError(f"voice pack data must have shape {_VOICE_SHAPE}")
++        if not np.isfinite(value).all():
++            raise InvalidVoiceError("voice pack data must contain only finite values")
++        with np.errstate(over="ignore", invalid="ignore"):
++            canonical = np.asarray(value, dtype=np.float32)
++        if not np.isfinite(canonical).all():
++            raise InvalidVoiceError(
++                "voice pack data must be representable as finite float32 values"
++            )
++        return cls(
++            data=canonical,
++            name=name,
++            engine=engine,
++            metadata={} if metadata is None else metadata,
++        )
++
++    def save(self, path: str | Path) -> None:
++        """Save the pack as a pickle-free NumPy archive."""
++        metadata: dict[str, Any] = {
++            "schema": _SCHEMA,
++            "format": _FORMAT,
++            "base_model": self.metadata.get("base_model", "v1.0"),
++            "fingerprint": self.fingerprint,
++            "metadata": _thaw_json(self.metadata),
++        }
++        if self.name is not None:
++            metadata["name"] = self.name
++        if self.engine is not None:
++            metadata["engine"] = self.engine
++        metadata_bytes = json.dumps(
++            metadata, sort_keys=True, separators=(",", ":"), allow_nan=False
++        ).encode()
++        with Path(path).open("wb") as file:
++            np.savez_compressed(
++                file,
++                data=self.data,
++                metadata_json_utf8=np.frombuffer(metadata_bytes, dtype=np.uint8),
++            )
++
++    @classmethod
++    def load(cls, path: str | Path) -> KokoroVoicePack:
++        """Load and validate a pickle-free NumPy archive."""
++        try:
++            with np.load(Path(path), allow_pickle=False) as archive:
++                expected_fields = {"data", "metadata_json_utf8"}
++                if set(archive.files) != expected_fields:
++                    raise InvalidVoiceError("voice pack archive has missing or unexpected fields")
++                data = archive["data"]
++                metadata_array = archive["metadata_json_utf8"]
++                if metadata_array.dtype != np.uint8 or metadata_array.ndim != 1:
++                    raise InvalidVoiceError("voice pack metadata must be a UTF-8 byte array")
++                document = json.loads(metadata_array.tobytes().decode("utf-8"))
++        except InvalidVoiceError:
++            raise
++        except (
++            OSError,
++            EOFError,
++            zipfile.BadZipFile,
++            ValueError,
++            TypeError,
++            UnicodeDecodeError,
++        ) as exc:
++            raise InvalidVoiceError(f"could not load voice pack from {path!s}: {exc}") from exc
++
++        if not isinstance(document, dict):
++            raise InvalidVoiceError("voice pack metadata must be a JSON object")
++        required = {"schema", "format", "base_model", "fingerprint", "metadata"}
++        allowed = required | {"name", "engine"}
++        if not required <= document.keys() or not document.keys() <= allowed:
++            raise InvalidVoiceError("voice pack metadata has missing or unsupported fields")
++        if (
++            type(document["schema"]) is not int
++            or document["schema"] != _SCHEMA
++            or document["format"] != _FORMAT
++        ):
++            raise InvalidVoiceError("unsupported voice pack archive schema or format")
++        if not isinstance(document["base_model"], str) or not isinstance(
++            document["fingerprint"], str
++        ):
++            raise InvalidVoiceError(
++                "voice pack base_model and fingerprint metadata must be strings"
++            )
++        name = document.get("name")
++        engine = document.get("engine")
++        if name is not None and not isinstance(name, str):
++            raise InvalidVoiceError("voice pack name metadata must be a string")
++        if engine is not None and not isinstance(engine, str):
++            raise InvalidVoiceError("voice pack engine metadata must be a string")
++        metadata = document["metadata"]
++        if (
++            not isinstance(metadata, dict)
++            or metadata.get("base_model", "v1.0") != document["base_model"]
++        ):
++            raise InvalidVoiceError("voice pack base_model metadata does not match")
++        pack = cls(data=data, name=name, engine=engine, metadata=metadata)
++        if pack.fingerprint != document["fingerprint"]:
++            raise InvalidVoiceError("voice pack fingerprint does not match its data")
++        return pack
+diff --git a/tests/test_inno_enrollment.py b/tests/test_inno_enrollment.py
+new file mode 100644
+index 0000000..e49ef20
+--- /dev/null
++++ b/tests/test_inno_enrollment.py
+@@ -0,0 +1,213 @@
++from __future__ import annotations
++
++from types import SimpleNamespace
++from typing import Any
++
++import numpy as np
++import pytest
++
++import pykokoro._onnxvoice as onnxvoice_boundary
++import pykokoro.synthesizer as synthesizer_module
++from pykokoro.exceptions import ConfigurationError, InvalidRequestError, InvalidVoiceError
++from pykokoro.model_registry import VoiceEnrollerSpec
++from pykokoro.synthesis_config import SynthesisConfig
++from pykokoro.synthesizer import KokoroSynthesizer
++from pykokoro.voice_enrollment import InnoEnrollmentOptions
++from pykokoro.voice_pack import KokoroVoicePack
++
++
++def tone(sample_rate: int = 24_000, duration: float = 3.5) -> np.ndarray:
++    times = np.arange(round(sample_rate * duration), dtype=np.float64) / sample_rate
++    return (0.15 * np.sin(2.0 * np.pi * 220.0 * times)).astype(np.float32)
++
++
++class NoCallG2P:
++    def phonemize(self, *args: Any, **kwargs: Any) -> Any:
++        raise AssertionError("Inno enrollment must not phonemize a transcript")
++
++
++class FakeRenderer:
++    def __init__(self) -> None:
++        self.call: tuple[Any, ...] | None = None
++
++    def enroll_inno_voice(
++        self,
++        audio: Any,
++        config: SynthesisConfig,
++        *,
++        language: str,
++        enroller: str,
++        options: InnoEnrollmentOptions,
++        name: str | None,
++    ) -> KokoroVoicePack:
++        self.call = (audio, config, language, enroller, options, name)
++        return KokoroVoicePack.from_array(
++            np.zeros((510, 1, 256), dtype=np.float32), engine=enroller, name=name
++        )
++
++
++def inno_spec(*, transcript_required: bool = False) -> VoiceEnrollerSpec:
++    return VoiceEnrollerSpec(
++        id="inno-v0.2",
++        kind="zero-shot-tuner",
++        transcript_required=transcript_required,
++        min_seconds=3.0,
++        max_seconds=30.0,
++        recommended_seconds=10.0,
++        output_format="kokoro-voicepack-v1",
++    )
++
++
++def patch_resolver(monkeypatch: pytest.MonkeyPatch, *, transcript_required: bool = False) -> None:
++    monkeypatch.setattr(
++        synthesizer_module,
++        "resolve_voice_enroller",
++        lambda model_id, enroller_id: (
++            model_id or "v1.0",
++            inno_spec(transcript_required=transcript_required),
++        ),
++    )
++
++
++def test_inno_enrollment_uses_original_mono_audio_and_typed_options(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    patch_resolver(monkeypatch)
++    source = tone(44_100)
++    stereo = np.column_stack((source, source * 0.5))
++    renderer = FakeRenderer()
++    synthesizer = KokoroSynthesizer(
++        SynthesisConfig(voice="af_heart"), g2p=NoCallG2P(), renderer=renderer
++    )
++
++    pack = synthesizer.enroll_voice(
++        stereo,
++        sample_rate=44_100,
++        name="tuned",
++        options=InnoEnrollmentOptions(fmax=8_000),
++    )
++
++    assert isinstance(pack, KokoroVoicePack)
++    assert pack.name == "tuned"
++    assert pack.engine == "inno-v0.2"
++    assert pack.data.dtype == np.float32
++    assert renderer.call is not None
++    audio, config, language, enroller, options, name = renderer.call
++    assert audio.original_sample_rate == 44_100
++    assert audio.mono_audio.shape == source.shape
++    np.testing.assert_allclose(audio.mono_audio, source * 0.75, atol=1.0e-7)
++    assert config.model_variant == "v1.0"
++    assert config.voice is None
++    assert language == "en"
++    assert enroller == "inno-v0.2"
++    assert options.to_runtime_options() == {"fmax": 8_000.0}
++    assert name == "tuned"
++
++
++def test_inno_enrollment_needs_no_transcript_or_g2p(monkeypatch: pytest.MonkeyPatch) -> None:
++    patch_resolver(monkeypatch)
++    renderer = FakeRenderer()
++    synthesizer = KokoroSynthesizer(g2p=NoCallG2P(), renderer=renderer)
++
++    result = synthesizer.enroll_voice(tone(), sample_rate=24_000)
++
++    assert isinstance(result, KokoroVoicePack)
++    assert renderer.call is not None
++
++
++def test_inno_enrollment_rejects_transcript_and_wrong_options(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    patch_resolver(monkeypatch)
++    synthesizer = KokoroSynthesizer(g2p=NoCallG2P(), renderer=FakeRenderer())
++
++    with pytest.raises(InvalidRequestError, match="must be omitted"):
++        synthesizer.enroll_voice(tone(), "unneeded transcript", sample_rate=24_000)
++    with pytest.raises(InvalidRequestError, match="InnoEnrollmentOptions"):
++        synthesizer.enroll_voice(tone(), sample_rate=24_000, options={"fmax": 8000})  # type: ignore[arg-type]
++    with pytest.raises(InvalidVoiceError, match="finite positive"):
++        InnoEnrollmentOptions(fmax=float("nan"))
++
++
++def test_inno_enrollment_rejects_enroller_that_requires_transcript(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    patch_resolver(monkeypatch, transcript_required=True)
++    synthesizer = KokoroSynthesizer(g2p=NoCallG2P(), renderer=FakeRenderer())
++
++    with pytest.raises(InvalidRequestError, match="unexpectedly requires a transcript"):
++        synthesizer.enroll_voice(tone(), sample_rate=24_000)
++
++
++def test_inno_enrollment_reports_reference_duration_errors(monkeypatch: pytest.MonkeyPatch) -> None:
++    patch_resolver(monkeypatch)
++    synthesizer = KokoroSynthesizer(g2p=NoCallG2P(), renderer=FakeRenderer())
++
++    with pytest.raises(InvalidVoiceError, match="between 3 and 30 seconds"):
++        synthesizer.enroll_voice(tone(duration=2.9), sample_rate=24_000)
++
++
++def test_runtime_adapter_forwards_inno_enrollment_and_wraps_pack() -> None:
++    calls: list[tuple[np.ndarray, dict[str, Any]]] = []
++
++    class Runtime:
++        def enroll_voice(self, audio: np.ndarray, **kwargs: Any) -> SimpleNamespace:
++            calls.append((audio, kwargs))
++            return SimpleNamespace(
++                data=np.zeros((510, 1, 256), dtype=np.float16),
++                metadata={"runtime_version": "0.2"},
++            )
++
++    resolved = SimpleNamespace(
++        ref="kokoro:v1.0",
++        storage_id="model-cache-id",
++        model_paths=(),
++        voices_path=None,
++        config_path=None,
++        model_artifacts={},
++        metadata={},
++        installation=None,
++        sample_rate=24_000,
++        model_id="v1.0",
++        distribution=None,
++    )
++    runtime = Runtime()
++    adapter = onnxvoice_boundary.KokoroRuntimeAdapter(runtime, resolved)
++    audio = tone()
++
++    pack = adapter.enroll_voice(
++        audio,
++        sample_rate=44_100,
++        enroller="inno-v0.2",
++        options={"fmax": 8_000.0},
++        name="voice",
++    )
++
++    assert isinstance(pack, KokoroVoicePack)
++    assert pack.data.dtype == np.float32
++    assert pack.name == "voice"
++    assert pack.engine == "inno-v0.2"
++    assert pack.metadata["runtime_version"] == "0.2"
++    assert calls == [
++        (audio, {"sample_rate": 44_100, "enroller": "inno-v0.2", "options": {"fmax": 8_000.0}})
++    ]
++
++
++def test_runtime_adapter_requires_runtime_enrollment_support() -> None:
++    resolved = SimpleNamespace(
++        ref="kokoro:v1.0",
++        storage_id=None,
++        model_paths=(),
++        voices_path=None,
++        config_path=None,
++        model_artifacts={},
++        metadata={},
++        installation=None,
++        sample_rate=24_000,
++        model_id="v1.0",
++        distribution=None,
++    )
++    adapter = onnxvoice_boundary.KokoroRuntimeAdapter(SimpleNamespace(), resolved)
++
++    with pytest.raises(ConfigurationError, match="does not support voice enrollment"):
++        adapter.enroll_voice(tone(), sample_rate=24_000, enroller="inno-v0.2", options={})
+diff --git a/tests/test_inno_synthesis.py b/tests/test_inno_synthesis.py
+new file mode 100644
+index 0000000..15ae2a8
+--- /dev/null
++++ b/tests/test_inno_synthesis.py
+@@ -0,0 +1,147 @@
++from __future__ import annotations
++
++import numpy as np
++import pytest
++
++from pykokoro.exceptions import ConfigurationError
++from pykokoro.prepared_g2p import PreparedSynthesis
++from pykokoro.request_renderer import OnnxRequestRenderer
++from pykokoro.synthesis_config import SynthesisConfig, resolve_synthesis_config
++from pykokoro.synthesis_types import SynthesisSegment
++from pykokoro.types import PhonemeSegment
++from pykokoro.voice_level import VoiceLevelConfig
++from pykokoro.voice_pack import KokoroVoicePack
++
++
++class FakeG2P:
++    def phonemize_context(self, text: str, language: str, config: SynthesisConfig) -> object:
++        return object()
++
++    def ids_to_phonemes(self, token_ids: list[int] | tuple[int, ...], target_model: str) -> str:
++        return "həˈloʊ"
++
++
++class FakeBackend:
++    def __init__(self, pack: KokoroVoicePack) -> None:
++        self.pack = pack
++        self.resolve_voice_style_called = False
++        self.received_style: np.ndarray | None = None
++        self.generated: list[PhonemeSegment] = []
++
++    def preprocess_segments(self, segments, enable_short_sentence, **kwargs):
++        return segments
++
++    def resolve_voice_style(self, voice: object) -> np.ndarray:
++        self.resolve_voice_style_called = True
++        raise AssertionError("KokoroVoicePack must bypass voice-name resolution")
++
++    def generate_raw_audio_segments(self, segments, voice_style, speed, **kwargs):
++        self.received_style = voice_style
++        self.generated = segments
++        assert voice_style is self.pack.data
++        assert kwargs["default_voice_name"] is None
++        for segment in segments:
++            segment.raw_audio = np.asarray([0.1, -0.1], dtype=np.float32)
++        return segments
++
++    def postprocess_audio_segments(self, segments, *, trim_silence, **kwargs):
++        for segment in segments:
++            segment.processed_audio = segment.raw_audio
++        return segments
++
++
++def make_pack(value: float = 0.0) -> KokoroVoicePack:
++    data = np.full((510, 1, 256), value, dtype=np.float32)
++    return KokoroVoicePack.from_array(data, engine="inno-v0.2")
++
++
++def test_voice_pack_uses_normal_static_synthesis_without_voice_manager() -> None:
++    pack = make_pack()
++    request = SynthesisSegment("inno", "Hello", "en-us", voice=pack)
++    prepared = PreparedSynthesis(
++        request_id=request.id,
++        text=request.text,
++        language=request.language,
++        voice=pack,
++        phonemes="həˈloʊ",
++        token_ids=(1, 2, 3),
++    )
++    config = SynthesisConfig(
++        voice=pack,
++        model_source="github",
++        model_variant="v1.0",
++        return_trace=True,
++    )
++    backend = FakeBackend(pack)
++    renderer = OnnxRequestRenderer(FakeG2P(), backend_factory=lambda _: backend)
++
++    rendered = renderer.render(prepared, request, config)
++
++    assert backend.resolve_voice_style_called is False
++    assert backend.received_style is pack.data
++    assert rendered.voice == f"voicepack:{pack.fingerprint}"
++    assert rendered.synthesis_identity is not None
++    assert rendered.synthesis_identity.voice == f"voicepack:{pack.fingerprint}"
++    assert rendered.synthesis_identity.cache_key
++    assert rendered.trace is not None
++    assert rendered.trace.model["voicepack_fingerprint"] == pack.fingerprint
++
++
++def test_voice_pack_fingerprint_changes_synthesis_cache_identity() -> None:
++    first = make_pack(0.0)
++    second = make_pack(0.25)
++
++    assert first.fingerprint != second.fingerprint
++    assert first.fingerprint == make_pack(0.0).fingerprint
++    request = SynthesisSegment("pack", "Hello", "en-us", voice=first)
++    first_prepared = PreparedSynthesis(
++        request_id=request.id,
++        text=request.text,
++        language=request.language,
++        voice=first,
++        phonemes="hello",
++        token_ids=(1, 2),
++    )
++    second_request = SynthesisSegment("pack", "Hello", "en-us", voice=second)
++    second_prepared = PreparedSynthesis(
++        request_id=second_request.id,
++        text=second_request.text,
++        language=second_request.language,
++        voice=second,
++        phonemes="hello",
++        token_ids=(1, 2),
++    )
++    renderer = OnnxRequestRenderer(FakeG2P(), backend_factory=lambda _: FakeBackend(first))
++    first_result = renderer.render(
++        first_prepared,
++        request,
++        SynthesisConfig(voice=first, model_variant="v1.0"),
++    )
++    second_renderer = OnnxRequestRenderer(FakeG2P(), backend_factory=lambda _: FakeBackend(second))
++    second_result = second_renderer.render(
++        second_prepared,
++        second_request,
++        SynthesisConfig(voice=second, model_variant="v1.0"),
++    )
++
++    assert first_result.synthesis_identity is not None
++    assert second_result.synthesis_identity is not None
++    assert first_result.synthesis_identity.cache_key != second_result.synthesis_identity.cache_key
++
++
++def test_voice_pack_disables_automatic_but_allows_explicit_calibration() -> None:
++    pack = make_pack()
++    with pytest.raises(ConfigurationError, match="unavailable for reference voices or voice packs"):
++        resolve_synthesis_config(
++            SynthesisConfig(voice=pack, voice_level=VoiceLevelConfig(mode="calibrated")),
++            language="en-us",
++        )
++
++    configured = resolve_synthesis_config(
++        SynthesisConfig(
++            voice=pack,
++            voice_level=VoiceLevelConfig(mode="calibrated", gain_db=-2.0),
++        ),
++        language="en-us",
++    )
++    assert configured.voice is pack
+diff --git a/tests/test_model_discovery.py b/tests/test_model_discovery.py
+index f68322f..cfa77b7 100644
+--- a/tests/test_model_discovery.py
++++ b/tests/test_model_discovery.py
+@@ -61,6 +61,7 @@ def _model(
+     source: str = "github",
+     voice_mode: str = "static",
+     layout: str = "single-onnx-v1",
++    voice_enrollers: list[dict] | None = None,
+ ) -> dict:
+     return {
+         "runtime": {
+@@ -72,6 +73,7 @@ def _model(
+             "voice_mode": voice_mode,
+             "sample_rate": 24000,
+             "max_tokens": 510,
++            "voice_enrollers": voice_enrollers or [],
+         },
+         "runtime_available": runtime_available,
+         "redistribution_allowed": redistribution_allowed,
+@@ -115,6 +117,17 @@ def _registry() -> ModelRegistry:
+                     languages=["de"],
+                     voices=["df_anna"],
+                     default_voice="df_anna",
++                    voice_enrollers=[
++                        {
++                            "id": "inno-v0.2",
++                            "kind": "zero-shot-tuner",
++                            "transcript_required": False,
++                            "min_seconds": 3.0,
++                            "max_seconds": 30.0,
++                            "recommended_seconds": 10.0,
++                            "output_format": "kokoro-voicepack-v1",
++                        }
++                    ],
+                 ),
+                 "de-thorsten": _model(
+                     "de-thorsten",
+diff --git a/tests/test_model_registry.py b/tests/test_model_registry.py
+index 5b3d33c..f959979 100644
+--- a/tests/test_model_registry.py
++++ b/tests/test_model_registry.py
+@@ -520,6 +520,45 @@ def _reference_registry() -> dict:
+     }
+
+
++def test_registry_parses_voice_enroller_capability() -> None:
++    data = _registry()
++    data["models"]["v1.0"]["runtime"]["voice_enrollers"] = [
++        {
++            "id": "inno-v0.2",
++            "kind": "zero-shot-tuner",
++            "transcript_required": False,
++            "min_seconds": 3.0,
++            "max_seconds": 30.0,
++            "recommended_seconds": 10.0,
++            "output_format": "kokoro-voicepack-v1",
++        }
++    ]
++
++    _validate_registry(data)
++    model = ModelRegistry(data, "fixture").model("v1.0")
++
++    assert model.voice_enrollers[0].id == "inno-v0.2"
++    assert model.voice_enrollers[0].transcript_required is False
++    assert model.voice_enrollers[0].min_seconds == 3.0
++
++
++def test_registry_rejects_invalid_voice_enroller_capability() -> None:
++    data = _registry()
++    data["models"]["v1.0"]["runtime"]["voice_enrollers"] = [
++        {
++            "id": "inno-v0.2",
++            "kind": "zero-shot-tuner",
++            "transcript_required": False,
++            "min_seconds": 30.0,
++            "max_seconds": 3.0,
++            "output_format": "kokoro-voicepack-v1",
++        }
++    ]
++
++    with pytest.raises(ModelRegistryError, match="voice enroller metadata"):
++        _validate_registry(data)
++
++
+ def test_reference_registry_allows_empty_voices_and_no_voice_artifact() -> None:
+     data = _reference_registry()
+
+diff --git a/tests/test_new_examples.py b/tests/test_new_examples.py
+index 3b50e00..3faeb27 100644
+--- a/tests/test_new_examples.py
++++ b/tests/test_new_examples.py
+@@ -210,7 +210,7 @@ def test_reference_voice_example_reloads_saved_state_before_synthesis(
+         "enroll",
+         tmp_path / "reference.wav",
+         "Exact reference transcript.",
+-        {"language": "en-us", "name": "speaker"},
++        {"engine": "akinvox", "language": "en-us", "name": "speaker"},
+     )
+     assert calls[1] == ("synthesize", "New target text.", "en-us", voice.fingerprint)
+     assert output_path.read_bytes() == b"fake wav"
+diff --git a/tests/test_public_engine_api.py b/tests/test_public_engine_api.py
+index c2e1bf5..cb15447 100644
+--- a/tests/test_public_engine_api.py
++++ b/tests/test_public_engine_api.py
+@@ -9,7 +9,9 @@ import numpy as np
+ import pykokoro
+ from pykokoro import (
+     GenerationConfig,
++    InnoEnrollmentOptions,
+     KokoroSynthesizer,
++    KokoroVoicePack,
+     LanguageRoutingConfig,
+     LinguisticToken,
+     LongTextSplitMode,
+@@ -22,6 +24,9 @@ from pykokoro import (
+     SynthesisRequest,
+     SynthesisSegment,
+     VoiceBlend,
++    VoiceConditioning,
++    VoiceEnrollerSpec,
++    VoiceEnrollmentEngine,
+     VoiceLevelApplication,
+     VoiceLevelConfig,
+     build_synthesis_identity,
+@@ -36,6 +41,7 @@ def test_public_api_exports_request_and_result_types() -> None:
+         "ConsoleAssetProgress",
+         "ModelCapabilities",
+         "ModelDiscoveryResult",
++        "VoiceEnrollerSpec",
+         "VoiceCapabilities",
+         "discover_models",
+         "LexiconCapabilities",
+@@ -68,6 +74,10 @@ def test_public_api_exports_request_and_result_types() -> None:
+         "VoiceLevelApplication",
+         "VoiceBlend",
+         "SynthesisSegment",
++        "KokoroVoicePack",
++        "InnoEnrollmentOptions",
++        "VoiceEnrollmentEngine",
++        "VoiceConditioning",
+         "SynthesisRequest",
+         "RenderedSegment",
+         "PronunciationOverride",
+@@ -101,6 +111,11 @@ def test_public_api_exports_request_and_result_types() -> None:
+             ReferenceVoice,
+             LinguisticToken,
+             VoiceBlend,
++            InnoEnrollmentOptions,
++            KokoroVoicePack,
++            VoiceConditioning,
++            VoiceEnrollmentEngine,
++            VoiceEnrollerSpec,
+         )
+     )
+
+diff --git a/tests/test_reference_audio.py b/tests/test_reference_audio.py
+index 69dde04..dfafefc 100644
+--- a/tests/test_reference_audio.py
++++ b/tests/test_reference_audio.py
+@@ -25,6 +25,7 @@ def test_prepare_reference_audio_reads_wav_and_downmixes_stereo(tmp_path: Path)
+     prepared = prepare_reference_audio(path)
+
+     assert prepared.original_sample_rate == 24_000
++    np.testing.assert_allclose(prepared.mono_audio, mono * 0.75, atol=1.0e-6)
+     assert prepared.duration_seconds == pytest.approx(3.5, abs=1 / 24_000)
+     np.testing.assert_allclose(prepared.audio_24k, mono * 0.75, atol=1.0e-6)
+     assert prepared.audio_16k.shape == (round(prepared.audio_24k.size * 2 / 3),)
+diff --git a/tests/test_reference_enrollment.py b/tests/test_reference_enrollment.py
+index 749c98d..aff5c88 100644
+--- a/tests/test_reference_enrollment.py
++++ b/tests/test_reference_enrollment.py
+@@ -77,7 +77,7 @@ def test_enroll_voice_uses_exact_transcript_and_selects_cloning_profile() -> Non
+     transcript = 'Dr. Smith said, "Don\'t leave yet, um."'
+
+     voice = synthesizer.enroll_voice(
+-        tone(), transcript, sample_rate=24_000, language="en-US", name="speaker"
++        tone(), transcript, engine="akinvox", sample_rate=24_000, language="en-US", name="speaker"
+     )
+
+     request = g2p.requests[0]
+@@ -104,7 +104,7 @@ def test_enroll_voice_reads_wav_without_normalizing_transcript(tmp_path: Path) -
+     synthesizer = KokoroSynthesizer(g2p=g2p, renderer=renderer)
+     transcript = "  Hello, exactly as spoken.  "
+
+-    voice = synthesizer.enroll_voice(path, transcript)
++    voice = synthesizer.enroll_voice(path, transcript, engine="akinvox")
+
+     assert g2p.requests[0].text == transcript
+     assert (
+@@ -119,9 +119,11 @@ def test_enroll_voice_rejects_empty_transcript_and_non_english() -> None:
+     synthesizer = KokoroSynthesizer(g2p=FakeG2P(), renderer=FakeRenderer())
+
+     with pytest.raises(EmptyTextError, match="reference_text"):
+-        synthesizer.enroll_voice(tone(), "  ", sample_rate=24_000)
++        synthesizer.enroll_voice(tone(), "  ", engine="akinvox", sample_rate=24_000)
+     with pytest.raises(InvalidLanguageError, match="English only"):
+-        synthesizer.enroll_voice(tone(), "Hello.", sample_rate=24_000, language="de")
++        synthesizer.enroll_voice(
++            tone(), "Hello.", engine="akinvox", sample_rate=24_000, language="de"
++        )
+
+
+ def test_onnx_request_renderer_bridges_prepared_reference_to_backend() -> None:
+diff --git a/tests/test_synthesis_identity.py b/tests/test_synthesis_identity.py
+index 85db32c..c307308 100644
+--- a/tests/test_synthesis_identity.py
++++ b/tests/test_synthesis_identity.py
+@@ -1,9 +1,12 @@
+ from __future__ import annotations
+
++import numpy as np
++
+ import pykokoro
+ from pykokoro.generation_config import GenerationConfig
+ from pykokoro.synthesis_config import SynthesisConfig, resolve_synthesis_config
+ from pykokoro.synthesis_identity import SynthesisIdentity, build_synthesis_identity
++from pykokoro.voice_pack import KokoroVoicePack
+
+
+ def _identity(config: SynthesisConfig | None = None) -> SynthesisIdentity:
+@@ -46,3 +49,22 @@ def test_synthesis_identity_does_not_include_transient_model_paths(tmp_path) ->
+     second = _identity(SynthesisConfig(model_path=tmp_path / "two.onnx"))
+
+     assert first.cache_key == second.cache_key
++
++
++def test_voice_pack_identity_uses_its_precomputed_fingerprint() -> None:
++    first = KokoroVoicePack.from_array(
++        np.zeros((510, 1, 256), dtype=np.float32), engine="inno-v0.2"
++    )
++    changed = np.zeros((510, 1, 256), dtype=np.float32)
++    changed[0, 0, 0] = 1
++    second = KokoroVoicePack.from_array(changed, engine="inno-v0.2")
++
++    resolved = resolve_synthesis_config(SynthesisConfig(voice=first), language="en-us")
++    identity = build_synthesis_identity(resolved, language="en-us", voice=resolved.voice)
++    second_resolved = resolve_synthesis_config(SynthesisConfig(voice=second), language="en-us")
++    second_identity = build_synthesis_identity(
++        second_resolved, language="en-us", voice=second_resolved.voice
++    )
++
++    assert identity.voice == f"voicepack:{first.fingerprint}"
++    assert identity.cache_key != second_identity.cache_key
+diff --git a/tests/test_voice_enroller_discovery.py b/tests/test_voice_enroller_discovery.py
+new file mode 100644
+index 0000000..6d1e7d5
+--- /dev/null
++++ b/tests/test_voice_enroller_discovery.py
+@@ -0,0 +1,119 @@
++from __future__ import annotations
++
++import pytest
++
++from pykokoro import discovery
++from pykokoro.exceptions import InvalidModelError, UnsupportedFeatureError
++from pykokoro.model_profiles import resolve_voice_enroller
++from pykokoro.model_registry import ModelRegistry, VoiceEnrollerSpec
++
++
++class RegistryClientStub:
++    def __init__(self, registry: ModelRegistry) -> None:
++        self.registry = registry
++
++    def load(self, *, offline: bool = False, refresh: bool = False) -> ModelRegistry:
++        return self.registry
++
++
++def test_discovery_exposes_voice_enroller_capabilities(monkeypatch) -> None:
++    enroller = {
++        "id": "inno-v0.2",
++        "kind": "zero-shot-tuner",
++        "transcript_required": False,
++        "min_seconds": 3.0,
++        "max_seconds": 30.0,
++        "recommended_seconds": 10.0,
++        "output_format": "kokoro-voicepack-v1",
++    }
++    registry = ModelRegistry(
++        {
++            "schema": 1,
++            "runtime_contract": 1,
++            "models": {
++                "v1.0": {
++                    "runtime": {
++                        "voice_mode": "static",
++                        "voices": ["af_heart"],
++                        "default_voice": "af_heart",
++                        "frontend": "pykokoro-native-v1",
++                        "language_codes": ["en"],
++                        "voice_enrollers": [enroller],
++                    },
++                    "runtime_available": False,
++                    "model_source": "github",
++                    "distributions": [],
++                },
++                "en-akinvox-cloning-v1": {
++                    "runtime": {"voice_mode": "reference", "voices": []},
++                    "runtime_available": False,
++                    "model_source": "github",
++                    "distributions": [],
++                },
++            },
++        },
++        "fixture",
++    )
++    monkeypatch.setattr(discovery, "RegistryClient", lambda: RegistryClientStub(registry))
++
++    result = discovery.discover_models(offline=True)
++    inno_model = next(model for model in result.models if model.model_id == "v1.0")
++    akinvox_model = next(
++        model for model in result.models if model.model_id == "en-akinvox-cloning-v1"
++    )
++
++    assert inno_model.voice_enrollers == (
++        VoiceEnrollerSpec(
++            id="inno-v0.2",
++            kind="zero-shot-tuner",
++            transcript_required=False,
++            min_seconds=3.0,
++            max_seconds=30.0,
++            recommended_seconds=10.0,
++            output_format="kokoro-voicepack-v1",
++        ),
++    )
++    assert inno_model.supports_voice_enrollment is True
++    assert akinvox_model.voice_enrollers == ()
++    assert akinvox_model.supports_reference_enrollment is True
++    assert akinvox_model.supports_voice_enrollment is True
++
++
++def test_inno_model_resolution_defaults_to_v1_and_checks_capability() -> None:
++    enroller = {
++        "id": "inno-v0.2",
++        "kind": "zero-shot-tuner",
++        "transcript_required": False,
++        "min_seconds": 3.0,
++        "max_seconds": 30.0,
++        "recommended_seconds": 10.0,
++        "output_format": "kokoro-voicepack-v1",
++    }
++    registry = ModelRegistry(
++        {
++            "schema": 1,
++            "runtime_contract": 1,
++            "models": {
++                "v1.0": {
++                    "runtime": {"voice_enrollers": [enroller]},
++                    "distributions": [],
++                    "runtime_available": False,
++                },
++                "other-model": {
++                    "runtime": {"voice_enrollers": []},
++                    "distributions": [],
++                    "runtime_available": False,
++                },
++            },
++        },
++        "fixture",
++    )
++
++    model_id, spec = resolve_voice_enroller(None, "inno-v0.2", registry=registry)
++    assert model_id == "v1.0"
++    assert spec.id == "inno-v0.2"
++    assert resolve_voice_enroller("v1.0", "inno-v0.2", registry=registry)[0] == "v1.0"
++    with pytest.raises(UnsupportedFeatureError, match="does not support voice enroller"):
++        resolve_voice_enroller("other-model", "inno-v0.2", registry=registry)
++    with pytest.raises(InvalidModelError, match="Unknown enrollment model"):
++        resolve_voice_enroller("missing-model", "inno-v0.2", registry=registry)
+diff --git a/tests/test_voice_pack.py b/tests/test_voice_pack.py
+new file mode 100644
+index 0000000..b3991db
+--- /dev/null
++++ b/tests/test_voice_pack.py
+@@ -0,0 +1,114 @@
++from __future__ import annotations
++
++import json
++from pathlib import Path
++
++import numpy as np
++import pytest
++
++from pykokoro.exceptions import InvalidVoiceError
++from pykokoro.voice_pack import KokoroVoicePack
++
++
++def make_data(dtype: np.dtype | type = np.float32) -> np.ndarray:
++    return np.zeros((510, 1, 256), dtype=dtype)
++
++
++def test_voice_pack_copies_read_only_data_and_fingerprints_metadata() -> None:
++    data = make_data()
++    pack = KokoroVoicePack(data, name="speaker", engine="inno-v0.2", metadata={"version": 2})
++    data[0, 0, 0] = 1
++
++    assert pack.data[0, 0, 0] == 0
++    assert pack.data.dtype == np.float32
++    with pytest.raises(ValueError):
++        pack.data[0, 0, 0] = 2
++    with pytest.raises(TypeError):
++        pack.metadata["new"] = "value"  # type: ignore[index]
++    assert (
++        pack.fingerprint
++        != KokoroVoicePack(
++            pack.data, name="speaker", engine="inno-v0.2", metadata={"version": 3}
++        ).fingerprint
++    )
++
++
++def test_voice_pack_accepts_float16_and_from_array_canonicalizes_to_float32() -> None:
++    pack = KokoroVoicePack(make_data(np.dtype(np.float16)))
++    generated = KokoroVoicePack.from_array(make_data(np.dtype(np.float16)), engine="inno-v0.2")
++
++    assert pack.data.dtype == np.float16
++    assert generated.data.dtype == np.float32
++
++
++@pytest.mark.parametrize(
++    ("data", "message"),
++    [
++        (np.zeros((1, 256), dtype=np.float32), "shape"),
++        (np.zeros((510, 1, 256), dtype=np.float64), "float16 or float32"),
++        (np.full((510, 1, 256), np.nan, dtype=np.float32), "finite"),
++        (np.zeros((510, 1, 256), dtype=object), "float16 or float32"),
++    ],
++)
++def test_voice_pack_rejects_invalid_data(data: np.ndarray, message: str) -> None:
++    with pytest.raises(InvalidVoiceError, match=message):
++        KokoroVoicePack(data)
++
++
++def test_voice_pack_from_array_rejects_non_numeric_and_non_finite_data() -> None:
++    with pytest.raises(InvalidVoiceError, match="real numeric"):
++        KokoroVoicePack.from_array(np.full((510, 1, 256), "voice"))
++    with pytest.raises(InvalidVoiceError, match="finite"):
++        KokoroVoicePack.from_array(np.full((510, 1, 256), np.inf))
++
++
++def test_voice_pack_round_trip_uses_safe_numpy_archive(tmp_path: Path) -> None:
++    pack = KokoroVoicePack.from_array(
++        make_data(),
++        name="speaker",
++        engine="inno-v0.2",
++        metadata={"base_model": "v1.0", "runtime": {"version": "0.2"}},
++    )
++    path = tmp_path / "speaker.npz"
++    pack.save(path)
++    restored = KokoroVoicePack.load(path)
++
++    assert restored.fingerprint == pack.fingerprint
++    assert restored.name == "speaker"
++    assert restored.engine == "inno-v0.2"
++    assert restored.metadata["runtime"]["version"] == "0.2"
++    np.testing.assert_array_equal(restored.data, pack.data)
++    with np.load(path, allow_pickle=False) as archive:
++        assert set(archive.files) == {"data", "metadata_json_utf8"}
++        assert all(archive[key].dtype != object for key in archive.files)
++        metadata = json.loads(archive["metadata_json_utf8"].tobytes())
++    assert metadata["format"] == "pykokoro-voicepack-v1"
++    assert metadata["base_model"] == "v1.0"
++
++
++def test_voice_pack_load_rejects_corrupt_or_incomplete_archives(tmp_path: Path) -> None:
++    corrupt = tmp_path / "corrupt.npz"
++    corrupt.write_bytes(b"not an npz archive")
++    with pytest.raises(InvalidVoiceError, match="could not load"):
++        KokoroVoicePack.load(corrupt)
++
++    incomplete = tmp_path / "incomplete.npz"
++    np.savez(incomplete, data=make_data())
++    with pytest.raises(InvalidVoiceError, match="missing or unexpected"):
++        KokoroVoicePack.load(incomplete)
++
++
++def test_voice_pack_load_rejects_tampered_fingerprint(tmp_path: Path) -> None:
++    path = tmp_path / "pack.npz"
++    KokoroVoicePack(make_data()).save(path)
++    with np.load(path, allow_pickle=False) as archive:
++        fields = {name: archive[name] for name in archive.files}
++    metadata = json.loads(fields["metadata_json_utf8"].tobytes())
++    metadata["fingerprint"] = "0" * 64
++    fields["metadata_json_utf8"] = np.frombuffer(
++        json.dumps(metadata).encode("utf-8"), dtype=np.uint8
++    )
++    np.savez(path, **fields)
++
++    with pytest.raises(InvalidVoiceError, match="fingerprint does not match"):
++        KokoroVoicePack.load(path)
+diff --git a/tests/typecheck/public_api.py b/tests/typecheck/public_api.py
+index 6cf1cce..21624d4 100644
+--- a/tests/typecheck/public_api.py
++++ b/tests/typecheck/public_api.py
+@@ -8,7 +8,9 @@ from pykokoro import (
+     AssetProgressEvent,
+     ConsoleAssetProgress,
+     GenerationConfig,
++    InnoEnrollmentOptions,
+     KokoroSynthesizer,
++    KokoroVoicePack,
+     LexiconCapabilities,
+     LexiconDiscoveryResult,
+     ModelCapabilities,
+@@ -18,6 +20,8 @@ from pykokoro import (
+     SynthesisConfig,
+     SynthesisSegment,
+     VoiceCapabilities,
++    VoiceEnrollerSpec,
++    VoiceEnrollmentEngine,
+     discover_lexicons,
+     discover_models,
+ )
+@@ -34,12 +38,24 @@ reference_voice = ReferenceVoice(
+ reference_request = SynthesisSegment("reference-1", "Hello.", "en-us", voice=reference_voice)
+ reference_config = SynthesisConfig(voice=reference_voice)
+
++voice_pack = KokoroVoicePack.from_array(np.zeros((510, 1, 256), dtype=np.float32))
++voice_pack_request = SynthesisSegment("voice-pack-1", "Hello.", "en-us", voice=voice_pack)
++voice_pack_config = SynthesisConfig(voice=voice_pack)
++inno_options = InnoEnrollmentOptions(fmax=8_000.0)
++inno_enroller = VoiceEnrollerSpec(
++    "inno-v0.2", "zero-shot-tuner", False, 3.0, 30.0, 10.0, "kokoro-voicepack-v1"
++)
++engine: VoiceEnrollmentEngine = "inno"
++enrolled_voice = KokoroSynthesizer().enroll_voice("reference.wav", engine=engine)
+ assert_type(AssetProgressCallback, type[AssetProgressCallback])
+ assert_type(AssetProgressEvent, type[AssetProgressEvent])
+ assert_type(ConsoleAssetProgress, type[ConsoleAssetProgress])
+ assert_type(ModelCapabilities, type[ModelCapabilities])
+ assert_type(ModelDiscoveryResult, type[ModelDiscoveryResult])
+ assert_type(VoiceCapabilities, type[VoiceCapabilities])
++assert_type(VoiceEnrollerSpec, type[VoiceEnrollerSpec])
++assert_type(KokoroVoicePack, type[KokoroVoicePack])
++assert_type(InnoEnrollmentOptions, type[InnoEnrollmentOptions])
+ model_discoverer: Callable[..., ModelDiscoveryResult] = discover_models
+ assert_type(model_discoverer, Callable[..., ModelDiscoveryResult])
+ assert_type(LexiconCapabilities, type[LexiconCapabilities])
+@@ -52,5 +68,11 @@ assert_type(SynthesisConfig, type[SynthesisConfig])
+ assert_type(ReferenceVoice, type[ReferenceVoice])
+ assert_type(reference_request, SynthesisSegment)
+ assert_type(reference_config, SynthesisConfig)
++assert_type(voice_pack, KokoroVoicePack)
++assert_type(voice_pack_request, SynthesisSegment)
++assert_type(voice_pack_config, SynthesisConfig)
++assert_type(inno_options, InnoEnrollmentOptions)
++assert_type(inno_enroller, VoiceEnrollerSpec)
++assert_type(enrolled_voice, KokoroVoicePack | ReferenceVoice)
+ assert_type(request, SynthesisSegment)
+ assert_type(config, SynthesisConfig)

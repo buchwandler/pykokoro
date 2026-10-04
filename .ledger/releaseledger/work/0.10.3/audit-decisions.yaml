@@ -1,0 +1,71 @@
+rows:
+  - sha: 4fa043229a3eacd73a2f185304391ad749822b61
+    inspected: true
+    inspected_paths:
+      - docs/reference_voice.md
+      - pykokoro/reference_audio.py
+      - pykokoro/reference_voice.py
+      - pykokoro/synthesizer.py
+      - pykokoro/request_renderer.py
+      - pykokoro/_onnxvoice.py
+      - tests/test_reference_enrollment.py
+      - tests/test_reference_synthesis.py
+    observed_behavior: >-
+      Adds English transcript-conditioned reference voice enrollment for the AkinVox
+      cloning profile. Reference audio is prepared and encoded as an immutable
+      model-bound ReferenceVoice that can be persisted and reused for conditioned
+      synthesis.
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: >-
+      Public enrollment and synthesis API with documented audio limits, persistence, and
+      privacy.
+    stale: false
+  - sha: 0b463faf6aa7099df9679d7472964de71215e58d
+    inspected: true
+    inspected_paths:
+      - docs/reference_voice.md
+      - docs/api_reference.md
+      - pykokoro/synthesizer.py
+      - pykokoro/voice_enrollment.py
+      - pykokoro/voice_pack.py
+      - pykokoro/model_registry.py
+      - pykokoro/request_renderer.py
+      - tests/test_inno_enrollment.py
+      - tests/test_inno_synthesis.py
+      - tests/test_voice_pack.py
+    observed_behavior: >-
+      Adds audio-only Inno enrollment with typed tuning options and model capability
+      discovery. Enrollment returns a portable, pickle-free KokoroVoicePack that can be
+      reused through ordinary static voice synthesis.
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: >-
+      Inno is the default enrollment engine; AkinVox remains available as an explicit
+      engine.
+    stale: false
+  - sha: 2a9a079cb9dea2f21d10e8ed87ca0a5adbb14b93
+    inspected: true
+    inspected_paths:
+      - docs/advanced_features.md
+      - examples/voice_blend.py
+      - pykokoro/voice_manager.py
+      - pykokoro/request_renderer.py
+      - tests/test_voice_manager.py
+      - tests/test_request_renderer.py
+    observed_behavior: >-
+      Makes '=' the documented voice blend separator while retaining legacy ':' parsing,
+      supports multi-voice linear blends and exactly two voices for SLERP, and uses
+      row-wise linear fallback for near-parallel SLERP vectors.
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: >-
+      Public blend syntax and interpolation behavior are documented and covered by
+      tests.
+    stale: false

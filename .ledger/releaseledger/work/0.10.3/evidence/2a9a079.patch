@@ -1,0 +1,487 @@
+ docs/advanced_features.md      |  10 ++--
+ docs/examples.md               |   2 +-
+ examples/README.md             |   2 +-
+ examples/korean.py             |   2 +-
+ examples/voice_blend.py        |  45 ++++++++++++-----
+ pykokoro/request_renderer.py   |   4 +-
+ pykokoro/voice_manager.py      |  57 +++++++++++----------
+ tests/test_new_examples.py     |   9 +++-
+ tests/test_request_renderer.py |  25 +++++++++-
+ tests/test_voice_manager.py    | 111 ++++++++++++++++++++++++++++++++++++++++-
+ 10 files changed, 219 insertions(+), 48 deletions(-)
+
+diff --git a/docs/advanced_features.md b/docs/advanced_features.md
+index 7b0fd32..766f9c5 100644
+--- a/docs/advanced_features.md
++++ b/docs/advanced_features.md
+@@ -143,11 +143,15 @@ blend = VoiceBlend(
+     voices=[("af_sarah", 0.6), ("af_bella", 0.4)],
+     interpolation="linear",
+ )
+-compact = VoiceBlend.parse("af_sarah:60,af_bella:40")
++compact = VoiceBlend.parse("af_sarah=60,af_bella=40")
++slerp = VoiceBlend.parse("af_sarah=60,af_bella=40@slerp")
++multi = VoiceBlend.parse("af_sarah=50,af_bella=30,af_nicole=20")
+ ```
+
+-Voice IDs and valid combinations come from model profiles; inspect `discover_models()`
+-instead of assuming a voice is available for every language or model. See
++Linear interpolation supports one or more voices. SLERP requires exactly two voices, and
++the second voice's weight is its interpolation parameter. Voice IDs and valid
++combinations come from model profiles; inspect `discover_models()` instead of assuming a
++voice is available for every language or model. See
+ [`voice_blend.py`](../examples/voice_blend.py).
+
+ ## Prepared phoneme input
+diff --git a/docs/examples.md b/docs/examples.md
+index 6d1c827..58a3e6d 100644
+--- a/docs/examples.md
++++ b/docs/examples.md
+@@ -32,7 +32,7 @@ group without running it.
+ | [`pronunciation_overrides.py`](../examples/pronunciation_overrides.py)<br>`python examples/pronunciation_overrides.py`  | Contrasts a source-span `PronunciationOverride(language=...)` with a direct phoneme span.                                                                                                    | First run may download model assets; low-to-medium cost for two short requests.                                                                                            | `language-override.wav`, `phoneme-span-override.wav`                                                                                 |
+ | [`linguistic_tokens.py`](../examples/linguistic_tokens.py)<br>`python examples/linguistic_tokens.py`                    | Passes a source-aligned `LinguisticToken` through the canonical `tokens=` field.                                                                                                             | First run may download model assets; low CPU cost.                                                                                                                         | `contextual-pronunciation.wav`                                                                                                       |
+ | [`long_text.py`](../examples/long_text.py)<br>`python examples/long_text.py`                                            | Sends one oversized original request with `long_text_split="sentence"`; engine-managed chunks return as one result.                                                                          | First run may download model assets; higher CPU cost for the long passage.                                                                                                 | `long_text.wav`                                                                                                                      |
+-| [`voice_blend.py`](../examples/voice_blend.py)<br>`python examples/voice_blend.py`                                      | Shows structured and parsed `VoiceBlend` construction and synthesizes one blended voice.                                                                                                     | First run may download assets for the selected model/voices; low-to-medium CPU cost.                                                                                       | `voice_blend.wav`                                                                                                                    |
++| [`voice_blend.py`](../examples/voice_blend.py)<br>`python examples/voice_blend.py`                                      | Compares linear and SLERP blends and synthesizes both outputs.                                                                                                                               | First run may download assets for the selected model/voices; low-to-medium CPU cost.                                                                                       | `voice_blend.wav`, `voice_blend_slerp.wav`                                                                                           |
+ | [`result_metadata.py`](../examples/result_metadata.py)<br>`python examples/result_metadata.py`                          | Prints request/result fields, token IDs, diagnostics, trace summary, synthesis identity, word timings, and voice-level applications.                                                         | First run may download model assets; low CPU cost for one request.                                                                                                         | `result_metadata.wav` and printed metadata                                                                                           |
+ | [`models_and_languages.py`](../examples/models_and_languages.py)<br>`python examples/models_and_languages.py --offline` | Uses `discover_models()` to print runtime model/profile, language, and voice inventory without creating an ONNX session. `--model MODEL_ID` optionally synthesizes using a selected profile. | Default discovery may refresh registry metadata over the network; `--offline` uses cached metadata. No model download unless `--model` is supplied; discovery cost is low. | Default: printed inventory only. With `--model`: `<model>_<language>_<voice>.wav` under `example-artifacts/model_language_outputs/`. |
+
+diff --git a/examples/README.md b/examples/README.md
+index bbc7db1..7321add 100644
+--- a/examples/README.md
++++ b/examples/README.md
+@@ -30,7 +30,7 @@ does not run synthesis.
+ | [`pronunciation_overrides.py`](pronunciation_overrides.py)<br>`python examples/pronunciation_overrides.py`  | Compares a language span override and a direct-phoneme span using `PronunciationOverride`.                                                                               | May download assets; low-to-medium cost for two short requests.                                                                                                               | `language-override.wav`, `phoneme-span-override.wav`                                                                            |
+ | [`linguistic_tokens.py`](linguistic_tokens.py)<br>`python examples/linguistic_tokens.py`                    | Supplies source-aligned POS/tag/lemma context with `LinguisticToken` and canonical `tokens=`.                                                                            | May download assets; low CPU cost for one request.                                                                                                                            | `contextual-pronunciation.wav`                                                                                                  |
+ | [`long_text.py`](long_text.py)<br>`python examples/long_text.py`                                            | Passes the unsplit original request with `long_text_split="sentence"`; internal chunks remain one result.                                                                | May download assets; higher CPU cost for the long passage.                                                                                                                    | `long_text.wav`                                                                                                                 |
+-| [`voice_blend.py`](voice_blend.py)<br>`python examples/voice_blend.py`                                      | Constructs `VoiceBlend` structurally and with `VoiceBlend.parse()`, then synthesizes a blend.                                                                            | May download selected voice/model assets; low-to-medium CPU cost.                                                                                                             | `voice_blend.wav`                                                                                                               |
++| [`voice_blend.py`](voice_blend.py)<br>`python examples/voice_blend.py`                                      | Compares linear and SLERP blends and synthesizes both outputs.                                                                                                           | May download selected voice/model assets; low-to-medium CPU cost.                                                                                                             | `voice_blend.wav`, `voice_blend_slerp.wav`                                                                                      |
+ | [`result_metadata.py`](result_metadata.py)<br>`python examples/result_metadata.py`                          | Prints result metadata, token IDs, diagnostics, trace, synthesis identity, word timings, and voice-level applications.                                                   | May download assets; low CPU cost.                                                                                                                                            | `result_metadata.wav` and printed metadata                                                                                      |
+ | [`models_and_languages.py`](models_and_languages.py)<br>`python examples/models_and_languages.py --offline` | Uses `discover_models()` to list profiles, languages, voices, and runtime status without ONNX inference. `--model MODEL_ID` optionally synthesizes one selected profile. | Default discovery may refresh registry metadata over the network; `--offline` uses cached metadata. No model asset download unless `--model` is supplied; low discovery cost. | Default: printed inventory. With `--model`: `<model>_<language>_<voice>.wav` under `example-artifacts/model_language_outputs/`. |
+
+diff --git a/examples/korean.py b/examples/korean.py
+index 06e3be3..b42bf21 100755
+--- a/examples/korean.py
++++ b/examples/korean.py
+@@ -11,7 +11,7 @@ except ImportError:
+     from _output import artifact_path
+
+ TEXT = "안녕하세요. 한국어 음성 합성 예제입니다. 오늘은 날씨가 좋아 공원에서 산책하기 좋습니다."
+-BLEND = "jf_alpha:50,jf_gongitsune:50"
++BLEND = "jf_alpha=50,jf_gongitsune=50"
+ LANG = "ko"
+
+
+diff --git a/examples/voice_blend.py b/examples/voice_blend.py
+index ffc932b..31790f0 100644
+--- a/examples/voice_blend.py
++++ b/examples/voice_blend.py
+@@ -1,8 +1,8 @@
+ #!/usr/bin/env python3
+-"""Blend voices with either the structured or compact public constructor.
++"""Compare linear and spherical interpolation of two voices.
+
+-Synthesis may install model assets. SLERP is also available through
+-``VoiceBlend.parse(...@slerp)`` and requires exactly two voices.
++Synthesis may install model assets. Linear blending supports one or more voices;
++SLERP requires exactly two voices.
+ """
+
+ from __future__ import annotations
+@@ -14,6 +14,10 @@ try:
+ except ImportError:
+     from _output import artifact_path
+
++LINEAR_BLEND = "af_sarah=60,af_bella=40"
++SLERP_BLEND = f"{LINEAR_BLEND}@slerp"
++SAMPLE_TEXT = "This voice combines two styles."
++
+
+ def explicit_blend() -> VoiceBlend:
+     return VoiceBlend(
+@@ -23,7 +27,11 @@ def explicit_blend() -> VoiceBlend:
+
+
+ def parsed_blend() -> VoiceBlend:
+-    return VoiceBlend.parse("af_sarah:60,af_bella:40")
++    return VoiceBlend.parse(LINEAR_BLEND)
++
++
++def slerp_blend() -> VoiceBlend:
++    return VoiceBlend.parse(SLERP_BLEND)
+
+
+ def make_config(blend: VoiceBlend | None = None) -> SynthesisConfig:
+@@ -34,15 +42,26 @@ def make_config(blend: VoiceBlend | None = None) -> SynthesisConfig:
+
+
+ def main() -> None:
+-    structured = explicit_blend()
+-    parsed = parsed_blend()
+-    print(f"Structured blend: {structured}")
+-    print(f"Parsed blend: {parsed}")
+-    with KokoroSynthesizer(make_config(parsed)) as synthesizer:
+-        result = synthesizer.synthesize_text("This voice combines two styles.", language="en-us")
+-    output = artifact_path("voice_blend.wav")
+-    result.save_wav(output)
+-    print(f"Wrote {output}")
++    linear = parsed_blend()
++    spherical = slerp_blend()
++    print(f"Linear blend: {linear}")
++    print(f"SLERP blend: {spherical}")
++
++    with KokoroSynthesizer(make_config(linear)) as synthesizer:
++        linear_result = synthesizer.synthesize_text(SAMPLE_TEXT, language="en-us")
++        spherical_result = synthesizer.synthesize_text(
++            SAMPLE_TEXT,
++            language="en-us",
++            voice=spherical,
++        )
++
++    linear_output = artifact_path("voice_blend.wav")
++    linear_result.save_wav(linear_output)
++    print(f"Wrote {linear_output}")
++
++    slerp_output = artifact_path("voice_blend_slerp.wav")
++    spherical_result.save_wav(slerp_output)
++    print(f"Wrote {slerp_output}")
+
+
+ if __name__ == "__main__":
+diff --git a/pykokoro/request_renderer.py b/pykokoro/request_renderer.py
+index f04cd05..57998ee 100644
+--- a/pykokoro/request_renderer.py
++++ b/pykokoro/request_renderer.py
+@@ -123,7 +123,9 @@ class OnnxRequestRenderer:
+         else:
+             try:
+                 voice_style = backend.resolve_voice_style(voice)
+-            except (KeyError, ValueError, FileNotFoundError, ConfigurationError) as exc:
++            except ConfigurationError:
++                raise
++            except (KeyError, ValueError, FileNotFoundError) as exc:
+                 raise InvalidVoiceError(
+                     f"Voice {voice!r} is unavailable for the resolved model"
+                 ) from exc
+diff --git a/pykokoro/voice_manager.py b/pykokoro/voice_manager.py
+index 9d5d860..8c2400b 100644
+--- a/pykokoro/voice_manager.py
++++ b/pykokoro/voice_manager.py
+@@ -169,23 +169,23 @@ def slerp_voices(
+     # Compute sine of theta
+     sin_theta = np.sin(theta)
+
+-    # If sin_theta is near zero, vectors are nearly parallel
+-    # Fall back to linear interpolation
+-    if np.max(np.abs(sin_theta)) < epsilon:
+-        result = (1 - t) * a + t * b
+-    else:
+-        # Compute SLERP using the spherical interpolation formula
+-        sin_t_theta = np.sin(t * theta)
+-        sin_one_minus_t_theta = np.sin((1 - t) * theta)
++    # Fall back to linear interpolation for each near-parallel row.
++    near_parallel = np.abs(sin_theta) < epsilon
++    safe_sin_theta = np.where(near_parallel, 1.0, sin_theta)
++
++    sin_t_theta = np.sin(t * theta)
++    sin_one_minus_t_theta = np.sin((1 - t) * theta)
+
+-        # SLERP on normalized vectors
+-        result_norm = (sin_one_minus_t_theta / sin_theta) * a_norm + (
+-            sin_t_theta / sin_theta
+-        ) * b_norm
++    # SLERP on normalized vectors
++    result_norm = (sin_one_minus_t_theta / safe_sin_theta) * a_norm + (
++        sin_t_theta / safe_sin_theta
++    ) * b_norm
+
+-        # Interpolate the magnitudes linearly and apply to result
+-        mag_interp = (1 - t) * mag_a + t * mag_b
+-        result = result_norm * mag_interp
++    # Interpolate the magnitudes linearly and apply to result
++    mag_interp = (1 - t) * mag_a + t * mag_b
++    spherical = result_norm * mag_interp
++    linear = (1 - t) * a + t * b
++    result = np.where(near_parallel, linear, spherical)
+
+     # Return with original dtype (float32)
+     return result.astype(a.dtype if a.dtype == np.float32 else np.float32)
+@@ -224,14 +224,15 @@ class VoiceBlend:
+     def parse(cls, blend_str: str) -> "VoiceBlend":
+         """Parse a voice blend string.
+
+-        Format: "voice1:weight1,voice2:weight2" or "voice1:50,voice2:50"
+-        Weights should sum to 100 (percentages).
++        Canonical format: "voice1=weight1,voice2=weight2" or "voice1=50,voice2=50".
++        A member without a separator is an unweighted voice. Legacy colon-separated
++        input remains accepted. Weights should sum to 100 (percentages).
+         Optionally append "@slerp" for spherical interpolation.
+
+         Examples:
+-            "af_bella:50,am_adam:50"        # Linear interpolation (default)
+-            "af_bella:50,am_adam:50@slerp"  # Spherical interpolation
+-            "af_bella:30,af_nicole:70"      # 30/70 linear blend
++            "af_bella=50,am_adam=50"        # Linear interpolation (default)
++            "af_bella=50,am_adam=50@slerp"  # Spherical interpolation
++            "af_bella=30,af_nicole=70"      # 30/70 linear blend
+
+         Args:
+             blend_str: String representation of voice blend
+@@ -239,18 +240,24 @@ class VoiceBlend:
+         Returns:
+             VoiceBlend instance
+         """
+-        # Check for interpolation method suffix
+         interpolation: Literal["linear", "slerp"] = "linear"
+         if blend_str.endswith("@slerp"):
+             interpolation = "slerp"
+-            blend_str = blend_str[:-6]  # Remove "@slerp" suffix
++            blend_str = blend_str[:-6]
+
+         voices = []
+         for part in blend_str.split(","):
+             part = part.strip()
+-            if ":" in part:
++            has_equal_separator = "=" in part
++            has_legacy_separator = ":" in part
++            if has_equal_separator and has_legacy_separator:
++                raise ValueError("Voice blend member cannot mix '=' and ':' separators")
++            if has_equal_separator:
++                voice_name, weight_str = part.split("=", 1)
++                weight = float(weight_str) / 100.0
++            elif has_legacy_separator:
+                 voice_name, weight_str = part.split(":", 1)
+-                weight = float(weight_str) / 100.0  # Convert percentage to fraction
++                weight = float(weight_str) / 100.0
+             else:
+                 voice_name = part
+                 weight = 1.0
+@@ -555,7 +562,7 @@ class VoiceManager:
+                 voice, lambda name: self._resolve_voice_name(name, voice_db_lookup)
+             )
+         if isinstance(voice, str):
+-            if ":" in voice or "," in voice:
++            if "=" in voice or ":" in voice or "," in voice:
+                 blend = VoiceBlend.parse(voice)
+                 return self._blend_voices(
+                     blend,
+diff --git a/tests/test_new_examples.py b/tests/test_new_examples.py
+index 3faeb27..7e50e4c 100644
+--- a/tests/test_new_examples.py
++++ b/tests/test_new_examples.py
+@@ -31,14 +31,20 @@ def test_long_text_example_keeps_one_unmodified_request() -> None:
+     assert config.return_trace is True
+
+
+-def test_voice_blend_example_shows_both_construction_forms() -> None:
++def test_voice_blend_example_shows_linear_and_slerp_construction() -> None:
+     explicit = voice_blend.explicit_blend()
+     parsed = voice_blend.parsed_blend()
++    spherical = voice_blend.slerp_blend()
+     config = voice_blend.make_config(parsed)
+
+     assert explicit.voices == [("af_sarah", 0.6), ("af_bella", 0.4)]
+     assert explicit.interpolation == "linear"
+     assert parsed.voices == explicit.voices
++    assert parsed.interpolation == "linear"
++    assert spherical.interpolation == "slerp"
++    assert spherical.voices == parsed.voices
++    assert ":" not in voice_blend.LINEAR_BLEND
++    assert ":" not in voice_blend.SLERP_BLEND
+     assert config.voice is parsed
+
+
+@@ -250,6 +256,7 @@ def test_new_synthesis_examples_write_expected_outputs_without_inference(
+         "long_text/long_text.wav",
+         "result_metadata/result_metadata.wav",
+         "voice_blend/voice_blend.wav",
++        "voice_blend/voice_blend_slerp.wav",
+     }
+     actual = {path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*.wav")}
+     assert actual == expected
+diff --git a/tests/test_request_renderer.py b/tests/test_request_renderer.py
+index 3d1ee23..0c2eb1f 100644
+--- a/tests/test_request_renderer.py
++++ b/tests/test_request_renderer.py
+@@ -6,7 +6,7 @@ import numpy as np
+ import pytest
+
+ from pykokoro import SynthesisInputTooLongError
+-from pykokoro.exceptions import InvalidVoiceError
++from pykokoro.exceptions import ConfigurationError, InvalidVoiceError
+ from pykokoro.generation_config import GenerationConfig
+ from pykokoro.prepared_g2p import PreparedSynthesis
+ from pykokoro.request_renderer import OnnxRequestRenderer
+@@ -207,6 +207,29 @@ def test_renderer_reports_invalid_voice_as_typed_error() -> None:
+         renderer.render(prepared, request, _config())
+
+
++def test_renderer_propagates_configuration_error_from_voice_resolution() -> None:
++    class ConfigurationFailureBackend(FakeBackend):
++        def resolve_voice_style(self, voice: str) -> str:
++            raise ConfigurationError("invalid model catalog configuration")
++
++    request = SynthesisSegment("bad-catalog", "Hello", "en-us", voice="af_heart")
++    prepared = PreparedSynthesis(
++        request_id=request.id,
++        text=request.text,
++        language=request.language,
++        voice=request.voice,
++        phonemes="hello",
++        token_ids=(1, 2),
++    )
++    renderer = OnnxRequestRenderer(
++        FakeG2PAdapter(), backend_factory=lambda config: ConfigurationFailureBackend()
++    )
++
++    with pytest.raises(ConfigurationError, match="model catalog") as raised:
++        renderer.render(prepared, request, _config())
++    assert not isinstance(raised.value, InvalidVoiceError)
++
++
+ def test_renderer_checks_capacity_after_frontend_postprocessing() -> None:
+     class ExpandingBackend(FakeBackend):
+         def preprocess_segments(self, segments, enable_short_sentence, **kwargs):
+diff --git a/tests/test_voice_manager.py b/tests/test_voice_manager.py
+index 4128a11..94d1584 100644
+--- a/tests/test_voice_manager.py
++++ b/tests/test_voice_manager.py
+@@ -6,7 +6,12 @@ import numpy as np
+ import pytest
+
+ from pykokoro.exceptions import ConfigurationError
+-from pykokoro.voice_manager import VoiceBlend, VoiceManager, normalize_voice_style
++from pykokoro.voice_manager import (
++    VoiceBlend,
++    VoiceManager,
++    normalize_voice_style,
++    slerp_voices,
++)
+
+
+ @pytest.fixture
+@@ -58,6 +63,86 @@ class TestVoiceBlend:
+         blend = VoiceBlend(voices=[("voice1", 1.0)])
+         assert len(blend.voices) == 1
+
++    def test_parse_blend_uses_equal_separator(self):
++        blend = VoiceBlend.parse("voice1=60,voice2=40")
++        assert blend.voices == [("voice1", 0.6), ("voice2", 0.4)]
++
++    def test_parse_slerp_with_equal_separator(self):
++        blend = VoiceBlend.parse("voice1=60,voice2=40@slerp")
++        assert blend.interpolation == "slerp"
++        assert blend.voices == [("voice1", 0.6), ("voice2", 0.4)]
++
++    def test_parse_three_way_linear_blend(self):
++        blend = VoiceBlend.parse("voice1=50,voice2=30,voice3=20")
++        assert blend.interpolation == "linear"
++        assert blend.voices == [("voice1", 0.5), ("voice2", 0.3), ("voice3", 0.2)]
++
++    def test_legacy_colon_blend_still_parses(self):
++        blend = VoiceBlend.parse("voice1:60,voice2:40")
++        assert blend.voices == [("voice1", 0.6), ("voice2", 0.4)]
++
++    def test_parse_rejects_mixed_separators_in_member(self):
++        with pytest.raises(ValueError, match="cannot mix"):
++            VoiceBlend.parse("voice1:60=40,voice2=40")
++
++    @pytest.mark.parametrize(
++        "voices",
++        [
++            [("voice1", 1.0)],
++            [("voice1", 0.5), ("voice2", 0.3), ("voice3", 0.2)],
++        ],
++    )
++    def test_slerp_requires_exactly_two_voices(self, voices):
++        with pytest.raises(ValueError, match="requires exactly 2 voices"):
++            VoiceBlend(voices=voices, interpolation="slerp")
++
++    def test_slerp_endpoints_return_input_embeddings(self):
++        voice_a = np.zeros((512, 1, 256), dtype=np.float32)
++        voice_b = np.zeros_like(voice_a)
++        voice_a[:, :, 0] = 1.0
++        voice_b[:, :, 1] = 1.0
++
++        np.testing.assert_allclose(slerp_voices(voice_a, voice_b, 0.0), voice_a)
++        np.testing.assert_allclose(slerp_voices(voice_a, voice_b, 1.0), voice_b)
++
++    def test_slerp_returns_finite_float32_model_style(self):
++        voice_a = np.zeros((512, 1, 256), dtype=np.float32)
++        voice_b = np.zeros_like(voice_a)
++        voice_a[:, :, 0] = 1.0
++        voice_b[:, :, 1] = 1.0
++
++        blended = slerp_voices(voice_a, voice_b, 0.4)
++
++        assert blended.shape == (512, 1, 256)
++        assert blended.dtype == np.float32
++        assert np.isfinite(blended).all()
++
++    def test_slerp_returns_finite_for_identical_vectors(self):
++        voice = np.zeros((512, 1, 256), dtype=np.float32)
++        voice[:, :, 0] = 1.0
++
++        blended = slerp_voices(voice, voice, 0.4)
++
++        assert np.isfinite(blended).all()
++        np.testing.assert_allclose(blended, voice)
++
++    def test_slerp_uses_rowwise_linear_fallback(self):
++        voice_a = np.zeros((512, 1, 256), dtype=np.float32)
++        voice_b = np.zeros_like(voice_a)
++        voice_a[:, :, 0] = 1.0
++        voice_b[:, :, 0] = 1.0
++        voice_b[0, 0, 1] = 1e-10
++        voice_b[1, 0, 0] = 0.0
++        voice_b[1, 0, 1] = 1.0
++
++        blended = slerp_voices(voice_a, voice_b, 0.4)
++
++        expected_linear = 0.6 * voice_a[0] + 0.4 * voice_b[0]
++        assert blended.shape == (512, 1, 256)
++        assert blended.dtype == np.float32
++        assert np.isfinite(blended).all()
++        np.testing.assert_allclose(blended[0], expected_linear)
++
+
+ class TestVoiceManagerInit:
+     """Test VoiceManager initialization."""
+@@ -231,6 +316,22 @@ class TestCreateBlendedVoice:
+         )
+         np.testing.assert_array_almost_equal(blended, expected)
+
++    def test_slerp_uses_second_voice_weight_as_t(self, mock_npz_file, voice_data):
++        manager = VoiceManager()
++        manager.load_voices(mock_npz_file)
++        blend = VoiceBlend(
++            voices=[("voice1", 0.7), ("voice2", 0.3)],
++            interpolation="slerp",
++        )
++
++        blended = manager.create_blended_voice(blend)
++        expected = slerp_voices(
++            voice_data["voice1"][:, None, :],
++            voice_data["voice2"][:, None, :],
++            t=0.3,
++        )
++        np.testing.assert_allclose(blended, expected)
++
+     def test_create_blended_voice_not_loaded(self):
+         """Test that blending before loading raises error."""
+         manager = VoiceManager()
+@@ -271,6 +372,14 @@ class TestResolveVoice:
+         expected = voice_data["voice1"][:, None, :] * 0.7 + voice_data["voice2"][:, None, :] * 0.3
+         np.testing.assert_array_almost_equal(style, expected)
+
++    def test_resolve_voice_canonical_blend_string(self, mock_npz_file, voice_data):
++        manager = VoiceManager()
++        manager.load_voices(mock_npz_file)
++
++        style = manager.resolve_voice("voice1=70,voice2=30")
++        expected = voice_data["voice1"][:, None, :] * 0.7 + voice_data["voice2"][:, None, :] * 0.3
++        np.testing.assert_array_almost_equal(style, expected)
++
+     def test_resolve_voice_ndarray(self, mock_npz_file):
+         """Test resolving a numpy array (style vector)."""
+         manager = VoiceManager()

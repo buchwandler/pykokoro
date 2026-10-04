@@ -1,0 +1,74 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: 0.10.3
+git_base_ref: 287ada5cd53b45765bb7163d1b4b49f67e6306b1
+git_base_sha: 287ada5cd53b45765bb7163d1b4b49f67e6306b1
+git_head_ref: 2a9a079cb9dea2f21d10e8ed87ca0a5adbb14b93
+git_head_sha: 2a9a079cb9dea2f21d10e8ed87ca0a5adbb14b93
+include_merges: nontrivial
+entries:
+  - kind: added
+    summary:
+      Added transcript-guided English voice enrollment with reusable, model-bound
+      reference-voice conditioning
+    status: accepted
+    source_refs:
+      - git:4fa043229a3eacd73a2f185304391ad749822b61
+    paths:
+      - docs/reference_voice.md
+      - docs/api_reference.md
+      - pykokoro/reference_audio.py
+      - pykokoro/reference_voice.py
+      - pykokoro/synthesizer.py
+      - pykokoro/request_renderer.py
+      - tests/test_reference_enrollment.py
+      - tests/test_reference_synthesis.py
+    sources:
+      - git:4fa043229a3eacd73a2f185304391ad749822b61
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary:
+      Added transcript-free Inno voice enrollment that exports reusable Kokoro voice
+      packs
+    status: accepted
+    source_refs:
+      - git:0b463faf6aa7099df9679d7472964de71215e58d
+    paths:
+      - docs/reference_voice.md
+      - docs/api_reference.md
+      - pykokoro/synthesizer.py
+      - pykokoro/voice_enrollment.py
+      - pykokoro/voice_pack.py
+      - pykokoro/model_registry.py
+      - tests/test_inno_enrollment.py
+      - tests/test_inno_synthesis.py
+      - tests/test_voice_pack.py
+    sources:
+      - git:0b463faf6aa7099df9679d7472964de71215e58d
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: changed
+    summary:
+      Changed voice blending to support canonical `=` syntax, multi-voice linear
+      interpolation, and row-wise SLERP fallback
+    status: accepted
+    source_refs:
+      - git:2a9a079cb9dea2f21d10e8ed87ca0a5adbb14b93
+    paths:
+      - docs/advanced_features.md
+      - examples/voice_blend.py
+      - pykokoro/voice_manager.py
+      - tests/test_voice_manager.py
+    sources:
+      - git:2a9a079cb9dea2f21d10e8ed87ca0a5adbb14b93
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

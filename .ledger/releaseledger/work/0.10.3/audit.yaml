@@ -1,0 +1,143 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 1
+release_version: 0.10.3
+git_base_ref: v0.10.2
+git_base_sha: 287ada5cd53b45765bb7163d1b4b49f67e6306b1
+git_head_ref: HEAD
+git_head_sha: 2a9a079cb9dea2f21d10e8ed87ca0a5adbb14b93
+git_range: 287ada5cd53b45765bb7163d1b4b49f67e6306b1..2a9a079cb9dea2f21d10e8ed87ca0a5adbb14b93
+commit_count: 3
+rows:
+  - sha: 4fa043229a3eacd73a2f185304391ad749822b61
+    source_ref: git:4fa043229a3eacd73a2f185304391ad749822b61
+    short_sha: 4fa0432
+    changed_paths:
+      - .github/workflows/python-publish.yml
+      - .github/workflows/tests.yml
+      - README.md
+      - docs/README.md
+      - docs/advanced_features.md
+      - docs/api_reference.md
+      - docs/examples.md
+      - docs/index.md
+      - docs/languages.md
+      - docs/reference_voice.md
+      - examples/README.md
+      - examples/reference_voice.py
+      - pykokoro/__init__.py
+      - pykokoro/_onnxvoice.py
+      - pykokoro/audio_generator.py
+      - pykokoro/discovery.py
+      - pykokoro/model_profiles.py
+      - pykokoro/model_registry.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/reference_audio.py
+      - pykokoro/reference_voice.py
+      - pykokoro/request_renderer.py
+      - pykokoro/runtime_protocol.py
+      - pykokoro/synthesis_config.py
+      - pykokoro/synthesis_identity.py
+      - pykokoro/synthesis_types.py
+      - pykokoro/synthesizer.py
+      - pyproject.toml
+      - tests/test_docs_examples.py
+      - tests/test_model_discovery.py
+      - tests/test_model_registry.py
+      - tests/test_new_examples.py
+      - tests/test_onnxvoice_boundary.py
+      - tests/test_packaging_metadata.py
+      - tests/test_public_engine_api.py
+      - tests/test_reference_audio.py
+      - tests/test_reference_enrollment.py
+      - tests/test_reference_frontend_parity.py
+      - tests/test_reference_manifest_loading.py
+      - tests/test_reference_synthesis.py
+      - tests/test_reference_voice.py
+      - tests/test_synthesis_config.py
+      - tests/typecheck/public_api.py
+      - uv.lock
+    stats:
+      files_changed: 44
+      insertions: 5581
+      deletions: 113
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: add support for voice cloning"
+  - sha: 0b463faf6aa7099df9679d7472964de71215e58d
+    source_ref: git:0b463faf6aa7099df9679d7472964de71215e58d
+    short_sha: 0b463fa
+    changed_paths:
+      - README.md
+      - docs/api_reference.md
+      - docs/reference_voice.md
+      - examples/reference_voice.py
+      - pykokoro/__init__.py
+      - pykokoro/_onnxvoice.py
+      - pykokoro/discovery.py
+      - pykokoro/model_profiles.py
+      - pykokoro/model_registry.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/reference_audio.py
+      - pykokoro/request_renderer.py
+      - pykokoro/runtime_protocol.py
+      - pykokoro/synthesis_config.py
+      - pykokoro/synthesis_identity.py
+      - pykokoro/synthesis_types.py
+      - pykokoro/synthesizer.py
+      - pykokoro/voice_enrollment.py
+      - pykokoro/voice_pack.py
+      - tests/test_inno_enrollment.py
+      - tests/test_inno_synthesis.py
+      - tests/test_model_discovery.py
+      - tests/test_model_registry.py
+      - tests/test_new_examples.py
+      - tests/test_public_engine_api.py
+      - tests/test_reference_audio.py
+      - tests/test_reference_enrollment.py
+      - tests/test_synthesis_identity.py
+      - tests/test_voice_enroller_discovery.py
+      - tests/test_voice_pack.py
+      - tests/typecheck/public_api.py
+    stats:
+      files_changed: 31
+      insertions: 1404
+      deletions: 78
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: support inno one shot voice cloning"
+  - sha: 2a9a079cb9dea2f21d10e8ed87ca0a5adbb14b93
+    source_ref: git:2a9a079cb9dea2f21d10e8ed87ca0a5adbb14b93
+    short_sha: 2a9a079
+    changed_paths:
+      - docs/advanced_features.md
+      - docs/examples.md
+      - examples/README.md
+      - examples/korean.py
+      - examples/voice_blend.py
+      - pykokoro/request_renderer.py
+      - pykokoro/voice_manager.py
+      - tests/test_new_examples.py
+      - tests/test_request_renderer.py
+      - tests/test_voice_manager.py
+    stats:
+      files_changed: 10
+      insertions: 219
+      deletions: 48
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: fix voice blend"
