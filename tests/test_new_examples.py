@@ -31,14 +31,20 @@ def test_long_text_example_keeps_one_unmodified_request() -> None:
     assert config.return_trace is True
 
 
-def test_voice_blend_example_shows_both_construction_forms() -> None:
+def test_voice_blend_example_shows_linear_and_slerp_construction() -> None:
     explicit = voice_blend.explicit_blend()
     parsed = voice_blend.parsed_blend()
+    spherical = voice_blend.slerp_blend()
     config = voice_blend.make_config(parsed)
 
     assert explicit.voices == [("af_sarah", 0.6), ("af_bella", 0.4)]
     assert explicit.interpolation == "linear"
     assert parsed.voices == explicit.voices
+    assert parsed.interpolation == "linear"
+    assert spherical.interpolation == "slerp"
+    assert spherical.voices == parsed.voices
+    assert ":" not in voice_blend.LINEAR_BLEND
+    assert ":" not in voice_blend.SLERP_BLEND
     assert config.voice is parsed
 
 
@@ -250,6 +256,7 @@ def test_new_synthesis_examples_write_expected_outputs_without_inference(
         "long_text/long_text.wav",
         "result_metadata/result_metadata.wav",
         "voice_blend/voice_blend.wav",
+        "voice_blend/voice_blend_slerp.wav",
     }
     actual = {path.relative_to(tmp_path).as_posix() for path in tmp_path.rglob("*.wav")}
     assert actual == expected

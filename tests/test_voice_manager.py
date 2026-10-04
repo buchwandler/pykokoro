@@ -6,7 +6,12 @@ import numpy as np
 import pytest
 
 from pykokoro.exceptions import ConfigurationError
-from pykokoro.voice_manager import VoiceBlend, VoiceManager, normalize_voice_style
+from pykokoro.voice_manager import (
+    VoiceBlend,
+    VoiceManager,
+    normalize_voice_style,
+    slerp_voices,
+)
 
 
 @pytest.fixture
@@ -57,6 +62,86 @@ class TestVoiceBlend:
         """Test VoiceBlend with a single voice."""
         blend = VoiceBlend(voices=[("voice1", 1.0)])
         assert len(blend.voices) == 1
+
+    def test_parse_blend_uses_equal_separator(self):
+        blend = VoiceBlend.parse("voice1=60,voice2=40")
+        assert blend.voices == [("voice1", 0.6), ("voice2", 0.4)]
+
+    def test_parse_slerp_with_equal_separator(self):
+        blend = VoiceBlend.parse("voice1=60,voice2=40@slerp")
+        assert blend.interpolation == "slerp"
+        assert blend.voices == [("voice1", 0.6), ("voice2", 0.4)]
+
+    def test_parse_three_way_linear_blend(self):
+        blend = VoiceBlend.parse("voice1=50,voice2=30,voice3=20")
+        assert blend.interpolation == "linear"
+        assert blend.voices == [("voice1", 0.5), ("voice2", 0.3), ("voice3", 0.2)]
+
+    def test_legacy_colon_blend_still_parses(self):
+        blend = VoiceBlend.parse("voice1:60,voice2:40")
+        assert blend.voices == [("voice1", 0.6), ("voice2", 0.4)]
+
+    def test_parse_rejects_mixed_separators_in_member(self):
+        with pytest.raises(ValueError, match="cannot mix"):
+            VoiceBlend.parse("voice1:60=40,voice2=40")
+
+    @pytest.mark.parametrize(
+        "voices",
+        [
+            [("voice1", 1.0)],
+            [("voice1", 0.5), ("voice2", 0.3), ("voice3", 0.2)],
+        ],
+    )
+    def test_slerp_requires_exactly_two_voices(self, voices):
+        with pytest.raises(ValueError, match="requires exactly 2 voices"):
+            VoiceBlend(voices=voices, interpolation="slerp")
+
+    def test_slerp_endpoints_return_input_embeddings(self):
+        voice_a = np.zeros((512, 1, 256), dtype=np.float32)
+        voice_b = np.zeros_like(voice_a)
+        voice_a[:, :, 0] = 1.0
+        voice_b[:, :, 1] = 1.0
+
+        np.testing.assert_allclose(slerp_voices(voice_a, voice_b, 0.0), voice_a)
+        np.testing.assert_allclose(slerp_voices(voice_a, voice_b, 1.0), voice_b)
+
+    def test_slerp_returns_finite_float32_model_style(self):
+        voice_a = np.zeros((512, 1, 256), dtype=np.float32)
+        voice_b = np.zeros_like(voice_a)
+        voice_a[:, :, 0] = 1.0
+        voice_b[:, :, 1] = 1.0
+
+        blended = slerp_voices(voice_a, voice_b, 0.4)
+
+        assert blended.shape == (512, 1, 256)
+        assert blended.dtype == np.float32
+        assert np.isfinite(blended).all()
+
+    def test_slerp_returns_finite_for_identical_vectors(self):
+        voice = np.zeros((512, 1, 256), dtype=np.float32)
+        voice[:, :, 0] = 1.0
+
+        blended = slerp_voices(voice, voice, 0.4)
+
+        assert np.isfinite(blended).all()
+        np.testing.assert_allclose(blended, voice)
+
+    def test_slerp_uses_rowwise_linear_fallback(self):
+        voice_a = np.zeros((512, 1, 256), dtype=np.float32)
+        voice_b = np.zeros_like(voice_a)
+        voice_a[:, :, 0] = 1.0
+        voice_b[:, :, 0] = 1.0
+        voice_b[0, 0, 1] = 1e-10
+        voice_b[1, 0, 0] = 0.0
+        voice_b[1, 0, 1] = 1.0
+
+        blended = slerp_voices(voice_a, voice_b, 0.4)
+
+        expected_linear = 0.6 * voice_a[0] + 0.4 * voice_b[0]
+        assert blended.shape == (512, 1, 256)
+        assert blended.dtype == np.float32
+        assert np.isfinite(blended).all()
+        np.testing.assert_allclose(blended[0], expected_linear)
 
 
 class TestVoiceManagerInit:
@@ -231,6 +316,22 @@ class TestCreateBlendedVoice:
         )
         np.testing.assert_array_almost_equal(blended, expected)
 
+    def test_slerp_uses_second_voice_weight_as_t(self, mock_npz_file, voice_data):
+        manager = VoiceManager()
+        manager.load_voices(mock_npz_file)
+        blend = VoiceBlend(
+            voices=[("voice1", 0.7), ("voice2", 0.3)],
+            interpolation="slerp",
+        )
+
+        blended = manager.create_blended_voice(blend)
+        expected = slerp_voices(
+            voice_data["voice1"][:, None, :],
+            voice_data["voice2"][:, None, :],
+            t=0.3,
+        )
+        np.testing.assert_allclose(blended, expected)
+
     def test_create_blended_voice_not_loaded(self):
         """Test that blending before loading raises error."""
         manager = VoiceManager()
@@ -268,6 +369,14 @@ class TestResolveVoice:
         blend = VoiceBlend(voices=[("voice1", 0.7), ("voice2", 0.3)])
         style = manager.resolve_voice(blend)
 
+        expected = voice_data["voice1"][:, None, :] * 0.7 + voice_data["voice2"][:, None, :] * 0.3
+        np.testing.assert_array_almost_equal(style, expected)
+
+    def test_resolve_voice_canonical_blend_string(self, mock_npz_file, voice_data):
+        manager = VoiceManager()
+        manager.load_voices(mock_npz_file)
+
+        style = manager.resolve_voice("voice1=70,voice2=30")
         expected = voice_data["voice1"][:, None, :] * 0.7 + voice_data["voice2"][:, None, :] * 0.3
         np.testing.assert_array_almost_equal(style, expected)
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Blend voices with either the structured or compact public constructor.
+"""Compare linear and spherical interpolation of two voices.
 
-Synthesis may install model assets. SLERP is also available through
-``VoiceBlend.parse(...@slerp)`` and requires exactly two voices.
+Synthesis may install model assets. Linear blending supports one or more voices;
+SLERP requires exactly two voices.
 """
 
 from __future__ import annotations
@@ -14,6 +14,10 @@ try:
 except ImportError:
     from _output import artifact_path
 
+LINEAR_BLEND = "af_sarah=60,af_bella=40"
+SLERP_BLEND = f"{LINEAR_BLEND}@slerp"
+SAMPLE_TEXT = "This voice combines two styles."
+
 
 def explicit_blend() -> VoiceBlend:
     return VoiceBlend(
@@ -23,7 +27,11 @@ def explicit_blend() -> VoiceBlend:
 
 
 def parsed_blend() -> VoiceBlend:
-    return VoiceBlend.parse("af_sarah:60,af_bella:40")
+    return VoiceBlend.parse(LINEAR_BLEND)
+
+
+def slerp_blend() -> VoiceBlend:
+    return VoiceBlend.parse(SLERP_BLEND)
 
 
 def make_config(blend: VoiceBlend | None = None) -> SynthesisConfig:
@@ -34,15 +42,26 @@ def make_config(blend: VoiceBlend | None = None) -> SynthesisConfig:
 
 
 def main() -> None:
-    structured = explicit_blend()
-    parsed = parsed_blend()
-    print(f"Structured blend: {structured}")
-    print(f"Parsed blend: {parsed}")
-    with KokoroSynthesizer(make_config(parsed)) as synthesizer:
-        result = synthesizer.synthesize_text("This voice combines two styles.", language="en-us")
-    output = artifact_path("voice_blend.wav")
-    result.save_wav(output)
-    print(f"Wrote {output}")
+    linear = parsed_blend()
+    spherical = slerp_blend()
+    print(f"Linear blend: {linear}")
+    print(f"SLERP blend: {spherical}")
+
+    with KokoroSynthesizer(make_config(linear)) as synthesizer:
+        linear_result = synthesizer.synthesize_text(SAMPLE_TEXT, language="en-us")
+        spherical_result = synthesizer.synthesize_text(
+            SAMPLE_TEXT,
+            language="en-us",
+            voice=spherical,
+        )
+
+    linear_output = artifact_path("voice_blend.wav")
+    linear_result.save_wav(linear_output)
+    print(f"Wrote {linear_output}")
+
+    slerp_output = artifact_path("voice_blend_slerp.wav")
+    spherical_result.save_wav(slerp_output)
+    print(f"Wrote {slerp_output}")
 
 
 if __name__ == "__main__":

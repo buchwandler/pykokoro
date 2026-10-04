@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from pykokoro import SynthesisInputTooLongError
-from pykokoro.exceptions import InvalidVoiceError
+from pykokoro.exceptions import ConfigurationError, InvalidVoiceError
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.prepared_g2p import PreparedSynthesis
 from pykokoro.request_renderer import OnnxRequestRenderer
@@ -205,6 +205,29 @@ def test_renderer_reports_invalid_voice_as_typed_error() -> None:
 
     with pytest.raises(InvalidVoiceError, match="not-a-voice"):
         renderer.render(prepared, request, _config())
+
+
+def test_renderer_propagates_configuration_error_from_voice_resolution() -> None:
+    class ConfigurationFailureBackend(FakeBackend):
+        def resolve_voice_style(self, voice: str) -> str:
+            raise ConfigurationError("invalid model catalog configuration")
+
+    request = SynthesisSegment("bad-catalog", "Hello", "en-us", voice="af_heart")
+    prepared = PreparedSynthesis(
+        request_id=request.id,
+        text=request.text,
+        language=request.language,
+        voice=request.voice,
+        phonemes="hello",
+        token_ids=(1, 2),
+    )
+    renderer = OnnxRequestRenderer(
+        FakeG2PAdapter(), backend_factory=lambda config: ConfigurationFailureBackend()
+    )
+
+    with pytest.raises(ConfigurationError, match="model catalog") as raised:
+        renderer.render(prepared, request, _config())
+    assert not isinstance(raised.value, InvalidVoiceError)
 
 
 def test_renderer_checks_capacity_after_frontend_postprocessing() -> None:

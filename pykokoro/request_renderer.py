@@ -123,7 +123,9 @@ class OnnxRequestRenderer:
         else:
             try:
                 voice_style = backend.resolve_voice_style(voice)
-            except (KeyError, ValueError, FileNotFoundError, ConfigurationError) as exc:
+            except ConfigurationError:
+                raise
+            except (KeyError, ValueError, FileNotFoundError) as exc:
                 raise InvalidVoiceError(
                     f"Voice {voice!r} is unavailable for the resolved model"
                 ) from exc

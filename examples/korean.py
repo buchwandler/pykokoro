@@ -11,7 +11,7 @@ except ImportError:
     from _output import artifact_path
 
 TEXT = "안녕하세요. 한국어 음성 합성 예제입니다. 오늘은 날씨가 좋아 공원에서 산책하기 좋습니다."
-BLEND = "jf_alpha:50,jf_gongitsune:50"
+BLEND = "jf_alpha=50,jf_gongitsune=50"
 LANG = "ko"
 
 

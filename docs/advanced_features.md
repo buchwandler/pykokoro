@@ -143,11 +143,15 @@ blend = VoiceBlend(
     voices=[("af_sarah", 0.6), ("af_bella", 0.4)],
     interpolation="linear",
 )
-compact = VoiceBlend.parse("af_sarah:60,af_bella:40")
+compact = VoiceBlend.parse("af_sarah=60,af_bella=40")
+slerp = VoiceBlend.parse("af_sarah=60,af_bella=40@slerp")
+multi = VoiceBlend.parse("af_sarah=50,af_bella=30,af_nicole=20")
 ```
 
-Voice IDs and valid combinations come from model profiles; inspect `discover_models()`
-instead of assuming a voice is available for every language or model. See
+Linear interpolation supports one or more voices. SLERP requires exactly two voices, and
+the second voice's weight is its interpolation parameter. Voice IDs and valid
+combinations come from model profiles; inspect `discover_models()` instead of assuming a
+voice is available for every language or model. See
 [`voice_blend.py`](../examples/voice_blend.py).
 
 ## Prepared phoneme input

@@ -169,23 +169,23 @@ def slerp_voices(
     # Compute sine of theta
     sin_theta = np.sin(theta)
 
-    # If sin_theta is near zero, vectors are nearly parallel
-    # Fall back to linear interpolation
-    if np.max(np.abs(sin_theta)) < epsilon:
-        result = (1 - t) * a + t * b
-    else:
-        # Compute SLERP using the spherical interpolation formula
-        sin_t_theta = np.sin(t * theta)
-        sin_one_minus_t_theta = np.sin((1 - t) * theta)
+    # Fall back to linear interpolation for each near-parallel row.
+    near_parallel = np.abs(sin_theta) < epsilon
+    safe_sin_theta = np.where(near_parallel, 1.0, sin_theta)
 
-        # SLERP on normalized vectors
-        result_norm = (sin_one_minus_t_theta / sin_theta) * a_norm + (
-            sin_t_theta / sin_theta
-        ) * b_norm
+    sin_t_theta = np.sin(t * theta)
+    sin_one_minus_t_theta = np.sin((1 - t) * theta)
 
-        # Interpolate the magnitudes linearly and apply to result
-        mag_interp = (1 - t) * mag_a + t * mag_b
-        result = result_norm * mag_interp
+    # SLERP on normalized vectors
+    result_norm = (sin_one_minus_t_theta / safe_sin_theta) * a_norm + (
+        sin_t_theta / safe_sin_theta
+    ) * b_norm
+
+    # Interpolate the magnitudes linearly and apply to result
+    mag_interp = (1 - t) * mag_a + t * mag_b
+    spherical = result_norm * mag_interp
+    linear = (1 - t) * a + t * b
+    result = np.where(near_parallel, linear, spherical)
 
     # Return with original dtype (float32)
     return result.astype(a.dtype if a.dtype == np.float32 else np.float32)
@@ -224,14 +224,15 @@ class VoiceBlend:
     def parse(cls, blend_str: str) -> "VoiceBlend":
         """Parse a voice blend string.
 
-        Format: "voice1:weight1,voice2:weight2" or "voice1:50,voice2:50"
-        Weights should sum to 100 (percentages).
+        Canonical format: "voice1=weight1,voice2=weight2" or "voice1=50,voice2=50".
+        A member without a separator is an unweighted voice. Legacy colon-separated
+        input remains accepted. Weights should sum to 100 (percentages).
         Optionally append "@slerp" for spherical interpolation.
 
         Examples:
-            "af_bella:50,am_adam:50"        # Linear interpolation (default)
-            "af_bella:50,am_adam:50@slerp"  # Spherical interpolation
-            "af_bella:30,af_nicole:70"      # 30/70 linear blend
+            "af_bella=50,am_adam=50"        # Linear interpolation (default)
+            "af_bella=50,am_adam=50@slerp"  # Spherical interpolation
+            "af_bella=30,af_nicole=70"      # 30/70 linear blend
 
         Args:
             blend_str: String representation of voice blend
@@ -239,18 +240,24 @@ class VoiceBlend:
         Returns:
             VoiceBlend instance
         """
-        # Check for interpolation method suffix
         interpolation: Literal["linear", "slerp"] = "linear"
         if blend_str.endswith("@slerp"):
             interpolation = "slerp"
-            blend_str = blend_str[:-6]  # Remove "@slerp" suffix
+            blend_str = blend_str[:-6]
 
         voices = []
         for part in blend_str.split(","):
             part = part.strip()
-            if ":" in part:
+            has_equal_separator = "=" in part
+            has_legacy_separator = ":" in part
+            if has_equal_separator and has_legacy_separator:
+                raise ValueError("Voice blend member cannot mix '=' and ':' separators")
+            if has_equal_separator:
+                voice_name, weight_str = part.split("=", 1)
+                weight = float(weight_str) / 100.0
+            elif has_legacy_separator:
                 voice_name, weight_str = part.split(":", 1)
-                weight = float(weight_str) / 100.0  # Convert percentage to fraction
+                weight = float(weight_str) / 100.0
             else:
                 voice_name = part
                 weight = 1.0
@@ -555,7 +562,7 @@ class VoiceManager:
                 voice, lambda name: self._resolve_voice_name(name, voice_db_lookup)
             )
         if isinstance(voice, str):
-            if ":" in voice or "," in voice:
+            if "=" in voice or ":" in voice or "," in voice:
                 blend = VoiceBlend.parse(voice)
                 return self._blend_voices(
                     blend,
