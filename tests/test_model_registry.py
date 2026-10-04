@@ -12,10 +12,12 @@ import pytest
 from pykokoro.asset_progress import AssetProgressEvent, ConsoleAssetProgress
 from pykokoro.model_registry import (
     ArtifactIntegrityError,
+    ModelRegistry,
     ModelRegistryError,
     RegistryClient,
     RuntimeArtifact,
     _distribution,
+    _validate_registry,
     download_artifact,
     select_distribution,
 )
@@ -479,3 +481,79 @@ def test_console_asset_progress_reports_cache_unknown_size_and_install_state() -
     assert "Runtime assets already installed:" in installed_text
     assert "/cache/onnxvoice/kokoro/v1.0" in installed_text
     assert "Downloading" not in installed_text
+
+
+def _reference_registry() -> dict:
+    digest = hashlib.sha256(b"cloning-model").hexdigest()
+    return {
+        "schema": 1,
+        "runtime_contract": 1,
+        "models": {
+            "en-akinvox-cloning-v1": {
+                "runtime": {
+                    "voice_mode": "reference",
+                    "layout": "cloning-onnx-v1",
+                    "voices": [],
+                },
+                "distributions": [
+                    {
+                        "id": "clone-dist",
+                        "provider": "github-release",
+                        "transport": "https",
+                        "runtime_ready": True,
+                        "artifacts": [
+                            {
+                                "id": "reference-wavlm",
+                                "role": "model",
+                                "component": "reference_wavlm",
+                                "url": "https://github.test/reference-wavlm.onnx",
+                                "local_name": "reference-wavlm.onnx",
+                                "format": "onnx",
+                                "size": 13,
+                                "sha256": digest,
+                            }
+                        ],
+                    }
+                ],
+            }
+        },
+    }
+
+
+def test_reference_registry_allows_empty_voices_and_no_voice_artifact() -> None:
+    data = _reference_registry()
+
+    _validate_registry(data)
+    model = ModelRegistry(data, "fixture").model("en-akinvox-cloning-v1")
+
+    assert model.voice_mode == "reference"
+    assert model.voices == ()
+    assert model.default_voice is None
+
+
+def test_registry_rejects_unknown_voice_mode() -> None:
+    data = _reference_registry()
+    data["models"]["en-akinvox-cloning-v1"]["runtime"]["voice_mode"] = "dynamic"
+
+    with pytest.raises(ModelRegistryError, match="unknown voice mode"):
+        _validate_registry(data)
+
+
+def test_reference_registry_still_requires_a_model_artifact() -> None:
+    data = _reference_registry()
+    distribution = data["models"]["en-akinvox-cloning-v1"]["distributions"][0]
+    distribution["artifacts"][0]["role"] = "voices"
+
+    with pytest.raises(ModelRegistryError, match="no model artifact"):
+        _validate_registry(data)
+
+
+def test_static_registry_still_requires_voices_and_voice_artifact() -> None:
+    data = _registry()
+    distribution = data["models"]["v1.0"]["distributions"][0]
+    distribution["artifacts"] = [
+        artifact for artifact in distribution["artifacts"] if artifact["role"] != "voices"
+    ]
+
+    with pytest.raises(ModelRegistryError, match="no voice artifact"):
+        _validate_registry(data)

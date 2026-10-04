@@ -10,6 +10,7 @@ import pytest
 import pykokoro._onnxvoice as boundary
 from pykokoro.asset_progress import AssetProgressEvent
 from pykokoro.exceptions import BackendError, ConfigurationError
+from pykokoro.reference_voice import ReferenceVoice
 
 
 def test_normalize_kokoro_ref() -> None:
@@ -41,6 +42,7 @@ def test_backend_forwards_cache_dir_to_managed_install(
     backend._model_source = "github"
     backend._model_quality = "fp32"
     backend._model_path = None
+    backend._model_artifacts = None
     backend._voices_path = None
     backend._cache_dir = tmp_path
     backend._asset_progress = None
@@ -199,6 +201,7 @@ def test_open_local_forwards_split_artifacts_and_runtime_options(
             "config": None,
             "voices": None,
             "runtime": {"layout": "split"},
+            "metadata": None,
             "sample_rate": 24_000,
             "providers": "cpu",
             "provider_options": [{"intra_op_num_threads": 2}],
@@ -502,3 +505,255 @@ def test_timing_summary_preserves_named_outputs_and_runtime_identity() -> None:
     assert timing == {"shape": [3], "dtype": "float32", "count": 3, "layout": "model-positions"}
     assert outputs == {"waveform": {"shape": [1, 8], "dtype": "float32", "count": 8}}
     assert result.metadata["runtime_ref"] == "onnxvoice-0.1.9"
+
+
+def _reference_voice() -> ReferenceVoice:
+    return ReferenceVoice(
+        style=np.zeros((1, 256), dtype=np.float32),
+        memory=np.ones((1, 2, 192), dtype=np.float32),
+        memory_mask=np.ones((1, 2), dtype=np.bool_),
+        model_id="en-akinvox-cloning-v1",
+        model_fingerprint="model-fingerprint",
+    )
+
+
+def test_runtime_adapter_prepares_and_converts_reference_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class RuntimeReferenceState:
+        def __init__(self, **values: object) -> None:
+            self.values = values
+
+    class Runtime:
+        def __init__(self) -> None:
+            self.prepared: dict[str, object] | None = None
+            self.inference: dict[str, object] | None = None
+
+        def prepare_reference(self, token_ids: object, **kwargs: object) -> SimpleNamespace:
+            self.prepared = {"token_ids": token_ids, **kwargs}
+            return SimpleNamespace(
+                style=np.zeros((1, 256), dtype=np.float32),
+                memory=np.ones((1, 2, 192), dtype=np.float32),
+                memory_mask=np.ones((1, 2), dtype=np.bool_),
+                model_fingerprint="model-fingerprint",
+            )
+
+        def infer(self, token_ids: object, **kwargs: object) -> str:
+            self.inference = {"token_ids": token_ids, **kwargs}
+            return "inferred"
+
+    monkeypatch.setattr(
+        boundary,
+        "_onnxvoice",
+        lambda: SimpleNamespace(KokoroReferenceState=RuntimeReferenceState),
+    )
+    runtime = Runtime()
+    resolved = boundary.ResolvedKokoroModel(
+        ref="kokoro:en-akinvox-cloning-v1",
+        model_id="en-akinvox-cloning-v1",
+        quality="fp32",
+        distribution="fixture",
+        storage_id="managed-clone",
+        installation=None,
+        metadata={"runtime": {"layout": "cloning-onnx-v1"}},
+        sample_rate=24_000,
+        model_paths=(),
+        voices_path=None,
+        config_path=None,
+    )
+    adapter = boundary.KokoroRuntimeAdapter(runtime, resolved)
+    audio_24k = np.ones(72_000, dtype=np.float32)
+    audio_16k = np.ones(48_000, dtype=np.float32)
+
+    state = adapter.prepare_reference([1, 2, 3], audio_24k=audio_24k, audio_16k=audio_16k)
+    result = adapter.infer([4, 5], reference=_reference_voice(), speed=1.0, seed=17)
+
+    assert state.model_fingerprint == "model-fingerprint"
+    assert runtime.prepared == {
+        "token_ids": [1, 2, 3],
+        "audio_24k": audio_24k,
+        "audio_16k": audio_16k,
+    }
+    assert result == "inferred"
+    assert runtime.inference is not None
+    assert runtime.inference["token_ids"] == [4, 5]
+    assert runtime.inference["speed"] == 1.0
+    assert runtime.inference["seed"] == 17
+    assert isinstance(runtime.inference["reference"], RuntimeReferenceState)
+    assert runtime.inference["reference"].values["model_fingerprint"] == "model-fingerprint"
+
+
+def test_open_local_cloning_artifacts_preserves_model_components(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    components = (
+        "reference_wavlm",
+        "reference_encoders",
+        "reference_mapper",
+        "prosody",
+        "curves",
+        "decoder",
+        "source_params",
+        "config",
+    )
+    artifact_paths = {component: tmp_path / f"{component}.bin" for component in components}
+    artifact_keys = {
+        (
+            "metadata:source_params"
+            if component == "source_params"
+            else "config"
+            if component == "config"
+            else f"model:{component}"
+        ): path
+        for component, path in artifact_paths.items()
+    }
+    calls: list[dict[str, object]] = []
+
+    def open_local(**kwargs: object) -> SimpleNamespace:
+        calls.append(kwargs)
+        artifacts = []
+        for key, path in kwargs["artifacts"].items():
+            role, _, component = key.partition(":")
+            artifacts.append(
+                SimpleNamespace(
+                    role=role,
+                    component=component or None,
+                    path=path,
+                )
+            )
+        installation = SimpleNamespace(
+            id="local-config",
+            ref=None,
+            sample_rate=24_000,
+            selected_quality=None,
+            selected_distribution=None,
+            storage_id=None,
+            metadata={
+                "model_id": "en-akinvox-cloning-v1",
+                "runtime": kwargs["runtime"],
+            },
+            artifacts=tuple(artifacts),
+        )
+        return SimpleNamespace(installation=installation, infer=lambda *args, **kw: None)
+
+    monkeypatch.setattr(boundary, "_onnxvoice", lambda: SimpleNamespace(open_local=open_local))
+
+    adapter = boundary.open_local_kokoro(
+        artifacts=artifact_keys,
+        runtime={"layout": "cloning-onnx-v1", "voice_mode": "reference"},
+        metadata={"model_id": "en-akinvox-cloning-v1"},
+        sample_rate=24_000,
+    )
+
+    assert calls[0]["artifacts"] == artifact_keys
+    assert adapter.resolved.model_id == "en-akinvox-cloning-v1"
+    assert adapter.resolved.voices_path is None
+    assert adapter.resolved.model_artifacts == artifact_paths
+    assert set(adapter.resolved.model_paths) == {
+        artifact_paths[component] for component in components[:6]
+    }
+
+
+def test_reference_backend_opens_components_without_a_voice_archive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pykokoro.onnx_backend as onnx_backend
+
+    components = (
+        "reference_wavlm",
+        "reference_encoders",
+        "reference_mapper",
+        "prosody",
+        "curves",
+        "decoder",
+        "source_params",
+        "config",
+    )
+    model_artifacts = {name: tmp_path / f"{name}.bin" for name in components}
+    expected_artifacts = {
+        (
+            "metadata:source_params"
+            if name == "source_params"
+            else "config"
+            if name == "config"
+            else f"model:{name}"
+        ): path
+        for name, path in model_artifacts.items()
+    }
+    resolved = boundary.ResolvedKokoroModel(
+        ref=None,
+        model_id="en-akinvox-cloning-v1",
+        quality="fp32",
+        distribution=None,
+        storage_id=None,
+        installation=None,
+        metadata={"runtime": {"layout": "cloning-onnx-v1", "voice_mode": "reference"}},
+        sample_rate=24_000,
+        model_paths=tuple(model_artifacts[name] for name in components[:6]),
+        voices_path=None,
+        config_path=model_artifacts["config"],
+        model_artifacts=model_artifacts,
+    )
+    reference_calls: list[tuple[object, dict[str, object]]] = []
+
+    def prepare_reference(token_ids: object, **kwargs: object) -> SimpleNamespace:
+        reference_calls.append((token_ids, kwargs))
+        return SimpleNamespace(
+            style=np.zeros((1, 256), dtype=np.float32),
+            memory=np.ones((1, 2, 192), dtype=np.float32),
+            memory_mask=np.ones((1, 2), dtype=np.bool_),
+            model_fingerprint="model-fingerprint",
+        )
+
+    runtime = SimpleNamespace(resolved=resolved, prepare_reference=prepare_reference)
+    calls: list[dict[str, object]] = []
+
+    def open_local(**kwargs: object) -> SimpleNamespace:
+        calls.append(kwargs)
+        return runtime
+
+    class AudioGeneratorStub:
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+
+    monkeypatch.setattr(onnx_backend, "open_local_kokoro", open_local)
+    monkeypatch.setattr(
+        onnx_backend,
+        "runtime_diagnostics",
+        lambda _runtime: {"timing_contract": {"supports_timings": False}},
+    )
+    monkeypatch.setattr(onnx_backend, "AudioGenerator", AudioGeneratorStub)
+    backend = onnx_backend.Kokoro(
+        model_artifacts=model_artifacts,
+        model_variant="en-akinvox-cloning-v1",
+        model_quality="fp32",
+    )
+    backend._tokenizer = object()
+
+    backend._init_kokoro_locked()
+
+    audio_24k = np.ones(72_000, dtype=np.float32)
+    audio_16k = np.ones(48_000, dtype=np.float32)
+    voice = backend.prepare_reference_voice(
+        [1, 2, 3],
+        audio_24k=audio_24k,
+        audio_16k=audio_16k,
+        name="speaker",
+        metadata={"reference_text_sha256": "a" * 64},
+    )
+    assert calls[0]["artifacts"] == expected_artifacts
+    assert calls[0]["runtime"] == {"layout": "cloning-onnx-v1", "voice_mode": "reference"}
+    assert calls[0]["metadata"] == {"model_id": "en-akinvox-cloning-v1"}
+    assert reference_calls == [
+        (
+            [1, 2, 3],
+            {"audio_24k": audio_24k, "audio_16k": audio_16k},
+        )
+    ]
+    assert voice.model_id == "en-akinvox-cloning-v1"
+    assert voice.model_fingerprint == "model-fingerprint"
+    assert voice.metadata["reference_text_sha256"] == "a" * 64
+    assert backend._voice_manager is None
+    assert backend.get_voices() == []
+    with pytest.raises(ConfigurationError, match="Static voice styles are unavailable"):
+        backend.get_voice_style("af_heart")

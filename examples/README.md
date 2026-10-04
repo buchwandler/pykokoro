@@ -44,6 +44,22 @@ does not run synthesis.
 | [`asset_progress.py`](asset_progress.py)<br>`python examples/asset_progress.py`<br>`python examples/asset_progress.py --custom-callback` | Uses `ConsoleAssetProgress` or a typed `AssetProgressEvent` callback for managed model downloads.                                          | May download assets; low CPU cost for one request.                      | `asset_progress.wav` plus progress events                               |
 | [`error_handling.py`](error_handling.py)<br>`python examples/error_handling.py`                                                          | Shows narrow public catches for invalid language, voice, pronunciation, and input-too-long errors.                                         | On the valid path, may download assets; low CPU cost.                   | Normally `error_handling.wav`; caught failures print a message instead. |
 
+## Input-driven reference voice example
+
+[`reference_voice.py`](reference_voice.py) requires a user-supplied English recording
+and its exact transcript, so it is intentionally excluded from the unattended runner
+groups:
+
+```bash
+python examples/reference_voice.py reference.wav \
+  "The exact words spoken in the reference." \
+  "New words spoken with the enrolled voice."
+```
+
+It enrolls the reference, saves and reloads the model-bound state, and writes the target
+WAV. See the [reference voice guide](../docs/reference_voice.md) for the 3 to 30 second
+limit, fixed speed, privacy, and permission requirements.
+
 ## Language showcase
 
 These synthesis scripts are separate from the default group. First use may download

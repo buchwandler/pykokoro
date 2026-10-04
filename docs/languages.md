@@ -96,7 +96,15 @@ from pykokoro import discover_models
 
 inventory = discover_models(offline=True)
 for profile in inventory.models:
-    print(profile.model_id, profile.languages, profile.voices, profile.status)
+    print(
+        profile.model_id,
+        profile.languages,
+        profile.voices,
+        profile.voice_mode,
+        profile.supports_reference_enrollment,
+        profile.speed_supported,
+        profile.status,
+    )
 ```
 
 Discovery does not load model weights or create an ONNX inference session. It reports
@@ -105,3 +113,8 @@ offline mode avoids refreshing remote metadata. The result is a capability inven
 not a synthesis guarantee if the required model assets are not installed or cannot be
 reached. See [`models_and_languages.py`](../examples/models_and_languages.py) for
 inventory and optional selected-model synthesis.
+
+Reference-only profiles report `voice_mode="reference"`, an empty `voices` tuple, no
+default voice, `supports_reference_enrollment=True`, and `speed_supported=False`. Use
+`KokoroSynthesizer.enroll_voice()` before synthesis with such a profile. See the
+[English reference voice guide](reference_voice.md).

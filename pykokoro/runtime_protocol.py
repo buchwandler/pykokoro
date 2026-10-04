@@ -12,12 +12,21 @@ class KokoroInferenceRuntime(Protocol):
     @property
     def sample_rate(self) -> int: ...
 
+    def prepare_reference(
+        self,
+        reference_token_ids: Sequence[int],
+        *,
+        audio_24k: np.ndarray,
+        audio_16k: np.ndarray,
+    ) -> Any: ...
+
     def infer(
         self,
         token_ids: Sequence[int],
         *,
-        style: np.ndarray,
-        speed: float,
+        style: np.ndarray | None = None,
+        reference: Any | None = None,
+        speed: float = 1.0,
         seed: int | None = None,
     ) -> Any: ...
 

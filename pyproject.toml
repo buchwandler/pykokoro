@@ -28,8 +28,9 @@ dependencies = [
     "numpy",
     "audiosig>=0.1.4,<0.2",
     "platformdirs",
-    "onnxvoice>=0.2.0,<0.3",
+    "onnxvoice>=0.2.2,<0.3",
     "soundfile",
+    "soxr>=1.1.0,<2.0",
     "typing_extensions>=4.0"
 ]
 classifiers=[
@@ -66,11 +67,11 @@ dev = [
     "ruff>=0.1.0",
     "mypy>=1.0.0",
 ]
-cpu = ["onnxvoice[cpu]>=0.2.0,<0.3"]
-gpu = ["onnxvoice[gpu]>=0.2.0,<0.3"]
-openvino = ["onnxvoice[openvino]>=0.2.0,<0.3"]
-directml = ["onnxvoice[directml]>=0.2.0,<0.3"]
-coreml = ["onnxvoice[coreml]>=0.2.0,<0.3"]
+cpu = ["onnxvoice[cpu]>=0.2.2,<0.3"]
+gpu = ["onnxvoice[gpu]>=0.2.2,<0.3"]
+openvino = ["onnxvoice[openvino]>=0.2.2,<0.3"]
+directml = ["onnxvoice[directml]>=0.2.2,<0.3"]
+coreml = ["onnxvoice[coreml]>=0.2.2,<0.3"]
 goruut = [
     "kokorog2p[goruut]>=0.9.8,<1.0",
 ]

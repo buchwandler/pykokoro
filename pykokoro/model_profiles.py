@@ -42,6 +42,7 @@ class RuntimeProfile:
     auto_select_for_language: bool = True
     auto_select_for_voice: bool = True
     named_lexicons: tuple[str, ...] | None = None
+    voice_mode: str = "static"
 
     @property
     def available_qualities(self) -> tuple[str, ...]:
@@ -323,6 +324,24 @@ MODEL_PROFILES.update(
         ),
     }
 )
+MODEL_PROFILES[("github", "en-akinvox-cloning-v1")] = RuntimeProfile(
+    source="github",
+    variant="en-akinvox-cloning-v1",
+    language_codes=("en", "en-us"),
+    default_voice=None,
+    vocabulary_source="builtin-v1.0",
+    tokenizer_vocab_version="1.0",
+    frontend="pykokoro-native-v1",
+    frontend_experimental=False,
+    sample_rate=24_000,
+    max_tokens=510,
+    voice_names=(),
+    layout="cloning-onnx-v1",
+    runtime_available=True,
+    voice_mode="reference",
+    auto_select_for_language=False,
+    auto_select_for_voice=False,
+)
 
 
 GERMAN_MARTIN_V1_2 = MODEL_PROFILES[("github", "v1.2-de-martin")]
@@ -425,7 +444,7 @@ IMPLEMENTED_FRONTENDS = {
     "kokorog2p-th-wayu-v1",
     "tts-eu-pt-v1",
 }
-IMPLEMENTED_LAYOUTS = {"single-onnx-v1", "split-onnx-v1"}
+IMPLEMENTED_LAYOUTS = {"single-onnx-v1", "split-onnx-v1", "cloning-onnx-v1"}
 
 
 def canonical_voice_name(model_id: str, voice: str) -> str:
@@ -510,4 +529,5 @@ def get_registry_model_profile(
         runtime_available=model.runtime_available,
         redistribution_allowed=model.redistribution_allowed,
         support_status=registry_support_status(model),
+        voice_mode=model.voice_mode,
     )

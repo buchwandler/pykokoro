@@ -75,3 +75,46 @@ def test_cache_dir_survives_synthesis_config_resolution(tmp_path) -> None:
     resolved = resolve_synthesis_config(config, language="en-us")
 
     assert resolved.cache_dir == tmp_path
+
+
+def _reference_voice():
+    import numpy as np
+
+    from pykokoro import ReferenceVoice
+
+    return ReferenceVoice(
+        style=np.zeros((1, 256), dtype=np.float32),
+        memory=np.ones((1, 2, 192), dtype=np.float32),
+        memory_mask=np.ones((1, 2), dtype=np.bool_),
+        model_id="en-akinvox-cloning-v1",
+        model_fingerprint="model-build",
+    )
+
+
+def test_reference_voice_selects_only_its_bound_cloning_model() -> None:
+    voice = _reference_voice()
+
+    resolved = resolve_synthesis_config(SynthesisConfig(), language="en-us", voice=voice)
+
+    assert resolved.model_variant == "en-akinvox-cloning-v1"
+    assert resolved.voice is voice
+
+
+def test_reference_voice_rejects_explicit_model_conflict() -> None:
+    with pytest.raises(InvalidModelError, match="belongs to model"):
+        resolve_synthesis_config(
+            SynthesisConfig(model_variant="v1.0"), language="en-us", voice=_reference_voice()
+        )
+
+
+def test_reference_only_model_requires_enrollment_and_keeps_english_default_static() -> None:
+    from pykokoro.exceptions import InvalidVoiceError
+
+    with pytest.raises(InvalidVoiceError, match="Enroll a reference voice"):
+        resolve_synthesis_config(
+            SynthesisConfig(model_variant="en-akinvox-cloning-v1"), language="en-us"
+        )
+
+    regular = resolve_synthesis_config(SynthesisConfig(), language="en-us")
+    assert regular.model_variant == "v1.0"
+    assert regular.voice == "af_heart"

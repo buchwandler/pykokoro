@@ -44,6 +44,7 @@ from .exceptions import (
 )
 from .generation_config import GenerationConfig
 from .language_routing import LanguageRoutingConfig
+from .reference_voice import ReferenceVoice
 from .short_sentence_handler import ShortSentenceConfig
 from .synthesis_config import LongTextSplitMode, SynthesisConfig
 from .synthesis_identity import SynthesisIdentity, build_synthesis_identity
@@ -150,6 +151,7 @@ __all__ = [
     "VoiceLevelConfig",
     "VoiceLevelApplication",
     "VoiceBlend",
+    "ReferenceVoice",
     "SynthesisRequest",
     "SynthesisSegment",
     "RenderedSegment",

@@ -54,11 +54,13 @@ def _model(
     frontend: str,
     languages: list[str],
     voices: list[str],
-    default_voice: str,
+    default_voice: str | None,
     runtime_available: bool = True,
     redistribution_allowed: bool = True,
     distributions: list[dict] | None = None,
     source: str = "github",
+    voice_mode: str = "static",
+    layout: str = "single-onnx-v1",
 ) -> dict:
     return {
         "runtime": {
@@ -66,7 +68,8 @@ def _model(
             "language_codes": languages,
             "voices": voices,
             "default_voice": default_voice,
-            "layout": "single-onnx-v1",
+            "layout": layout,
+            "voice_mode": voice_mode,
             "sample_rate": 24000,
             "max_tokens": 510,
         },
@@ -89,6 +92,15 @@ def _registry() -> ModelRegistry:
                     languages=["EN_us"],
                     voices=["future"],
                     default_voice="future",
+                ),
+                "en-akinvox-cloning-v1": _model(
+                    "en-akinvox-cloning-v1",
+                    frontend="pykokoro-native-v1",
+                    languages=["en"],
+                    voices=[],
+                    default_voice=None,
+                    voice_mode="reference",
+                    layout="cloning-onnx-v1",
                 ),
                 "de-crane": _model(
                     "de-crane",
@@ -163,6 +175,7 @@ def test_discovery_returns_complete_sorted_contract(monkeypatch: pytest.MonkeyPa
         "de-anna",
         "de-crane",
         "de-thorsten",
+        "en-akinvox-cloning-v1",
         "pt-eu-logus2k",
         "restricted",
         "unavailable",
@@ -171,6 +184,12 @@ def test_discovery_returns_complete_sorted_contract(monkeypatch: pytest.MonkeyPa
     assert result.registry_source == "fixture-cache"
     assert result.cache_fallback is False
     assert result.offline is True
+    cloning = next(model for model in result.models if model.model_id == "en-akinvox-cloning-v1")
+    assert cloning.default_voice is None
+    assert cloning.voices == ()
+    assert cloning.voice_mode == "reference"
+    assert cloning.supports_reference_enrollment is True
+    assert cloning.speed_supported is False
 
     anna = next(model for model in result.models if model.model_id == "de-anna")
     assert anna.source == "github"

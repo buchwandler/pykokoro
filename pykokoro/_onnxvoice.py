@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
@@ -35,6 +35,8 @@ class ResolvedKokoroModel:
     model_paths: tuple[Path, ...]
     voices_path: Path | None
     config_path: Path | None
+
+    model_artifacts: Mapping[str, Path] = field(default_factory=dict)
 
 
 TimingLayout = Literal["special-padded", "model-positions", "invalid", "unknown"]
@@ -360,6 +362,15 @@ def _installation_info(installation: Any, *, ref: str | None = None) -> Resolved
             if getattr(artifact, "role", None) == "model"
         )
 
+    artifacts = tuple(getattr(installation, "artifacts", ()) or ())
+    model_artifacts: dict[str, Path] = {}
+    for artifact in artifacts:
+        role = getattr(artifact, "role", None)
+        component = getattr(artifact, "component", None)
+        if isinstance(component, str) and role in {"model", "metadata"}:
+            model_artifacts[component] = Path(artifact.path)
+        elif role == "config":
+            model_artifacts["config"] = Path(artifact.path)
     if hasattr(installation, "require_artifact"):
         try:
             voices_path = Path(installation.require_artifact("voices").path)
@@ -415,7 +426,7 @@ def _installation_info(installation: Any, *, ref: str | None = None) -> Resolved
 
     return ResolvedKokoroModel(
         ref=ref or getattr(installation, "ref", None),
-        model_id=getattr(installation, "id", None),
+        model_id=metadata.get("model_id") or getattr(installation, "id", None),
         quality=str(selected_quality) if selected_quality is not None else None,
         distribution=str(selected_distribution) if selected_distribution is not None else None,
         storage_id=str(storage_id) if storage_id is not None else None,
@@ -425,6 +436,7 @@ def _installation_info(installation: Any, *, ref: str | None = None) -> Resolved
         model_paths=model_paths,
         voices_path=voices_path,
         config_path=config_path,
+        model_artifacts=model_artifacts,
     )
 
 
@@ -504,6 +516,7 @@ def open_local_kokoro(
     config: str | Path | None = None,
     voices: str | Path | None = None,
     runtime: Mapping[str, Any] | None = None,
+    metadata: Mapping[str, Any] | None = None,
     sample_rate: int | None = None,
     providers: Sequence[Any] | str | None = None,
     provider_options: Mapping[str, Any] | Sequence[Mapping[str, Any]] | None = None,
@@ -519,6 +532,7 @@ def open_local_kokoro(
             config=config,
             voices=voices,
             runtime=runtime,
+            metadata=metadata,
             sample_rate=sample_rate,
             providers=requested,
             provider_options=options,
@@ -564,6 +578,11 @@ def runtime_diagnostics(runtime: Any) -> dict[str, Any]:
         "storage_id": getattr(resolved, "storage_id", None),
         "sample_rate": getattr(resolved, "sample_rate", None),
         "model_paths": [str(path) for path in getattr(resolved, "model_paths", ())],
+        "model_artifacts": {
+            name: str(path) for name, path in getattr(resolved, "model_artifacts", {}).items()
+        }
+        if resolved is not None
+        else {},
         "voices_path": (
             str(resolved.voices_path)
             if resolved is not None and resolved.voices_path is not None
@@ -744,22 +763,75 @@ class KokoroRuntimeAdapter:
                 tuple(str(path.resolve()) for path in resolved.model_paths),
                 str(resolved.voices_path.resolve()) if resolved.voices_path is not None else None,
                 str(resolved.config_path.resolve()) if resolved.config_path is not None else None,
+                tuple(
+                    sorted(
+                        (name, str(path.resolve()))
+                        for name, path in resolved.model_artifacts.items()
+                    )
+                ),
             )
         self._closed = False
+
+    def prepare_reference(
+        self,
+        reference_token_ids: Sequence[int],
+        *,
+        audio_24k: np.ndarray,
+        audio_16k: np.ndarray,
+    ) -> Any:
+        if self._closed:
+            raise RuntimeError("Kokoro runtime is closed")
+        prepare = getattr(self._runtime, "prepare_reference", None)
+        if not callable(prepare):
+            raise ConfigurationError("OnnxVoice runtime does not support reference enrollment")
+        return _call(
+            "prepare_reference",
+            lambda: prepare(reference_token_ids, audio_24k=audio_24k, audio_16k=audio_16k),
+        )
 
     def infer(
         self,
         token_ids: Sequence[int],
         *,
-        style: Any,
+        style: Any | None = None,
+        reference: Any | None = None,
         speed: float,
         seed: int | None = None,
     ) -> Any:
         if self._closed:
             raise RuntimeError("Kokoro runtime is closed")
+        if reference is None:
+            return _call(
+                "infer",
+                lambda: self._runtime.infer(token_ids, style=style, speed=speed, seed=seed),
+            )
+
+        from .reference_voice import ReferenceVoice
+
+        if style is not None:
+            raise ConfigurationError("Reference inference cannot also provide a static style")
+        if not isinstance(reference, ReferenceVoice):
+            raise TypeError("reference must be a ReferenceVoice")
+        if self.resolved.model_id is not None and reference.model_id != self.resolved.model_id:
+            raise ConfigurationError(
+                f"Reference voice belongs to model {reference.model_id!r}, "
+                f"not {self.resolved.model_id!r}"
+            )
+        state_type = getattr(_onnxvoice(), "KokoroReferenceState", None)
+        if state_type is None:
+            raise ConfigurationError("OnnxVoice does not expose KokoroReferenceState")
+        runtime_reference = state_type(
+            style=reference.style,
+            memory=reference.memory,
+            memory_mask=reference.memory_mask,
+            model_fingerprint=reference.model_fingerprint,
+            metadata=reference.metadata,
+        )
         return _call(
             "infer",
-            lambda: self._runtime.infer(token_ids, style=style, speed=speed, seed=seed),
+            lambda: self._runtime.infer(
+                token_ids, reference=runtime_reference, speed=speed, seed=seed
+            ),
         )
 
     def diagnostics(self) -> Any:

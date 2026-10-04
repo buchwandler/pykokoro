@@ -189,3 +189,4 @@ Routing, G2P languages, and model/voice profiles are distinct: see
 - [Short-sentence quality and explicit modes](short_sentence_quality.md)
 - [Frontend, lexicon, cache, and asset progress configuration](installation.md)
 - [All maintained example groups](examples.md)
+- [English reference voice enrollment and reuse](reference_voice.md)

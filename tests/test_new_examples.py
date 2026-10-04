@@ -12,10 +12,11 @@ from examples import (
     frontend_and_lexicons,
     language_routing,
     long_text,
+    reference_voice,
     result_metadata,
     voice_blend,
 )
-from pykokoro import AssetProgressEvent, ConsoleAssetProgress
+from pykokoro import AssetProgressEvent, ConsoleAssetProgress, ReferenceVoice
 
 
 def test_long_text_example_keeps_one_unmodified_request() -> None:
@@ -162,6 +163,57 @@ class _FakeSynthesizer:
     def synthesize_segments(self, requests) -> Iterator[_FakeResult]:
         for request in requests:
             yield self.synthesize(request)
+
+
+def test_reference_voice_example_reloads_saved_state_before_synthesis(
+    monkeypatch, tmp_path: Path
+) -> None:
+    voice = ReferenceVoice(
+        style=np.zeros((1, 256), dtype=np.float32),
+        memory=np.ones((1, 2, 192), dtype=np.float32),
+        memory_mask=np.ones((1, 2), dtype=np.bool_),
+        model_id="en-akinvox-cloning-v1",
+        model_fingerprint="example-model-fingerprint",
+    )
+    calls: list[tuple[object, ...]] = []
+
+    class FakeSynthesizer:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def enroll_voice(self, audio, transcript, **kwargs):
+            calls.append(("enroll", audio, transcript, kwargs))
+            return voice
+
+        def synthesize_text(self, text, *, language, voice):
+            calls.append(("synthesize", text, language, voice.fingerprint))
+            return _FakeResult(id="reference", text=text, language=language, voice=voice)
+
+    monkeypatch.setattr(reference_voice, "KokoroSynthesizer", FakeSynthesizer)
+    state_path = tmp_path / "nested" / "speaker.npz"
+    output_path = tmp_path / "audio" / "cloned.wav"
+
+    reference_voice.run(
+        tmp_path / "reference.wav",
+        "Exact reference transcript.",
+        "New target text.",
+        state_path,
+        output_path,
+    )
+
+    loaded = ReferenceVoice.load(state_path)
+    assert loaded.fingerprint == voice.fingerprint
+    assert calls[0] == (
+        "enroll",
+        tmp_path / "reference.wav",
+        "Exact reference transcript.",
+        {"language": "en-us", "name": "speaker"},
+    )
+    assert calls[1] == ("synthesize", "New target text.", "en-us", voice.fingerprint)
+    assert output_path.read_bytes() == b"fake wav"
 
 
 def test_new_synthesis_examples_write_expected_outputs_without_inference(

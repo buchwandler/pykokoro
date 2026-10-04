@@ -2,19 +2,28 @@
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 from collections.abc import Iterable, Iterator
+from dataclasses import replace
+from pathlib import Path
 from typing import Protocol
+
+import numpy as np
 
 from .exceptions import (
     AlignmentError,
     BackendError,
+    EmptyTextError,
     InvalidLanguageError,
     InvalidRequestError,
     PyKokoroError,
     SynthesisStateError,
 )
+from .model_profiles import normalize_language_code
 from .prepared_g2p import PreparedG2PAdapter, PreparedSynthesis
+from .reference_audio import PreparedReferenceAudio, prepare_reference_audio
+from .reference_voice import ReferenceVoice
 from .synthesis_config import SynthesisConfig, resolve_synthesis_config
 from .synthesis_types import RenderedSegment, SynthesisRequest, SynthesisSegment
 from .voice_manager import VoiceBlend
@@ -27,6 +36,15 @@ class _RequestRenderer(Protocol):
         request: SynthesisSegment,
         config: SynthesisConfig,
     ) -> RenderedSegment: ...
+    def enroll_voice(
+        self,
+        prepared: PreparedSynthesis,
+        audio: PreparedReferenceAudio,
+        config: SynthesisConfig,
+        *,
+        name: str | None,
+        reference_text_sha256: str,
+    ) -> ReferenceVoice: ...
 
 
 class KokoroSynthesizer:
@@ -89,7 +107,7 @@ class KokoroSynthesizer:
         text: str,
         *,
         language: str | None = None,
-        voice: str | VoiceBlend | None = None,
+        voice: str | VoiceBlend | ReferenceVoice | None = None,
     ) -> RenderedSegment:
         """Synthesize one already-prepared string without document parsing."""
         effective_language = language if language is not None else self.config.generation.lang
@@ -103,6 +121,49 @@ class KokoroSynthesizer:
                 voice=voice,
             )
         )
+
+    def enroll_voice(
+        self,
+        reference_audio: str | Path | np.ndarray,
+        reference_text: str,
+        *,
+        sample_rate: int | None = None,
+        language: str = "en",
+        name: str | None = None,
+    ) -> ReferenceVoice:
+        """Enroll an English reference recording for model-bound synthesis."""
+        self._ensure_open()
+        if not isinstance(reference_text, str) or not reference_text.strip():
+            raise EmptyTextError("reference_text must be non-empty and match the reference speech")
+        if not isinstance(language, str) or not language.strip():
+            raise InvalidLanguageError("a supported English enrollment language is required")
+        normalized_language = normalize_language_code(language)
+        if normalized_language not in {"en", "en-us"}:
+            raise InvalidLanguageError("reference voice enrollment currently supports English only")
+
+        audio = prepare_reference_audio(reference_audio, sample_rate=sample_rate)
+        config = self.config
+        if config.model_variant is None:
+            config = replace(config, model_variant="en-akinvox-cloning-v1")
+        config = replace(config, voice=None)
+        request = SynthesisSegment(
+            id=f"reference-{uuid.uuid4().hex}",
+            text=reference_text,
+            language=normalized_language,
+        )
+        try:
+            prepared = self.g2p.phonemize(request, config)
+            return self._renderer.enroll_voice(
+                prepared,
+                audio,
+                config,
+                name=name,
+                reference_text_sha256=hashlib.sha256(reference_text.encode("utf-8")).hexdigest(),
+            )
+        except PyKokoroError:
+            raise
+        except Exception as exc:
+            raise BackendError("Kokoro reference enrollment failed") from exc
 
     def synthesize_segments(
         self, segments: Iterable[SynthesisSegment]

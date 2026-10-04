@@ -18,6 +18,8 @@ from .exceptions import (
 )
 from .model_profiles import get_model_profile
 from .prepared_g2p import PreparedSynthesis
+from .reference_audio import PreparedReferenceAudio
+from .reference_voice import ReferenceVoice
 from .synthesis_config import SynthesisConfig, resolve_synthesis_config
 from .synthesis_identity import build_synthesis_identity
 from .synthesis_types import (
@@ -73,6 +75,12 @@ class OnnxRequestRenderer:
         )
         voice = resolved.voice
         voice_name = voice if isinstance(voice, str) else None
+        reference_voice = voice if isinstance(voice, ReferenceVoice) else None
+        rendered_voice = voice_name
+        if reference_voice is not None:
+            rendered_voice = f"reference:{reference_voice.fingerprint}"
+            if resolved.generation.speed != 1.0:
+                raise ConfigurationError("reference voice synthesis requires speed=1.0")
         trace = Trace() if resolved.return_trace else None
         if trace is not None:
             trace.model.update(
@@ -84,6 +92,13 @@ class OnnxRequestRenderer:
                     "voice": voice_name,
                 }
             )
+            if reference_voice is not None:
+                trace.model.update(
+                    {
+                        "voice_mode": "reference",
+                        "reference_fingerprint": reference_voice.fingerprint,
+                    }
+                )
             trace.warnings.extend(prepared.diagnostics)
 
         if not prepared.token_ids:
@@ -95,12 +110,15 @@ class OnnxRequestRenderer:
             request, prepared, resolved, profile.max_tokens, trace
         )
         backend = self._get_backend(resolved)
-        try:
-            voice_style = backend.resolve_voice_style(voice)
-        except (KeyError, ValueError, FileNotFoundError, ConfigurationError) as exc:
-            raise InvalidVoiceError(
-                f"Voice {voice!r} is unavailable for the resolved model"
-            ) from exc
+        if reference_voice is not None:
+            voice_style = None
+        else:
+            try:
+                voice_style = backend.resolve_voice_style(voice)
+            except (KeyError, ValueError, FileNotFoundError, ConfigurationError) as exc:
+                raise InvalidVoiceError(
+                    f"Voice {voice!r} is unavailable for the resolved model"
+                ) from exc
 
         def context_phonemizer(text: str, language: str) -> Any:
             return self._g2p_adapter.phonemize_context(text, language, resolved)
@@ -126,13 +144,22 @@ class OnnxRequestRenderer:
             raise BackendError(f"request {request.id!r} produced no acoustic chunks")
         if trace is not None:
             trace.model["acoustic_chunk_count"] = len(phoneme_segments)
-        raw_segments = backend.generate_raw_audio_segments(
-            phoneme_segments,
-            voice_style,
-            resolved.generation.speed,
-            default_voice_name=voice_name,
-            trace=trace,
-        )
+        if reference_voice is not None:
+            raw_segments = backend.generate_reference_audio_segments(
+                phoneme_segments,
+                reference_voice,
+                resolved.generation.speed,
+                seed=resolved.generation.random_seed,
+                trace=trace,
+            )
+        else:
+            raw_segments = backend.generate_raw_audio_segments(
+                phoneme_segments,
+                voice_style,
+                resolved.generation.speed,
+                default_voice_name=voice_name,
+                trace=trace,
+            )
 
         processed_segments = backend.postprocess_audio_segments(
             raw_segments,
@@ -191,7 +218,7 @@ class OnnxRequestRenderer:
             sample_rate=profile.sample_rate,
             text=request.text,
             language=request.language,
-            voice=voice_name,
+            voice=rendered_voice,
             phonemes=prepared.phonemes,
             token_ids=prepared.token_ids,
             word_timings=tuple(word_timings),
@@ -200,6 +227,35 @@ class OnnxRequestRenderer:
             synthesis_identity=identity,
             voice_level_applications=voice_level_applications,
             short_sentence_mode=short_sentence_mode,
+        )
+
+    def enroll_voice(
+        self,
+        prepared: PreparedSynthesis,
+        audio: PreparedReferenceAudio,
+        config: SynthesisConfig,
+        *,
+        name: str | None,
+        reference_text_sha256: str,
+    ) -> ReferenceVoice:
+        config = resolve_synthesis_config(
+            config, language=prepared.language, reference_enrollment=True
+        )
+        profile = get_model_profile(config.model_variant or "v1.0", config.model_source or "github")
+        if profile.voice_mode != "reference":
+            raise InvalidVoiceError("Reference enrollment requires a reference-only cloning model")
+        if not prepared.token_ids:
+            raise BackendError("frontend produced no model tokens for the reference transcript")
+        backend = self._get_backend(config)
+        return backend.prepare_reference_voice(
+            prepared.token_ids,
+            audio_24k=audio.audio_24k,
+            audio_16k=audio.audio_16k,
+            name=name,
+            metadata={
+                "reference_audio_sha256": audio.audio_sha256,
+                "reference_text_sha256": reference_text_sha256,
+            },
         )
 
     def _get_backend(self, config: SynthesisConfig) -> Any:
@@ -219,6 +275,7 @@ class OnnxRequestRenderer:
             "model_path",
             "voices_path",
             "model_config_path",
+            "model_artifacts",
             "release_manifest_path",
             "provider",
             "provider_options",
@@ -246,6 +303,7 @@ class OnnxRequestRenderer:
             model_config_path=(
                 Path(config.model_config_path) if config.model_config_path is not None else None
             ),
+            model_artifacts=config.model_artifacts,
             provider=config.provider,
             session_options=config.session_options,
             provider_options=config.provider_options,

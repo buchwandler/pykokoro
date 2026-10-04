@@ -13,6 +13,7 @@ quickstart
 installation
 basic_usage
 advanced_features
+reference_voice
 short_sentence_quality
 pipeline_stages
 api_reference
@@ -38,6 +39,7 @@ changelog
 - [Long-text capacity, splitting, and errors](basic_usage.md#render-longer-text)
 - [Direct phonemes, language routing, VoiceBlend, and result metadata]
   (advanced_features.md)
+- [English reference voice enrollment and reuse](reference_voice.md)
 - [Language codes and acoustic-profile discovery](languages.md)
 - [Frontends, installed lexicons, cache location, and asset progress](installation.md)
 - [Short-sentence configuration and modes](short_sentence_quality.md)

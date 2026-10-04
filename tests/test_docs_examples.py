@@ -15,6 +15,7 @@ ROOT = Path(__file__).parents[1]
 MAINTAINED_EXAMPLES = tuple(
     path for path in sorted((ROOT / "examples").glob("*.py")) if path.name != "__init__.py"
 )
+INPUT_DRIVEN_EXAMPLES = {"reference_voice.py"}
 PYTHON_FENCE = re.compile(r"(?ms)^```python[ \t]*\n(.*?)^```[ \t]*$")
 
 
@@ -83,7 +84,7 @@ def test_example_catalogs_cover_every_runnable_script() -> None:
         if path.name not in {"__init__.py", "_output.py", "run_all.py"}
     }
     grouped = set().union(*run_all._GROUPS.values())
-    assert grouped == expected
+    assert grouped == expected - INPUT_DRIVEN_EXAMPLES
 
     catalogs = (ROOT / "docs" / "examples.md", ROOT / "examples" / "README.md")
     for catalog_path in catalogs:

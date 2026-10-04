@@ -46,7 +46,8 @@ def test_companion_dependency_floors_match_current_integration_contract() -> Non
     assert "lexphon>=0.2.5,<0.3" in dependencies
     assert "phrasplit>=0.3.9,<0.4" in dependencies
     assert "audiosig>=0.1.4,<0.2" in dependencies
-    assert "onnxvoice>=0.2.0,<0.3" in dependencies
+    assert "soxr>=1.1.0,<2.0" in dependencies
+    assert "onnxvoice>=0.2.2,<0.3" in dependencies
 
 
 def test_test_requirements_keep_kokorog2p_in_supported_window() -> None:
@@ -96,12 +97,13 @@ def test_removed_document_dependencies_are_not_declared() -> None:
     assert not any(requirement.startswith("phrasplit[nlp]") for requirement in dependencies)
 
 
-def test_audiosig_is_the_only_declared_dsp_backend() -> None:
+def test_audio_backends_are_declared_without_heavy_dsp_dependencies() -> None:
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     dependencies = pyproject["project"]["dependencies"]
     optional = pyproject["project"]["optional-dependencies"]
 
     assert "audiosig>=0.1.4,<0.2" in dependencies
+    assert "soxr>=1.1.0,<2.0" in dependencies
     assert "prosody" not in optional
 
     requirements = [requirement.lower() for requirement in dependencies]
@@ -115,7 +117,6 @@ def test_audiosig_is_the_only_declared_dsp_backend() -> None:
         "signalsmith",
         "python-stretch",
         "resampy",
-        "soxr",
         "torchaudio",
     )
     assert not any(name in requirement for requirement in requirements for name in forbidden)
@@ -138,7 +139,6 @@ def test_production_source_has_no_forbidden_dsp_imports() -> None:
         "import signalsmith_stretch",
         "import python_stretch",
         "import resampy",
-        "import soxr",
         "import torchaudio",
     )
     source_files = [
@@ -193,13 +193,14 @@ def test_lower_bound_workflow_pins_match_project_floors() -> None:
         "lexphon",
         "onnxvoice",
         "audiosig",
+        "soxr",
         "phrasplit",
     }
 
     assert {package: pins[package] for package in expected_packages} == {
         package: floors[package] for package in expected_packages
     }
-    assert '"onnxvoice[cpu]==0.2.0"' in workflow
+    assert '"onnxvoice[cpu]==0.2.2"' in workflow
     assert "tests/test_onnxvoice_boundary.py" in workflow
     assert "tests/test_request_renderer.py" in workflow
     assert "tests/test_voice_manager.py" in workflow
@@ -231,4 +232,5 @@ def test_publish_workflow_validates_artifacts_before_upload() -> None:
     assert 'has_minimum(requirements, "lexphon", "0.2.5")' in workflow
     assert 'has_minimum(requirements, "phrasplit", "0.3.9")' in workflow
     assert 'has_minimum(requirements, "audiosig", "0.1.4")' in workflow
-    assert 'has_minimum(requirements, "onnxvoice", "0.2.0")' in workflow
+    assert 'has_minimum(requirements, "soxr", "1.1.0")' in workflow
+    assert 'has_minimum(requirements, "onnxvoice", "0.2.2")' in workflow

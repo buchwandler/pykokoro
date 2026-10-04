@@ -9,6 +9,7 @@ from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from typing import Any
 
+from .reference_voice import ReferenceVoice
 from .synthesis_config import SynthesisConfig
 from .voice_level import default_voice_calibration
 from .voice_manager import VoiceBlend
@@ -82,13 +83,15 @@ def build_synthesis_identity(
     config: SynthesisConfig,
     *,
     language: str,
-    voice: str | VoiceBlend | None,
+    voice: str | VoiceBlend | ReferenceVoice | None,
 ) -> SynthesisIdentity:
     """Build a stable identity from resolved settings that can affect output."""
     from . import __version__
     from .short_sentence_handler import ShortSentenceConfig
 
-    if isinstance(voice, VoiceBlend):
+    if isinstance(voice, ReferenceVoice):
+        voice_identity = f"reference:{voice.fingerprint}"
+    elif isinstance(voice, VoiceBlend):
         voice_identity = _canonical_json(
             {"voices": voice.voices, "interpolation": voice.interpolation}
         )

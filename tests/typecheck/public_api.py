@@ -1,6 +1,8 @@
 from collections.abc import Callable
 from typing import assert_type
 
+import numpy as np
+
 from pykokoro import (
     AssetProgressCallback,
     AssetProgressEvent,
@@ -11,6 +13,7 @@ from pykokoro import (
     LexiconDiscoveryResult,
     ModelCapabilities,
     ModelDiscoveryResult,
+    ReferenceVoice,
     RenderedSegment,
     SynthesisConfig,
     SynthesisSegment,
@@ -21,6 +24,15 @@ from pykokoro import (
 
 config = SynthesisConfig(voice="af_sarah", generation=GenerationConfig(lang="en-us"))
 request = SynthesisSegment("line-1", "Hello.", "en-us", voice="af_sarah")
+reference_voice = ReferenceVoice(
+    np.zeros((1, 256), dtype=np.float32),
+    np.zeros((1, 1, 192), dtype=np.float32),
+    np.ones((1, 1), dtype=np.bool_),
+    "en-akinvox-cloning-v1",
+    "model-fingerprint",
+)
+reference_request = SynthesisSegment("reference-1", "Hello.", "en-us", voice=reference_voice)
+reference_config = SynthesisConfig(voice=reference_voice)
 
 assert_type(AssetProgressCallback, type[AssetProgressCallback])
 assert_type(AssetProgressEvent, type[AssetProgressEvent])
@@ -37,5 +49,8 @@ assert_type(lexicon_discoverer, Callable[..., LexiconDiscoveryResult])
 assert_type(KokoroSynthesizer, type[KokoroSynthesizer])
 assert_type(RenderedSegment, type[RenderedSegment])
 assert_type(SynthesisConfig, type[SynthesisConfig])
+assert_type(ReferenceVoice, type[ReferenceVoice])
+assert_type(reference_request, SynthesisSegment)
+assert_type(reference_config, SynthesisConfig)
 assert_type(request, SynthesisSegment)
 assert_type(config, SynthesisConfig)

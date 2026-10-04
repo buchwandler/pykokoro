@@ -8,7 +8,7 @@ import logging
 import sqlite3
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -33,6 +33,7 @@ from .config_types import (
 )
 from .exceptions import ConfigurationError
 from .model_profiles import VOICE_ALIASES, get_model_profile
+from .reference_voice import ReferenceVoice
 from .tokenizer import Tokenizer, TokenizerConfig
 from .voice_level import VoiceCalibrationKey, VoiceLevelConfig
 from .voice_manager import VoiceBlend, VoiceManager
@@ -112,6 +113,7 @@ class Kokoro:
         model_path: Path | None = None,
         voices_path: Path | None = None,
         model_config_path: Path | None = None,
+        model_artifacts: Mapping[str, str | Path] | None = None,
         use_gpu: bool = False,
         provider: ProviderType | None = None,
         session_options: Any | None = None,
@@ -138,6 +140,11 @@ class Kokoro:
         self._voices_path_provided = voices_path is not None
         self._model_config_path = model_config_path
         self._model_config_path_provided = model_config_path is not None
+        self._model_artifacts = (
+            {name: Path(path) for name, path in model_artifacts.items()}
+            if model_artifacts is not None
+            else None
+        )
 
         # Deprecation warning for use_gpu
         if use_gpu:
@@ -292,7 +299,39 @@ class Kokoro:
             self._provider,
         )
         provider = self._provider or ("auto" if self._use_gpu else "cpu")
-        if self._model_path is not None or self._voices_path is not None:
+        profile = get_model_profile(self._model_variant, self._model_source)
+        if self._model_artifacts is not None:
+            if profile.voice_mode != "reference":
+                raise ConfigurationError(
+                    "Componentized model_artifacts require a reference-voice model"
+                )
+            artifacts = {
+                (
+                    "config"
+                    if component == "config"
+                    else "metadata:source_params"
+                    if component == "source_params"
+                    else f"model:{component}"
+                ): path
+                for component, path in self._model_artifacts.items()
+            }
+            if self._model_config_path is not None:
+                artifacts["config"] = self._model_config_path
+            runtime = open_local_kokoro(
+                artifacts=artifacts,
+                runtime={"layout": profile.layout, "voice_mode": profile.voice_mode},
+                metadata={"model_id": self._model_variant},
+                sample_rate=profile.sample_rate,
+                providers=provider,
+                provider_options=self._provider_options,
+                session_options=self._session_options,
+            )
+            resolved = runtime.resolved
+        elif self._model_path is not None or self._voices_path is not None:
+            if profile.voice_mode == "reference":
+                raise ConfigurationError(
+                    "Reference-only models require componentized model_artifacts"
+                )
             if self._model_path is None or self._voices_path is None:
                 raise ConfigurationError(
                     "Explicit Kokoro local loading requires both model_path and voices_path"
@@ -310,7 +349,7 @@ class Kokoro:
             resolved = install_kokoro_model(
                 self._model_variant,
                 quality=str(self._model_quality),
-                source=self._model_source,
+                source=self._model_source if profile.voice_mode == "static" else None,
                 cache_dir=self._cache_dir,
                 progress=self._asset_progress,
             )
@@ -335,11 +374,14 @@ class Kokoro:
         self._model_path = resolved.model_paths[0] if resolved.model_paths else None
         self._voices_path = resolved.voices_path
         self._model_config_path = resolved.config_path
-        if self._voices_path is None:
-            raise ConfigurationError("OnnxVoice Kokoro installation has no voices artifact")
-        voice_manager = VoiceManager(model_source=self._model_source)
-        voice_manager.load_voices(voices_path=self._voices_path)
-        self._voice_manager = voice_manager
+        if profile.voice_mode == "static":
+            if self._voices_path is None:
+                raise ConfigurationError("OnnxVoice Kokoro installation has no voices artifact")
+            voice_manager = VoiceManager(model_source=self._model_source)
+            voice_manager.load_voices(voices_path=self._voices_path)
+            self._voice_manager = voice_manager
+        else:
+            self._voice_manager = None
         self._audio_generator = AudioGenerator(
             runtime=runtime,
             tokenizer=self.tokenizer,
@@ -361,9 +403,47 @@ class Kokoro:
         self._init_kokoro()
 
     def get_voices(self) -> list[str]:
+        """Return the static voice roster, or an empty list for reference-only models."""
+        if get_model_profile(self._model_variant, self._model_source).voice_mode == "reference":
+            return []
         self._init_kokoro()
-        assert self._voice_manager is not None
+        if self._voice_manager is None:
+            return []
         return self._voice_manager.get_voices()
+
+    def _require_static_voice_mode(self, message: str) -> None:
+        profile = get_model_profile(self._model_variant, self._model_source)
+        if profile.voice_mode == "reference":
+            raise ConfigurationError(message)
+
+    def prepare_reference_voice(
+        self,
+        reference_token_ids: Sequence[int],
+        *,
+        audio_24k: np.ndarray,
+        audio_16k: np.ndarray,
+        name: str | None = None,
+        metadata: Mapping[str, str] | None = None,
+    ) -> ReferenceVoice:
+        """Run OnnxVoice reference enrollment and return model-bound public state."""
+        profile = get_model_profile(self._model_variant, self._model_source)
+        if profile.voice_mode != "reference":
+            raise ConfigurationError("Reference enrollment requires a reference-only Kokoro model")
+        self._init_kokoro()
+        if self._runtime is None:
+            raise ConfigurationError("Reference enrollment runtime is not initialized")
+        state = self._runtime.prepare_reference(
+            reference_token_ids, audio_24k=audio_24k, audio_16k=audio_16k
+        )
+        return ReferenceVoice(
+            style=state.style,
+            memory=state.memory,
+            memory_mask=state.memory_mask,
+            model_id=self._model_variant,
+            model_fingerprint=state.model_fingerprint,
+            name=name,
+            metadata=metadata or {},
+        )
 
     def _voice_manager_voice_name(self, voice_name: str) -> str:
         """Map a registry voice alias to the name stored in a voice archive."""
@@ -377,18 +457,29 @@ class Kokoro:
         )
 
     def get_voice_style(self, voice_name: str) -> np.ndarray:
+        self._require_static_voice_mode(
+            "Static voice styles are unavailable for reference-only models"
+        )
         self._init_kokoro()
-        assert self._voice_manager is not None
+        if self._voice_manager is None:
+            raise ConfigurationError(
+                "Static voice styles are unavailable for reference-only models"
+            )
         return self._voice_manager.get_voice_style(self._voice_manager_voice_name(voice_name))
 
     def create_blended_voice(self, blend: VoiceBlend) -> np.ndarray:
         """Create a blended voice style vector from a VoiceBlend."""
+        self._require_static_voice_mode("Voice blending is unavailable for reference-only models")
         self._init_kokoro()
-        assert self._voice_manager is not None
+        if self._voice_manager is None:
+            raise ConfigurationError("Voice blending is unavailable for reference-only models")
         return self._voice_manager.create_blended_voice(blend)
 
     def _resolve_voice_style(self, voice: str | np.ndarray | VoiceBlend) -> np.ndarray:
         """Resolve voice parameter to a voice style array."""
+        self._require_static_voice_mode(
+            "Reference-only models require a ReferenceVoice instead of a static voice style"
+        )
         self._init_kokoro()
         if self._voice_manager is None and self._runtime is not None:
             if not isinstance(voice, str):
@@ -476,6 +567,29 @@ class Kokoro:
             segments, voice_style, speed, trace
         )
 
+    def generate_reference_audio_segments(
+        self,
+        segments: list[PhonemeSegment],
+        reference_voice: ReferenceVoice,
+        speed: float,
+        *,
+        seed: int | None = None,
+        trace: Trace | None = None,
+    ) -> list[PhonemeSegment]:
+        """Generate request-local audio conditioned by one enrolled reference voice."""
+        if reference_voice.model_id != self._model_variant:
+            raise ConfigurationError(
+                f"Reference voice belongs to model {reference_voice.model_id!r}, "
+                f"not backend model {self._model_variant!r}"
+            )
+        if speed != 1.0:
+            raise ConfigurationError("reference voice synthesis requires speed=1.0")
+        self._init_kokoro()
+        assert self._audio_generator is not None
+        return self._audio_generator._generate_reference_audio_segments(
+            segments, reference_voice, speed, seed=seed, trace=trace
+        )
+
     def postprocess_audio_segments(
         self,
         segments: list[PhonemeSegment],
@@ -551,8 +665,12 @@ class Kokoro:
         factor: float = 0.5,
     ) -> np.ndarray:
         """Interpolate between two voices."""
+        self._require_static_voice_mode(
+            "Voice interpolation is unavailable for reference-only models"
+        )
         self._init_kokoro()
-        assert self._voice_manager is not None
+        if self._voice_manager is None:
+            raise ConfigurationError("Voice interpolation is unavailable for reference-only models")
 
         style1 = self._voice_manager.resolve_voice(
             voice1, voice_db_lookup=self.get_voice_from_database

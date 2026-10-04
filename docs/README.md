@@ -19,6 +19,7 @@ or `make.bat html`. Run `make clean` to remove generated files.
 - `basic_usage.md` — request, configuration, and result patterns
 - `advanced_features.md` — pronunciation overrides, annotations, routing, and
   calibration
+- `reference_voice.md` — English reference enrollment, reuse, and privacy
 - `pipeline_stages.md` — request rendering lifecycle
 - `api_reference.md` — public request-centric API
 - `examples.md` — maintained example scripts

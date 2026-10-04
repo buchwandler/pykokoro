@@ -22,6 +22,7 @@ from ._onnxvoice import (
 )
 from .constants import MAX_PHONEME_LENGTH, SAMPLE_RATE
 from .exceptions import ConfigurationError
+from .reference_voice import ReferenceVoice
 from .runtime_protocol import KokoroInferenceRuntime
 from .short_sentence_handler import (
     SHORT_SENTENCE_META_KEY,
@@ -200,11 +201,15 @@ class AudioGenerator:
     def _inference_cache_key(
         inputs: dict[str, np.ndarray | list[int]],
         runtime_identity: object = None,
+        reference_identity: tuple[str, int | None] | None = None,
     ) -> bytes:
         """Build a digest from producer inputs and runtime identity."""
         digest = hashlib.blake2b(digest_size=20)
         digest.update(repr(runtime_identity).encode("utf-8"))
         digest.update(b"\0")
+        if reference_identity is not None:
+            digest.update(repr(reference_identity).encode("utf-8"))
+            digest.update(b"\0")
         for name in sorted(inputs):
             array = np.ascontiguousarray(np.asarray(inputs[name]))
             digest.update(name.encode("utf-8"))
@@ -321,26 +326,121 @@ class AudioGenerator:
         tokens: list[int] | None = None,
         seed: int | None = None,
     ) -> tuple[np.ndarray, KokoroTimingPayload | None]:
+        return self._run_conditioned_onnx(
+            phonemes,
+            voice_style,
+            speed,
+            trace,
+            attempt_kind=attempt_kind,
+            tokens=tokens,
+            seed=seed,
+        )
+
+    def _run_reference_onnx(
+        self,
+        phonemes: str,
+        reference_voice: ReferenceVoice,
+        speed: float,
+        trace: Trace | None = None,
+        *,
+        attempt_kind: str = "initial",
+        tokens: list[int] | None = None,
+        seed: int | None = None,
+    ) -> tuple[np.ndarray, KokoroTimingPayload | None]:
+        if speed != 1.0:
+            raise ConfigurationError("reference voice synthesis requires speed=1.0")
+        return self._run_conditioned_onnx(
+            phonemes,
+            None,
+            speed,
+            trace,
+            attempt_kind=attempt_kind,
+            tokens=tokens,
+            seed=seed,
+            reference_voice=reference_voice,
+        )
+
+    def _run_voice_conditioned_onnx(
+        self,
+        phonemes: str,
+        voice_style: np.ndarray | None,
+        speed: float,
+        trace: Trace | None = None,
+        *,
+        reference_voice: ReferenceVoice | None = None,
+        attempt_kind: str = "initial",
+        tokens: list[int] | None = None,
+        seed: int | None = None,
+    ) -> tuple[np.ndarray, KokoroTimingPayload | None]:
+        if reference_voice is not None:
+            return self._run_reference_onnx(
+                phonemes,
+                reference_voice,
+                speed,
+                trace,
+                attempt_kind=attempt_kind,
+                tokens=tokens,
+                seed=seed,
+            )
+        if voice_style is None:
+            raise ValueError("static-voice inference requires a voice style")
+        return self._run_onnx(
+            phonemes,
+            voice_style,
+            speed,
+            trace,
+            attempt_kind=attempt_kind,
+            tokens=tokens,
+            seed=seed,
+        )
+
+    def _run_conditioned_onnx(
+        self,
+        phonemes: str,
+        voice_style: np.ndarray | None,
+        speed: float,
+        trace: Trace | None = None,
+        *,
+        attempt_kind: str = "initial",
+        tokens: list[int] | None = None,
+        seed: int | None = None,
+        reference_voice: ReferenceVoice | None = None,
+    ) -> tuple[np.ndarray, KokoroTimingPayload | None]:
         effective_phonemes = phonemes[:MAX_PHONEME_LENGTH]
         effective_tokens = (
             list(tokens)
             if tokens is not None and len(phonemes) <= MAX_PHONEME_LENGTH
             else self._tokenizer.tokenize(effective_phonemes)
         )
-        normalized_voice_style = normalize_voice_style(voice_style, expected_length=None)
-        style_idx = self._voice_style_index(
-            normalized_voice_style.shape[0], len(effective_phonemes)
-        )
-        voice_style_indexed = normalized_voice_style[style_idx]
-        if voice_style_indexed.ndim == 1:
-            voice_style_indexed = voice_style_indexed[None, :]
         inputs: dict[str, np.ndarray | list[int]] = {
             "token_ids": effective_tokens,
-            "style": voice_style_indexed,
             "speed": np.asarray([speed], dtype=np.float32),
         }
+        voice_style_indexed: np.ndarray | None = None
+        style_idx: int | None = None
+        if reference_voice is None:
+            if voice_style is None:
+                raise ValueError("static-voice inference requires a voice style")
+            normalized_voice_style = normalize_voice_style(voice_style, expected_length=None)
+            style_idx = self._voice_style_index(
+                normalized_voice_style.shape[0], len(effective_phonemes)
+            )
+            voice_style_indexed = normalized_voice_style[style_idx]
+            if voice_style_indexed.ndim == 1:
+                voice_style_indexed = voice_style_indexed[None, :]
+            inputs["style"] = voice_style_indexed
+        else:
+            if voice_style is not None:
+                raise ValueError("reference inference must not include a static voice style")
+            if speed != 1.0:
+                raise ConfigurationError("reference voice synthesis requires speed=1.0")
         runtime_identity = getattr(self._runtime, "cache_identity", None)
-        cache_key = self._inference_cache_key(inputs, runtime_identity)
+        reference_identity = (
+            (reference_voice.fingerprint, seed) if reference_voice is not None else None
+        )
+        cache_key = self._inference_cache_key(
+            inputs, runtime_identity, reference_identity=reference_identity
+        )
         cached = self._get_cached_inference(cache_key)
         result: Any | None = None
         if cached is not None:
@@ -349,12 +449,21 @@ class AudioGenerator:
             cache_hit = True
         else:
             started = time.perf_counter()
-            result = self._runtime.infer(
-                effective_tokens,
-                style=voice_style_indexed,
-                speed=speed,
-                seed=seed,
-            )
+            if reference_voice is None:
+                assert voice_style_indexed is not None
+                result = self._runtime.infer(
+                    effective_tokens,
+                    style=voice_style_indexed,
+                    speed=speed,
+                    seed=seed,
+                )
+            else:
+                result = self._runtime.infer(
+                    effective_tokens,
+                    reference=reference_voice,
+                    speed=speed,
+                    seed=seed,
+                )
             runtime_s = time.perf_counter() - started
             audio = np.asarray(getattr(result, "audio", result), dtype=np.float32).reshape(-1)
             timing = timing_payload_from_result(
@@ -418,18 +527,9 @@ class AudioGenerator:
                 output_summary,
             )
         if trace is not None:
-            style_values = np.asarray(voice_style_indexed, dtype=np.float32)
             diagnostic = trace.inference[-1]
             diagnostic.update(
                 {
-                    "style_row": style_idx,
-                    "style": {
-                        "shape": list(voice_style_indexed.shape),
-                        "min": float(np.min(style_values)) if style_values.size else 0.0,
-                        "max": float(np.max(style_values)) if style_values.size else 0.0,
-                        "mean": float(np.mean(style_values)) if style_values.size else 0.0,
-                        "std": float(np.std(style_values)) if style_values.size else 0.0,
-                    },
                     "audio": {"samples": int(np.asarray(audio).size)},
                     "timings": timing_summary,
                     "outputs": output_summary,
@@ -439,6 +539,23 @@ class AudioGenerator:
                     },
                 }
             )
+            if reference_voice is None:
+                assert voice_style_indexed is not None and style_idx is not None
+                style_values = np.asarray(voice_style_indexed, dtype=np.float32)
+                diagnostic.update(
+                    {
+                        "style_row": style_idx,
+                        "style": {
+                            "shape": list(voice_style_indexed.shape),
+                            "min": float(np.min(style_values)) if style_values.size else 0.0,
+                            "max": float(np.max(style_values)) if style_values.size else 0.0,
+                            "mean": float(np.mean(style_values)) if style_values.size else 0.0,
+                            "std": float(np.std(style_values)) if style_values.size else 0.0,
+                        },
+                    }
+                )
+            else:
+                diagnostic["voice_mode"] = "reference"
             if self._inference_audio_diagnostics:
                 noise_detected, noise_metrics = _is_stationary_broadband_noise(audio)
                 audio_metrics = _waveform_metrics(audio)
@@ -623,10 +740,17 @@ class AudioGenerator:
     def _generate_raw_audio_segments(
         self,
         segments: list[PhonemeSegment],
-        voice_style: np.ndarray,
+        voice_style: np.ndarray | None,
         speed: float,
         trace: Trace | None = None,
+        *,
+        reference_voice: ReferenceVoice | None = None,
+        seed: int | None = None,
     ) -> list[PhonemeSegment]:
+        if (voice_style is None) == (reference_voice is None):
+            raise ValueError("provide either a static voice style or a reference voice")
+        if reference_voice is not None and speed != 1.0:
+            raise ConfigurationError("reference voice synthesis requires speed=1.0")
         noise_flags: list[bool] = []
         for segment in segments:
             short_sentence_metadata = (segment.engine_metadata or {}).get(SHORT_SENTENCE_META_KEY)
@@ -644,17 +768,24 @@ class AudioGenerator:
                 )
             segment_voice_style = voice_style
             if trace is None:
-                audio, pred_dur = self._run_onnx(
-                    segment.phonemes, segment_voice_style, speed, tokens=segment.tokens or None
+                audio, pred_dur = self._run_voice_conditioned_onnx(
+                    segment.phonemes,
+                    segment_voice_style,
+                    speed,
+                    tokens=segment.tokens or None,
+                    seed=seed,
+                    reference_voice=reference_voice,
                 )
             else:
-                audio, pred_dur = self._run_onnx(
+                audio, pred_dur = self._run_voice_conditioned_onnx(
                     segment.phonemes,
                     segment_voice_style,
                     speed,
                     trace=trace,
                     attempt_kind="initial",
                     tokens=segment.tokens or None,
+                    seed=seed,
+                    reference_voice=reference_voice,
                 )
             if trace is not None:
                 trace.inference[-1].update(
@@ -671,6 +802,8 @@ class AudioGenerator:
                 segment_voice_style,
                 speed,
                 trace=trace,
+                reference_voice=reference_voice,
+                seed=seed,
             )
 
             if self._waveform_validation != "off":
@@ -687,6 +820,24 @@ class AudioGenerator:
                 raise ConfigurationError(message)
             logger.warning(message)
         return segments
+
+    def _generate_reference_audio_segments(
+        self,
+        segments: list[PhonemeSegment],
+        reference_voice: ReferenceVoice,
+        speed: float,
+        *,
+        seed: int | None = None,
+        trace: Trace | None = None,
+    ) -> list[PhonemeSegment]:
+        return self._generate_raw_audio_segments(
+            segments,
+            None,
+            speed,
+            trace,
+            reference_voice=reference_voice,
+            seed=seed,
+        )
 
     @staticmethod
     def _coerce_timing_payload(
@@ -910,10 +1061,12 @@ class AudioGenerator:
         self,
         segment: PhonemeSegment,
         audio: np.ndarray,
-        voice_style: np.ndarray,
+        voice_style: np.ndarray | None,
         speed: float,
         *,
         trace: Trace | None = None,
+        reference_voice: ReferenceVoice | None = None,
+        seed: int | None = None,
     ) -> np.ndarray:
         """Accept confident phrase cuts or regenerate a wrap fallback."""
         short_sentence_metadata = (segment.engine_metadata or {}).get(SHORT_SENTENCE_META_KEY)
@@ -957,6 +1110,8 @@ class AudioGenerator:
             speed,
             trace=trace,
             context_phonemizer=self._context_phonemizer,
+            reference_voice=reference_voice,
+            seed=seed,
         )
         if retry_audio is not None:
             return retry_audio
@@ -1002,21 +1157,25 @@ class AudioGenerator:
             else None
         )
         if trace is None:
-            fallback_audio, _ = self._run_onnx(
+            fallback_audio, _ = self._run_voice_conditioned_onnx(
                 fallback_phonemes,
                 voice_style,
                 speed,
                 attempt_kind="fallback",
                 tokens=prepared_fallback_tokens,
+                seed=seed,
+                reference_voice=reference_voice,
             )
         else:
-            fallback_audio, _ = self._run_onnx(
+            fallback_audio, _ = self._run_voice_conditioned_onnx(
                 fallback_phonemes,
                 voice_style,
                 speed,
                 trace=trace,
                 attempt_kind="fallback",
                 tokens=prepared_fallback_tokens,
+                seed=seed,
+                reference_voice=reference_voice,
             )
         short_sentence_metadata["cut_applied"] = True
         short_sentence_metadata["fallback_used"] = "wrap"
@@ -1032,11 +1191,13 @@ class AudioGenerator:
         self,
         segment: PhonemeSegment,
         short_sentence_metadata: dict[str, object],
-        voice_style: np.ndarray,
+        voice_style: np.ndarray | None,
         speed: float,
         *,
         trace: Trace | None = None,
         context_phonemizer: Callable[[str, str], Any] | None = None,
+        reference_voice: ReferenceVoice | None = None,
+        seed: int | None = None,
     ) -> np.ndarray | None:
         templates = short_sentence_metadata.get("phrase_fallback_templates")
         if not isinstance(templates, list):
@@ -1116,21 +1277,25 @@ class AudioGenerator:
                 failed_template = template
 
             if trace is None:
-                retry_audio, pred_dur = self._run_onnx(
+                retry_audio, pred_dur = self._run_voice_conditioned_onnx(
                     retry.phonemes,
                     voice_style,
                     speed,
                     attempt_kind="retry",
                     tokens=retry.tokens,
+                    seed=seed,
+                    reference_voice=reference_voice,
                 )
             else:
-                retry_audio, pred_dur = self._run_onnx(
+                retry_audio, pred_dur = self._run_voice_conditioned_onnx(
                     retry.phonemes,
                     voice_style,
                     speed,
                     trace=trace,
                     attempt_kind="retry",
                     tokens=retry.tokens,
+                    seed=seed,
+                    reference_voice=reference_voice,
                 )
             timing_tokens = retry.metadata.get("timing_tokens")
             retry_timings: list[WordTiming] = []

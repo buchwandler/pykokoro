@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from .asset_progress import AssetProgressCallback
 from .config_types import ModelQuality, ModelSource, ModelVariant, ProviderType
-from .exceptions import ConfigurationError, InvalidModelError, InvalidVoiceError
+from .exceptions import (
+    ConfigurationError,
+    InvalidLanguageError,
+    InvalidModelError,
+    InvalidVoiceError,
+)
 from .generation_config import GenerationConfig
 from .language_routing import LanguageRoutingConfig
+from .reference_voice import ReferenceVoice
 from .short_sentence_handler import ShortSentenceConfig
 from .voice_level import VoiceLevelConfig
 from .voice_manager import VoiceBlend
@@ -27,7 +34,7 @@ if TYPE_CHECKING:
 class SynthesisConfig:
     """Model, frontend, and inference settings for Kokoro speech synthesis."""
 
-    voice: str | VoiceBlend | None = None
+    voice: str | VoiceBlend | ReferenceVoice | None = None
     generation: GenerationConfig = field(default_factory=GenerationConfig)
     language_routing: LanguageRoutingConfig | None = None
 
@@ -38,6 +45,7 @@ class SynthesisConfig:
     voices_path: Path | str | None = None
     model_config_path: Path | str | None = None
     release_manifest_path: Path | str | None = None
+    model_artifacts: Mapping[str, Path | str] | None = None
     model_identity: str | None = None
     provider: ProviderType | None = None
     provider_options: dict[str, Any] | None = None
@@ -58,10 +66,22 @@ class SynthesisConfig:
     allow_experimental_frontend: bool = False
 
     def __post_init__(self) -> None:
-        if self.voice is not None and not isinstance(self.voice, (str, VoiceBlend)):
-            raise InvalidVoiceError("voice must be a voice name, VoiceBlend, or None")
+        if self.voice is not None and not isinstance(self.voice, (str, VoiceBlend, ReferenceVoice)):
+            raise InvalidVoiceError(
+                "voice must be a voice name, VoiceBlend, ReferenceVoice, or None"
+            )
         if isinstance(self.voice, str) and not self.voice.strip():
             raise InvalidVoiceError("voice must be non-empty when supplied")
+        if self.model_artifacts is not None:
+            if not isinstance(self.model_artifacts, Mapping):
+                raise ConfigurationError(
+                    "model_artifacts must be a mapping of component names to paths"
+                )
+            if any(
+                not isinstance(name, str) or not isinstance(path, (Path, str))
+                for name, path in self.model_artifacts.items()
+            ):
+                raise ConfigurationError("model_artifacts keys and paths must be strings or paths")
         if self.language_routing is not None and not isinstance(
             self.language_routing, LanguageRoutingConfig
         ):
@@ -110,6 +130,74 @@ def _manifest_model_name(
     return None
 
 
+_REFERENCE_ARTIFACTS = frozenset(
+    {
+        "reference_wavlm",
+        "reference_encoders",
+        "reference_mapper",
+        "prosody",
+        "curves",
+        "decoder",
+        "source_params",
+        "config",
+    }
+)
+
+
+def _resolve_reference_manifest_paths(
+    config: SynthesisConfig, data: dict[str, Any], manifest_path: Path
+) -> SynthesisConfig:
+    base = manifest_path.parent
+    manifest_assets = [
+        item
+        for key in ("assets", "components")
+        for item in (data.get(key, []) if isinstance(data.get(key, []), list) else [])
+        if isinstance(item, dict)
+    ]
+    artifacts: dict[str, Path] = {}
+    for item in manifest_assets:
+        component = item.get("component")
+        role = item.get("role")
+        key = component if component in _REFERENCE_ARTIFACTS else role
+        if key not in _REFERENCE_ARTIFACTS:
+            continue
+        name = item.get("name", item.get("filename", item.get("local_name", item.get("path"))))
+        if isinstance(name, str) and name:
+            artifacts[str(key)] = base / name
+
+    source_params = data.get("source_params")
+    if "source_params" not in artifacts and isinstance(source_params, dict):
+        name = source_params.get("path", source_params.get("filename"))
+        if isinstance(name, str) and name:
+            artifacts["source_params"] = base / name
+    config_asset = data.get("config")
+    if "config" not in artifacts:
+        name = (
+            config_asset.get("path", config_asset.get("filename"))
+            if isinstance(config_asset, dict)
+            else config_asset
+        )
+        if isinstance(name, str) and name:
+            artifacts["config"] = base / name
+    if "config" not in artifacts and (base / "config.json").is_file():
+        artifacts["config"] = base / "config.json"
+
+    artifacts.update({name: Path(path) for name, path in (config.model_artifacts or {}).items()})
+    if config.model_config_path is not None:
+        artifacts["config"] = Path(config.model_config_path)
+    missing = sorted(_REFERENCE_ARTIFACTS - artifacts.keys())
+    if missing:
+        raise ValueError(
+            f"Reference release manifest {manifest_path} lacks component artifacts: "
+            + ", ".join(missing)
+        )
+    return replace(
+        config,
+        model_artifacts=artifacts,
+        model_config_path=config.model_config_path or artifacts["config"],
+    )
+
+
 def _resolve_manifest_paths(config: SynthesisConfig) -> SynthesisConfig:
     if config.release_manifest_path is None:
         return config
@@ -120,6 +208,11 @@ def _resolve_manifest_paths(config: SynthesisConfig) -> SynthesisConfig:
     assets = [item for item in data.get("assets", []) if isinstance(item, dict)]
     if config.model_quality is None:
         raise ValueError("Manifest model resolution requires an effective model quality")
+    from .model_profiles import get_model_profile
+
+    profile = get_model_profile(config.model_variant or "v1.0", config.model_source or "github")
+    if profile.voice_mode == "reference":
+        return _resolve_reference_manifest_paths(config, data, manifest_path)
     model = _manifest_model_name(assets, quality=config.model_quality, manifest_path=manifest_path)
     voices = next(
         (
@@ -160,7 +253,8 @@ def resolve_synthesis_config(
     config: SynthesisConfig,
     *,
     language: str,
-    voice: str | VoiceBlend | None = None,
+    voice: str | VoiceBlend | ReferenceVoice | None = None,
+    reference_enrollment: bool = False,
 ) -> SynthesisConfig:
     """Resolve one request's explicit language and voice to a concrete Kokoro profile."""
     from .model_profiles import (
@@ -173,8 +267,23 @@ def resolve_synthesis_config(
 
     language = normalize_language_code(language)
     effective_voice = voice if voice is not None else config.voice
+    if (
+        isinstance(effective_voice, ReferenceVoice)
+        and config.voice_level.mode == "calibrated"
+        and config.voice_level.gain_db is None
+    ):
+        raise ConfigurationError(
+            "automatic voice-level calibration is unavailable for reference voices"
+        )
     source = config.model_source
     variant = config.model_variant
+    if isinstance(effective_voice, ReferenceVoice):
+        if variant is not None and variant != effective_voice.model_id:
+            raise InvalidModelError(
+                f"Reference voice belongs to model {effective_voice.model_id!r}, "
+                f"not configured model {variant!r}"
+            )
+        variant = effective_voice.model_id
     if variant is None and isinstance(effective_voice, str):
         voice_model = model_id_for_voice(effective_voice)
         if voice_model is not None:
@@ -216,6 +325,19 @@ def resolve_synthesis_config(
     if profile.runtime_available is False and config.release_manifest_path is None:
         raise InvalidModelError(
             f"Model profile {variant!r} is present but has no runtime-ready distribution"
+        )
+    if isinstance(effective_voice, ReferenceVoice):
+        if profile.voice_mode != "reference" or profile.layout != "cloning-onnx-v1":
+            raise InvalidModelError(
+                "ReferenceVoice requires a model with the cloning-onnx-v1 reference layout"
+            )
+        if language not in profile.language_codes:
+            raise InvalidLanguageError(
+                f"Reference voice model {variant!r} does not support language {language!r}"
+            )
+    elif profile.voice_mode == "reference" and not reference_enrollment:
+        raise InvalidVoiceError(
+            "This model requires a ReferenceVoice. Enroll a reference voice before synthesis."
         )
     quality = config.model_quality or cast(
         ModelQuality, profile.available_qualities[0] if profile.available_qualities else "fp32"

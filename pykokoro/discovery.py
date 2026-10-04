@@ -42,7 +42,7 @@ class ModelCapabilities:
     source: str
     languages: tuple[str, ...]
     voices: tuple[str, ...]
-    default_voice: str
+    default_voice: str | None
     qualities: tuple[str, ...]
     g2p_backend: str | None
     lexicons: tuple[str, ...] | None
@@ -56,6 +56,10 @@ class ModelCapabilities:
     sample_rate: int | None = None
     max_tokens: int | None = None
     voice_details: tuple[VoiceCapabilities, ...] = ()
+
+    voice_mode: str = "static"
+    supports_reference_enrollment: bool = False
+    speed_supported: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,10 +151,18 @@ def _capabilities_for_model(
         status = "experimental"
 
     voices = tuple(canonical_voice_name(model.model_id, voice) for voice in model.voices)
-    default_voice = canonical_voice_name(model.model_id, model.default_voice)
+    default_voice = (
+        canonical_voice_name(model.model_id, model.default_voice)
+        if model.default_voice is not None
+        else None
+    )
     source = _source_for_model(model, distribution)
     qualities = _qualities(distribution)
 
+    voice_mode = model.voice_mode
+    speed_supported = model.runtime.get("speed_supported")
+    if not isinstance(speed_supported, bool):
+        speed_supported = voice_mode != "reference"
     return ModelCapabilities(
         model_id=model.model_id,
         source=source,
@@ -170,6 +182,9 @@ def _capabilities_for_model(
         provider=distribution.provider if distribution is not None else None,
         sample_rate=model.sample_rate,
         max_tokens=model.max_tokens,
+        voice_mode=voice_mode,
+        supports_reference_enrollment=voice_mode == "reference",
+        speed_supported=speed_supported,
     )
 
 

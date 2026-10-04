@@ -7,6 +7,7 @@ parsing, speech planning, and composition between requests remain caller-owned.
 ```python
 from pykokoro import (
     GenerationConfig,
+    ReferenceVoice,
     KokoroSynthesizer,
     SynthesisConfig,
     SynthesisRequest,
@@ -21,6 +22,7 @@ from pykokoro import (
 | Source context and timing | `PronunciationOverride`, `LinguisticToken`, `WordTiming`                                                                                                                                                                                                                                                                                                                            |
 | Configuration             | `SynthesisConfig`, `GenerationConfig`, `LanguageRoutingConfig`, `TokenizerConfig`, `ShortSentenceConfig`, `LongTextSplitMode`                                                                                                                                                                                                                                                       |
 | Voice level               | `VoiceLevelConfig`, `VoiceLevelApplication`, `VoiceBlend`                                                                                                                                                                                                                                                                                                                           |
+| Reference voice           | `ReferenceVoice`, `KokoroSynthesizer.enroll_voice()`                                                                                                                                                                                                                                                                                                                                |
 | Model discovery           | `ModelCapabilities`, `ModelDiscoveryResult`, `VoiceCapabilities`, `discover_models`                                                                                                                                                                                                                                                                                                 |
 | Lexicon discovery         | `LexiconCapabilities`, `LexiconDiscoveryResult`, `discover_lexicons`                                                                                                                                                                                                                                                                                                                |
 | Asset progress            | `AssetProgressEvent`, `AssetProgressCallback`, `ConsoleAssetProgress`                                                                                                                                                                                                                                                                                                               |
@@ -104,6 +106,20 @@ them.
    :members:
    :undoc-members:
 ```
+
+## Reference voice cloning
+
+```{eval-rst}
+.. autoclass:: pykokoro.ReferenceVoice
+   :members:
+   :undoc-members:
+```
+
+`KokoroSynthesizer.enroll_voice()` accepts English reference audio and its exact
+transcript. The resulting state is bound to one cloning model build and can be saved
+with `save()` and reloaded with `ReferenceVoice.load()`. See the
+[reference voice guide](reference_voice.md) for audio limits, fixed-speed behavior,
+privacy, and permissions.
 
 `LongTextSplitMode` is `"none" | "sentence"`. The default `"none"` path raises
 `SynthesisInputTooLongError` for an oversized request. `"sentence"` lazily loads

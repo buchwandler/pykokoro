@@ -14,6 +14,7 @@ from pykokoro import (
     LinguisticToken,
     LongTextSplitMode,
     PronunciationOverride,
+    ReferenceVoice,
     RenderedSegment,
     SynthesisConfig,
     SynthesisIdentity,
@@ -70,6 +71,7 @@ def test_public_api_exports_request_and_result_types() -> None:
         "SynthesisRequest",
         "RenderedSegment",
         "PronunciationOverride",
+        "ReferenceVoice",
         "LinguisticToken",
         "WordTiming",
         "TokenizerConfig",
@@ -96,6 +98,7 @@ def test_public_api_exports_request_and_result_types() -> None:
             VoiceLevelApplication,
             LanguageRoutingConfig,
             PronunciationOverride,
+            ReferenceVoice,
             LinguisticToken,
             VoiceBlend,
         )

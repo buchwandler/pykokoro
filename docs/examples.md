@@ -46,6 +46,22 @@ group without running it.
 | [`asset_progress.py`](../examples/asset_progress.py)<br>`python examples/asset_progress.py`<br>`python examples/asset_progress.py --custom-callback` | Demonstrates `ConsoleAssetProgress` or a typed `AssetProgressEvent` callback during managed model asset installation.                                        | May download model assets on first use; low CPU cost for one short request.                         | `asset_progress.wav` plus progress events                                 |
 | [`error_handling.py`](../examples/error_handling.py)<br>`python examples/error_handling.py`                                                          | Shows narrow catches for invalid language, voice, pronunciation, and oversized input errors.                                                                 | First run may download model assets on the valid path; low CPU cost for one short request.          | Normally `error_handling.wav`; a caught failure prints a message instead. |
 
+## Input-driven example
+
+[`reference_voice.py`](../examples/reference_voice.py) requires a user-supplied
+recording and its exact English transcript, so it is not run by the unattended example
+groups:
+
+```bash
+python examples/reference_voice.py reference.wav \
+  "The exact words spoken in the reference." \
+  "New words spoken with the enrolled voice."
+```
+
+The script enrolls the recording, saves and reloads `ReferenceVoice`, then synthesizes
+the target text. The [reference voice guide](reference_voice.md) documents audio
+constraints, model binding, privacy, and permissions.
+
 ## Language showcase
 
 These scripts are separated from the default runner group because each performs

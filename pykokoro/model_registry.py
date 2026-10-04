@@ -119,7 +119,7 @@ class RuntimeModel:
 
     @property
     def voices(self) -> tuple[str, ...]:
-        return tuple(self.runtime["voices"])
+        return tuple(str(voice) for voice in self.runtime.get("voices", ()))
 
     @property
     def voice_metadata(self) -> Mapping[str, Mapping[str, str]]:
@@ -133,8 +133,13 @@ class RuntimeModel:
         }
 
     @property
-    def default_voice(self) -> str:
-        return str(self.runtime["default_voice"])
+    def default_voice(self) -> str | None:
+        value = self.runtime.get("default_voice")
+        return value if isinstance(value, str) else None
+
+    @property
+    def voice_mode(self) -> str:
+        return str(self.runtime.get("voice_mode", "static"))
 
     @property
     def runtime_available(self) -> bool:
@@ -370,13 +375,34 @@ def _validate_registry(data: Mapping[str, Any]) -> None:
         if not isinstance(model_id, str) or not isinstance(model, dict):
             raise ModelRegistryError("Model registry contains an invalid model entry")
         runtime = model.get("runtime")
-        if not isinstance(runtime, dict) or not isinstance(runtime.get("voices"), list):
+        if not isinstance(runtime, dict):
             raise ModelRegistryError(f"Model {model_id} has invalid runtime metadata")
-        voices = runtime["voices"]
-        if not voices or len(voices) != len(set(voices)):
-            raise ModelRegistryError(f"Model {model_id} has an invalid voice roster")
-        if runtime.get("default_voice") not in voices:
-            raise ModelRegistryError(f"Model {model_id} default voice is not advertised")
+        voice_mode = runtime.get("voice_mode", "static")
+        if voice_mode not in ("static", "reference"):
+            raise ModelRegistryError(f"Model {model_id} has unknown voice mode: {voice_mode!r}")
+        voices = runtime.get("voices")
+        if voice_mode == "static":
+            if not isinstance(voices, list) or not voices:
+                raise ModelRegistryError(f"Model {model_id} has an invalid voice roster")
+            if any(not isinstance(voice, str) or not voice for voice in voices):
+                raise ModelRegistryError(f"Model {model_id} has an invalid voice roster")
+            if len(voices) != len(set(voices)):
+                raise ModelRegistryError(f"Model {model_id} has an invalid voice roster")
+            if runtime.get("default_voice") not in voices:
+                raise ModelRegistryError(f"Model {model_id} default voice is not advertised")
+        else:
+            if voices is not None and not isinstance(voices, list):
+                raise ModelRegistryError(f"Model {model_id} has an invalid voice roster")
+            if voices is not None and (
+                any(not isinstance(voice, str) or not voice for voice in voices)
+                or len(voices) != len(set(voices))
+            ):
+                raise ModelRegistryError(f"Model {model_id} has an invalid voice roster")
+            default_voice = runtime.get("default_voice")
+            if default_voice is not None and (
+                not isinstance(default_voice, str) or default_voice not in (voices or [])
+            ):
+                raise ModelRegistryError(f"Model {model_id} default voice is not advertised")
         distributions = model.get("distributions")
         if not isinstance(distributions, list):
             raise ModelRegistryError(f"Model {model_id} distributions are invalid")
@@ -393,7 +419,9 @@ def _validate_registry(data: Mapping[str, Any]) -> None:
                 raise ModelRegistryError(f"Distribution {distribution.id} has no artifacts")
             if not any(asset.role == "model" for asset in distribution.artifacts):
                 raise ModelRegistryError(f"Distribution {distribution.id} has no model artifact")
-            if not any(asset.role in {"voice", "voices"} for asset in distribution.artifacts):
+            if voice_mode == "static" and not any(
+                asset.role in {"voice", "voices"} for asset in distribution.artifacts
+            ):
                 raise ModelRegistryError(f"Distribution {distribution.id} has no voice artifact")
 
 
