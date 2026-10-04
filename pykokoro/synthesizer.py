@@ -7,7 +7,7 @@ import uuid
 from collections.abc import Iterable, Iterator
 from dataclasses import replace
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 
@@ -21,8 +21,10 @@ from .exceptions import (
     SynthesisStateError,
 )
 from .model_profiles import normalize_language_code, resolve_voice_enroller
-from .prepared_g2p import PreparedG2PAdapter, PreparedSynthesis
-from .reference_audio import PreparedReferenceAudio, prepare_reference_audio
+
+if TYPE_CHECKING:
+    from .prepared_g2p import PreparedG2PAdapter, PreparedSynthesis
+    from .reference_audio import PreparedReferenceAudio
 from .reference_voice import ReferenceVoice
 from .synthesis_config import SynthesisConfig, resolve_synthesis_config
 from .synthesis_types import (
@@ -75,7 +77,11 @@ class KokoroSynthesizer:
         renderer: _RequestRenderer | None = None,
     ) -> None:
         self.config = config or SynthesisConfig()
-        self.g2p = g2p or PreparedG2PAdapter()
+        if g2p is None:
+            from .prepared_g2p import PreparedG2PAdapter
+
+            g2p = PreparedG2PAdapter()
+        self.g2p = g2p
         if renderer is None:
             from .request_renderer import OnnxRequestRenderer
 
@@ -157,6 +163,7 @@ class KokoroSynthesizer:
         if not isinstance(language, str) or not language.strip():
             raise InvalidLanguageError("a supported enrollment language is required")
         normalized_language = normalize_language_code(language)
+        from .reference_audio import prepare_reference_audio
 
         if engine == "inno":
             if reference_text is not None:

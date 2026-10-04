@@ -87,6 +87,9 @@ def test_public_api_exports_request_and_result_types() -> None:
         "TokenizerConfig",
         "ShortSentenceConfig",
         "KokoroSynthesizer",
+        "REQUEST_API_VERSION",
+        "RequestApiContract",
+        "request_api_contract",
         "__version__",
         "__version_tuple__",
     }

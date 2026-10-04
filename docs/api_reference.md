@@ -30,6 +30,7 @@ from pykokoro import (
 | Lexicon discovery         | `LexiconCapabilities`, `LexiconDiscoveryResult`, `discover_lexicons`                                                                                                                                                                                                                                                                                                                |
 | Asset progress            | `AssetProgressEvent`, `AssetProgressCallback`, `ConsoleAssetProgress`                                                                                                                                                                                                                                                                                                               |
 | Synthesis identity        | `SynthesisIdentity`, `build_synthesis_identity`                                                                                                                                                                                                                                                                                                                                     |
+| API contract              | `REQUEST_API_VERSION`, `RequestApiContract`, `request_api_contract`                                                                                                                                                                                                                                                                                                                 |
 | Errors                    | `KokoroError`, `PyKokoroError`, `SynthesisError`, `ConfigurationError`, `InvalidRequestError`, `EmptyTextError`, `InvalidLanguageError`, `InvalidVoiceError`, `InvalidModelError`, `InvalidPronunciationError`, `InvalidLinguisticTokensError`, `UnsupportedFeatureError`, `CapabilityError`, `SynthesisStateError`, `AlignmentError`, `BackendError`, `SynthesisInputTooLongError` |
 | Version                   | `__version__`, `__version_tuple__`                                                                                                                                                                                                                                                                                                                                                  |
 
@@ -37,6 +38,32 @@ from pykokoro import (
 compatibility alias of `KokoroError`. `AssetProgressCallback`, `LongTextSplitMode`,
 `VoiceConditioning`, and `VoiceEnrollmentEngine` are type aliases; they describe
 accepted Python values rather than runtime record classes.
+
+## Request API compatibility contract
+
+`pykokoro.REQUEST_API_VERSION` identifies the request API contract family. Call
+`pykokoro.request_api_contract()` to inspect its stable capability declaration before
+constructing an engine:
+
+```python
+import pykokoro
+
+contract = pykokoro.request_api_contract()
+assert contract.version == pykokoro.REQUEST_API_VERSION == 1
+assert contract.request_type == "SynthesisRequest"
+assert contract.result_type == "RenderedSegment"
+```
+
+The declaration is dependency-light: it does not initialize a G2P frontend, model
+registry, ONNX session, or audio backend. Resolving `pykokoro.KokoroSynthesizer` loads
+the class without constructing its G2P adapter; constructing the synthesizer or
+rendering a request is a separate runtime operation. This versioned declaration gives
+integrations a stable compatibility probe instead of requiring them to infer a contract
+from implementation details.
+
+Each `SynthesisRequest` is one caller-prepared atomic text boundary. Parsing, shaping,
+and splitting documents remain caller-owned; the default strict token-capacity behavior
+raises `SynthesisInputTooLongError` instead of silently changing that boundary.
 
 ## Synthesizer
 

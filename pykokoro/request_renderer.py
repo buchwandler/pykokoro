@@ -6,7 +6,7 @@ import re
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
 
@@ -17,8 +17,10 @@ from .exceptions import (
     SynthesisInputTooLongError,
 )
 from .model_profiles import get_model_profile
-from .prepared_g2p import PreparedSynthesis
-from .reference_audio import PreparedReferenceAudio
+
+if TYPE_CHECKING:
+    from .prepared_g2p import PreparedSynthesis
+    from .reference_audio import PreparedReferenceAudio
 from .reference_voice import ReferenceVoice
 from .synthesis_config import SynthesisConfig, resolve_synthesis_config
 from .synthesis_identity import build_synthesis_identity

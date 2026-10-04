@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from .api_contract import REQUEST_API_VERSION, RequestApiContract, request_api_contract
+
 if TYPE_CHECKING:
     from .asset_progress import (
         AssetProgressCallback,
@@ -173,6 +175,9 @@ __all__ = [
     "TokenizerConfig",
     "ShortSentenceConfig",
     "KokoroSynthesizer",
+    "REQUEST_API_VERSION",
+    "RequestApiContract",
+    "request_api_contract",
     "__version__",
     "__version_tuple__",
 ]

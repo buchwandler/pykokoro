@@ -199,3 +199,18 @@ jobs:
         )
         assert result.phonemes
         PY
+
+  request-api-python314:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.14"
+    - name: Install runtime dependencies and pytest
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install pytest .
+    - name: Verify the public request API on Python 3.14
+      run: python -m pytest -q tests/test_request_api_contract.py tests/test_public_engine_api.py
