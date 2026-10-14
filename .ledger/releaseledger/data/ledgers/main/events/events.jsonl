@@ -396,3 +396,10 @@
 {"data":{"released_at":"2026-10-04"},"event":"release.finalized","event_id":"event-0396","record_revisions":{"release:0.10.3":4},"release_version":"0.10.3","schema_version":2}
 {"data":{"status":"planned"},"event":"release.created","event_id":"event-0397","record_revisions":{"release:0.10.4":1},"release_version":"0.10.4","schema_version":2}
 {"data":{"kind":"added","status":"accepted"},"entry_id":"entry-0001","event":"entry.added","event_id":"event-0398","record_revisions":{"entry:0.10.4/entry-0001":1,"release:0.10.4":2},"release_version":"0.10.4","schema_version":2}
+{"data":{"status":"planned"},"event":"release.created","event_id":"event-0399","record_revisions":{"release:0.10.5":1},"release_version":"0.10.5","schema_version":2}
+{"data":{"fields":["git_base_ref","git_base_sha","git_commit_count","git_head_ref","git_head_sha","git_range"]},"event":"release.updated","event_id":"event-0400","record_revisions":{"release:0.10.5":2},"release_version":"0.10.5","schema_version":2}
+{"data":{"row_count":4},"event":"audit.created","event_id":"event-0401","record_revisions":{"commit_audit_sheet":1},"release_version":"0.10.5","schema_version":2}
+{"data":{"updated_rows":4},"event":"audit.updated","event_id":"event-0402","record_revisions":{"commit_audit_sheet":2},"release_version":"0.10.5","schema_version":2}
+{"data":{"entry_ids":["entry-0001","entry-0002","entry-0003","entry-0004"],"synced_audit_rows":4},"event":"entry.batch_added","event_id":"event-0403","record_revisions":{"commit_audit_sheet":3,"entry:0.10.5/entry-0001":1,"entry:0.10.5/entry-0002":1,"entry:0.10.5/entry-0003":1,"entry:0.10.5/entry-0004":1,"release:0.10.5":3},"release_version":"0.10.5","schema_version":2}
+{"data":{"released_at":"2026-10-04"},"event":"release.finalized","event_id":"event-0404","record_revisions":{"release:0.10.4":3},"release_version":"0.10.4","schema_version":2}
+{"data":{"released_at":"2026-10-14"},"event":"release.finalized","event_id":"event-0405","record_revisions":{"release:0.10.5":4},"release_version":"0.10.5","schema_version":2}

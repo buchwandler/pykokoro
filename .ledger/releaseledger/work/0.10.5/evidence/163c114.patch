@@ -1,0 +1,524 @@
+ docs/api_reference.md                   | 29 ++++++++++---
+ docs/reference_voice.md                 | 19 +++++++++
+ pykokoro/__init__.py                    |  2 +
+ pykokoro/api_contract.py                | 10 +++++
+ pykokoro/synthesis_types.py             | 29 +++++++++++++
+ pykokoro/synthesizer.py                 | 27 +++++++++++--
+ tests/test_reference_frontend_parity.py | 21 +++++++++-
+ tests/test_request_api_contract.py      | 36 +++++++++++++++++
+ tests/test_synthesis_types.py           | 33 +++++++++++++++
+ tests/test_synthesizer_requests.py      | 72 ++++++++++++++++++++++++++++++++-
+ tests/typecheck/public_api.py           |  3 ++
+ 11 files changed, 271 insertions(+), 10 deletions(-)
+
+diff --git a/docs/api_reference.md b/docs/api_reference.md
+index e7e7e55..722520f 100644
+--- a/docs/api_reference.md
++++ b/docs/api_reference.md
+@@ -10,6 +10,7 @@ from pykokoro import (
+     InnoEnrollmentOptions,
+     KokoroVoicePack,
+     ReferenceVoice,
++    RequestMeasure,
+     VoiceEnrollerSpec,
+     KokoroSynthesizer,
+     SynthesisConfig,
+@@ -22,6 +23,7 @@ from pykokoro import (
+ | Area                      | Root exports                                                                                                                                                                                                                                                                                                                                                                        |
+ | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+ | Synthesis                 | `KokoroSynthesizer`, `SynthesisRequest`, `SynthesisSegment`, `RenderedSegment`                                                                                                                                                                                                                                                                                                      |
++| Request measurement       | `RequestMeasure`, `KokoroSynthesizer.measure_request()`                                                                                                                                                                                                                                                                                                                            |
+ | Source context and timing | `PronunciationOverride`, `LinguisticToken`, `WordTiming`                                                                                                                                                                                                                                                                                                                            |
+ | Configuration             | `SynthesisConfig`, `GenerationConfig`, `LanguageRoutingConfig`, `TokenizerConfig`, `ShortSentenceConfig`, `LongTextSplitMode`                                                                                                                                                                                                                                                       |
+ | Voice level               | `VoiceLevelConfig`, `VoiceLevelApplication`, `VoiceBlend`                                                                                                                                                                                                                                                                                                                           |
+@@ -52,6 +54,10 @@ contract = pykokoro.request_api_contract()
+ assert contract.version == pykokoro.REQUEST_API_VERSION == 1
+ assert contract.request_type == "SynthesisRequest"
+ assert contract.result_type == "RenderedSegment"
++assert contract.measurement_method == "measure_request"
++assert contract.voice_enrollment_method == "enroll_voice"
++assert contract.supports_request_measurement and contract.supports_reference_voice
++assert contract.supports_voice_enrollment
+ ```
+
+ The declaration is dependency-light: it does not initialize a G2P frontend, model
+@@ -73,11 +79,13 @@ raises `SynthesisInputTooLongError` instead of silently changing that boundary.
+    :undoc-members:
+ ```
+
+-Use it as a context manager or call `close()` when finished. `synthesize()` renders one
+-request, `synthesize_text()` constructs and renders one prepared string, and
+-`synthesize_segments()` yields independent results in input order. `prepare()` runs the
+-frontend and returns `PreparedSynthesis` (request ID, text, language, voice, phonemes,
+-token IDs, alignment tokens, and diagnostics) without running ONNX inference.
++Use it as a context manager or call `close()` when finished. `synthesize()` renders one request,
++`synthesize_text()` constructs and renders one prepared string, and `synthesize_segments()` yields
++independent results in input order. `measure_request()` runs the request frontend and returns a
++`RequestMeasure` token count without rendering; unlike `prepare()`, it can resolve a reference-only
++target without a `ReferenceVoice`. `prepare()` runs the frontend and returns `PreparedSynthesis`
++(request ID, text, language, voice, phonemes, token IDs, alignment tokens, and diagnostics) without
++running ONNX inference.
+
+ ## Requests, results, and source alignment
+
+@@ -86,6 +94,11 @@ token IDs, alignment tokens, and diagnostics) without running ONNX inference.
+    :members:
+    :undoc-members:
+
++
++.. autoclass:: pykokoro.RequestMeasure
++   :members:
++   :undoc-members:
++
+ .. autoclass:: pykokoro.PronunciationOverride
+    :members:
+    :undoc-members:
+@@ -108,6 +121,12 @@ Request language and voice are explicit. `PronunciationOverride` and `Linguistic
+ offsets are half-open character ranges into the exact `text` carried by that request;
+ `tokens` is the canonical `SynthesisRequest` field.
+
++
++`RequestMeasure.amount` is the exact frontend token count. `maximum` is an optional
++caller-provided limit, and `fits` is true when the amount is within that limit, false when
++it exceeds it, and `None` when no limit was supplied. Measurement does not imply that
++reference audio is valid or enrollment will succeed.
++
+ `RenderedSegment` contains one request's waveform and metadata. `save_wav()` writes mono
+ float32 WAV audio. `play()` uses the optional playback dependency. Results from a batch
+ remain separate: this API does not join independent requests or insert silence between
+diff --git a/docs/reference_voice.md b/docs/reference_voice.md
+index 3b20729..e43dfb7 100644
+--- a/docs/reference_voice.md
++++ b/docs/reference_voice.md
+@@ -5,6 +5,25 @@ PyKokoro exposes two distinct enrollment engines through
+ reference audio only. AkinVox creates a transcript-conditioned `ReferenceVoice` for its
+ cloning model. These outputs have separate formats and synthesis paths.
+
++## Frontend measurement before reference enrollment
++
++A reference-only target can be preflighted before its reference recording is loaded or enrolled:
++
++```text
++discover / validate target and request
++              ↓
++measure_request   # request frontend and model-token count only
++              ↓
++enroll_voice      # execution-time reference conditioning
++              ↓
++synthesize
++```
++
++`KokoroSynthesizer.measure_request(request, maximum=...)` measures the narration request with the same G2P/tokenizer frontend as `prepare()` and returns a `RequestMeasure`. It does not require a `ReferenceVoice` or reference audio, enroll a voice, or run acoustic/reference inference. The optional `maximum` lets the caller report whether the token count fits a known model limit.
++
++Measurement covers the narration request's frontend/model-token size only. It does not download, inspect, or prove that a reference WAV is valid for enrollment; enrollment errors can still occur later. `prepare()` remains synthesis-oriented and continues to require a compatible `ReferenceVoice` for reference-only targets. Resolve and validate reference audio in the application, then call `enroll_voice()` at execution time before synthesizing with the resulting voice.
++
++
+ ## Inno voice tuning
+
+ Inno v0.2 is a zero-shot voice tuner, not a strong identity cloner. It requires
+diff --git a/pykokoro/__init__.py b/pykokoro/__init__.py
+index d74052a..7016a47 100644
+--- a/pykokoro/__init__.py
++++ b/pykokoro/__init__.py
+@@ -55,6 +55,7 @@ from .synthesis_types import (
+     LinguisticToken,
+     PronunciationOverride,
+     RenderedSegment,
++    RequestMeasure,
+     SynthesisRequest,
+     SynthesisSegment,
+     VoiceConditioning,
+@@ -167,6 +168,7 @@ __all__ = [
+     "ReferenceVoice",
+     "SynthesisRequest",
+     "SynthesisSegment",
++    "RequestMeasure",
+     "RenderedSegment",
+     "PronunciationOverride",
+     "LinguisticToken",
+diff --git a/pykokoro/api_contract.py b/pykokoro/api_contract.py
+index 9b46d3f..b395c9e 100644
+--- a/pykokoro/api_contract.py
++++ b/pykokoro/api_contract.py
+@@ -24,6 +24,11 @@ class RequestApiContract:
+     supports_voice_level: bool
+     caller_owns_text_boundaries: bool
+
++    measurement_method: str | None = None
++    voice_enrollment_method: str | None = None
++    supports_request_measurement: bool = False
++    supports_reference_voice: bool = False
++    supports_voice_enrollment: bool = False
+
+ def request_api_contract() -> RequestApiContract:
+     """Return the stable request API capabilities without initializing runtime code."""
+@@ -40,4 +45,9 @@ def request_api_contract() -> RequestApiContract:
+         supports_word_timings=True,
+         supports_voice_level=True,
+         caller_owns_text_boundaries=True,
++        measurement_method="measure_request",
++        voice_enrollment_method="enroll_voice",
++        supports_request_measurement=True,
++        supports_reference_voice=True,
++        supports_voice_enrollment=True,
+     )
+diff --git a/pykokoro/synthesis_types.py b/pykokoro/synthesis_types.py
+index 58f718a..7ed94b7 100644
+--- a/pykokoro/synthesis_types.py
++++ b/pykokoro/synthesis_types.py
+@@ -57,6 +57,35 @@ def _normalize_language(language: str, label: str) -> str:
+     return normalized
+
+
++@dataclass(frozen=True, slots=True)
++class RequestMeasure:
++    """Frontend measurement of one request, expressed in model tokens."""
++
++    amount: int
++    maximum: int | None
++    unit: str = "model_tokens"
++    fits: bool | None = None
++
++    def __post_init__(self) -> None:
++        if isinstance(self.amount, bool) or not isinstance(self.amount, int):
++            raise TypeError("measurement amount must be an integer")
++        if self.amount < 0:
++            raise ValueError("measurement amount must be non-negative")
++        if self.maximum is not None:
++            if isinstance(self.maximum, bool) or not isinstance(self.maximum, int):
++                raise TypeError("measurement maximum must be an integer or None")
++            if self.maximum < 0:
++                raise ValueError("measurement maximum must be non-negative")
++        if not isinstance(self.unit, str) or not self.unit:
++            raise ValueError("measurement unit must be a non-empty string")
++        if self.fits is not None and not isinstance(self.fits, bool):
++            raise TypeError("measurement fits must be a boolean or None")
++        expected_fits = None if self.maximum is None else self.amount <= self.maximum
++        if self.fits is not None and self.fits != expected_fits:
++            raise ValueError("measurement fits must agree with amount and maximum")
++        object.__setattr__(self, "fits", expected_fits)
++
++
+ @dataclass(frozen=True, slots=True)
+ class PronunciationOverride:
+     """Source-aligned, already-resolved pronunciation instructions."""
+diff --git a/pykokoro/synthesizer.py b/pykokoro/synthesizer.py
+index 744eab4..e5f5f2f 100644
+--- a/pykokoro/synthesizer.py
++++ b/pykokoro/synthesizer.py
+@@ -29,6 +29,7 @@ from .reference_voice import ReferenceVoice
+ from .synthesis_config import SynthesisConfig, resolve_synthesis_config
+ from .synthesis_types import (
+     RenderedSegment,
++    RequestMeasure,
+     SynthesisRequest,
+     SynthesisSegment,
+     VoiceConditioning,
+@@ -90,11 +91,32 @@ class KokoroSynthesizer:
+         self._closed = False
+
+     def prepare(self, segment: SynthesisSegment) -> PreparedSynthesis:
+-        """Return model-ready Kokoro frontend data for one prepared request."""
++        """Return model-ready Kokoro frontend data for one synthesis request."""
++        return self._prepare_frontend(segment, allow_unenrolled_reference=False)
++
++    def measure_request(
++        self,
++        segment: SynthesisSegment,
++        *,
++        maximum: int | None = None,
++    ) -> RequestMeasure:
++        """Measure frontend model-token usage without rendering or reference enrollment."""
++        prepared = self._prepare_frontend(segment, allow_unenrolled_reference=True)
++        return RequestMeasure(amount=len(prepared.token_ids), maximum=maximum)
++
++    def _prepare_frontend(
++        self,
++        segment: SynthesisSegment,
++        *,
++        allow_unenrolled_reference: bool,
++    ) -> PreparedSynthesis:
+         self._ensure_open()
+         self._validate_request(segment)
+         config = resolve_synthesis_config(
+-            self.config, language=segment.language, voice=segment.voice
++            self.config,
++            language=segment.language,
++            voice=segment.voice,
++            reference_enrollment=allow_unenrolled_reference,
+         )
+         try:
+             return self.g2p.phonemize(segment, config)
+@@ -102,7 +124,6 @@ class KokoroSynthesizer:
+             raise
+         except Exception as exc:
+             raise BackendError(f"Kokoro frontend failed for request {segment.id!r}") from exc
+-
+     def synthesize(self, segment: SynthesisSegment) -> RenderedSegment:
+         """Render exactly one independent prepared speech request."""
+         self._ensure_open()
+diff --git a/tests/test_reference_frontend_parity.py b/tests/test_reference_frontend_parity.py
+index 5cbd416..17df416 100644
+--- a/tests/test_reference_frontend_parity.py
++++ b/tests/test_reference_frontend_parity.py
+@@ -5,7 +5,8 @@ from kokorog2p import phonemes_to_ids
+
+ from pykokoro.prepared_g2p import PreparedG2PAdapter
+ from pykokoro.synthesis_config import SynthesisConfig
+-from pykokoro.synthesis_types import SynthesisSegment
++from pykokoro.synthesis_types import LinguisticToken, PronunciationOverride, SynthesisSegment
++from pykokoro.synthesizer import KokoroSynthesizer
+
+
+ @pytest.mark.parametrize(
+@@ -26,3 +27,21 @@ def test_reference_transcript_tokens_match_kokoro_text_cleaner(text: str) -> Non
+
+     assert prepared.text == text
+     assert prepared.token_ids == tuple(phonemes_to_ids(prepared.phonemes, model="1.0"))
++
++
++
++def test_request_measure_uses_the_preparation_frontend_for_structured_inputs() -> None:
++
++    request = SynthesisSegment(
++        "structured-measure-parity",
++        "Wait, really?",
++        "en-us",
++        pronunciation_overrides=(PronunciationOverride(0, 4, language="de"),),
++        tokens=(LinguisticToken(0, 4, text="Wait", pos="VERB"),),
++    )
++    synthesizer = KokoroSynthesizer(g2p=PreparedG2PAdapter())
++
++    prepared = synthesizer.prepare(request)
++    measured = synthesizer.measure_request(request)
++
++    assert measured.amount == len(prepared.token_ids)
+diff --git a/tests/test_request_api_contract.py b/tests/test_request_api_contract.py
+index 05a9d0a..78f35e5 100644
+--- a/tests/test_request_api_contract.py
++++ b/tests/test_request_api_contract.py
+@@ -30,11 +30,45 @@ def test_request_api_contract_declares_stable_capabilities() -> None:
+         supports_word_timings=True,
+         supports_voice_level=True,
+         caller_owns_text_boundaries=True,
++        measurement_method="measure_request",
++        voice_enrollment_method="enroll_voice",
++        supports_request_measurement=True,
++        supports_reference_voice=True,
++        supports_voice_enrollment=True,
+     )
+     assert pykokoro.RequestApiContract is RequestApiContract
++    assert pykokoro.RequestMeasure is not None
++    assert contract.measurement_method == "measure_request"
++    assert contract.voice_enrollment_method == "enroll_voice"
++    assert contract.supports_request_measurement is True
++    assert contract.supports_reference_voice is True
++    assert contract.supports_voice_enrollment is True
+     assert pykokoro.request_api_contract is request_api_contract
+
+
++
++def test_request_api_contract_fields_remain_additive_for_positional_callers() -> None:
++    legacy = RequestApiContract(
++        1,
++        "SynthesisRequest",
++        "RenderedSegment",
++        "KokoroSynthesizer",
++        "prepare",
++        "synthesize",
++        True,
++        True,
++        True,
++        True,
++        True,
++        True,
++    )
++
++    assert legacy.measurement_method is None
++    assert legacy.voice_enrollment_method is None
++    assert legacy.supports_request_measurement is False
++    assert legacy.supports_reference_voice is False
++    assert legacy.supports_voice_enrollment is False
++
+ def test_request_api_contract_and_synthesizer_resolution_are_dependency_light() -> None:
+     code = r"""
+ import importlib.abc
+@@ -65,6 +99,7 @@ assert contract.synthesizer_type == "KokoroSynthesizer"
+ synthesizer = pykokoro.KokoroSynthesizer
+ assert callable(synthesizer.prepare)
+ assert callable(synthesizer.synthesize)
++assert callable(synthesizer.measure_request)
+ assert not blocked.intersection(sys.modules)
+ """
+     result = subprocess.run(
+@@ -86,6 +121,7 @@ REQUIRED_READIO_API = (
+     "VoiceLevelConfig",
+     "SynthesisInputTooLongError",
+     "ShortSentenceConfig",
++    "RequestMeasure",
+ )
+
+
+diff --git a/tests/test_synthesis_types.py b/tests/test_synthesis_types.py
+index 50db989..da78e96 100644
+--- a/tests/test_synthesis_types.py
++++ b/tests/test_synthesis_types.py
+@@ -239,3 +239,36 @@ def test_synthesis_config_only_accepts_engine_owned_options():
+         SynthesisConfig(overlap_mode="legacy")  # type: ignore[call-arg]
+     with pytest.raises(ValueError, match="gain_db"):
+         VoiceLevelConfig(gain_db=float("nan"))
++
++
++@pytest.mark.parametrize(
++    ("amount", "maximum", "expected_fits"),
++    [(2, 3, True), (3, 3, True), (4, 3, False), (3, None, None)],
++)
++def test_request_measure_validates_and_derives_fit(
++    amount: int, maximum: int | None, expected_fits: bool | None
++) -> None:
++    from pykokoro import RequestMeasure
++
++    measured = RequestMeasure(amount=amount, maximum=maximum)
++
++    assert measured.amount == amount
++    assert measured.maximum == maximum
++    assert measured.unit == "model_tokens"
++    assert measured.fits is expected_fits
++    assert RequestMeasure.__dataclass_params__.frozen
++    with pytest.raises((AttributeError, TypeError)):
++        measured.__setattr__("amount", 0)
++
++
++def test_request_measure_rejects_invalid_values_and_inconsistent_fit() -> None:
++    from pykokoro import RequestMeasure
++
++    with pytest.raises(ValueError, match="amount must be non-negative"):
++        RequestMeasure(amount=-1, maximum=None)
++    with pytest.raises(ValueError, match="maximum must be non-negative"):
++        RequestMeasure(amount=0, maximum=-1)
++    with pytest.raises(ValueError, match="fits must agree"):
++        RequestMeasure(amount=4, maximum=3, fits=True)
++    with pytest.raises(ValueError, match="fits must agree"):
++        RequestMeasure(amount=0, maximum=None, fits=False)
+diff --git a/tests/test_synthesizer_requests.py b/tests/test_synthesizer_requests.py
+index 31471fd..c515915 100644
+--- a/tests/test_synthesizer_requests.py
++++ b/tests/test_synthesizer_requests.py
+@@ -1,7 +1,7 @@
+ import numpy as np
+ import pytest
+
+-from pykokoro.exceptions import AlignmentError, BackendError, SynthesisStateError
++from pykokoro.exceptions import AlignmentError, BackendError, InvalidVoiceError, SynthesisStateError
+ from pykokoro.generation_config import GenerationConfig
+ from pykokoro.prepared_g2p import PreparedSynthesis
+ from pykokoro.synthesis_config import SynthesisConfig
+@@ -12,9 +12,11 @@ from pykokoro.synthesizer import KokoroSynthesizer
+ class FakeG2P:
+     def __init__(self):
+         self.requests = []
++        self.configs = []
+
+     def phonemize(self, segment, config):
+         self.requests.append(segment)
++        self.configs.append(config)
+         return PreparedSynthesis(
+             request_id=segment.id,
+             text=segment.text,
+@@ -109,3 +111,71 @@ def test_backend_failure_is_wrapped_as_typed_error() -> None:
+         synthesizer.synthesize(SynthesisSegment("line", "Hello", "en-us"))
+
+     assert isinstance(raised.value.__cause__, RuntimeError)
++
++
++class NoInferenceRenderer:
++    def render(self, *args, **kwargs):
++        raise AssertionError("measurement must not render audio")
++
++    def enroll_voice(self, *args, **kwargs):
++        raise AssertionError("measurement must not enroll a reference voice")
++
++    def enroll_inno_voice(self, *args, **kwargs):
++        raise AssertionError("measurement must not enroll an Inno voice")
++
++
++def test_measure_request_matches_prepare_for_static_request() -> None:
++    g2p = FakeG2P()
++    synthesizer = KokoroSynthesizer(g2p=g2p, renderer=NoInferenceRenderer())
++    request = SynthesisSegment("measure", "Hello world", "en-us", voice="af_sarah")
++
++    prepared = synthesizer.prepare(request)
++    measured = synthesizer.measure_request(request, maximum=2)
++
++    assert measured.amount == len(prepared.token_ids) == 2
++    assert measured.fits is True
++    assert g2p.requests == [request, request]
++
++
++def test_measure_request_allows_unenrolled_reference_target_only_for_measurement() -> None:
++    g2p = FakeG2P()
++    synthesizer = KokoroSynthesizer(
++        SynthesisConfig(model_source="github", model_variant="en-akinvox-cloning-v1"),
++        g2p=g2p,
++        renderer=NoInferenceRenderer(),
++    )
++    request = SynthesisSegment("reference-measure", "Hello world", "en-us")
++
++    measured = synthesizer.measure_request(request, maximum=1)
++
++    assert measured.amount == 2
++    assert measured.fits is False
++    assert g2p.configs[-1].model_variant == "en-akinvox-cloning-v1"
++    assert len(g2p.requests) == 1
++    with pytest.raises(InvalidVoiceError, match="requires a ReferenceVoice"):
++        synthesizer.prepare(request)
++    with pytest.raises(InvalidVoiceError, match="requires a ReferenceVoice"):
++        synthesizer.synthesize(request)
++    assert len(g2p.requests) == 1
++
++
++def test_measure_request_passes_structured_frontend_input_through_prepare_path() -> None:
++    from pykokoro.synthesis_types import LinguisticToken, PronunciationOverride
++
++    g2p = FakeG2P()
++    synthesizer = KokoroSynthesizer(g2p=g2p, renderer=NoInferenceRenderer())
++    request = SynthesisSegment(
++        "structured-measure",
++        "Hello world",
++        "en-us",
++        pronunciation_overrides=(PronunciationOverride(0, 5, language="de"),),
++        tokens=(LinguisticToken(0, 5, text="Hello", pos="INTJ"),),
++    )
++
++    prepared = synthesizer.prepare(request)
++    measured = synthesizer.measure_request(request)
++
++    assert measured.amount == len(prepared.token_ids)
++    assert g2p.requests == [request, request]
++    assert g2p.requests[-1].pronunciation_overrides == request.pronunciation_overrides
++    assert g2p.requests[-1].tokens == request.tokens
+diff --git a/tests/typecheck/public_api.py b/tests/typecheck/public_api.py
+index 21624d4..215f7ad 100644
+--- a/tests/typecheck/public_api.py
++++ b/tests/typecheck/public_api.py
+@@ -17,6 +17,7 @@ from pykokoro import (
+     ModelDiscoveryResult,
+     ReferenceVoice,
+     RenderedSegment,
++    RequestMeasure,
+     SynthesisConfig,
+     SynthesisSegment,
+     VoiceCapabilities,
+@@ -47,6 +48,7 @@ inno_enroller = VoiceEnrollerSpec(
+ )
+ engine: VoiceEnrollmentEngine = "inno"
+ enrolled_voice = KokoroSynthesizer().enroll_voice("reference.wav", engine=engine)
++measurement = KokoroSynthesizer().measure_request(request, maximum=10)
+ assert_type(AssetProgressCallback, type[AssetProgressCallback])
+ assert_type(AssetProgressEvent, type[AssetProgressEvent])
+ assert_type(ConsoleAssetProgress, type[ConsoleAssetProgress])
+@@ -76,3 +78,4 @@ assert_type(inno_enroller, VoiceEnrollerSpec)
+ assert_type(enrolled_voice, KokoroVoicePack | ReferenceVoice)
+ assert_type(request, SynthesisSegment)
+ assert_type(config, SynthesisConfig)
++assert_type(measurement, RequestMeasure)

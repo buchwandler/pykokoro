@@ -1,0 +1,73 @@
+{
+  "candidate_count": 4,
+  "candidates": [
+    {
+      "additions": 33,
+      "deletions": 0,
+      "patch_file": "53f3071.patch",
+      "patch_sha256": "ecc68bbb50bf24c349c0faa1796c915018acaf35bd31fa95816177ab105c3c87",
+      "paths": ["tests/test_prepared_g2p_adapter.py"],
+      "sha": "53f3071f0016a909e8e4b341592a5279f6f67f7c",
+      "short_sha": "53f3071",
+      "source_ref": "git:53f3071f0016a909e8e4b341592a5279f6f67f7c"
+    },
+    {
+      "additions": 271,
+      "deletions": 10,
+      "patch_file": "163c114.patch",
+      "patch_sha256": "acc4086f6bb40e3012715be21be4d8ae6ead4870f3fa0815033d867faecb5fd6",
+      "paths": [
+        "docs/api_reference.md",
+        "docs/reference_voice.md",
+        "pykokoro/__init__.py",
+        "pykokoro/api_contract.py",
+        "pykokoro/synthesis_types.py",
+        "pykokoro/synthesizer.py",
+        "tests/test_reference_frontend_parity.py",
+        "tests/test_request_api_contract.py",
+        "tests/test_synthesis_types.py",
+        "tests/test_synthesizer_requests.py",
+        "tests/typecheck/public_api.py"
+      ],
+      "sha": "163c114f253dce5bc7258c193729a65441efb75c",
+      "short_sha": "163c114",
+      "source_ref": "git:163c114f253dce5bc7258c193729a65441efb75c"
+    },
+    {
+      "additions": 30,
+      "deletions": 20,
+      "patch_file": "4e3dd47.patch",
+      "patch_sha256": "a15118d879cac62c2a98425307b01e751b625c0a9fdae6daaf628303538b793f",
+      "paths": [
+        "docs/api_reference.md",
+        "docs/reference_voice.md",
+        "pykokoro/api_contract.py",
+        "pykokoro/synthesizer.py",
+        "tests/test_prepared_g2p_adapter.py",
+        "tests/test_reference_frontend_parity.py",
+        "tests/test_request_api_contract.py"
+      ],
+      "sha": "4e3dd47b9d7a3d09a731a7533f3baee8d2df3fbd",
+      "short_sha": "4e3dd47",
+      "source_ref": "git:4e3dd47b9d7a3d09a731a7533f3baee8d2df3fbd"
+    },
+    {
+      "additions": 3,
+      "deletions": 0,
+      "patch_file": "6ee9d26.patch",
+      "patch_sha256": "2be1437d741ed427df00284fed24a715eba48e95fbacb6dc7f9dca4167c4cb42",
+      "paths": ["tests/test_public_engine_api.py"],
+      "sha": "6ee9d26d8715c530668da02054c42e28f9a9e8f2",
+      "short_sha": "6ee9d26",
+      "source_ref": "git:6ee9d26d8715c530668da02054c42e28f9a9e8f2"
+    }
+  ],
+  "git_base_ref": "62694ac586d0d21b877d2b6ac1b4703606edee16",
+  "git_base_sha": "62694ac586d0d21b877d2b6ac1b4703606edee16",
+  "git_head_ref": "6ee9d26d8715c530668da02054c42e28f9a9e8f2",
+  "git_head_sha": "6ee9d26d8715c530668da02054c42e28f9a9e8f2",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "0.10.5",
+  "schema_version": 1
+}

@@ -1,0 +1,87 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: 0.10.5
+git_base_ref: 62694ac586d0d21b877d2b6ac1b4703606edee16
+git_base_sha: 62694ac586d0d21b877d2b6ac1b4703606edee16
+git_head_ref: 6ee9d26d8715c530668da02054c42e28f9a9e8f2
+git_head_sha: 6ee9d26d8715c530668da02054c42e28f9a9e8f2
+include_merges: nontrivial
+entries:
+  - kind: internal
+    internal: true
+    summary:
+      Added regression coverage confirming prepared adapters preserve tagged live
+      annotation metadata
+    status: accepted
+    source_refs:
+      - git:53f3071f0016a909e8e4b341592a5279f6f67f7c
+    paths:
+      - tests/test_prepared_g2p_adapter.py
+    sources:
+      - git:53f3071f0016a909e8e4b341592a5279f6f67f7c
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary:
+      Added request measurement for frontend token usage without rendering or reference
+      enrollment
+    status: accepted
+    source_refs:
+      - git:163c114f253dce5bc7258c193729a65441efb75c
+    paths:
+      - docs/api_reference.md
+      - docs/reference_voice.md
+      - pykokoro/__init__.py
+      - pykokoro/api_contract.py
+      - pykokoro/synthesis_types.py
+      - pykokoro/synthesizer.py
+      - tests/test_reference_frontend_parity.py
+      - tests/test_request_api_contract.py
+      - tests/test_synthesis_types.py
+      - tests/test_synthesizer_requests.py
+      - tests/typecheck/public_api.py
+    sources:
+      - git:163c114f253dce5bc7258c193729a65441efb75c
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: internal
+    internal: true
+    summary:
+      Added formatting-only cleanup across release documentation and regression tests
+    status: accepted
+    source_refs:
+      - git:4e3dd47b9d7a3d09a731a7533f3baee8d2df3fbd
+    paths:
+      - docs/api_reference.md
+      - docs/reference_voice.md
+      - pykokoro/api_contract.py
+      - pykokoro/synthesizer.py
+      - tests/test_prepared_g2p_adapter.py
+      - tests/test_reference_frontend_parity.py
+      - tests/test_request_api_contract.py
+    sources:
+      - git:4e3dd47b9d7a3d09a731a7533f3baee8d2df3fbd
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: internal
+    internal: true
+    summary: Added public API export regression coverage for RequestMeasure
+    status: accepted
+    source_refs:
+      - git:6ee9d26d8715c530668da02054c42e28f9a9e8f2
+    paths:
+      - tests/test_public_engine_api.py
+    sources:
+      - git:6ee9d26d8715c530668da02054c42e28f9a9e8f2
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

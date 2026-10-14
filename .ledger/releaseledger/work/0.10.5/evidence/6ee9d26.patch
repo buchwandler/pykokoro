@@ -1,0 +1,31 @@
+ tests/test_public_engine_api.py | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/tests/test_public_engine_api.py b/tests/test_public_engine_api.py
+index dba9bb3..e34dce8 100644
+--- a/tests/test_public_engine_api.py
++++ b/tests/test_public_engine_api.py
+@@ -18,6 +18,7 @@ from pykokoro import (
+     PronunciationOverride,
+     ReferenceVoice,
+     RenderedSegment,
++    RequestMeasure,
+     SynthesisConfig,
+     SynthesisIdentity,
+     SynthesisInputTooLongError,
+@@ -80,6 +81,7 @@ def test_public_api_exports_request_and_result_types() -> None:
+         "VoiceConditioning",
+         "SynthesisRequest",
+         "RenderedSegment",
++        "RequestMeasure",
+         "PronunciationOverride",
+         "ReferenceVoice",
+         "LinguisticToken",
+@@ -101,6 +103,7 @@ def test_public_api_exports_request_and_result_types() -> None:
+             SynthesisSegment,
+             SynthesisRequest,
+             RenderedSegment,
++            RequestMeasure,
+             SynthesisConfig,
+             SynthesisIdentity,
+             build_synthesis_identity,

@@ -1,0 +1,172 @@
+ docs/api_reference.md                   | 24 ++++++++++++------------
+ docs/reference_voice.md                 | 19 ++++++++++++++-----
+ pykokoro/api_contract.py                |  1 +
+ pykokoro/synthesizer.py                 |  1 +
+ tests/test_prepared_g2p_adapter.py      |  2 +-
+ tests/test_reference_frontend_parity.py |  1 -
+ tests/test_request_api_contract.py      |  2 +-
+ 7 files changed, 30 insertions(+), 20 deletions(-)
+
+diff --git a/docs/api_reference.md b/docs/api_reference.md
+index 722520f..20d5dcb 100644
+--- a/docs/api_reference.md
++++ b/docs/api_reference.md
+@@ -23,7 +23,7 @@ from pykokoro import (
+ | Area                      | Root exports                                                                                                                                                                                                                                                                                                                                                                        |
+ | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+ | Synthesis                 | `KokoroSynthesizer`, `SynthesisRequest`, `SynthesisSegment`, `RenderedSegment`                                                                                                                                                                                                                                                                                                      |
+-| Request measurement       | `RequestMeasure`, `KokoroSynthesizer.measure_request()`                                                                                                                                                                                                                                                                                                                            |
++| Request measurement       | `RequestMeasure`, `KokoroSynthesizer.measure_request()`                                                                                                                                                                                                                                                                                                                             |
+ | Source context and timing | `PronunciationOverride`, `LinguisticToken`, `WordTiming`                                                                                                                                                                                                                                                                                                                            |
+ | Configuration             | `SynthesisConfig`, `GenerationConfig`, `LanguageRoutingConfig`, `TokenizerConfig`, `ShortSentenceConfig`, `LongTextSplitMode`                                                                                                                                                                                                                                                       |
+ | Voice level               | `VoiceLevelConfig`, `VoiceLevelApplication`, `VoiceBlend`                                                                                                                                                                                                                                                                                                                           |
+@@ -79,13 +79,14 @@ raises `SynthesisInputTooLongError` instead of silently changing that boundary.
+    :undoc-members:
+ ```
+
+-Use it as a context manager or call `close()` when finished. `synthesize()` renders one request,
+-`synthesize_text()` constructs and renders one prepared string, and `synthesize_segments()` yields
+-independent results in input order. `measure_request()` runs the request frontend and returns a
+-`RequestMeasure` token count without rendering; unlike `prepare()`, it can resolve a reference-only
+-target without a `ReferenceVoice`. `prepare()` runs the frontend and returns `PreparedSynthesis`
+-(request ID, text, language, voice, phonemes, token IDs, alignment tokens, and diagnostics) without
+-running ONNX inference.
++Use it as a context manager or call `close()` when finished. `synthesize()` renders one
++request, `synthesize_text()` constructs and renders one prepared string, and
++`synthesize_segments()` yields independent results in input order. `measure_request()`
++runs the request frontend and returns a `RequestMeasure` token count without rendering;
++unlike `prepare()`, it can resolve a reference-only target without a `ReferenceVoice`.
++`prepare()` runs the frontend and returns `PreparedSynthesis` (request ID, text,
++language, voice, phonemes, token IDs, alignment tokens, and diagnostics) without running
++ONNX inference.
+
+ ## Requests, results, and source alignment
+
+@@ -121,11 +122,10 @@ Request language and voice are explicit. `PronunciationOverride` and `Linguistic
+ offsets are half-open character ranges into the exact `text` carried by that request;
+ `tokens` is the canonical `SynthesisRequest` field.
+
+-
+ `RequestMeasure.amount` is the exact frontend token count. `maximum` is an optional
+-caller-provided limit, and `fits` is true when the amount is within that limit, false when
+-it exceeds it, and `None` when no limit was supplied. Measurement does not imply that
+-reference audio is valid or enrollment will succeed.
++caller-provided limit, and `fits` is true when the amount is within that limit, false
++when it exceeds it, and `None` when no limit was supplied. Measurement does not imply
++that reference audio is valid or enrollment will succeed.
+
+ `RenderedSegment` contains one request's waveform and metadata. `save_wav()` writes mono
+ float32 WAV audio. `play()` uses the optional playback dependency. Results from a batch
+diff --git a/docs/reference_voice.md b/docs/reference_voice.md
+index e43dfb7..b6e9706 100644
+--- a/docs/reference_voice.md
++++ b/docs/reference_voice.md
+@@ -7,7 +7,8 @@ cloning model. These outputs have separate formats and synthesis paths.
+
+ ## Frontend measurement before reference enrollment
+
+-A reference-only target can be preflighted before its reference recording is loaded or enrolled:
++A reference-only target can be preflighted before its reference recording is loaded or
++enrolled:
+
+ ```text
+ discover / validate target and request
+@@ -19,10 +20,18 @@ enroll_voice      # execution-time reference conditioning
+ synthesize
+ ```
+
+-`KokoroSynthesizer.measure_request(request, maximum=...)` measures the narration request with the same G2P/tokenizer frontend as `prepare()` and returns a `RequestMeasure`. It does not require a `ReferenceVoice` or reference audio, enroll a voice, or run acoustic/reference inference. The optional `maximum` lets the caller report whether the token count fits a known model limit.
+-
+-Measurement covers the narration request's frontend/model-token size only. It does not download, inspect, or prove that a reference WAV is valid for enrollment; enrollment errors can still occur later. `prepare()` remains synthesis-oriented and continues to require a compatible `ReferenceVoice` for reference-only targets. Resolve and validate reference audio in the application, then call `enroll_voice()` at execution time before synthesizing with the resulting voice.
+-
++`KokoroSynthesizer.measure_request(request, maximum=...)` measures the narration request
++with the same G2P/tokenizer frontend as `prepare()` and returns a `RequestMeasure`. It
++does not require a `ReferenceVoice` or reference audio, enroll a voice, or run
++acoustic/reference inference. The optional `maximum` lets the caller report whether the
++token count fits a known model limit.
++
++Measurement covers the narration request's frontend/model-token size only. It does not
++download, inspect, or prove that a reference WAV is valid for enrollment; enrollment
++errors can still occur later. `prepare()` remains synthesis-oriented and continues to
++require a compatible `ReferenceVoice` for reference-only targets. Resolve and validate
++reference audio in the application, then call `enroll_voice()` at execution time before
++synthesizing with the resulting voice.
+
+ ## Inno voice tuning
+
+diff --git a/pykokoro/api_contract.py b/pykokoro/api_contract.py
+index b395c9e..873a459 100644
+--- a/pykokoro/api_contract.py
++++ b/pykokoro/api_contract.py
+@@ -30,6 +30,7 @@ class RequestApiContract:
+     supports_reference_voice: bool = False
+     supports_voice_enrollment: bool = False
+
++
+ def request_api_contract() -> RequestApiContract:
+     """Return the stable request API capabilities without initializing runtime code."""
+     return RequestApiContract(
+diff --git a/pykokoro/synthesizer.py b/pykokoro/synthesizer.py
+index e5f5f2f..e5f6073 100644
+--- a/pykokoro/synthesizer.py
++++ b/pykokoro/synthesizer.py
+@@ -124,6 +124,7 @@ class KokoroSynthesizer:
+             raise
+         except Exception as exc:
+             raise BackendError(f"Kokoro frontend failed for request {segment.id!r}") from exc
++
+     def synthesize(self, segment: SynthesisSegment) -> RenderedSegment:
+         """Render exactly one independent prepared speech request."""
+         self._ensure_open()
+diff --git a/tests/test_prepared_g2p_adapter.py b/tests/test_prepared_g2p_adapter.py
+index 28197ec..d6ce2c0 100644
+--- a/tests/test_prepared_g2p_adapter.py
++++ b/tests/test_prepared_g2p_adapter.py
+@@ -93,6 +93,7 @@ def test_prepared_adapter_forwards_request_text_overrides_annotations_and_routin
+     assert result.alignment_tokens[1].char_start == 6
+     assert result.alignment_tokens[1].char_end == 11
+
++
+ def test_prepared_adapter_preserves_tagged_live_annotation():
+     module = FakeKokoroG2P()
+     adapter = PreparedG2PAdapter(module)
+@@ -126,7 +127,6 @@ def test_prepared_adapter_preserves_tagged_live_annotation():
+     )
+
+
+-
+ def test_prepared_adapter_reuses_g2p_instance_for_repeated_request():
+     module = FakeKokoroG2P()
+     adapter = PreparedG2PAdapter(module)
+diff --git a/tests/test_reference_frontend_parity.py b/tests/test_reference_frontend_parity.py
+index 17df416..783d60d 100644
+--- a/tests/test_reference_frontend_parity.py
++++ b/tests/test_reference_frontend_parity.py
+@@ -29,7 +29,6 @@ def test_reference_transcript_tokens_match_kokoro_text_cleaner(text: str) -> Non
+     assert prepared.token_ids == tuple(phonemes_to_ids(prepared.phonemes, model="1.0"))
+
+
+-
+ def test_request_measure_uses_the_preparation_frontend_for_structured_inputs() -> None:
+
+     request = SynthesisSegment(
+diff --git a/tests/test_request_api_contract.py b/tests/test_request_api_contract.py
+index 78f35e5..08d0242 100644
+--- a/tests/test_request_api_contract.py
++++ b/tests/test_request_api_contract.py
+@@ -46,7 +46,6 @@ def test_request_api_contract_declares_stable_capabilities() -> None:
+     assert pykokoro.request_api_contract is request_api_contract
+
+
+-
+ def test_request_api_contract_fields_remain_additive_for_positional_callers() -> None:
+     legacy = RequestApiContract(
+         1,
+@@ -69,6 +68,7 @@ def test_request_api_contract_fields_remain_additive_for_positional_callers() ->
+     assert legacy.supports_reference_voice is False
+     assert legacy.supports_voice_enrollment is False
+
++
+ def test_request_api_contract_and_synthesizer_resolution_are_dependency_light() -> None:
+     code = r"""
+ import importlib.abc

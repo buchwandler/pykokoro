@@ -1,0 +1,93 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 1
+release_version: 0.10.5
+git_base_ref: v0.10.4
+git_base_sha: 62694ac586d0d21b877d2b6ac1b4703606edee16
+git_head_ref: HEAD
+git_head_sha: 6ee9d26d8715c530668da02054c42e28f9a9e8f2
+git_range: 62694ac586d0d21b877d2b6ac1b4703606edee16..6ee9d26d8715c530668da02054c42e28f9a9e8f2
+commit_count: 4
+rows:
+  - sha: 53f3071f0016a909e8e4b341592a5279f6f67f7c
+    source_ref: git:53f3071f0016a909e8e4b341592a5279f6f67f7c
+    short_sha: 53f3071
+    changed_paths:
+      - tests/test_prepared_g2p_adapter.py
+    stats:
+      files_changed: 1
+      insertions: 33
+      deletions: 0
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "fix: add pytest"
+  - sha: 163c114f253dce5bc7258c193729a65441efb75c
+    source_ref: git:163c114f253dce5bc7258c193729a65441efb75c
+    short_sha: 163c114
+    changed_paths:
+      - docs/api_reference.md
+      - docs/reference_voice.md
+      - pykokoro/__init__.py
+      - pykokoro/api_contract.py
+      - pykokoro/synthesis_types.py
+      - pykokoro/synthesizer.py
+      - tests/test_reference_frontend_parity.py
+      - tests/test_request_api_contract.py
+      - tests/test_synthesis_types.py
+      - tests/test_synthesizer_requests.py
+      - tests/typecheck/public_api.py
+    stats:
+      files_changed: 11
+      insertions: 271
+      deletions: 10
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: add measure API"
+  - sha: 4e3dd47b9d7a3d09a731a7533f3baee8d2df3fbd
+    source_ref: git:4e3dd47b9d7a3d09a731a7533f3baee8d2df3fbd
+    short_sha: 4e3dd47
+    changed_paths:
+      - docs/api_reference.md
+      - docs/reference_voice.md
+      - pykokoro/api_contract.py
+      - pykokoro/synthesizer.py
+      - tests/test_prepared_g2p_adapter.py
+      - tests/test_reference_frontend_parity.py
+      - tests/test_request_api_contract.py
+    stats:
+      files_changed: 7
+      insertions: 30
+      deletions: 20
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "chore: pre-commit"
+  - sha: 6ee9d26d8715c530668da02054c42e28f9a9e8f2
+    source_ref: git:6ee9d26d8715c530668da02054c42e28f9a9e8f2
+    short_sha: 6ee9d26
+    changed_paths:
+      - tests/test_public_engine_api.py
+    stats:
+      files_changed: 1
+      insertions: 3
+      deletions: 0
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "fix: pyptest"

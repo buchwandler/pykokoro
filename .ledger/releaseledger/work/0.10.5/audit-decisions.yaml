@@ -1,0 +1,69 @@
+rows:
+  - sha: 53f3071f0016a909e8e4b341592a5279f6f67f7c
+    inspected: true
+    inspected_paths:
+      - tests/test_prepared_g2p_adapter.py
+    observed_behavior:
+      Added regression coverage confirming prepared adapters preserve POS, tag, lemma,
+      and morphology metadata for tagged live annotations.
+    public_impact: none
+    decision: internal
+    target_entry_key: null
+    target_entry_id: null
+    notes: Test-only coverage; no shipped behavior change.
+    stale: false
+  - sha: 163c114f253dce5bc7258c193729a65441efb75c
+    inspected: true
+    inspected_paths:
+      - docs/api_reference.md
+      - docs/reference_voice.md
+      - pykokoro/__init__.py
+      - pykokoro/api_contract.py
+      - pykokoro/synthesis_types.py
+      - pykokoro/synthesizer.py
+      - tests/test_reference_frontend_parity.py
+      - tests/test_request_api_contract.py
+      - tests/test_synthesis_types.py
+      - tests/test_synthesizer_requests.py
+      - tests/typecheck/public_api.py
+    observed_behavior:
+      Introduced RequestMeasure and KokoroSynthesizer.measure_request(), exposing
+      frontend token counts and fit checks without rendering or requiring reference
+      enrollment; updated the API contract and documentation.
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: Reviewed implementation, tests, public exports, and documentation.
+    stale: false
+  - sha: 4e3dd47b9d7a3d09a731a7533f3baee8d2df3fbd
+    inspected: true
+    inspected_paths:
+      - docs/api_reference.md
+      - docs/reference_voice.md
+      - pykokoro/api_contract.py
+      - pykokoro/synthesizer.py
+      - tests/test_prepared_g2p_adapter.py
+      - tests/test_reference_frontend_parity.py
+      - tests/test_request_api_contract.py
+    observed_behavior:
+      Applied formatting-only cleanup to documentation, runtime spacing, and test files;
+      no behavior change.
+    public_impact: none
+    decision: internal
+    target_entry_key: null
+    target_entry_id: null
+    notes: Formatting-only commit.
+    stale: false
+  - sha: 6ee9d26d8715c530668da02054c42e28f9a9e8f2
+    inspected: true
+    inspected_paths:
+      - tests/test_public_engine_api.py
+    observed_behavior:
+      Extended public API export regression coverage to include RequestMeasure.
+    public_impact: none
+    decision: internal
+    target_entry_key: null
+    target_entry_id: null
+    notes: Test-only coverage; no shipped behavior change.
+    stale: false
