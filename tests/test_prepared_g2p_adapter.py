@@ -93,6 +93,39 @@ def test_prepared_adapter_forwards_request_text_overrides_annotations_and_routin
     assert result.alignment_tokens[1].char_start == 6
     assert result.alignment_tokens[1].char_end == 11
 
+def test_prepared_adapter_preserves_tagged_live_annotation():
+    module = FakeKokoroG2P()
+    adapter = PreparedG2PAdapter(module)
+    request = SynthesisSegment(
+        id="live-verb",
+        text="I live here.",
+        language="en-us",
+        tokens=(
+            LinguisticToken(
+                2,
+                6,
+                text="live",
+                pos="VERB",
+                tag="VBP",
+                lemma="live",
+                morph="Tense=Pres|VerbForm=Fin",
+            ),
+        ),
+    )
+
+    adapter.phonemize(request, _config())
+
+    annotation = module.calls[0][1]["annotations"][0]
+    assert isinstance(annotation, TokenAnnotation)
+    assert (annotation.start, annotation.end, annotation.text) == (2, 6, "live")
+    assert (annotation.pos, annotation.tag, annotation.lemma, annotation.morph) == (
+        "VERB",
+        "VBP",
+        "live",
+        "Tense=Pres|VerbForm=Fin",
+    )
+
+
 
 def test_prepared_adapter_reuses_g2p_instance_for_repeated_request():
     module = FakeKokoroG2P()
