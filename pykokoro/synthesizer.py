@@ -29,6 +29,7 @@ from .reference_voice import ReferenceVoice
 from .synthesis_config import SynthesisConfig, resolve_synthesis_config
 from .synthesis_types import (
     RenderedSegment,
+    RequestMeasure,
     SynthesisRequest,
     SynthesisSegment,
     VoiceConditioning,
@@ -90,11 +91,32 @@ class KokoroSynthesizer:
         self._closed = False
 
     def prepare(self, segment: SynthesisSegment) -> PreparedSynthesis:
-        """Return model-ready Kokoro frontend data for one prepared request."""
+        """Return model-ready Kokoro frontend data for one synthesis request."""
+        return self._prepare_frontend(segment, allow_unenrolled_reference=False)
+
+    def measure_request(
+        self,
+        segment: SynthesisSegment,
+        *,
+        maximum: int | None = None,
+    ) -> RequestMeasure:
+        """Measure frontend model-token usage without rendering or reference enrollment."""
+        prepared = self._prepare_frontend(segment, allow_unenrolled_reference=True)
+        return RequestMeasure(amount=len(prepared.token_ids), maximum=maximum)
+
+    def _prepare_frontend(
+        self,
+        segment: SynthesisSegment,
+        *,
+        allow_unenrolled_reference: bool,
+    ) -> PreparedSynthesis:
         self._ensure_open()
         self._validate_request(segment)
         config = resolve_synthesis_config(
-            self.config, language=segment.language, voice=segment.voice
+            self.config,
+            language=segment.language,
+            voice=segment.voice,
+            reference_enrollment=allow_unenrolled_reference,
         )
         try:
             return self.g2p.phonemize(segment, config)
@@ -102,7 +124,6 @@ class KokoroSynthesizer:
             raise
         except Exception as exc:
             raise BackendError(f"Kokoro frontend failed for request {segment.id!r}") from exc
-
     def synthesize(self, segment: SynthesisSegment) -> RenderedSegment:
         """Render exactly one independent prepared speech request."""
         self._ensure_open()

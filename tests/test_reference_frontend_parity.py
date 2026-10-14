@@ -5,7 +5,8 @@ from kokorog2p import phonemes_to_ids
 
 from pykokoro.prepared_g2p import PreparedG2PAdapter
 from pykokoro.synthesis_config import SynthesisConfig
-from pykokoro.synthesis_types import SynthesisSegment
+from pykokoro.synthesis_types import LinguisticToken, PronunciationOverride, SynthesisSegment
+from pykokoro.synthesizer import KokoroSynthesizer
 
 
 @pytest.mark.parametrize(
@@ -26,3 +27,21 @@ def test_reference_transcript_tokens_match_kokoro_text_cleaner(text: str) -> Non
 
     assert prepared.text == text
     assert prepared.token_ids == tuple(phonemes_to_ids(prepared.phonemes, model="1.0"))
+
+
+
+def test_request_measure_uses_the_preparation_frontend_for_structured_inputs() -> None:
+
+    request = SynthesisSegment(
+        "structured-measure-parity",
+        "Wait, really?",
+        "en-us",
+        pronunciation_overrides=(PronunciationOverride(0, 4, language="de"),),
+        tokens=(LinguisticToken(0, 4, text="Wait", pos="VERB"),),
+    )
+    synthesizer = KokoroSynthesizer(g2p=PreparedG2PAdapter())
+
+    prepared = synthesizer.prepare(request)
+    measured = synthesizer.measure_request(request)
+
+    assert measured.amount == len(prepared.token_ids)

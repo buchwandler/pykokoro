@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from pykokoro.exceptions import AlignmentError, BackendError, SynthesisStateError
+from pykokoro.exceptions import AlignmentError, BackendError, InvalidVoiceError, SynthesisStateError
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.prepared_g2p import PreparedSynthesis
 from pykokoro.synthesis_config import SynthesisConfig
@@ -12,9 +12,11 @@ from pykokoro.synthesizer import KokoroSynthesizer
 class FakeG2P:
     def __init__(self):
         self.requests = []
+        self.configs = []
 
     def phonemize(self, segment, config):
         self.requests.append(segment)
+        self.configs.append(config)
         return PreparedSynthesis(
             request_id=segment.id,
             text=segment.text,
@@ -109,3 +111,71 @@ def test_backend_failure_is_wrapped_as_typed_error() -> None:
         synthesizer.synthesize(SynthesisSegment("line", "Hello", "en-us"))
 
     assert isinstance(raised.value.__cause__, RuntimeError)
+
+
+class NoInferenceRenderer:
+    def render(self, *args, **kwargs):
+        raise AssertionError("measurement must not render audio")
+
+    def enroll_voice(self, *args, **kwargs):
+        raise AssertionError("measurement must not enroll a reference voice")
+
+    def enroll_inno_voice(self, *args, **kwargs):
+        raise AssertionError("measurement must not enroll an Inno voice")
+
+
+def test_measure_request_matches_prepare_for_static_request() -> None:
+    g2p = FakeG2P()
+    synthesizer = KokoroSynthesizer(g2p=g2p, renderer=NoInferenceRenderer())
+    request = SynthesisSegment("measure", "Hello world", "en-us", voice="af_sarah")
+
+    prepared = synthesizer.prepare(request)
+    measured = synthesizer.measure_request(request, maximum=2)
+
+    assert measured.amount == len(prepared.token_ids) == 2
+    assert measured.fits is True
+    assert g2p.requests == [request, request]
+
+
+def test_measure_request_allows_unenrolled_reference_target_only_for_measurement() -> None:
+    g2p = FakeG2P()
+    synthesizer = KokoroSynthesizer(
+        SynthesisConfig(model_source="github", model_variant="en-akinvox-cloning-v1"),
+        g2p=g2p,
+        renderer=NoInferenceRenderer(),
+    )
+    request = SynthesisSegment("reference-measure", "Hello world", "en-us")
+
+    measured = synthesizer.measure_request(request, maximum=1)
+
+    assert measured.amount == 2
+    assert measured.fits is False
+    assert g2p.configs[-1].model_variant == "en-akinvox-cloning-v1"
+    assert len(g2p.requests) == 1
+    with pytest.raises(InvalidVoiceError, match="requires a ReferenceVoice"):
+        synthesizer.prepare(request)
+    with pytest.raises(InvalidVoiceError, match="requires a ReferenceVoice"):
+        synthesizer.synthesize(request)
+    assert len(g2p.requests) == 1
+
+
+def test_measure_request_passes_structured_frontend_input_through_prepare_path() -> None:
+    from pykokoro.synthesis_types import LinguisticToken, PronunciationOverride
+
+    g2p = FakeG2P()
+    synthesizer = KokoroSynthesizer(g2p=g2p, renderer=NoInferenceRenderer())
+    request = SynthesisSegment(
+        "structured-measure",
+        "Hello world",
+        "en-us",
+        pronunciation_overrides=(PronunciationOverride(0, 5, language="de"),),
+        tokens=(LinguisticToken(0, 5, text="Hello", pos="INTJ"),),
+    )
+
+    prepared = synthesizer.prepare(request)
+    measured = synthesizer.measure_request(request)
+
+    assert measured.amount == len(prepared.token_ids)
+    assert g2p.requests == [request, request]
+    assert g2p.requests[-1].pronunciation_overrides == request.pronunciation_overrides
+    assert g2p.requests[-1].tokens == request.tokens

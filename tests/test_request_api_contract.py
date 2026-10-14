@@ -30,10 +30,44 @@ def test_request_api_contract_declares_stable_capabilities() -> None:
         supports_word_timings=True,
         supports_voice_level=True,
         caller_owns_text_boundaries=True,
+        measurement_method="measure_request",
+        voice_enrollment_method="enroll_voice",
+        supports_request_measurement=True,
+        supports_reference_voice=True,
+        supports_voice_enrollment=True,
     )
     assert pykokoro.RequestApiContract is RequestApiContract
+    assert pykokoro.RequestMeasure is not None
+    assert contract.measurement_method == "measure_request"
+    assert contract.voice_enrollment_method == "enroll_voice"
+    assert contract.supports_request_measurement is True
+    assert contract.supports_reference_voice is True
+    assert contract.supports_voice_enrollment is True
     assert pykokoro.request_api_contract is request_api_contract
 
+
+
+def test_request_api_contract_fields_remain_additive_for_positional_callers() -> None:
+    legacy = RequestApiContract(
+        1,
+        "SynthesisRequest",
+        "RenderedSegment",
+        "KokoroSynthesizer",
+        "prepare",
+        "synthesize",
+        True,
+        True,
+        True,
+        True,
+        True,
+        True,
+    )
+
+    assert legacy.measurement_method is None
+    assert legacy.voice_enrollment_method is None
+    assert legacy.supports_request_measurement is False
+    assert legacy.supports_reference_voice is False
+    assert legacy.supports_voice_enrollment is False
 
 def test_request_api_contract_and_synthesizer_resolution_are_dependency_light() -> None:
     code = r"""
@@ -65,6 +99,7 @@ assert contract.synthesizer_type == "KokoroSynthesizer"
 synthesizer = pykokoro.KokoroSynthesizer
 assert callable(synthesizer.prepare)
 assert callable(synthesizer.synthesize)
+assert callable(synthesizer.measure_request)
 assert not blocked.intersection(sys.modules)
 """
     result = subprocess.run(
@@ -86,6 +121,7 @@ REQUIRED_READIO_API = (
     "VoiceLevelConfig",
     "SynthesisInputTooLongError",
     "ShortSentenceConfig",
+    "RequestMeasure",
 )
 
 

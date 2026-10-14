@@ -17,6 +17,7 @@ from pykokoro import (
     ModelDiscoveryResult,
     ReferenceVoice,
     RenderedSegment,
+    RequestMeasure,
     SynthesisConfig,
     SynthesisSegment,
     VoiceCapabilities,
@@ -47,6 +48,7 @@ inno_enroller = VoiceEnrollerSpec(
 )
 engine: VoiceEnrollmentEngine = "inno"
 enrolled_voice = KokoroSynthesizer().enroll_voice("reference.wav", engine=engine)
+measurement = KokoroSynthesizer().measure_request(request, maximum=10)
 assert_type(AssetProgressCallback, type[AssetProgressCallback])
 assert_type(AssetProgressEvent, type[AssetProgressEvent])
 assert_type(ConsoleAssetProgress, type[ConsoleAssetProgress])
@@ -76,3 +78,4 @@ assert_type(inno_enroller, VoiceEnrollerSpec)
 assert_type(enrolled_voice, KokoroVoicePack | ReferenceVoice)
 assert_type(request, SynthesisSegment)
 assert_type(config, SynthesisConfig)
+assert_type(measurement, RequestMeasure)

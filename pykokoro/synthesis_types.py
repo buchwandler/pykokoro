@@ -58,6 +58,35 @@ def _normalize_language(language: str, label: str) -> str:
 
 
 @dataclass(frozen=True, slots=True)
+class RequestMeasure:
+    """Frontend measurement of one request, expressed in model tokens."""
+
+    amount: int
+    maximum: int | None
+    unit: str = "model_tokens"
+    fits: bool | None = None
+
+    def __post_init__(self) -> None:
+        if isinstance(self.amount, bool) or not isinstance(self.amount, int):
+            raise TypeError("measurement amount must be an integer")
+        if self.amount < 0:
+            raise ValueError("measurement amount must be non-negative")
+        if self.maximum is not None:
+            if isinstance(self.maximum, bool) or not isinstance(self.maximum, int):
+                raise TypeError("measurement maximum must be an integer or None")
+            if self.maximum < 0:
+                raise ValueError("measurement maximum must be non-negative")
+        if not isinstance(self.unit, str) or not self.unit:
+            raise ValueError("measurement unit must be a non-empty string")
+        if self.fits is not None and not isinstance(self.fits, bool):
+            raise TypeError("measurement fits must be a boolean or None")
+        expected_fits = None if self.maximum is None else self.amount <= self.maximum
+        if self.fits is not None and self.fits != expected_fits:
+            raise ValueError("measurement fits must agree with amount and maximum")
+        object.__setattr__(self, "fits", expected_fits)
+
+
+@dataclass(frozen=True, slots=True)
 class PronunciationOverride:
     """Source-aligned, already-resolved pronunciation instructions."""
 

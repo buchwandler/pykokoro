@@ -24,6 +24,11 @@ class RequestApiContract:
     supports_voice_level: bool
     caller_owns_text_boundaries: bool
 
+    measurement_method: str | None = None
+    voice_enrollment_method: str | None = None
+    supports_request_measurement: bool = False
+    supports_reference_voice: bool = False
+    supports_voice_enrollment: bool = False
 
 def request_api_contract() -> RequestApiContract:
     """Return the stable request API capabilities without initializing runtime code."""
@@ -40,4 +45,9 @@ def request_api_contract() -> RequestApiContract:
         supports_word_timings=True,
         supports_voice_level=True,
         caller_owns_text_boundaries=True,
+        measurement_method="measure_request",
+        voice_enrollment_method="enroll_voice",
+        supports_request_measurement=True,
+        supports_reference_voice=True,
+        supports_voice_enrollment=True,
     )

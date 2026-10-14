@@ -5,6 +5,25 @@ PyKokoro exposes two distinct enrollment engines through
 reference audio only. AkinVox creates a transcript-conditioned `ReferenceVoice` for its
 cloning model. These outputs have separate formats and synthesis paths.
 
+## Frontend measurement before reference enrollment
+
+A reference-only target can be preflighted before its reference recording is loaded or enrolled:
+
+```text
+discover / validate target and request
+              ↓
+measure_request   # request frontend and model-token count only
+              ↓
+enroll_voice      # execution-time reference conditioning
+              ↓
+synthesize
+```
+
+`KokoroSynthesizer.measure_request(request, maximum=...)` measures the narration request with the same G2P/tokenizer frontend as `prepare()` and returns a `RequestMeasure`. It does not require a `ReferenceVoice` or reference audio, enroll a voice, or run acoustic/reference inference. The optional `maximum` lets the caller report whether the token count fits a known model limit.
+
+Measurement covers the narration request's frontend/model-token size only. It does not download, inspect, or prove that a reference WAV is valid for enrollment; enrollment errors can still occur later. `prepare()` remains synthesis-oriented and continues to require a compatible `ReferenceVoice` for reference-only targets. Resolve and validate reference audio in the application, then call `enroll_voice()` at execution time before synthesizing with the resulting voice.
+
+
 ## Inno voice tuning
 
 Inno v0.2 is a zero-shot voice tuner, not a strong identity cloner. It requires

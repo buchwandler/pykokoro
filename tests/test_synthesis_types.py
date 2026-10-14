@@ -239,3 +239,36 @@ def test_synthesis_config_only_accepts_engine_owned_options():
         SynthesisConfig(overlap_mode="legacy")  # type: ignore[call-arg]
     with pytest.raises(ValueError, match="gain_db"):
         VoiceLevelConfig(gain_db=float("nan"))
+
+
+@pytest.mark.parametrize(
+    ("amount", "maximum", "expected_fits"),
+    [(2, 3, True), (3, 3, True), (4, 3, False), (3, None, None)],
+)
+def test_request_measure_validates_and_derives_fit(
+    amount: int, maximum: int | None, expected_fits: bool | None
+) -> None:
+    from pykokoro import RequestMeasure
+
+    measured = RequestMeasure(amount=amount, maximum=maximum)
+
+    assert measured.amount == amount
+    assert measured.maximum == maximum
+    assert measured.unit == "model_tokens"
+    assert measured.fits is expected_fits
+    assert RequestMeasure.__dataclass_params__.frozen
+    with pytest.raises((AttributeError, TypeError)):
+        measured.__setattr__("amount", 0)
+
+
+def test_request_measure_rejects_invalid_values_and_inconsistent_fit() -> None:
+    from pykokoro import RequestMeasure
+
+    with pytest.raises(ValueError, match="amount must be non-negative"):
+        RequestMeasure(amount=-1, maximum=None)
+    with pytest.raises(ValueError, match="maximum must be non-negative"):
+        RequestMeasure(amount=0, maximum=-1)
+    with pytest.raises(ValueError, match="fits must agree"):
+        RequestMeasure(amount=4, maximum=3, fits=True)
+    with pytest.raises(ValueError, match="fits must agree"):
+        RequestMeasure(amount=0, maximum=None, fits=False)
