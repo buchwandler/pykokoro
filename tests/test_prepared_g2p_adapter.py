@@ -93,6 +93,7 @@ def test_prepared_adapter_forwards_request_text_overrides_annotations_and_routin
     assert result.alignment_tokens[1].char_start == 6
     assert result.alignment_tokens[1].char_end == 11
 
+
 def test_prepared_adapter_preserves_tagged_live_annotation():
     module = FakeKokoroG2P()
     adapter = PreparedG2PAdapter(module)
@@ -124,7 +125,6 @@ def test_prepared_adapter_preserves_tagged_live_annotation():
         "live",
         "Tense=Pres|VerbForm=Fin",
     )
-
 
 
 def test_prepared_adapter_reuses_g2p_instance_for_repeated_request():

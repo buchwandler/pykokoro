@@ -30,6 +30,7 @@ class RequestApiContract:
     supports_reference_voice: bool = False
     supports_voice_enrollment: bool = False
 
+
 def request_api_contract() -> RequestApiContract:
     """Return the stable request API capabilities without initializing runtime code."""
     return RequestApiContract(

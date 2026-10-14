@@ -124,6 +124,7 @@ class KokoroSynthesizer:
             raise
         except Exception as exc:
             raise BackendError(f"Kokoro frontend failed for request {segment.id!r}") from exc
+
     def synthesize(self, segment: SynthesisSegment) -> RenderedSegment:
         """Render exactly one independent prepared speech request."""
         self._ensure_open()

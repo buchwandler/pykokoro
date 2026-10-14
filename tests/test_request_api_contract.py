@@ -46,7 +46,6 @@ def test_request_api_contract_declares_stable_capabilities() -> None:
     assert pykokoro.request_api_contract is request_api_contract
 
 
-
 def test_request_api_contract_fields_remain_additive_for_positional_callers() -> None:
     legacy = RequestApiContract(
         1,
@@ -68,6 +67,7 @@ def test_request_api_contract_fields_remain_additive_for_positional_callers() ->
     assert legacy.supports_request_measurement is False
     assert legacy.supports_reference_voice is False
     assert legacy.supports_voice_enrollment is False
+
 
 def test_request_api_contract_and_synthesizer_resolution_are_dependency_light() -> None:
     code = r"""

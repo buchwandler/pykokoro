@@ -23,7 +23,7 @@ from pykokoro import (
 | Area                      | Root exports                                                                                                                                                                                                                                                                                                                                                                        |
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Synthesis                 | `KokoroSynthesizer`, `SynthesisRequest`, `SynthesisSegment`, `RenderedSegment`                                                                                                                                                                                                                                                                                                      |
-| Request measurement       | `RequestMeasure`, `KokoroSynthesizer.measure_request()`                                                                                                                                                                                                                                                                                                                            |
+| Request measurement       | `RequestMeasure`, `KokoroSynthesizer.measure_request()`                                                                                                                                                                                                                                                                                                                             |
 | Source context and timing | `PronunciationOverride`, `LinguisticToken`, `WordTiming`                                                                                                                                                                                                                                                                                                                            |
 | Configuration             | `SynthesisConfig`, `GenerationConfig`, `LanguageRoutingConfig`, `TokenizerConfig`, `ShortSentenceConfig`, `LongTextSplitMode`                                                                                                                                                                                                                                                       |
 | Voice level               | `VoiceLevelConfig`, `VoiceLevelApplication`, `VoiceBlend`                                                                                                                                                                                                                                                                                                                           |
@@ -79,13 +79,14 @@ raises `SynthesisInputTooLongError` instead of silently changing that boundary.
    :undoc-members:
 ```
 
-Use it as a context manager or call `close()` when finished. `synthesize()` renders one request,
-`synthesize_text()` constructs and renders one prepared string, and `synthesize_segments()` yields
-independent results in input order. `measure_request()` runs the request frontend and returns a
-`RequestMeasure` token count without rendering; unlike `prepare()`, it can resolve a reference-only
-target without a `ReferenceVoice`. `prepare()` runs the frontend and returns `PreparedSynthesis`
-(request ID, text, language, voice, phonemes, token IDs, alignment tokens, and diagnostics) without
-running ONNX inference.
+Use it as a context manager or call `close()` when finished. `synthesize()` renders one
+request, `synthesize_text()` constructs and renders one prepared string, and
+`synthesize_segments()` yields independent results in input order. `measure_request()`
+runs the request frontend and returns a `RequestMeasure` token count without rendering;
+unlike `prepare()`, it can resolve a reference-only target without a `ReferenceVoice`.
+`prepare()` runs the frontend and returns `PreparedSynthesis` (request ID, text,
+language, voice, phonemes, token IDs, alignment tokens, and diagnostics) without running
+ONNX inference.
 
 ## Requests, results, and source alignment
 
@@ -121,11 +122,10 @@ Request language and voice are explicit. `PronunciationOverride` and `Linguistic
 offsets are half-open character ranges into the exact `text` carried by that request;
 `tokens` is the canonical `SynthesisRequest` field.
 
-
 `RequestMeasure.amount` is the exact frontend token count. `maximum` is an optional
-caller-provided limit, and `fits` is true when the amount is within that limit, false when
-it exceeds it, and `None` when no limit was supplied. Measurement does not imply that
-reference audio is valid or enrollment will succeed.
+caller-provided limit, and `fits` is true when the amount is within that limit, false
+when it exceeds it, and `None` when no limit was supplied. Measurement does not imply
+that reference audio is valid or enrollment will succeed.
 
 `RenderedSegment` contains one request's waveform and metadata. `save_wav()` writes mono
 float32 WAV audio. `play()` uses the optional playback dependency. Results from a batch

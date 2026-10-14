@@ -29,7 +29,6 @@ def test_reference_transcript_tokens_match_kokoro_text_cleaner(text: str) -> Non
     assert prepared.token_ids == tuple(phonemes_to_ids(prepared.phonemes, model="1.0"))
 
 
-
 def test_request_measure_uses_the_preparation_frontend_for_structured_inputs() -> None:
 
     request = SynthesisSegment(
