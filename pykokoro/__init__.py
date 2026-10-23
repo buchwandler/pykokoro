@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from .api_contract import REQUEST_API_VERSION, RequestApiContract, request_api_contract
+from .error_diagnostics import ERROR_DIAGNOSTICS_VERSION, error_diagnostic
 
 if TYPE_CHECKING:
     from .asset_progress import (
@@ -177,6 +178,8 @@ __all__ = [
     "TokenizerConfig",
     "ShortSentenceConfig",
     "KokoroSynthesizer",
+    "ERROR_DIAGNOSTICS_VERSION",
+    "error_diagnostic",
     "REQUEST_API_VERSION",
     "RequestApiContract",
     "request_api_contract",

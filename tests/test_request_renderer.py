@@ -6,7 +6,8 @@ import numpy as np
 import pytest
 
 from pykokoro import SynthesisInputTooLongError
-from pykokoro.exceptions import ConfigurationError, InvalidVoiceError
+from pykokoro.error_diagnostics import error_diagnostic
+from pykokoro.exceptions import BackendError, ConfigurationError, InvalidVoiceError
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.prepared_g2p import PreparedSynthesis
 from pykokoro.request_renderer import OnnxRequestRenderer
@@ -159,6 +160,48 @@ def test_renderer_keeps_one_request_independent_and_rebases_timings() -> None:
 
     renderer.close()
     assert backend.closed
+
+
+def test_reference_inference_failure_keeps_inference_stage() -> None:
+    from pykokoro.reference_voice import ReferenceVoice
+
+    reference = ReferenceVoice(
+        style=np.zeros((1, 256), dtype=np.float32),
+        memory=np.ones((1, 2, 192), dtype=np.float32),
+        memory_mask=np.ones((1, 2), dtype=np.bool_),
+        model_id="en-akinvox-cloning-v1",
+        model_fingerprint="model-fingerprint",
+    )
+
+    class BrokenReferenceBackend(FakeBackend):
+        def generate_reference_audio_segments(self, *args: object, **kwargs: object) -> object:
+            raise RuntimeError("reference provider execution failed")
+
+    request = SynthesisSegment("reference-inference", "Hello", "en-us", voice=reference)
+    prepared = PreparedSynthesis(
+        request_id=request.id,
+        text=request.text,
+        language=request.language,
+        voice=None,
+        phonemes="hello",
+        token_ids=(1, 2, 3),
+    )
+    backend = BrokenReferenceBackend()
+    renderer = OnnxRequestRenderer(FakeG2PAdapter(), backend_factory=lambda _: backend)
+    config = SynthesisConfig(
+        model_variant="en-akinvox-cloning-v1",
+        voice=reference,
+        generation=GenerationConfig(lang="en-us"),
+    )
+
+    with pytest.raises(BackendError, match="reference provider execution failed") as caught:
+        renderer.render(prepared, request, config)
+
+    assert caught.value.stage == "inference"
+    assert caught.value.native_error_type == "RuntimeError"
+    assert caught.value.native_error_message == "reference provider execution failed"
+    diagnostic = error_diagnostic(caught.value)
+    assert diagnostic["cause"]["message"] == "reference provider execution failed"  # type: ignore[index]
 
 
 def test_renderer_rejects_oversized_request_before_model_inference() -> None:

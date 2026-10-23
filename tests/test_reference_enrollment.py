@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -8,7 +9,8 @@ import numpy as np
 import pytest
 import soundfile as sf
 
-from pykokoro.exceptions import EmptyTextError, InvalidLanguageError
+from pykokoro.error_diagnostics import error_diagnostic
+from pykokoro.exceptions import BackendError, EmptyTextError, InvalidLanguageError
 from pykokoro.prepared_g2p import PreparedSynthesis
 from pykokoro.reference_audio import PreparedReferenceAudio, prepare_reference_audio
 from pykokoro.reference_voice import ReferenceVoice
@@ -124,6 +126,34 @@ def test_enroll_voice_rejects_empty_transcript_and_non_english() -> None:
         synthesizer.enroll_voice(
             tone(), "Hello.", engine="akinvox", sample_rate=24_000, language="de"
         )
+
+
+def test_akinvox_enrollment_failure_serializes_only_safe_reference_identifiers() -> None:
+    transcript = "private reference transcript"
+
+    class BrokenRenderer(FakeRenderer):
+        def enroll_voice(self, *args: Any, **kwargs: Any) -> ReferenceVoice:
+            raise RuntimeError("reference embedding failed")
+
+    synthesizer = KokoroSynthesizer(g2p=FakeG2P(), renderer=BrokenRenderer())
+
+    with pytest.raises(BackendError, match="RuntimeError: reference embedding failed") as caught:
+        synthesizer.enroll_voice(tone(), transcript, engine="akinvox", sample_rate=24_000)
+
+    error = caught.value
+    assert error.stage == "reference_enrollment"
+    assert error.native_error_type == "RuntimeError"
+    assert error.native_error_message == "reference embedding failed"
+    diagnostic = error_diagnostic(error)
+    serialized = json.dumps(diagnostic)
+    details = diagnostic["details"]
+    assert details["engine"] == "akinvox"  # type: ignore[index]
+    assert details["language"] == "en"  # type: ignore[index]
+    assert details["reference_text_sha256"] == hashlib.sha256(transcript.encode()).hexdigest()  # type: ignore[index]
+    assert len(details["reference_audio_sha256"]) == 64  # type: ignore[index]
+    assert transcript not in serialized
+    assert "audio_24k" not in serialized
+    assert "audio_16k" not in serialized
 
 
 def test_onnx_request_renderer_bridges_prepared_reference_to_backend() -> None:

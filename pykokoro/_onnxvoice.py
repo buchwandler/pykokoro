@@ -11,6 +11,7 @@ from typing import Any, Literal
 
 import numpy as np
 
+from ._error_utils import native_error_fields, with_native_summary
 from .asset_progress import AssetProgressEvent, AssetProgressPhase
 from .exceptions import BackendError, ConfigurationError, KokoroError
 
@@ -318,24 +319,67 @@ def adapt_progress(
     return emit
 
 
+def _operation_stage(operation: str) -> str | None:
+    return {
+        "infer": "inference",
+        "open": "model_open",
+        "prepare_reference": "reference_enrollment",
+        "enroll": "voice_enrollment",
+        "install": "model_install",
+        "resolve": "model_install",
+    }.get(operation)
+
+
+def _operation_summary(operation: str) -> str:
+    return {
+        "infer": "Kokoro model inference failed",
+        "open": "Could not open Kokoro runtime",
+        "prepare_reference": "Kokoro reference enrollment failed",
+        "enroll": "Kokoro voice enrollment failed",
+        "install": "Could not install Kokoro model",
+        "resolve": "Could not resolve Kokoro model",
+    }.get(operation, f"Kokoro {operation} failed")
+
+
 def _map_error(exc: Exception, *, operation: str) -> KokoroError:
     name = type(exc).__name__
+    stage = _operation_stage(operation)
+    details = {"operation": operation}
+    native_fields = native_error_fields(exc)
+    summary = _operation_summary(operation)
+
     if name in {
         "OptionalDependencyError",
         "ImportError",
         "RuntimeContractError",
         "CapabilityError",
     }:
-        return ConfigurationError(str(exc))
+        return ConfigurationError(
+            with_native_summary(summary, exc),
+            stage=stage,
+            details=details,
+            **native_fields,
+        )
     if name in {"AssetNotFoundError", "NotInstalledError", "CatalogError"}:
-        return ConfigurationError(str(exc))
+        return ConfigurationError(
+            with_native_summary(summary, exc),
+            stage="model_install",
+            details=details,
+            **native_fields,
+        )
     if name in {"IntegrityError", "ManifestError", "UnsafePathError", "LockError"}:
-        return BackendError(f"Kokoro model asset integrity failure: {exc}")
-    if operation == "infer":
-        return BackendError("Kokoro model inference failed")
-    if operation == "open":
-        return BackendError(f"Could not open Kokoro runtime: {exc}")
-    return BackendError(str(exc))
+        return BackendError(
+            with_native_summary("Kokoro model asset integrity failure", exc),
+            stage="model_install",
+            details=details,
+            **native_fields,
+        )
+    return BackendError(
+        with_native_summary(summary, exc),
+        stage=stage,
+        details=details,
+        **native_fields,
+    )
 
 
 def _call(operation: str, function: Callable[[], Any]) -> Any:

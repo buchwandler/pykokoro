@@ -1,5 +1,25 @@
+from __future__ import annotations
+
+from collections.abc import Mapping
+
+
 class PyKokoroError(Exception):
-    """Base exception for PyKokoro."""
+    """Base exception for PyKokoro with optional safe diagnostic metadata."""
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        stage: str | None = None,
+        details: Mapping[str, object] | None = None,
+        native_error_type: str | None = None,
+        native_error_message: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.stage = stage
+        self.details = dict(details) if details is not None else {}
+        self.native_error_type = native_error_type
+        self.native_error_message = native_error_message
 
 
 KokoroError = PyKokoroError

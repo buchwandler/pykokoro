@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 
+from pykokoro.error_diagnostics import error_diagnostic
 from pykokoro.exceptions import AlignmentError, BackendError, InvalidVoiceError, SynthesisStateError
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.prepared_g2p import PreparedSynthesis
@@ -111,6 +112,30 @@ def test_backend_failure_is_wrapped_as_typed_error() -> None:
         synthesizer.synthesize(SynthesisSegment("line", "Hello", "en-us"))
 
     assert isinstance(raised.value.__cause__, RuntimeError)
+    assert raised.value.stage == "synthesis"
+    assert raised.value.native_error_type == "RuntimeError"
+    assert raised.value.native_error_message == "inference failed"
+    assert "RuntimeError: inference failed" in str(raised.value)
+    diagnostic = error_diagnostic(raised.value)
+    assert diagnostic["cause"]["message"] == "inference failed"  # type: ignore[index]
+
+
+def test_frontend_failure_is_structured_without_request_text() -> None:
+    class BrokenG2P:
+        def phonemize(self, segment, config):
+            raise RuntimeError("phonemizer unavailable")
+
+    synthesizer = KokoroSynthesizer(g2p=BrokenG2P(), renderer=FakeRenderer())
+
+    with pytest.raises(BackendError, match="RuntimeError: phonemizer unavailable") as raised:
+        synthesizer.prepare(SynthesisSegment("request-1", "secret request text", "en-us"))
+
+    assert raised.value.stage == "frontend"
+    assert raised.value.native_error_type == "RuntimeError"
+    assert raised.value.native_error_message == "phonemizer unavailable"
+    diagnostic = error_diagnostic(raised.value)
+    assert diagnostic["details"]["request_id"] == "request-1"  # type: ignore[index]
+    assert "secret request text" not in str(diagnostic)
 
 
 class NoInferenceRenderer:

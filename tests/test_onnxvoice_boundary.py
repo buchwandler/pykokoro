@@ -9,6 +9,7 @@ import pytest
 
 import pykokoro._onnxvoice as boundary
 from pykokoro.asset_progress import AssetProgressEvent
+from pykokoro.error_diagnostics import error_diagnostic
 from pykokoro.exceptions import BackendError, ConfigurationError
 from pykokoro.reference_voice import ReferenceVoice
 
@@ -222,6 +223,92 @@ def test_open_errors_are_mapped_and_chained(monkeypatch: pytest.MonkeyPatch) -> 
         boundary.open_installed_kokoro(resolved)
 
     assert isinstance(caught.value.__cause__, RuntimeError)
+
+    assert caught.value.stage == "model_open"
+    assert caught.value.native_error_type == "RuntimeError"
+    assert caught.value.native_error_message == "provider unavailable"
+
+
+def test_inference_errors_preserve_native_reason_and_stage() -> None:
+    native_error = RuntimeError("provider execution failed")
+
+    class Runtime:
+        def infer(self, *args: object, **kwargs: object) -> object:
+            raise native_error
+
+    adapter = boundary.KokoroRuntimeAdapter.__new__(boundary.KokoroRuntimeAdapter)
+    adapter._runtime = Runtime()
+    adapter._closed = False
+
+    with pytest.raises(BackendError, match="RuntimeError: provider execution failed") as caught:
+        adapter.infer([1, 2], speed=1.0)
+
+    error = caught.value
+    assert error.stage == "inference"
+    assert error.native_error_type == "RuntimeError"
+    assert error.native_error_message == "provider execution failed"
+    assert error.__cause__ is native_error
+    diagnostic = error_diagnostic(error)
+    assert diagnostic["cause"]["message"] == "provider execution failed"  # type: ignore[index]
+
+
+def test_reference_preparation_error_has_reference_enrollment_stage() -> None:
+    native_error = RuntimeError("reference preparation failed")
+
+    class Runtime:
+        def prepare_reference(self, *args: object, **kwargs: object) -> object:
+            raise native_error
+
+    adapter = boundary.KokoroRuntimeAdapter.__new__(boundary.KokoroRuntimeAdapter)
+    adapter._runtime = Runtime()
+    adapter._closed = False
+
+    with pytest.raises(BackendError, match="reference preparation failed") as caught:
+        adapter.prepare_reference(
+            [1, 2],
+            audio_24k=np.zeros(4, dtype=np.float32),
+            audio_16k=np.zeros(3, dtype=np.float32),
+        )
+
+    assert caught.value.stage == "reference_enrollment"
+    assert caught.value.__cause__ is native_error
+    diagnostic = error_diagnostic(caught.value)
+    assert diagnostic["cause"]["message"] == "reference preparation failed"  # type: ignore[index]
+
+
+def test_voice_enrollment_error_has_voice_enrollment_stage() -> None:
+    native_error = RuntimeError("voice enrollment failed")
+
+    class Runtime:
+        def enroll_voice(self, *args: object, **kwargs: object) -> object:
+            raise native_error
+
+    adapter = boundary.KokoroRuntimeAdapter.__new__(boundary.KokoroRuntimeAdapter)
+    adapter._runtime = Runtime()
+    adapter._closed = False
+
+    with pytest.raises(BackendError, match="voice enrollment failed") as caught:
+        adapter.enroll_voice(
+            np.zeros(4, dtype=np.float32),
+            sample_rate=24_000,
+            enroller="inno-v0.2",
+            options={},
+        )
+
+    assert caught.value.stage == "voice_enrollment"
+    assert caught.value.__cause__ is native_error
+
+
+def test_asset_integrity_error_has_model_install_stage() -> None:
+    class IntegrityError(RuntimeError):
+        pass
+
+    mapped = boundary._map_error(IntegrityError("asset hash mismatch"), operation="install")
+
+    assert isinstance(mapped, BackendError)
+    assert mapped.stage == "model_install"
+    assert mapped.native_error_type == "IntegrityError"
+    assert mapped.native_error_message == "asset hash mismatch"
 
 
 def test_progress_and_diagnostics_are_trace_safe() -> None:

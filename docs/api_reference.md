@@ -34,6 +34,7 @@ from pykokoro import (
 | Synthesis identity        | `SynthesisIdentity`, `build_synthesis_identity`                                                                                                                                                                                                                                                                                                                                     |
 | API contract              | `REQUEST_API_VERSION`, `RequestApiContract`, `request_api_contract`                                                                                                                                                                                                                                                                                                                 |
 | Errors                    | `KokoroError`, `PyKokoroError`, `SynthesisError`, `ConfigurationError`, `InvalidRequestError`, `EmptyTextError`, `InvalidLanguageError`, `InvalidVoiceError`, `InvalidModelError`, `InvalidPronunciationError`, `InvalidLinguisticTokensError`, `UnsupportedFeatureError`, `CapabilityError`, `SynthesisStateError`, `AlignmentError`, `BackendError`, `SynthesisInputTooLongError` |
+| Error diagnostics         | `ERROR_DIAGNOSTICS_VERSION`, `error_diagnostic()`                                                                                                                                                                                                                                                                                                                                   |
 | Version                   | `__version__`, `__version_tuple__`                                                                                                                                                                                                                                                                                                                                                  |
 
 `SynthesisSegment` is an alias of `SynthesisRequest`, and `PyKokoroError` is a
@@ -347,6 +348,26 @@ key. Building identity metadata does not run inference.
    :members:
    :undoc-members:
 ```
+
+## Structured error diagnostics
+
+`ERROR_DIAGNOSTICS_VERSION` versions this additive error-reporting API independently of
+`REQUEST_API_VERSION`. `error_diagnostic(error, max_depth=8)` returns a bounded,
+JSON-compatible mapping with exception type, module, message, optional semantic stage
+and details, native error fields for `PyKokoroError`, and a cause-first `cause` or
+fallback `context` chain. It detects cycles and marks a chain `truncated` when the depth
+limit is reached. It does not serialize tracebacks or local variables.
+
+PyKokoro uses the stable stages `frontend`, `model_install`, `model_open`,
+`reference_enrollment`, `voice_enrollment`, `inference`, `postprocess`, `synthesis`, and
+`close`. Engine-generated details use request/model identifiers, operation names, and
+reference fingerprints rather than raw request text, transcripts, audio arrays,
+phonemes, or token arrays. Native exception messages are retained and may themselves
+contain a local path.
+
+.. autodata:: pykokoro.ERROR_DIAGNOSTICS_VERSION
+
+.. autofunction:: pykokoro.error_diagnostic
 
 Catch the narrow exception that an application can act on; avoid treating every failure
 as a recoverable input error. `PyKokoroError` is the retained alias for `KokoroError`.

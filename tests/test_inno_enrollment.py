@@ -8,7 +8,13 @@ import pytest
 
 import pykokoro._onnxvoice as onnxvoice_boundary
 import pykokoro.synthesizer as synthesizer_module
-from pykokoro.exceptions import ConfigurationError, InvalidRequestError, InvalidVoiceError
+from pykokoro.error_diagnostics import error_diagnostic
+from pykokoro.exceptions import (
+    BackendError,
+    ConfigurationError,
+    InvalidRequestError,
+    InvalidVoiceError,
+)
 from pykokoro.model_registry import VoiceEnrollerSpec
 from pykokoro.synthesis_config import SynthesisConfig
 from pykokoro.synthesizer import KokoroSynthesizer
@@ -145,6 +151,31 @@ def test_inno_enrollment_reports_reference_duration_errors(monkeypatch: pytest.M
 
     with pytest.raises(InvalidVoiceError, match="between 3 and 30 seconds"):
         synthesizer.enroll_voice(tone(duration=2.9), sample_rate=24_000)
+
+
+def test_inno_enrollment_failure_has_safe_voice_enrollment_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    patch_resolver(monkeypatch)
+
+    class BrokenRenderer(FakeRenderer):
+        def enroll_inno_voice(self, *args: Any, **kwargs: Any) -> KokoroVoicePack:
+            raise RuntimeError("Inno provider unavailable")
+
+    synthesizer = KokoroSynthesizer(g2p=NoCallG2P(), renderer=BrokenRenderer())
+
+    with pytest.raises(BackendError, match="RuntimeError: Inno provider unavailable") as caught:
+        synthesizer.enroll_voice(tone(), sample_rate=24_000, language="en")
+
+    error = caught.value
+    assert error.stage == "voice_enrollment"
+    assert error.native_error_type == "RuntimeError"
+    assert error.native_error_message == "Inno provider unavailable"
+    diagnostic = error_diagnostic(error)
+    assert diagnostic["details"]["engine"] == "inno"  # type: ignore[index]
+    assert diagnostic["details"]["language"] == "en"  # type: ignore[index]
+    assert len(diagnostic["details"]["reference_audio_sha256"]) == 64  # type: ignore[index]
+    assert "audio" not in diagnostic["details"]  # type: ignore[operator]
 
 
 def test_runtime_adapter_forwards_inno_enrollment_and_wraps_pack() -> None:

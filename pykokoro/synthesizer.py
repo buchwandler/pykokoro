@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 
+from ._error_utils import backend_error_from_exception
 from .exceptions import (
     AlignmentError,
     BackendError,
@@ -123,7 +124,12 @@ class KokoroSynthesizer:
         except PyKokoroError:
             raise
         except Exception as exc:
-            raise BackendError(f"Kokoro frontend failed for request {segment.id!r}") from exc
+            raise backend_error_from_exception(
+                f"Kokoro frontend failed for request {segment.id!r}",
+                exc,
+                stage="frontend",
+                details={"request_id": segment.id},
+            ) from exc
 
     def synthesize(self, segment: SynthesisSegment) -> RenderedSegment:
         """Render exactly one independent prepared speech request."""
@@ -134,11 +140,26 @@ class KokoroSynthesizer:
         )
         try:
             prepared = self.g2p.phonemize(segment, config)
+        except PyKokoroError:
+            raise
+        except Exception as exc:
+            raise backend_error_from_exception(
+                f"Kokoro frontend failed for request {segment.id!r}",
+                exc,
+                stage="frontend",
+                details={"request_id": segment.id},
+            ) from exc
+        try:
             result = self._renderer.render(prepared, segment, config)
         except PyKokoroError:
             raise
         except Exception as exc:
-            raise BackendError(f"Kokoro synthesis failed for request {segment.id!r}") from exc
+            raise backend_error_from_exception(
+                f"Kokoro synthesis failed for request {segment.id!r}",
+                exc,
+                stage="synthesis",
+                details={"request_id": segment.id},
+            ) from exc
         if not isinstance(result, RenderedSegment):
             raise BackendError("request renderer must return a RenderedSegment")
         if result.id != segment.id or result.text != segment.text:
@@ -211,7 +232,17 @@ class KokoroSynthesizer:
             except PyKokoroError:
                 raise
             except Exception as exc:
-                raise BackendError("Kokoro Inno voice enrollment failed") from exc
+                raise backend_error_from_exception(
+                    "Kokoro Inno voice enrollment failed",
+                    exc,
+                    stage="voice_enrollment",
+                    details={
+                        "engine": "inno",
+                        "model_variant": config.model_variant,
+                        "language": normalized_language,
+                        "reference_audio_sha256": audio.audio_sha256,
+                    },
+                ) from exc
 
         if options is not None:
             raise InvalidRequestError("options are only supported for Inno enrollment")
@@ -232,19 +263,41 @@ class KokoroSynthesizer:
             text=reference_text,
             language=normalized_language,
         )
+        reference_text_sha256 = hashlib.sha256(reference_text.encode("utf-8")).hexdigest()
         try:
             prepared = self.g2p.phonemize(request, config)
+        except PyKokoroError:
+            raise
+        except Exception as exc:
+            raise backend_error_from_exception(
+                f"Kokoro frontend failed for request {request.id!r}",
+                exc,
+                stage="frontend",
+                details={"request_id": request.id, "engine": "akinvox"},
+            ) from exc
+        try:
             return self._renderer.enroll_voice(
                 prepared,
                 audio,
                 config,
                 name=name,
-                reference_text_sha256=hashlib.sha256(reference_text.encode("utf-8")).hexdigest(),
+                reference_text_sha256=reference_text_sha256,
             )
         except PyKokoroError:
             raise
         except Exception as exc:
-            raise BackendError("Kokoro AkinVox reference enrollment failed") from exc
+            raise backend_error_from_exception(
+                "Kokoro AkinVox reference enrollment failed",
+                exc,
+                stage="reference_enrollment",
+                details={
+                    "engine": "akinvox",
+                    "model_variant": config.model_variant,
+                    "language": normalized_language,
+                    "reference_text_sha256": reference_text_sha256,
+                    "reference_audio_sha256": audio.audio_sha256,
+                },
+            ) from exc
 
     def synthesize_segments(
         self, segments: Iterable[SynthesisSegment]

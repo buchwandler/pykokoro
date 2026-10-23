@@ -166,6 +166,27 @@ with KokoroSynthesizer(config) as synthesizer:
 See [`error_handling.py`](../examples/error_handling.py) for narrow handling of
 supported language, voice, pronunciation, and length failures.
 
+## Structured diagnostics for unexpected failures
+
+Catch a specific typed error when the application can act on it. For unexpected backend
+failures, the public diagnostic helper provides a safe, JSON-compatible cause chain
+while `str(exc)` remains useful on its own:
+
+```python
+import json
+import pykokoro
+
+with pykokoro.KokoroSynthesizer() as synthesizer:
+    try:
+        rendered = synthesizer.synthesize_text("Hello.", language="en-us")
+    except pykokoro.PyKokoroError as exc:
+        print(json.dumps(pykokoro.error_diagnostic(exc), indent=2))
+```
+
+Diagnostics identify stages such as `inference`, `reference_enrollment`, and `frontend`,
+retain the native error type/message and explicit cause, and omit raw request text,
+transcripts, audio arrays, and token arrays. `REQUEST_API_VERSION` is unchanged.
+
 ## Inference cache and configuration groups
 
 `SynthesisConfig.inference_cache_enabled` and `inference_cache_max_bytes` control the

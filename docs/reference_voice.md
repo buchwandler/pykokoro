@@ -156,5 +156,9 @@ The runtime uses OnnxVoice and ONNX Runtime. PyKokoro does not require PyTorch,
 torchaudio, Transformers, or the AkinVox Python package for these features. Reference
 audio and transcript content are not written into synthesis traces by default.
 
-See the [API reference](api_reference.md) for public enrollment types and
-[model discovery](languages.md) for runtime capability metadata.
+For enrollment or synthesis troubleshooting, catch `PyKokoroError` and serialize
+`pykokoro.error_diagnostic(exc)`. The stage distinguishes `reference_enrollment` from
+`voice_enrollment`; safe SHA-256 reference fingerprints may be included, but the raw
+transcript and audio arrays are not. Existing typed exceptions remain appropriate for
+normal control flow. See the [API reference](api_reference.md) for public enrollment
+types and [model discovery](languages.md) for runtime capability metadata.

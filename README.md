@@ -112,6 +112,27 @@ required. Separate caller requests remain separate results, and cross-request
 composition stays with the caller. See
 [long-text configuration](docs/basic_usage.md#render-longer-text) for details.
 
+## Structured error diagnostics
+
+Catch typed exceptions for normal control flow. For unexpected backend or enrollment
+failures, `pykokoro.error_diagnostic(exc)` provides a JSON-safe cause chain with a
+stable stage and native error reason:
+
+```python
+import json
+import pykokoro
+
+with pykokoro.KokoroSynthesizer() as synthesizer:
+    try:
+        rendered = synthesizer.synthesize_text("Hello.", language="en-us")
+    except pykokoro.PyKokoroError as exc:
+        print(json.dumps(pykokoro.error_diagnostic(exc), indent=2))
+```
+
+Diagnostics omit raw request text, reference transcripts, audio arrays, and token
+arrays. See the
+[troubleshooting guide](docs/basic_usage.md#structured-diagnostics-for-unexpected-failures).
+
 ## Installation
 
 Python 3.10 or newer is required. Choose one ONNX Runtime provider extra per

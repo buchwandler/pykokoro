@@ -10,10 +10,12 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 import numpy as np
 
+from ._error_utils import backend_error_from_exception
 from .exceptions import (
     BackendError,
     ConfigurationError,
     InvalidVoiceError,
+    PyKokoroError,
     SynthesisInputTooLongError,
 )
 from .model_profiles import get_model_profile
@@ -29,6 +31,26 @@ from .types import PhonemeSegment, Trace, WordTiming
 from .voice_enrollment import InnoEnrollmentOptions
 from .voice_level import resolve_voice_level_application
 from .voice_pack import KokoroVoicePack
+
+
+def _call_backend_operation(
+    function: Callable[[], Any],
+    *,
+    operation: str,
+    stage: str,
+    request_id: str,
+) -> Any:
+    try:
+        return function()
+    except PyKokoroError:
+        raise
+    except Exception as exc:
+        raise backend_error_from_exception(
+            f"Kokoro {operation} failed for request {request_id!r}",
+            exc,
+            stage=stage,
+            details={"operation": operation, "request_id": request_id},
+        ) from exc
 
 
 class _RequestG2PAdapter(Protocol):
@@ -110,7 +132,11 @@ class OnnxRequestRenderer:
             trace.warnings.extend(prepared.diagnostics)
 
         if not prepared.token_ids:
-            raise BackendError(f"frontend produced no model tokens for request {request.id!r}")
+            raise BackendError(
+                f"frontend produced no model tokens for request {request.id!r}",
+                stage="frontend",
+                details={"request_id": request.id},
+            )
         if voice is None:
             raise InvalidVoiceError("a voice must resolve before ONNX rendering")
 
@@ -131,15 +157,27 @@ class OnnxRequestRenderer:
                 raise InvalidVoiceError(
                     f"Voice {voice!r} is unavailable for the resolved model"
                 ) from exc
+            except Exception as exc:
+                raise backend_error_from_exception(
+                    f"Kokoro voice preparation failed for request {request.id!r}",
+                    exc,
+                    stage="model_open",
+                    details={"operation": "resolve_voice_style", "request_id": request.id},
+                ) from exc
 
         def context_phonemizer(text: str, language: str) -> Any:
             return self._g2p_adapter.phonemize_context(text, language, resolved)
 
-        phoneme_segments = backend.preprocess_segments(
-            phoneme_segments,
-            resolved.generation.enable_short_sentence,
-            random_seed=resolved.generation.random_seed,
-            context_phonemizer=context_phonemizer,
+        phoneme_segments = _call_backend_operation(
+            lambda: backend.preprocess_segments(
+                phoneme_segments,
+                resolved.generation.enable_short_sentence,
+                random_seed=resolved.generation.random_seed,
+                context_phonemizer=context_phonemizer,
+            ),
+            operation="preprocess_segments",
+            stage="inference",
+            request_id=request.id,
         )
         oversized_segment = next(
             (segment for segment in phoneme_segments if len(segment.tokens) > profile.max_tokens),
@@ -153,36 +191,57 @@ class OnnxRequestRenderer:
                 model_id=identity.model_id,
             )
         if not phoneme_segments:
-            raise BackendError(f"request {request.id!r} produced no acoustic chunks")
+            raise BackendError(
+                f"request {request.id!r} produced no acoustic chunks",
+                stage="frontend",
+                details={"request_id": request.id},
+            )
         if trace is not None:
             trace.model["acoustic_chunk_count"] = len(phoneme_segments)
         if reference_voice is not None:
-            raw_segments = backend.generate_reference_audio_segments(
-                phoneme_segments,
-                reference_voice,
-                resolved.generation.speed,
-                seed=resolved.generation.random_seed,
-                trace=trace,
+            raw_segments = _call_backend_operation(
+                lambda: backend.generate_reference_audio_segments(
+                    phoneme_segments,
+                    reference_voice,
+                    resolved.generation.speed,
+                    seed=resolved.generation.random_seed,
+                    trace=trace,
+                ),
+                operation="generate_reference_audio_segments",
+                stage="inference",
+                request_id=request.id,
             )
         else:
-            raw_segments = backend.generate_raw_audio_segments(
-                phoneme_segments,
-                voice_style,
-                resolved.generation.speed,
-                default_voice_name=voice_name,
-                trace=trace,
+            raw_segments = _call_backend_operation(
+                lambda: backend.generate_raw_audio_segments(
+                    phoneme_segments,
+                    voice_style,
+                    resolved.generation.speed,
+                    default_voice_name=voice_name,
+                    trace=trace,
+                ),
+                operation="generate_raw_audio_segments",
+                stage="inference",
+                request_id=request.id,
             )
 
-        processed_segments = backend.postprocess_audio_segments(
-            raw_segments,
-            trim_silence=False,
-            trace=trace,
-            voice_level_config=resolved.voice_level,
+        processed_segments = _call_backend_operation(
+            lambda: backend.postprocess_audio_segments(
+                raw_segments,
+                trim_silence=False,
+                trace=trace,
+                voice_level_config=resolved.voice_level,
+            ),
+            operation="postprocess_audio_segments",
+            stage="postprocess",
+            request_id=request.id,
         )
         if len(processed_segments) != len(phoneme_segments):
             raise BackendError(
                 "postprocessing must preserve acoustic chunks; "
-                f"received {len(processed_segments)} for {len(phoneme_segments)} input chunks"
+                f"received {len(processed_segments)} for {len(phoneme_segments)} input chunks",
+                stage="postprocess",
+                details={"request_id": request.id},
             )
         audio_parts: list[np.ndarray] = []
         word_timings: list[WordTiming] = []
@@ -209,7 +268,11 @@ class OnnxRequestRenderer:
             else np.zeros(0, dtype=np.float32)
         )
         if rendered_audio.size == 0:
-            raise BackendError(f"backend produced no audio samples for request {request.id!r}")
+            raise BackendError(
+                f"backend produced no audio samples for request {request.id!r}",
+                stage="postprocess",
+                details={"request_id": request.id},
+            )
         voice_level_applications = tuple(
             resolve_voice_level_application(resolved.voice_level, segment.render_voice_key)
             for segment in processed_segments
@@ -282,7 +345,11 @@ class OnnxRequestRenderer:
         if profile.voice_mode != "reference":
             raise InvalidVoiceError("Reference enrollment requires a reference-only cloning model")
         if not prepared.token_ids:
-            raise BackendError("frontend produced no model tokens for the reference transcript")
+            raise BackendError(
+                "frontend produced no model tokens for the reference transcript",
+                stage="frontend",
+                details={"engine": "akinvox", "model_variant": config.model_variant},
+            )
         backend = self._get_backend(config)
         return backend.prepare_reference_voice(
             prepared.token_ids,
