@@ -140,6 +140,8 @@ a saved state with `ReferenceVoice.load()`; reference audio is not needed again.
   cannot be used with a different model build. Keep the saved state when reusing the
   same model.
 - Reference synthesis currently requires `GenerationConfig.speed == 1.0`.
+- `GenerationConfig.random_seed=None` leaves the seed unspecified so the runtime may
+  apply its own default; an explicit integer requests that seed where supported.
 - Automatic static-voice calibration is unavailable for a reference voice. Voice-level
   mode `off` and an explicit gain override are supported.
 

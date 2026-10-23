@@ -877,10 +877,14 @@ class KokoroRuntimeAdapter:
     ) -> Any:
         if self._closed:
             raise RuntimeError("Kokoro runtime is closed")
+
+        runtime_kwargs: dict[str, Any] = {"speed": speed}
+        if seed is not None:
+            runtime_kwargs["seed"] = seed
         if reference is None:
             return _call(
                 "infer",
-                lambda: self._runtime.infer(token_ids, style=style, speed=speed, seed=seed),
+                lambda: self._runtime.infer(token_ids, style=style, **runtime_kwargs),
             )
 
         from .reference_voice import ReferenceVoice
@@ -906,9 +910,7 @@ class KokoroRuntimeAdapter:
         )
         return _call(
             "infer",
-            lambda: self._runtime.infer(
-                token_ids, reference=runtime_reference, speed=speed, seed=seed
-            ),
+            lambda: self._runtime.infer(token_ids, reference=runtime_reference, **runtime_kwargs),
         )
 
     def diagnostics(self) -> Any:

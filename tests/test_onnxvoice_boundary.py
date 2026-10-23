@@ -604,6 +604,63 @@ def _reference_voice() -> ReferenceVoice:
     )
 
 
+@pytest.mark.parametrize("reference_conditioned", [False, True])
+@pytest.mark.parametrize("seed", [None, 17])
+def test_runtime_adapter_seed_keyword_contract(
+    monkeypatch: pytest.MonkeyPatch,
+    reference_conditioned: bool,
+    seed: int | None,
+) -> None:
+    class RuntimeReferenceState:
+        def __init__(self, **values: object) -> None:
+            self.values = values
+
+    class Runtime:
+        def __init__(self) -> None:
+            self.inference: dict[str, object] | None = None
+
+        def infer(self, token_ids: object, **kwargs: object) -> str:
+            self.inference = {"token_ids": token_ids, **kwargs}
+            return "inferred"
+
+    monkeypatch.setattr(
+        boundary,
+        "_onnxvoice",
+        lambda: SimpleNamespace(KokoroReferenceState=RuntimeReferenceState),
+    )
+    runtime = Runtime()
+    resolved = boundary.ResolvedKokoroModel(
+        ref=None,
+        model_id="en-akinvox-cloning-v1",
+        quality=None,
+        distribution=None,
+        storage_id=None,
+        installation=None,
+        metadata={},
+        sample_rate=24_000,
+        model_paths=(),
+        voices_path=None,
+        config_path=None,
+    )
+    adapter = boundary.KokoroRuntimeAdapter(runtime, resolved)
+    style = np.zeros((1, 256), dtype=np.float32)
+
+    result = adapter.infer(
+        [4, 5],
+        style=None if reference_conditioned else style,
+        reference=_reference_voice() if reference_conditioned else None,
+        speed=1.0,
+        seed=seed,
+    )
+
+    assert result == "inferred"
+    assert runtime.inference is not None
+    if seed is None:
+        assert "seed" not in runtime.inference
+    else:
+        assert runtime.inference["seed"] == seed
+
+
 def test_runtime_adapter_prepares_and_converts_reference_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

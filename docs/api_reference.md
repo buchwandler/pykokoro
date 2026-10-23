@@ -192,6 +192,8 @@ spaCy.
 
 `GenerationConfig` controls Kokoro acoustic speed, the default language for
 `synthesize_text()`, inference random seed, and the per-request short-sentence override.
+By default, `random_seed=None` requests no specific seed and allows the selected runtime
+to apply its own default; an explicit integer requests that seed where supported.
 Short-sentence handling is disabled unless explicitly enabled with `ShortSentenceConfig`
 or `GenerationConfig.enable_short_sentence`.
 

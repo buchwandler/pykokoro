@@ -126,8 +126,9 @@ waveform; it is not a composition API.
 
 - `GenerationConfig.speed` controls Kokoro's acoustic inference speed. Editorial
   playback rate belongs to the caller's composition layer.
-- `GenerationConfig.random_seed` sets the inference seed when supported by the
-  model/runtime.
+- `GenerationConfig.random_seed=None` requests no specific inference seed; the selected
+  runtime may apply its own default. An explicit integer requests deterministic
+  inference with that seed where the model/runtime supports it.
 - `GenerationConfig.enable_short_sentence` or `SynthesisConfig.short_sentence_config`
   explicitly enables short-sentence processing; leaving both unset keeps it off.
 - `RenderedSegment.synthesis_identity` and `voice_level_applications` expose cache

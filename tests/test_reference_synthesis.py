@@ -102,12 +102,15 @@ class _ReferenceBackend:
 
 
 def _reference_config(
-    *, speed: float = 1.0, voice_level: VoiceLevelConfig | None = None
+    *,
+    speed: float = 1.0,
+    random_seed: int | None = None,
+    voice_level: VoiceLevelConfig | None = None,
 ) -> SynthesisConfig:
     return SynthesisConfig(
         model_source="github",
         model_variant=_MODEL_ID,
-        generation=GenerationConfig(random_seed=17, speed=speed),
+        generation=GenerationConfig(random_seed=random_seed, speed=speed),
         return_trace=True,
         voice_level=voice_level or VoiceLevelConfig(),
     )
@@ -214,7 +217,7 @@ def test_reference_renderer_routes_reference_voice_and_keeps_trace_private() -> 
     rendered = renderer.render(
         prepared,
         request,
-        _reference_config(voice_level=VoiceLevelConfig(gain_db=-1.5)),
+        _reference_config(random_seed=17, voice_level=VoiceLevelConfig(gain_db=-1.5)),
     )
 
     assert backend.reference_call == (voice, 1.0, 17)
@@ -232,6 +235,27 @@ def test_reference_renderer_routes_reference_voice_and_keeps_trace_private() -> 
     assert "reference_audio_sha256" not in trace_json
     assert "reference_text_sha256" not in trace_json
     assert "memory" not in trace_json
+    renderer.close()
+
+
+def test_reference_renderer_succeeds_with_default_random_seed() -> None:
+    voice = _reference_voice()
+    request = SynthesisSegment("reference-request", "Hello there.", "en-us", voice=voice)
+    prepared = PreparedSynthesis(
+        request_id=request.id,
+        text=request.text,
+        language=request.language,
+        voice=None,
+        phonemes="həˈloʊ",
+        token_ids=(1, 2, 3),
+    )
+    backend = _ReferenceBackend()
+    renderer = OnnxRequestRenderer(_G2P(), backend_factory=lambda config: backend)
+
+    rendered = renderer.render(prepared, request, _reference_config())
+
+    assert backend.reference_call == (voice, 1.0, None)
+    assert rendered.voice == f"reference:{voice.fingerprint}"
     renderer.close()
 
 
