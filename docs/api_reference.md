@@ -30,6 +30,7 @@ from pykokoro import (
 | Voice enrollment          | `KokoroVoicePack`, `ReferenceVoice`, `InnoEnrollmentOptions`, `KokoroSynthesizer.enroll_voice()`                                                                                                                                                                                                                                                                                    |
 | Model discovery           | `ModelCapabilities`, `ModelDiscoveryResult`, `VoiceCapabilities`, `VoiceEnrollerSpec`, `discover_models`                                                                                                                                                                                                                                                                            |
 | Lexicon discovery         | `LexiconCapabilities`, `LexiconDiscoveryResult`, `discover_lexicons`                                                                                                                                                                                                                                                                                                                |
+| Local G2Lex inputs        | `G2LexFileRef`, `G2LexFileInspection`, `inspect_g2lex_file`                                                                                                                                                                                                                                                                                                                         |
 | Asset progress            | `AssetProgressEvent`, `AssetProgressCallback`, `ConsoleAssetProgress`                                                                                                                                                                                                                                                                                                               |
 | Synthesis identity        | `SynthesisIdentity`, `build_synthesis_identity`                                                                                                                                                                                                                                                                                                                                     |
 | API contract              | `REQUEST_API_VERSION`, `RequestApiContract`, `request_api_contract`                                                                                                                                                                                                                                                                                                                 |
@@ -152,6 +153,10 @@ them.
    :members:
    :undoc-members:
 
+.. autoclass:: pykokoro.G2LexFileRef
+   :members:
+   :undoc-members:
+
 .. autoclass:: pykokoro.ShortSentenceConfig
    :members:
    :undoc-members:
@@ -248,11 +253,23 @@ calibration is an engine-local option; it is not whole-program loudness masterin
 .. autofunction:: pykokoro.discover_lexicons
 ```
 
+.. autoclass:: pykokoro.G2LexFileInspection :members: :undoc-members:
+
+.. autofunction:: pykokoro.inspect_g2lex_file
+
 Discovery reports metadata and runtime capability, including `VoiceEnrollerSpec`,
 without loading synthesis weights or creating an ONNX session. Offline discovery uses
 available local metadata; it does not install model or lexicon assets. Use the inventory
 to select an available model/language/voice rather than inferring compatibility from a
 voice name.
+
+`discover_lexicons()` covers registered selectors. For a local file, call
+`inspect_g2lex_file(path)` to validate and read its manifest without traversing the
+pronunciation entries; `inspection.to_ref()` creates an immutable reference pinned to
+the content and logical hashes. Add one or more references through
+`TokenizerConfig(g2lex_files=(ref,))`. Local sources are forwarded to KokoroG2P and
+never enter Lexphon's named-asset installer. Prepared alignment metadata retains the
+contextual heteronym decision and its reason when one was selected.
 
 ## Asset progress
 

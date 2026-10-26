@@ -118,6 +118,14 @@ def __getattr__(name: str) -> Any:
             "LexiconDiscoveryResult": LexiconDiscoveryResult,
             "discover_lexicons": discover_lexicons,
         }[name]
+    if name in {"G2LexFileRef", "G2LexFileInspection", "inspect_g2lex_file"}:
+        from .g2lex_sources import G2LexFileInspection, G2LexFileRef, inspect_g2lex_file
+
+        return {
+            "G2LexFileRef": G2LexFileRef,
+            "G2LexFileInspection": G2LexFileInspection,
+            "inspect_g2lex_file": inspect_g2lex_file,
+        }[name]
     if name == "KokoroSynthesizer":
         from .synthesizer import KokoroSynthesizer
 
@@ -137,6 +145,9 @@ __all__ = [
     "LexiconCapabilities",
     "LexiconDiscoveryResult",
     "discover_lexicons",
+    "G2LexFileRef",
+    "G2LexFileInspection",
+    "inspect_g2lex_file",
     "GenerationConfig",
     "LanguageRoutingConfig",
     "SynthesisConfig",

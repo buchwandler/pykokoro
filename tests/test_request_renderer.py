@@ -113,7 +113,21 @@ def test_renderer_keeps_one_request_independent_and_rebases_timings() -> None:
         voice="af_sarah",
         phonemes="həlˈoʊ",
         token_ids=(1, 2, 3),
-        alignment_tokens=(G2PAlignmentToken("Hello", "həlˈoʊ", char_start=0, char_end=5),),
+        alignment_tokens=(
+            G2PAlignmentToken(
+                "Hello",
+                "həlˈoʊ",
+                char_start=0,
+                char_end=5,
+                pronunciation_source="local-g2lex",
+                pronunciation_provider="file",
+                pronunciation_lexicon_id="en-us:fixture",
+                pronunciation_source_details={
+                    "source_path": "/tmp/fixture.g2lex",
+                    "sha256": "sha256:" + "a" * 64,
+                },
+            ),
+        ),
         diagnostics=("frontend note",),
     )
 
@@ -146,6 +160,13 @@ def test_renderer_keeps_one_request_independent_and_rebases_timings() -> None:
     assert rendered.voice_level_applications[0].source == "override"
     assert rendered.short_sentence_mode is None
     assert rendered.trace is not None
+    assert (
+        rendered.trace.model["pronunciation_alignment"][0]["pronunciation_source"] == "local-g2lex"
+    )
+    assert (
+        rendered.trace.model["pronunciation_alignment"][0]["pronunciation_source_details"]["sha256"]
+        == "sha256:" + "a" * 64
+    )
     assert rendered.trace.warnings == ["frontend note"]
     assert backend.preprocessed[0].tokens == [1, 2, 3]
     assert factory_configs[0].voice == "af_sarah"

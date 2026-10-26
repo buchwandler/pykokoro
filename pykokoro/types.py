@@ -48,6 +48,8 @@ class G2PAlignmentToken:
     pronunciation_requested_language: str | None = None
     pronunciation_source_ipa: str | None = None
     pronunciation_language_markers: list[dict[str, Any]] | None = None
+    heteronym_resolution: dict[str, Any] | None = None
+    pronunciation_source_details: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -64,6 +66,10 @@ class G2PAlignmentToken:
             "pronunciation_source_ipa": self.pronunciation_source_ipa,
             "pronunciation_language_markers": self.pronunciation_language_markers,
         }
+        if self.heteronym_resolution is not None:
+            result["heteronym_resolution"] = dict(self.heteronym_resolution)
+        if self.pronunciation_source_details is not None:
+            result["pronunciation_source_details"] = dict(self.pronunciation_source_details)
         if self.model_span_token_count is not None:
             result["model_span_token_count"] = self.model_span_token_count
         return result

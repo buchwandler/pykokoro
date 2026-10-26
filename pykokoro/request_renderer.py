@@ -130,6 +130,13 @@ class OnnxRequestRenderer:
                     {"voice_mode": "static", "voicepack_fingerprint": voice_pack.fingerprint}
                 )
             trace.warnings.extend(prepared.diagnostics)
+            pronunciation_alignment = [
+                item.to_dict()
+                for item in prepared.alignment_tokens
+                if item.pronunciation_source is not None or item.heteronym_resolution is not None
+            ]
+            if pronunciation_alignment:
+                trace.model["pronunciation_alignment"] = pronunciation_alignment
 
         if not prepared.token_ids:
             raise BackendError(

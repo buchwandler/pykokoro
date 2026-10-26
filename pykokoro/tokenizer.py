@@ -9,6 +9,7 @@ from typing import Literal, TypeAlias
 import kokorog2p as _kokorog2p
 
 from .constants import MAX_PHONEME_LENGTH
+from .g2lex_sources import G2LexFileRef
 from .spacy_models import SpacyModelSize, make_spacy_model_request
 
 N_TOKENS = _kokorog2p.N_TOKENS
@@ -51,6 +52,8 @@ class TokenizerConfig:
     spacy_model_size: SpacyModelSize | None = None
     backend: BackendType = "kokorog2p"
     lexicons: str | Sequence[str] | None = None
+    g2lex_files: G2LexFileRef | Sequence[G2LexFileRef] | None = None
+    resolve_heteronyms: bool = True
     lexicon_data_policy: LexiconDataPolicy = "auto"
 
     def __post_init__(self) -> None:
@@ -66,6 +69,23 @@ class TokenizerConfig:
             if any(not isinstance(value, str) or not value.strip() for value in values):
                 raise ValueError("lexicons must contain non-empty names")
             self.lexicons = tuple(value.strip() for value in values)
+
+        if not isinstance(self.resolve_heteronyms, bool):
+            raise ValueError("resolve_heteronyms must be a boolean")
+        if self.g2lex_files is not None:
+            files = (
+                (self.g2lex_files,)
+                if isinstance(self.g2lex_files, G2LexFileRef)
+                else tuple(self.g2lex_files)
+            )
+            if any(not isinstance(value, G2LexFileRef) for value in files):
+                raise TypeError("g2lex_files must contain G2LexFileRef values")
+            paths = [value.path for value in files]
+            if len(paths) != len(set(paths)):
+                raise ValueError("g2lex_files must not contain duplicate paths")
+            if files and self.backend.casefold() != "kokorog2p":
+                raise ValueError("g2lex_files require the kokorog2p backend")
+            self.g2lex_files = files
 
 
 def _default_lexicons_for_language(language: str) -> tuple[str, ...] | None:

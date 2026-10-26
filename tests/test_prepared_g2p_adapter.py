@@ -1,7 +1,13 @@
+import hashlib
+from pathlib import Path
 from types import SimpleNamespace
 
+import g2lex
+import pytest
 from kokorog2p import OverrideSpan, TokenAnnotation
+from kokorog2p.lexicons.registry import FileLexiconSource
 
+from pykokoro import G2LexFileRef
 from pykokoro.language_routing import LanguageRoutingConfig
 from pykokoro.prepared_g2p import PreparedG2PAdapter
 from pykokoro.synthesis_config import SynthesisConfig
@@ -92,6 +98,161 @@ def test_prepared_adapter_forwards_request_text_overrides_annotations_and_routin
     assert result.request_id == request.id
     assert result.alignment_tokens[1].char_start == 6
     assert result.alignment_tokens[1].char_end == 11
+
+
+def test_prepared_adapter_forwards_local_g2lex_without_named_installation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    installations = []
+    monkeypatch.setattr(
+        "pykokoro.lexicon_data.install_missing_lexphon_data",
+        lambda language, lexicons: installations.append((language, lexicons)) or (),
+    )
+    ref = G2LexFileRef("custom/local.g2lex", sha256="a" * 64)
+    config = SynthesisConfig(
+        tokenizer_config=TokenizerConfig(
+            lexicons=(),
+            g2lex_files=(ref,),
+            resolve_heteronyms=False,
+        )
+    )
+    module = FakeKokoroG2P()
+    adapter = PreparedG2PAdapter(module)
+
+    adapter.phonemize(
+        SynthesisSegment(id="local-source", text="Hello", language="en-us"),
+        config,
+    )
+
+    kwargs = module.g2p_creations[0][0]
+    assert kwargs["lexicons"] == ()
+    assert kwargs["g2lex_files"] == (
+        FileLexiconSource(
+            path=ref.path,
+            sha256=ref.sha256,
+            logical_sha256=ref.logical_sha256,
+        ),
+    )
+    assert kwargs["resolve_heteronyms"] is False
+    assert installations == [("en-us", ())]
+
+
+def test_alignment_preserves_contextual_heteronym_provenance() -> None:
+    decision = {
+        "source": "english-context-resolver",
+        "context_rule": "lead.metal",
+        "ipa": "lɛd",
+        "reason": "A metal-object complement selects the element pronunciation.",
+        "lexicon_id": "en-us:gold",
+    }
+    token = SimpleNamespace(
+        text="lead",
+        phonemes="lɛd",
+        whitespace="",
+        char_start=0,
+        char_end=4,
+        meta={
+            "pronunciation_source": "contextual-heteronym",
+            "heteronym_resolution": decision,
+        },
+    )
+
+    alignment = PreparedG2PAdapter._alignment_token(token, FakeKokoroG2P(), "1.0")
+
+    assert alignment.pronunciation_source == "contextual-heteronym"
+    assert alignment.pronunciation_provider == "english-context-resolver"
+    assert alignment.pronunciation_lexicon_id == "en-us:gold"
+    assert alignment.pronunciation_source_ipa == "lɛd"
+    assert alignment.heteronym_resolution == decision
+    assert alignment.to_dict()["heteronym_resolution"] == decision
+
+
+def test_alignment_preserves_local_g2lex_source_details() -> None:
+    details = {
+        "source_kind": "file",
+        "selector": "editorial",
+        "lexicon_id": "en-us:editorial",
+        "source_path": "/tmp/editorial.g2lex",
+        "sha256": "sha256:" + "a" * 64,
+        "logical_sha256": "sha256:" + "b" * 64,
+        "phoneme_encoding": "ipa",
+    }
+    token = SimpleNamespace(
+        text="lead",
+        phonemes="lɛd",
+        whitespace="",
+        char_start=0,
+        char_end=4,
+        meta={
+            "pronunciation_source": "local-g2lex",
+            "pronunciation_provider": "file",
+            "pronunciation_lexicon_id": "en-us:editorial",
+            "pronunciation_source_details": details,
+        },
+    )
+
+    alignment = PreparedG2PAdapter._alignment_token(token, FakeKokoroG2P(), "1.0")
+
+    assert alignment.pronunciation_source == "local-g2lex"
+    assert alignment.pronunciation_provider == "file"
+    assert alignment.pronunciation_lexicon_id == "en-us:editorial"
+    assert alignment.pronunciation_source_details == details
+    assert alignment.to_dict()["pronunciation_source_details"] == details
+
+
+def test_local_g2lex_provenance_reaches_prepared_alignment(tmp_path: Path) -> None:
+    source_json = tmp_path / "editorial.json"
+    source_path = tmp_path / "editorial.g2lex"
+    source_json.write_text(
+        '{"read": {"DEFAULT": "riːd", "VERB": "riːd", "VBN": "rɛd"}}',
+        encoding="utf-8",
+    )
+    g2lex.pack_file(
+        source_json,
+        source_path,
+        input_format="kokoro-json",
+        metadata={
+            "id": "fixture:editorial",
+            "name": "editorial",
+            "language": "en-us",
+            "phoneme_encoding": "ipa",
+        },
+    )
+    digest = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    config = SynthesisConfig(
+        tokenizer_config=TokenizerConfig(
+            lexicons=(),
+            g2lex_files=(G2LexFileRef(str(source_path), sha256=digest),),
+            use_spacy=False,
+            resolve_heteronyms=False,
+        )
+    )
+    request = SynthesisSegment(
+        id="local-g2lex",
+        text="had read",
+        language="en-us",
+        tokens=(
+            LinguisticToken(
+                4,
+                8,
+                text="read",
+                pos="VERB",
+                tag="VBN",
+                lemma="read",
+                morph="VerbForm=Part",
+            ),
+        ),
+    )
+
+    result = PreparedG2PAdapter().phonemize(request, config)
+    alignment = next(item for item in result.alignment_tokens if item.text == "read")
+
+    assert alignment.phonemes == "ɹɛd"
+    assert alignment.pronunciation_source == "local-g2lex"
+    assert alignment.pronunciation_provider == "file"
+    assert alignment.pronunciation_source_details is not None
+    assert alignment.pronunciation_source_details["source_path"] == str(source_path.resolve())
+    assert alignment.pronunciation_source_details["sha256"] == f"sha256:{digest}"
 
 
 def test_prepared_adapter_preserves_tagged_live_annotation():

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -173,6 +174,9 @@ class PreparedG2PAdapter:
         def get(name: str, default: Any = None) -> Any:
             if isinstance(value, dict):
                 return value.get(name, default)
+            metadata = getattr(value, "meta", None)
+            if isinstance(metadata, Mapping) and name in metadata:
+                return metadata.get(name, default)
             return getattr(value, name, default)
 
         text = get("text", "")
@@ -199,6 +203,27 @@ class PreparedG2PAdapter:
                 if isinstance(model_token_count, int)
                 else None
             )
+        heteronym_resolution = get("heteronym_resolution")
+        heteronym_resolution = get("heteronym_resolution")
+        if not isinstance(heteronym_resolution, Mapping):
+            heteronym_resolution = None
+        else:
+            heteronym_resolution = dict(heteronym_resolution)
+        pronunciation_source_details = get("pronunciation_source_details")
+        if not isinstance(pronunciation_source_details, Mapping):
+            pronunciation_source_details = None
+        else:
+            pronunciation_source_details = dict(pronunciation_source_details)
+        pronunciation_source = get("pronunciation_source")
+        pronunciation_provider = get("pronunciation_provider")
+        pronunciation_lexicon_id = get("pronunciation_lexicon_id")
+        pronunciation_source_ipa = get("pronunciation_source_ipa")
+        if heteronym_resolution is not None:
+            pronunciation_provider = pronunciation_provider or heteronym_resolution.get("source")
+            pronunciation_lexicon_id = pronunciation_lexicon_id or heteronym_resolution.get(
+                "lexicon_id"
+            )
+            pronunciation_source_ipa = pronunciation_source_ipa or heteronym_resolution.get("ipa")
         return G2PAlignmentToken(
             text=text if isinstance(text, str) else "",
             phonemes=phonemes if isinstance(phonemes, str) else "",
@@ -207,12 +232,14 @@ class PreparedG2PAdapter:
             char_end=get("char_end"),
             model_token_count=model_token_count,
             model_span_token_count=model_span_token_count,
-            pronunciation_source=get("pronunciation_source"),
-            pronunciation_provider=get("pronunciation_provider"),
-            pronunciation_lexicon_id=get("pronunciation_lexicon_id"),
+            pronunciation_source=pronunciation_source,
+            pronunciation_provider=pronunciation_provider,
+            pronunciation_lexicon_id=pronunciation_lexicon_id,
             pronunciation_requested_language=get("pronunciation_requested_language"),
-            pronunciation_source_ipa=get("pronunciation_source_ipa"),
+            pronunciation_source_ipa=pronunciation_source_ipa,
             pronunciation_language_markers=get("pronunciation_language_markers"),
+            heteronym_resolution=heteronym_resolution,
+            pronunciation_source_details=pronunciation_source_details,
         )
 
     def _load(self) -> Any:
@@ -259,6 +286,12 @@ class PreparedG2PAdapter:
             "backend": backend,
             "lexicons": lexicons,
         }
+        if tokenizer_config.g2lex_files:
+            kwargs["g2lex_files"] = tuple(
+                reference.to_source() for reference in tokenizer_config.g2lex_files
+            )
+        if backend == "kokorog2p" and normalized_language.startswith("en"):
+            kwargs["resolve_heteronyms"] = tokenizer_config.resolve_heteronyms
         if profile is not None and profile.variant == "ar-nabra":
             kwargs["model_profile"] = "nabra-82m-v0.1"
         key = tuple(sorted((name, repr(value)) for name, value in kwargs.items())) + (
