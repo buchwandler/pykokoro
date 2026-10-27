@@ -42,7 +42,7 @@ def test_companion_dependency_floors_match_current_integration_contract() -> Non
         "dependencies"
     ]
 
-    assert "kokorog2p[espeak,en]>=0.9.15,<1.0" in dependencies
+    assert "kokorog2p[espeak,en]>=0.9.16,<1.0" in dependencies
     assert "lexphon>=0.2.5,<0.3" in dependencies
     assert "phrasplit>=0.3.9,<0.4" in dependencies
     assert "audiosig>=0.1.4,<0.2" in dependencies
@@ -211,7 +211,7 @@ def test_lower_bound_workflow_pins_match_project_floors() -> None:
 def test_package_resource_workflow_covers_kokorog2p_window() -> None:
     workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
 
-    assert 'kokorog2p-version: ["0.9.15"]' in workflow
+    assert 'kokorog2p-version: ["0.9.16"]' in workflow
     assert "working-directory: ${{ runner.temp }}" in workflow
     assert "pykokoro-*.whl" in workflow
     assert "Verify frontend phonemization outside checkout" in workflow
@@ -228,7 +228,7 @@ def test_publish_workflow_validates_artifacts_before_upload() -> None:
     assert "from packaging.requirements import Requirement" in workflow
     assert "from packaging.version import Version" in workflow
     assert "def has_minimum(requirements, name, minimum):" in workflow
-    assert 'has_minimum(requirements, "kokorog2p", "0.9.15")' in workflow
+    assert 'has_minimum(requirements, "kokorog2p", "0.9.16")' in workflow
     assert 'has_minimum(requirements, "lexphon", "0.2.5")' in workflow
     assert 'has_minimum(requirements, "phrasplit", "0.3.9")' in workflow
     assert 'has_minimum(requirements, "audiosig", "0.1.4")' in workflow

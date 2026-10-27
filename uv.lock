@@ -905,16 +905,16 @@ wheels = [
 
 [[package]]
 name = "kokorog2p"
-version = "0.9.15"
+version = "0.9.16"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "espeakng-runtime" },
     { name = "g2lex" },
     { name = "lexphon" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/66/16/a266a7214e1b730faf8823770882a1372b4840a317a3a1bf2e547b32bc9b/kokorog2p-0.9.15.tar.gz", hash = "sha256:81178d25f1529171e2745e67ecd45d2c21fcd51203f77d5314edebbe007040e0", size = 1102939, upload-time = "2026-09-25T15:04:48.324Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/75/f0/9dec817995d5d52d0f912b8bc3cad6a455888c201a108d7623677442e0ed/kokorog2p-0.9.16.tar.gz", hash = "sha256:392166c280b7fff932b503ec4d38ed1a77b4582b2079cb206c59669ef52454a7", size = 1135269, upload-time = "2026-10-27T08:39:00.155Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/99/58/5f8456a82a819d42841ccde4e215009af37969b9f975711255fd4907abc3/kokorog2p-0.9.15-py3-none-any.whl", hash = "sha256:d99392c758c0a16164b0b52a691b1a609ac739b6e4520bf42f4442643cb90a07", size = 295959, upload-time = "2026-09-25T15:04:46.514Z" },
+    { url = "https://files.pythonhosted.org/packages/f7/50/bb62c8a8b42bd1acc13991c9675d12be2b34b696b4f2390767a5b1b5f0b5/kokorog2p-0.9.16-py3-none-any.whl", hash = "sha256:31dc16699161b656aba1df8957f9887810401de5fbe70e64f414504abec70a22", size = 303125, upload-time = "2026-10-27T08:38:58.268Z" },
 ]
 
 [package.optional-dependencies]
@@ -2207,7 +2207,7 @@ sounddevice = [
 requires-dist = [
     { name = "audiosig", specifier = ">=0.1.4,<0.2" },
     { name = "huggingface-hub", marker = "extra == 'huggingface'", specifier = ">=0.27" },
-    { name = "kokorog2p", extras = ["en", "espeak"], specifier = ">=0.9.15,<1.0" },
+    { name = "kokorog2p", extras = ["en", "espeak"], specifier = ">=0.9.16,<1.0" },
     { name = "kokorog2p", extras = ["goruut"], marker = "extra == 'goruut'", specifier = ">=0.9.8,<1.0" },
     { name = "lexphon", specifier = ">=0.2.5,<0.3" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.0.0" },
