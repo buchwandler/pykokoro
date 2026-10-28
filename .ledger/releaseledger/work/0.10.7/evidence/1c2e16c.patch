@@ -1,0 +1,1563 @@
+ docs/advanced_features.md               |  26 +++
+ docs/api_reference.md                   |  24 ++-
+ pykokoro/__init__.py                    |   2 +
+ pykokoro/api_contract.py                |   6 +-
+ pykokoro/frontend_projection.py         | 318 ++++++++++++++++++++++++++++++++
+ pykokoro/prepared_g2p.py                |  61 ++++--
+ pykokoro/request_renderer.py            |  51 +++--
+ pykokoro/synthesis_identity.py          |  11 +-
+ pykokoro/synthesis_types.py             |  59 ++++++
+ pykokoro/types.py                       |   1 +
+ tests/test_frontend_projection.py       |  77 ++++++++
+ tests/test_long_text_splitting.py       |  49 ++++-
+ tests/test_prepared_g2p_adapter.py      |  93 +++++++++-
+ tests/test_public_engine_api.py         |   3 +
+ tests/test_reference_frontend_parity.py |  25 ++-
+ tests/test_request_api_contract.py      |  18 +-
+ tests/test_request_renderer.py          |  81 +++++++-
+ tests/test_synthesis_identity.py        |  20 +-
+ tests/test_synthesis_types.py           |  61 ++++++
+ 19 files changed, 945 insertions(+), 41 deletions(-)
+
+diff --git a/docs/advanced_features.md b/docs/advanced_features.md
+index 766f9c5..0594857 100644
+--- a/docs/advanced_features.md
++++ b/docs/advanced_features.md
+@@ -41,6 +41,32 @@ cannot be combined with span-level direct-phoneme overrides. Ambiguous overlappi
+ direct overrides are rejected. Offsets refer to the exact prepared request string, not
+ an earlier source file or markup document.
+
++## Character say-as spans
++
++`SayAsSpan` requests character-by-character reading for an exact, half-open range in the
++prepared request text. For example, PyKokoro may send `A- R- T` to KokoroG2P for the
++marked canonical text `A R T`; the caller's text is not rewritten:
++
++```python
++from pykokoro import SayAsSpan, SynthesisSegment
++
++text = "Because someone called A R T."
++start = text.index("A R T")
++request = SynthesisSegment(
++    id="character-say-as",
++    text=text,
++    language="en-us",
++    say_as=(SayAsSpan(start, start + len("A R T"), interpret_as="characters"),),
++)
++```
++
++Only explicitly marked spans are transformed, and `characters` is the supported
++interpretation. Request/result text, source alignment, and word-timing offsets remain in
++the canonical text. The marked phrase stays inside the caller's request: say-as does not
++add requests or pauses. The normal token-capacity policy still applies; opt-in long-text
++splitting protects marked spans from being cut. `measure_request()` uses the same
++projected frontend as synthesis.
++
+ ## Caller-provided linguistic tokens
+
+ `LinguisticToken` supplies source-aligned POS, tag, lemma, morphology, and optional
+diff --git a/docs/api_reference.md b/docs/api_reference.md
+index fb53c84..914521a 100644
+--- a/docs/api_reference.md
++++ b/docs/api_reference.md
+@@ -14,6 +14,7 @@ from pykokoro import (
+     VoiceEnrollerSpec,
+     KokoroSynthesizer,
+     SynthesisConfig,
++    SayAsSpan,
+     SynthesisRequest,
+ )
+ ```
+@@ -24,7 +25,7 @@ from pykokoro import (
+ | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+ | Synthesis                 | `KokoroSynthesizer`, `SynthesisRequest`, `SynthesisSegment`, `RenderedSegment`                                                                                                                                                                                                                                                                                                      |
+ | Request measurement       | `RequestMeasure`, `KokoroSynthesizer.measure_request()`                                                                                                                                                                                                                                                                                                                             |
+-| Source context and timing | `PronunciationOverride`, `LinguisticToken`, `WordTiming`                                                                                                                                                                                                                                                                                                                            |
++| Source context and timing | `PronunciationOverride`, `LinguisticToken`, `SayAsSpan`, `WordTiming`                                                                                                                                                                                                                                                                                                               |
+ | Configuration             | `SynthesisConfig`, `GenerationConfig`, `LanguageRoutingConfig`, `TokenizerConfig`, `ShortSentenceConfig`, `LongTextSplitMode`                                                                                                                                                                                                                                                       |
+ | Voice level               | `VoiceLevelConfig`, `VoiceLevelApplication`, `VoiceBlend`                                                                                                                                                                                                                                                                                                                           |
+ | Voice enrollment          | `KokoroVoicePack`, `ReferenceVoice`, `InnoEnrollmentOptions`, `KokoroSynthesizer.enroll_voice()`                                                                                                                                                                                                                                                                                    |
+@@ -53,12 +54,13 @@ constructing an engine:
+ import pykokoro
+
+ contract = pykokoro.request_api_contract()
+-assert contract.version == pykokoro.REQUEST_API_VERSION == 1
++assert contract.version == pykokoro.REQUEST_API_VERSION == 2
+ assert contract.request_type == "SynthesisRequest"
+ assert contract.result_type == "RenderedSegment"
+ assert contract.measurement_method == "measure_request"
+ assert contract.voice_enrollment_method == "enroll_voice"
+ assert contract.supports_request_measurement and contract.supports_reference_voice
++assert contract.supports_say_as and contract.say_as_interpretations == ("characters",)
+ assert contract.supports_voice_enrollment
+ ```
+
+@@ -93,6 +95,11 @@ ONNX inference.
+ ## Requests, results, and source alignment
+
+ ```{eval-rst}
++.. autoclass:: pykokoro.SayAsSpan
++   :members:
++   :undoc-members:
++
++
+ .. autoclass:: pykokoro.SynthesisRequest
+    :members:
+    :undoc-members:
+@@ -124,10 +131,15 @@ Request language and voice are explicit. `PronunciationOverride` and `Linguistic
+ offsets are half-open character ranges into the exact `text` carried by that request;
+ `tokens` is the canonical `SynthesisRequest` field.
+
+-`RequestMeasure.amount` is the exact frontend token count. `maximum` is an optional
+-caller-provided limit, and `fits` is true when the amount is within that limit, false
+-when it exceeds it, and `None` when no limit was supplied. Measurement does not imply
+-that reference audio is valid or enrollment will succeed.
++`SayAsSpan` marks an exact half-open range in `SynthesisRequest.text`. The currently
++supported interpretation is `characters`; only marked spans are projected to KokoroG2P's
++shadow frontend (for example, canonical `A R T` may be sent as `A- R- T`). The request,
++prepared text, public alignment, and word timings stay on canonical text and offsets. A
++marked phrase remains inside the caller's request; say-as does not add pauses or itself
++split text. `RequestMeasure.amount` is the exact frontend token count. `maximum` is an
++optional caller-provided limit, and `fits` is true when the amount is within that limit,
++false when it exceeds it, and `None` when no limit was supplied. Measurement does not
++imply that reference audio is valid or enrollment will succeed.
+
+ `RenderedSegment` contains one request's waveform and metadata. `save_wav()` writes mono
+ float32 WAV audio. `play()` uses the optional playback dependency. Results from a batch
+diff --git a/pykokoro/__init__.py b/pykokoro/__init__.py
+index 35cfdc6..b19df13 100644
+--- a/pykokoro/__init__.py
++++ b/pykokoro/__init__.py
+@@ -57,6 +57,7 @@ from .synthesis_types import (
+     PronunciationOverride,
+     RenderedSegment,
+     RequestMeasure,
++    SayAsSpan,
+     SynthesisRequest,
+     SynthesisSegment,
+     VoiceConditioning,
+@@ -183,6 +184,7 @@ __all__ = [
+     "RequestMeasure",
+     "RenderedSegment",
+     "PronunciationOverride",
++    "SayAsSpan",
+     "LinguisticToken",
+     "VoiceConditioning",
+     "WordTiming",
+diff --git a/pykokoro/api_contract.py b/pykokoro/api_contract.py
+index 873a459..f1d50b3 100644
+--- a/pykokoro/api_contract.py
++++ b/pykokoro/api_contract.py
+@@ -4,7 +4,7 @@ from __future__ import annotations
+
+ from dataclasses import dataclass
+
+-REQUEST_API_VERSION = 1
++REQUEST_API_VERSION = 2
+
+
+ @dataclass(frozen=True, slots=True)
+@@ -29,6 +29,8 @@ class RequestApiContract:
+     supports_request_measurement: bool = False
+     supports_reference_voice: bool = False
+     supports_voice_enrollment: bool = False
++    supports_say_as: bool = False
++    say_as_interpretations: tuple[str, ...] = ()
+
+
+ def request_api_contract() -> RequestApiContract:
+@@ -51,4 +53,6 @@ def request_api_contract() -> RequestApiContract:
+         supports_request_measurement=True,
+         supports_reference_voice=True,
+         supports_voice_enrollment=True,
++        supports_say_as=True,
++        say_as_interpretations=("characters",),
+     )
+diff --git a/pykokoro/frontend_projection.py b/pykokoro/frontend_projection.py
+new file mode 100644
+index 0000000..993fe0d
+--- /dev/null
++++ b/pykokoro/frontend_projection.py
+@@ -0,0 +1,318 @@
++"""Kokoro-only projection from canonical request text to frontend text."""
++
++from __future__ import annotations
++
++import re
++from collections.abc import Sequence
++from dataclasses import dataclass
++from typing import Literal, cast
++
++from .exceptions import InvalidRequestError, UnsupportedFeatureError
++from .synthesis_types import SayAsSpan
++
++BoundaryBias = Literal["left", "right"]
++_CHARACTER = re.compile(r"[A-Za-z0-9]")
++_COMPACT_CHARACTERS = re.compile(r"[A-Za-z0-9]{2,}")
++_SPACED_CHARACTERS = re.compile(r"[A-Za-z0-9](?:\s+[A-Za-z0-9])+")
++
++
++@dataclass(frozen=True, slots=True)
++class FrontendTextProjection:
++    """Canonical and Kokoro frontend text plus deterministic span mappings."""
++
++    canonical_text: str
++    frontend_text: str
++    _canonical_left: tuple[int, ...]
++    _canonical_right: tuple[int, ...]
++    _frontend_left: tuple[int, ...]
++    _frontend_right: tuple[int, ...]
++
++    def map_canonical_span(
++        self,
++        start: int,
++        end: int,
++        *,
++        start_bias: BoundaryBias = "right",
++        end_bias: BoundaryBias = "left",
++    ) -> tuple[int, int]:
++        """Map canonical boundaries, choosing explicitly how to include insertions."""
++        _validate_span(start, end, len(self.canonical_text), "canonical")
++        _validate_bias(start_bias)
++        _validate_bias(end_bias)
++        frontend_start = _boundary_value(
++            self._canonical_left, self._canonical_right, start, start_bias
++        )
++        frontend_end = _boundary_value(self._canonical_left, self._canonical_right, end, end_bias)
++        return frontend_start, max(frontend_start, frontend_end)
++
++    def map_frontend_span(
++        self,
++        start: int,
++        end: int,
++        *,
++        start_bias: BoundaryBias = "left",
++        end_bias: BoundaryBias = "right",
++    ) -> tuple[int, int]:
++        """Map frontend boundaries back to canonical text with explicit boundary bias."""
++        _validate_span(start, end, len(self.frontend_text), "frontend")
++        _validate_bias(start_bias)
++        _validate_bias(end_bias)
++        canonical_start = _boundary_value(
++            self._frontend_left, self._frontend_right, start, start_bias
++        )
++        canonical_end = _boundary_value(self._frontend_left, self._frontend_right, end, end_bias)
++        return canonical_start, max(canonical_start, canonical_end)
++
++
++def project_frontend_text(
++    canonical_text: str,
++    say_as: Sequence[object] = (),
++) -> FrontendTextProjection:
++    """Project marked character spans into the frontend syntax understood by Kokoro."""
++    if not isinstance(canonical_text, str):
++        raise InvalidRequestError("canonical text must be a string")
++    if not isinstance(say_as, (tuple, list)):
++        raise InvalidRequestError("say_as must be a tuple or list of SayAsSpan values")
++
++    raw_spans = tuple(say_as)
++    spans: list[SayAsSpan] = []
++    previous: SayAsSpan | None = None
++    for index, candidate in enumerate(raw_spans):
++        if not isinstance(candidate, SayAsSpan):
++            raise InvalidRequestError("say_as must contain SayAsSpan values")
++        span = cast(SayAsSpan, candidate)
++        _validate_span(span.start, span.end, len(canonical_text), f"say_as[{index}]")
++        if previous is not None:
++            if (span.start, span.end) < (previous.start, previous.end):
++                raise InvalidRequestError("say_as spans must be sorted by (start, end)")
++            if span.start < previous.end:
++                raise InvalidRequestError("overlapping say_as spans are ambiguous")
++        if span.interpret_as != "characters":
++            raise UnsupportedFeatureError(
++                f"say_as interpretation {span.interpret_as!r} is not supported"
++            )
++        spans.append(span)
++        previous = span
++
++    frontend_parts: list[str] = []
++    canonical_left: list[int | None] = [None] * (len(canonical_text) + 1)
++    canonical_right: list[int | None] = [None] * (len(canonical_text) + 1)
++    frontend_left: list[int] = []
++    frontend_right: list[int] = []
++    canonical_cursor = 0
++    frontend_cursor = 0
++
++    for span in spans:
++        if canonical_cursor < span.start:
++            piece = canonical_text[canonical_cursor : span.start]
++            local_frontier = list(range(len(piece) + 1))
++            _append_piece(
++                piece,
++                canonical_cursor,
++                frontend_cursor,
++                local_frontier,
++                local_frontier,
++                frontend_parts,
++                canonical_left,
++                canonical_right,
++                frontend_left,
++                frontend_right,
++            )
++            frontend_cursor += len(piece)
++
++        surface = canonical_text[span.start : span.end]
++        frontend, local_canonical_left, local_canonical_right, local_frontend = (
++            _project_character_surface(surface, span.start)
++        )
++        _append_piece(
++            frontend,
++            span.start,
++            frontend_cursor,
++            local_canonical_left,
++            local_canonical_right,
++            frontend_parts,
++            canonical_left,
++            canonical_right,
++            frontend_left,
++            frontend_right,
++            frontend_to_canonical=local_frontend,
++        )
++        frontend_cursor += len(frontend)
++        canonical_cursor = span.end
++
++    if canonical_cursor < len(canonical_text):
++        piece = canonical_text[canonical_cursor:]
++        local_frontier = list(range(len(piece) + 1))
++        _append_piece(
++            piece,
++            canonical_cursor,
++            frontend_cursor,
++            local_frontier,
++            local_frontier,
++            frontend_parts,
++            canonical_left,
++            canonical_right,
++            frontend_left,
++            frontend_right,
++        )
++        frontend_cursor += len(piece)
++    elif not spans:
++        local_frontier = list(range(len(canonical_text) + 1))
++        _append_piece(
++            canonical_text,
++            0,
++            0,
++            local_frontier,
++            local_frontier,
++            frontend_parts,
++            canonical_left,
++            canonical_right,
++            frontend_left,
++            frontend_right,
++        )
++        frontend_cursor = len(canonical_text)
++
++    if any(value is None for value in (*canonical_left, *canonical_right)):
++        raise RuntimeError("canonical-to-frontend projection left an unmapped boundary")
++    if len(frontend_left) != frontend_cursor + 1 or len(frontend_right) != frontend_cursor + 1:
++        raise RuntimeError("frontend-to-canonical projection left an unmapped boundary")
++
++    return FrontendTextProjection(
++        canonical_text=canonical_text,
++        frontend_text="".join(frontend_parts),
++        _canonical_left=tuple(value for value in canonical_left if value is not None),
++        _canonical_right=tuple(value for value in canonical_right if value is not None),
++        _frontend_left=tuple(frontend_left),
++        _frontend_right=tuple(frontend_right),
++    )
++
++
++def _append_piece(
++    frontend: str,
++    canonical_start: int,
++    frontend_start: int,
++    canonical_to_frontend_left: list[int],
++    canonical_to_frontend_right: list[int],
++    frontend_parts: list[str],
++    canonical_left: list[int | None],
++    canonical_right: list[int | None],
++    frontend_left: list[int],
++    frontend_right: list[int],
++    *,
++    frontend_to_canonical: list[int] | None = None,
++) -> None:
++    frontend_parts.append(frontend)
++    for local, (left, right) in enumerate(
++        zip(canonical_to_frontend_left, canonical_to_frontend_right, strict=True)
++    ):
++        index = canonical_start + local
++        canonical_left[index] = frontend_start + left
++        canonical_right[index] = frontend_start + right
++
++    if frontend_to_canonical is None:
++        frontend_to_canonical = list(range(canonical_start, canonical_start + len(frontend) + 1))
++    if len(frontend_to_canonical) != len(frontend) + 1:
++        raise RuntimeError("projection piece has invalid frontend boundary mapping")
++    piece_left = frontend_to_canonical
++    piece_right = frontend_to_canonical
++    if not frontend_left:
++        frontend_left.extend(piece_left)
++        frontend_right.extend(piece_right)
++        return
++    if frontend_left[-1] != piece_left[0] or frontend_right[-1] != piece_right[0]:
++        raise RuntimeError("projection pieces disagree at their shared boundary")
++    frontend_left.extend(piece_left[1:])
++    frontend_right.extend(piece_right[1:])
++
++
++def _project_character_surface(
++    surface: str,
++    canonical_start: int,
++) -> tuple[str, list[int], list[int], list[int]]:
++    if not (_COMPACT_CHARACTERS.fullmatch(surface) or _SPACED_CHARACTERS.fullmatch(surface)):
++        raise InvalidRequestError(
++            f"say_as characters span has unsupported surface {surface!r}; "
++            "use at least two ASCII letters or digits, compact or whitespace-separated"
++        )
++
++    matches = tuple(_CHARACTER.finditer(surface))
++    if len(matches) < 2:
++        raise InvalidRequestError("say_as characters spans must contain at least two characters")
++    characters = [match.group() for match in matches]
++    frontend = "- ".join(characters)
++    canonical_left: list[int | None] = [None] * (len(surface) + 1)
++    canonical_right: list[int | None] = [None] * (len(surface) + 1)
++    frontend_to_canonical: list[int | None] = [None] * (len(frontend) + 1)
++    output_cursor = 0
++
++    for index, match in enumerate(matches):
++        source_start = match.start()
++        source_end = match.end()
++        canonical_boundary_start = canonical_start + source_start
++        canonical_boundary_end = canonical_start + source_end
++        if canonical_left[source_start] is None:
++            canonical_left[source_start] = output_cursor
++        canonical_right[source_start] = output_cursor
++        frontend_to_canonical[output_cursor] = canonical_boundary_start
++        output_cursor += 1
++        canonical_left[source_end] = output_cursor
++        canonical_right[source_end] = output_cursor
++        frontend_to_canonical[output_cursor] = canonical_boundary_end
++
++        if index + 1 < len(matches):
++            next_match = matches[index + 1]
++            next_start = next_match.start()
++            separator_start = output_cursor
++            if source_end == next_start:
++                canonical_left[source_end] = separator_start
++                canonical_right[source_end] = separator_start + 2
++            else:
++                for boundary in range(source_end, next_start):
++                    canonical_left[boundary] = separator_start
++                    canonical_right[boundary] = separator_start + 2
++                canonical_left[next_start] = separator_start + 2
++                canonical_right[next_start] = separator_start + 2
++            frontend_to_canonical[separator_start] = canonical_boundary_end
++            frontend_to_canonical[separator_start + 1] = canonical_boundary_end
++            frontend_to_canonical[separator_start + 2] = canonical_start + next_start
++            output_cursor += 2
++
++    canonical_left[0] = 0
++    canonical_right[0] = 0
++    canonical_left[-1] = len(frontend)
++    canonical_right[-1] = len(frontend)
++    if any(value is None for value in (*canonical_left, *canonical_right)):
++        raise RuntimeError("character projection left a canonical boundary unmapped")
++    if any(value is None for value in frontend_to_canonical):
++        raise RuntimeError("character projection left a frontend boundary unmapped")
++    return (
++        frontend,
++        [value for value in canonical_left if value is not None],
++        [value for value in canonical_right if value is not None],
++        [value for value in frontend_to_canonical if value is not None],
++    )
++
++
++def _validate_span(start: int, end: int, length: int, label: str) -> None:
++    if isinstance(start, bool) or not isinstance(start, int):
++        raise InvalidRequestError(f"{label} start must be an integer")
++    if isinstance(end, bool) or not isinstance(end, int):
++        raise InvalidRequestError(f"{label} end must be an integer")
++    if not 0 <= start <= end <= length:
++        raise InvalidRequestError(
++            f"{label} span must satisfy 0 <= start <= end <= {length}, got [{start}, {end})"
++        )
++
++
++def _validate_bias(bias: BoundaryBias) -> None:
++    if bias not in ("left", "right"):
++        raise InvalidRequestError("span boundary bias must be 'left' or 'right'")
++
++
++def _boundary_value(
++    left_values: tuple[int, ...],
++    right_values: tuple[int, ...],
++    boundary: int,
++    bias: BoundaryBias,
++) -> int:
++    return left_values[boundary] if bias == "left" else right_values[boundary]
+diff --git a/pykokoro/prepared_g2p.py b/pykokoro/prepared_g2p.py
+index 42184ce..cb3f3ec 100644
+--- a/pykokoro/prepared_g2p.py
++++ b/pykokoro/prepared_g2p.py
+@@ -4,13 +4,15 @@ from __future__ import annotations
+
+ import threading
+ from collections.abc import Mapping
+-from dataclasses import dataclass
++from dataclasses import dataclass, replace
+ from typing import Any
+
+ from kokorog2p import OverrideSpan, TokenAnnotation
+
+ from .constants import SUPPORTED_LANGUAGES
++from .exceptions import AlignmentError
+ from .frontend_contracts import require_frontend
++from .frontend_projection import FrontendTextProjection, project_frontend_text
+ from .lexicon_data import create_g2p_with_lexphon_retry
+ from .model_profiles import get_model_profile
+ from .synthesis_config import SynthesisConfig
+@@ -48,6 +50,7 @@ class PreparedG2PAdapter:
+
+     def phonemize(self, segment: SynthesisSegment, config: SynthesisConfig) -> PreparedSynthesis:
+         g2p_module = self._load()
++        projection = project_frontend_text(segment.text, segment.say_as)
+         target_model, profile = self._model_target(config)
+         tokenizer_config = config.tokenizer_config or TokenizerConfig()
+         if profile is not None:
+@@ -60,8 +63,10 @@ class PreparedG2PAdapter:
+             profile,
+             use_spacy=False if segment.tokens else None,
+         )
+-        overrides = tuple(self._to_override(item) for item in segment.pronunciation_overrides)
+-        annotations = tuple(self._to_annotation(item) for item in segment.tokens)
++        overrides = tuple(
++            self._to_override(item, projection) for item in segment.pronunciation_overrides
++        )
++        annotations = tuple(self._to_annotation(item, projection) for item in segment.tokens)
+         routing = config.language_routing
+         language_routing = (
+             None
+@@ -76,7 +81,7 @@ class PreparedG2PAdapter:
+             warnings: tuple[str, ...] = ()
+         else:
+             result = g2p_module.phonemize_prepared(
+-                segment.text,
++                projection.frontend_text,
+                 language=language,
+                 overrides=overrides or None,
+                 annotations=annotations or None,
+@@ -104,7 +109,10 @@ class PreparedG2PAdapter:
+             warnings = tuple(str(item) for item in getattr(result, "warnings", ()) or ())
+
+         alignments = tuple(
+-            self._alignment_token(token, g2p_module, target_model) for token in raw_tokens
++            self._map_alignment_to_canonical(
++                self._alignment_token(token, g2p_module, target_model), projection, segment.text
++            )
++            for token in raw_tokens
+         )
+         return PreparedSynthesis(
+             request_id=segment.id,
+@@ -148,20 +156,27 @@ class PreparedG2PAdapter:
+         )
+
+     @staticmethod
+-    def _to_override(value: PronunciationOverride) -> OverrideSpan:
++    def _to_override(
++        value: PronunciationOverride, projection: FrontendTextProjection
++    ) -> OverrideSpan:
+         attrs: dict[str, str] = {}
+         if value.phonemes is not None:
+             attrs["ph"] = value.phonemes
+         if value.language is not None:
+             attrs["lang"] = value.language
+-        return OverrideSpan(char_start=value.start, char_end=value.end, attrs=attrs)
++        start, end = projection.map_canonical_span(value.start, value.end)
++        return OverrideSpan(char_start=start, char_end=end, attrs=attrs)
+
+     @staticmethod
+-    def _to_annotation(value: LinguisticToken) -> TokenAnnotation:
++    def _to_annotation(
++        value: LinguisticToken, projection: FrontendTextProjection
++    ) -> TokenAnnotation:
++        start, end = projection.map_canonical_span(value.start, value.end)
++        text = projection.frontend_text[start:end] if value.text is not None else None
+         return TokenAnnotation(
+-            start=value.start,
+-            end=value.end,
+-            text=value.text,
++            start=start,
++            end=end,
++            text=text,
+             pos=value.pos,
+             tag=value.tag,
+             lemma=value.lemma,
+@@ -242,6 +257,30 @@ class PreparedG2PAdapter:
+             pronunciation_source_details=pronunciation_source_details,
+         )
+
++    @staticmethod
++    def _map_alignment_to_canonical(
++        alignment: G2PAlignmentToken,
++        projection: FrontendTextProjection,
++        canonical_text: str,
++    ) -> G2PAlignmentToken:
++        if projection.frontend_text == projection.canonical_text:
++            return alignment
++        char_start = alignment.char_start
++        char_end = alignment.char_end
++        if char_start is None or char_end is None:
++            if projection.frontend_text != projection.canonical_text and alignment.text:
++                raise AlignmentError(
++                    "KokoroG2P alignment lacks character offsets for projected frontend text"
++                )
++            return alignment
++        canonical_start, canonical_end = projection.map_frontend_span(char_start, char_end)
++        return replace(
++            alignment,
++            text=canonical_text[canonical_start:canonical_end],
++            char_start=canonical_start,
++            char_end=canonical_end,
++        )
++
+     def _load(self) -> Any:
+         if self._g2p_module is None:
+             import kokorog2p
+diff --git a/pykokoro/request_renderer.py b/pykokoro/request_renderer.py
+index be8c452..5dcb959 100644
+--- a/pykokoro/request_renderer.py
++++ b/pykokoro/request_renderer.py
+@@ -14,10 +14,12 @@ from ._error_utils import backend_error_from_exception
+ from .exceptions import (
+     BackendError,
+     ConfigurationError,
++    InvalidRequestError,
+     InvalidVoiceError,
+     PyKokoroError,
+     SynthesisInputTooLongError,
+ )
++from .frontend_projection import project_frontend_text
+ from .model_profiles import get_model_profile
+
+ if TYPE_CHECKING:
+@@ -91,7 +93,10 @@ class OnnxRequestRenderer:
+     ) -> RenderedSegment:
+         resolved = resolve_synthesis_config(config, language=request.language, voice=request.voice)
+         identity = build_synthesis_identity(
+-            resolved, language=request.language, voice=resolved.voice
++            resolved,
++            language=request.language,
++            voice=resolved.voice,
++            say_as=request.say_as,
+         )
+         profile = get_model_profile(
+             resolved.model_variant or "v1.0", resolved.model_source or "github"
+@@ -109,6 +114,20 @@ class OnnxRequestRenderer:
+                 raise ConfigurationError("reference voice synthesis requires speed=1.0")
+         trace = Trace() if resolved.return_trace else None
+         if trace is not None:
++            if request.say_as:
++                projection = project_frontend_text(request.text, request.say_as)
++                trace.frontend["say_as"] = [
++                    {
++                        "start": span.start,
++                        "end": span.end,
++                        "interpret_as": span.interpret_as,
++                        "canonical": request.text[span.start : span.end],
++                        "frontend": projection.frontend_text[
++                            slice(*projection.map_canonical_span(span.start, span.end))
++                        ],
++                    }
++                    for span in request.say_as
++                ]
+             trace.model.update(
+                 {
+                     "model_source": resolved.model_source,
+@@ -581,6 +600,12 @@ class OnnxRequestRenderer:
+             for override in request.pronunciation_overrides
+             if override.start < end and override.end > start
+         )
++        say_as = []
++        for span in request.say_as:
++            if span.start >= start and span.end <= end:
++                say_as.append(replace(span, start=span.start - start, end=span.end - start))
++            elif span.start < end and span.end > start:
++                raise InvalidRequestError("long-text child span cuts through a say_as span")
+         tokens = tuple(
+             replace(
+                 token,
+@@ -598,6 +623,7 @@ class OnnxRequestRenderer:
+             voice=request.voice,
+             pronunciation_overrides=overrides,
+             tokens=tokens,
++            say_as=tuple(say_as),
+         )
+         return self._g2p_adapter.phonemize(child_request, config)
+
+@@ -631,7 +657,7 @@ class OnnxRequestRenderer:
+             spans.append((start + cursor, end))
+         if not spans:
+             spans.append((start, end))
+-        return self._merge_override_boundaries(spans, request)
++        return self._merge_protected_boundaries(spans, request)
+
+     @staticmethod
+     def _word_source_spans(
+@@ -648,21 +674,24 @@ class OnnxRequestRenderer:
+             spans.append((start + cursor, end))
+         if not spans:
+             spans.append((start, end))
+-        return OnnxRequestRenderer._merge_override_boundaries(spans, request)
++        return OnnxRequestRenderer._merge_protected_boundaries(spans, request)
+
+     @staticmethod
+-    def _merge_override_boundaries(
++    def _merge_protected_boundaries(
+         spans: list[tuple[int, int]], request: SynthesisSegment
+     ) -> list[tuple[int, int]]:
+         merged: list[tuple[int, int]] = []
+         for start, end in spans:
+-            if merged and any(
+-                override.phonemes is not None and override.start < merged[-1][1] < override.end
+-                for override in request.pronunciation_overrides
+-            ):
+-                merged[-1] = (merged[-1][0], end)
+-            else:
+-                merged.append((start, end))
++            if merged:
++                boundary = merged[-1][1]
++                protected = any(
++                    override.phonemes is not None and override.start < boundary < override.end
++                    for override in request.pronunciation_overrides
++                ) or any(span.start < boundary < span.end for span in request.say_as)
++                if protected:
++                    merged[-1] = (merged[-1][0], end)
++                    continue
++            merged.append((start, end))
+         return merged
+
+     @staticmethod
+diff --git a/pykokoro/synthesis_identity.py b/pykokoro/synthesis_identity.py
+index f94d11c..0e6dccd 100644
+--- a/pykokoro/synthesis_identity.py
++++ b/pykokoro/synthesis_identity.py
+@@ -7,7 +7,7 @@ import json
+ from collections.abc import Mapping
+ from dataclasses import asdict, dataclass, is_dataclass
+ from pathlib import Path
+-from typing import Any
++from typing import TYPE_CHECKING, Any
+
+ from .reference_voice import ReferenceVoice
+ from .synthesis_config import SynthesisConfig
+@@ -15,6 +15,9 @@ from .voice_level import default_voice_calibration
+ from .voice_manager import VoiceBlend
+ from .voice_pack import KokoroVoicePack
+
++if TYPE_CHECKING:
++    from .synthesis_types import SayAsSpan
++
+
+ def _identity_value(value: Any) -> Any:
+     if is_dataclass(value):
+@@ -69,6 +72,7 @@ class SynthesisIdentity:
+     voice_level_gain_db: float | None
+     calibration_dataset: str | None
+     calibration_sha256: str | None
++    say_as: tuple[tuple[int, int, str, str | None, str | None], ...] = ()
+
+     def to_dict(self) -> dict[str, Any]:
+         """Return a JSON-safe representation without transient filesystem paths."""
+@@ -85,6 +89,7 @@ def build_synthesis_identity(
+     *,
+     language: str,
+     voice: str | VoiceBlend | KokoroVoicePack | ReferenceVoice | None,
++    say_as: tuple[SayAsSpan, ...] = (),
+ ) -> SynthesisIdentity:
+     """Build a stable identity from resolved settings that can affect output."""
+     from . import __version__
+@@ -126,6 +131,9 @@ def build_synthesis_identity(
+     model_id = config.model_identity or ":".join(
+         str(value) for value in (config.model_source, config.model_variant, config.model_quality)
+     )
++    say_as_identity = tuple(
++        (span.start, span.end, span.interpret_as, span.format, span.detail) for span in say_as
++    )
+
+     calibration_dataset = None
+     calibration_sha256 = None
+@@ -163,4 +171,5 @@ def build_synthesis_identity(
+         ),
+         calibration_dataset=calibration_dataset,
+         calibration_sha256=calibration_sha256,
++        say_as=say_as_identity,
+     )
+diff --git a/pykokoro/synthesis_types.py b/pykokoro/synthesis_types.py
+index 7ed94b7..94207b3 100644
+--- a/pykokoro/synthesis_types.py
++++ b/pykokoro/synthesis_types.py
+@@ -57,6 +57,33 @@ def _normalize_language(language: str, label: str) -> str:
+     return normalized
+
+
++@dataclass(frozen=True, slots=True)
++class SayAsSpan:
++    """Source-aligned text interpretation requested by the caller."""
++
++    start: int
++    end: int
++    interpret_as: str
++    format: str | None = None
++    detail: str | None = None
++
++    def __post_init__(self) -> None:
++        for name in ("start", "end"):
++            value = getattr(self, name)
++            if isinstance(value, bool) or not isinstance(value, int):
++                raise InvalidRequestError(f"say_as {name} must be an integer")
++        if not 0 <= self.start < self.end:
++            raise InvalidRequestError(
++                f"say_as offsets must satisfy 0 <= start < end, got [{self.start}, {self.end})"
++            )
++        if not isinstance(self.interpret_as, str) or not self.interpret_as.strip():
++            raise InvalidRequestError("say_as interpret_as must be a non-empty string")
++        for name in ("format", "detail"):
++            value = getattr(self, name)
++            if value is not None and (not isinstance(value, str) or not value.strip()):
++                raise InvalidRequestError(f"say_as {name} must be a non-empty string or None")
++
++
+ @dataclass(frozen=True, slots=True)
+ class RequestMeasure:
+     """Frontend measurement of one request, expressed in model tokens."""
+@@ -153,6 +180,7 @@ class SynthesisRequest:
+     pronunciation_overrides: tuple[PronunciationOverride, ...]
+     tokens: tuple[LinguisticToken, ...]
+     phonemes: str | None
++    say_as: tuple[SayAsSpan, ...]
+
+     def __init__(
+         self,
+@@ -166,7 +194,10 @@ class SynthesisRequest:
+         phonemes: str | None = None,
+         *,
+         tokens: tuple[LinguisticToken, ...] | list[LinguisticToken] | None = None,
++        say_as: tuple[SayAsSpan, ...] | list[SayAsSpan] = (),
+     ) -> None:
++        if not isinstance(say_as, (tuple, list)):
++            raise InvalidRequestError("say_as must be a tuple or list of SayAsSpan values")
+         if tokens is not None and annotations is not None and tuple(tokens) != tuple(annotations):
+             raise InvalidLinguisticTokensError(
+                 "tokens and legacy annotations cannot provide different values"
+@@ -179,6 +210,7 @@ class SynthesisRequest:
+         object.__setattr__(self, "pronunciation_overrides", tuple(pronunciation_overrides))
+         object.__setattr__(self, "tokens", tuple(request_tokens))
+         object.__setattr__(self, "phonemes", phonemes)
++        object.__setattr__(self, "say_as", tuple(say_as))
+         self.__post_init__()
+
+     @property
+@@ -215,6 +247,28 @@ class SynthesisRequest:
+             )
+         if any(not isinstance(item, LinguisticToken) for item in tokens):
+             raise InvalidLinguisticTokensError("tokens must contain LinguisticToken values")
++        say_as = self.say_as
++        if any(not isinstance(item, SayAsSpan) for item in say_as):
++            raise InvalidRequestError("say_as must contain SayAsSpan values")
++        previous_say_as: SayAsSpan | None = None
++        for index, span in enumerate(say_as):
++            _validate_offset(
++                span.start,
++                span.end,
++                len(self.text),
++                f"say_as[{index}]",
++                InvalidRequestError,
++            )
++            if previous_say_as is not None:
++                if (span.start, span.end) < (previous_say_as.start, previous_say_as.end):
++                    raise InvalidRequestError("say_as spans must be sorted by (start, end)")
++                if span.start < previous_say_as.end:
++                    raise InvalidRequestError("overlapping say_as spans are ambiguous")
++            previous_say_as = span
++        if self.phonemes is not None and say_as:
++            raise InvalidPronunciationError(
++                "whole-request phonemes cannot be combined with say_as spans"
++            )
+
+         for index, override in enumerate(overrides):
+             _validate_offset(
+@@ -224,6 +278,11 @@ class SynthesisRequest:
+                 f"override[{index}]",
+                 InvalidPronunciationError,
+             )
++        for override in overrides:
++            if any(override.start < span.end and span.start < override.end for span in say_as):
++                raise InvalidPronunciationError(
++                    "pronunciation overrides cannot overlap say_as spans"
++                )
+         direct_overrides = sorted(
+             (item for item in overrides if item.phonemes is not None), key=lambda item: item.start
+         )
+diff --git a/pykokoro/types.py b/pykokoro/types.py
+index 468d28b..80d4247 100644
+--- a/pykokoro/types.py
++++ b/pykokoro/types.py
+@@ -221,6 +221,7 @@ class Trace:
+     inference: list[dict[str, Any]] = field(default_factory=list)
+     model: dict[str, Any] = field(default_factory=dict)
+     counters: dict[str, int] = field(default_factory=dict)
++    frontend: dict[str, Any] = field(default_factory=dict)
+
+     def increment_counter(self, name: str, amount: int = 1) -> None:
+         """Increment a named trace counter."""
+diff --git a/tests/test_frontend_projection.py b/tests/test_frontend_projection.py
+new file mode 100644
+index 0000000..684aa36
+--- /dev/null
++++ b/tests/test_frontend_projection.py
+@@ -0,0 +1,77 @@
++from __future__ import annotations
++
++from typing import Any, cast
++
++import pytest
++
++from pykokoro.exceptions import InvalidRequestError, UnsupportedFeatureError
++from pykokoro.frontend_projection import project_frontend_text
++from pykokoro.synthesis_types import SayAsSpan
++
++
++def _span(text: str, surface: str) -> SayAsSpan:
++    start = text.index(surface)
++    return SayAsSpan(start, start + len(surface), "characters")
++
++
++def test_projection_handles_compact_spaced_and_digit_sequences() -> None:
++    compact = project_frontend_text("ART", (SayAsSpan(0, 3, "characters"),))
++    spaced = project_frontend_text("A R T", (SayAsSpan(0, 5, "characters"),))
++    digits = project_frontend_text("R2D2", (SayAsSpan(0, 4, "characters"),))
++
++    assert compact.frontend_text == "A- R- T"
++    assert spaced.frontend_text == "A- R- T"
++    assert digits.frontend_text == "R- 2- D- 2"
++    assert compact.map_canonical_span(0, 3) == (0, 7)
++    assert spaced.map_canonical_span(0, 5) == (0, 7)
++    assert compact.map_canonical_span(1, 2) == (3, 4)
++    assert compact.map_frontend_span(0, 7) == (0, 3)
++
++
++def test_projection_preserves_possessive_suffixes_and_unmarked_text() -> None:
++    straight = "A R T's house is nice."
++    curly = "A R T’s house is nice."
++
++    projected_straight = project_frontend_text(straight, (_span(straight, "A R T"),))
++    projected_curly = project_frontend_text(curly, (_span(curly, "A R T"),))
++
++    assert projected_straight.frontend_text == "A- R- T's house is nice."
++    assert projected_curly.frontend_text == "A- R- T’s house is nice."
++    assert "T-'" not in projected_straight.frontend_text
++    assert "T-’" not in projected_curly.frontend_text
++    assert projected_straight.canonical_text == straight
++
++
++def test_projection_composes_multiple_spans_and_maps_cumulative_offsets() -> None:
++    text = "A R T met U S A."
++    first = _span(text, "A R T")
++    second = _span(text, "U S A")
++    projection = project_frontend_text(text, (first, second))
++
++    assert projection.frontend_text == "A- R- T met U- S- A."
++    assert projection.map_canonical_span(first.start, first.end) == (0, 7)
++    second_frontend = projection.map_canonical_span(second.start, second.end)
++    assert projection.frontend_text[slice(*second_frontend)] == "U- S- A"
++    assert projection.map_frontend_span(*second_frontend) == (second.start, second.end)
++
++
++@pytest.mark.parametrize(
++    "surface",
++    ["A&B", "A / B", "A-B", "A, B", "one two", "A R word", "A"],
++)
++def test_projection_rejects_unsupported_character_surfaces(surface: str) -> None:
++    projection_span = SayAsSpan(0, len(surface), "characters")
++
++    with pytest.raises(InvalidRequestError, match="unsupported surface|at least two"):
++        project_frontend_text(surface, (projection_span,))
++
++
++def test_projection_rejects_unsupported_interpretations_and_invalid_boundaries() -> None:
++    with pytest.raises(UnsupportedFeatureError, match="not supported"):
++        project_frontend_text("ART", (SayAsSpan(0, 3, "date"),))
++
++    projection = project_frontend_text("A R T", (SayAsSpan(0, 5, "characters"),))
++    with pytest.raises(InvalidRequestError, match="frontend span"):
++        projection.map_frontend_span(0, 8)
++    with pytest.raises(InvalidRequestError, match="boundary bias"):
++        projection.map_canonical_span(0, 1, start_bias=cast(Any, "middle"))
+diff --git a/tests/test_long_text_splitting.py b/tests/test_long_text_splitting.py
+index b18538a..4e5e539 100644
+--- a/tests/test_long_text_splitting.py
++++ b/tests/test_long_text_splitting.py
+@@ -9,10 +9,16 @@ import numpy as np
+ import pytest
+
+ from pykokoro import SynthesisInputTooLongError
++from pykokoro.exceptions import InvalidRequestError
+ from pykokoro.prepared_g2p import PreparedSynthesis
+ from pykokoro.request_renderer import OnnxRequestRenderer
+ from pykokoro.synthesis_config import SynthesisConfig
+-from pykokoro.synthesis_types import LinguisticToken, PronunciationOverride, SynthesisSegment
++from pykokoro.synthesis_types import (
++    LinguisticToken,
++    PronunciationOverride,
++    SayAsSpan,
++    SynthesisSegment,
++)
+ from pykokoro.types import G2PAlignmentToken, PhonemeSegment, Trace, WordTiming
+
+
+@@ -279,6 +285,47 @@ def test_sentence_mode_rebases_pronunciation_overrides_and_annotations() -> None
+     )
+
+
++def test_sentence_mode_protects_and_rebases_say_as_spans(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    text = "ART one two three"
++    say_as = (SayAsSpan(0, 3, "characters"),)
++    request = _request(text, say_as=say_as)
++    renderer = FakeRenderer()
++
++    def split_source_spans(self, request, config, *, start, end, mode):
++        assert mode == "sentence"
++        return self._merge_protected_boundaries([(start, 2), (2, 8), (8, end)], request)
++
++    monkeypatch.setattr(OnnxRequestRenderer, "_split_source_spans", split_source_spans)
++    segments = renderer._build_phoneme_segments(
++        request,
++        _prepared(text, 5),
++        _config(long_text_split="sentence"),
++        max_tokens=2,
++    )
++
++    assert [(segment.char_start, segment.char_end) for segment in segments] == [
++        (0, 8),
++        (8, len(text)),
++    ]
++    assert [(child.text, child.say_as) for child in renderer.g2p_adapter.phonemized_segments] == [
++        ("ART one ", (SayAsSpan(0, 3, "characters"),)),
++        ("two three", ()),
++        (text, say_as),
++    ]
++    assert "".join(segment.text for segment in segments) == text
++
++
++def test_phonemize_child_rejects_partial_say_as_intersections() -> None:
++    text = "ART now"
++    request = _request(text, say_as=(SayAsSpan(0, 3, "characters"),))
++    renderer = FakeRenderer()
++
++    with pytest.raises(InvalidRequestError, match="cuts through a say_as span"):
++        renderer._phonemize_source_span(request, _config(), start=0, end=2)
++
++
+ def test_sentence_mode_long_sentence_falls_back_to_word_boundaries() -> None:
+     text = "one two three four five"
+     request = _request(text)
+diff --git a/tests/test_prepared_g2p_adapter.py b/tests/test_prepared_g2p_adapter.py
+index 5486e7a..535d0ae 100644
+--- a/tests/test_prepared_g2p_adapter.py
++++ b/tests/test_prepared_g2p_adapter.py
+@@ -11,7 +11,13 @@ from pykokoro import G2LexFileRef
+ from pykokoro.language_routing import LanguageRoutingConfig
+ from pykokoro.prepared_g2p import PreparedG2PAdapter
+ from pykokoro.synthesis_config import SynthesisConfig
+-from pykokoro.synthesis_types import LinguisticToken, PronunciationOverride, SynthesisSegment
++from pykokoro.synthesis_types import (
++    LinguisticToken,
++    PronunciationOverride,
++    SayAsSpan,
++    SynthesisRequest,
++    SynthesisSegment,
++)
+ from pykokoro.tokenizer import TokenizerConfig
+
+
+@@ -54,6 +60,23 @@ class FakeKokoroG2P:
+         return [ord(char) for char in phonemes]
+
+
++class ShadowTextG2P(FakeKokoroG2P):
++    def phonemize_prepared(self, text, **kwargs):
++        self.calls.append((text, kwargs))
++        if text == "A- R- T now":
++            tokens = (
++                {"text": "A- R- T", "phonemes": "letters", "char_start": 0, "char_end": 7},
++                {"text": "now", "phonemes": "naʊ", "char_start": 8, "char_end": 11},
++            )
++        else:
++            tokens = (
++                {"text": text, "phonemes": "sentence", "char_start": 0, "char_end": len(text)},
++            )
++        return SimpleNamespace(
++            phonemes="shadow phonemes", token_ids=(1, 2), tokens=tokens, warnings=()
++        )
++
++
+ def _config():
+     return SynthesisConfig(
+         language_routing=LanguageRoutingConfig(mode="auto", languages=("en-us", "de")),
+@@ -100,6 +123,74 @@ def test_prepared_adapter_forwards_request_text_overrides_annotations_and_routin
+     assert result.alignment_tokens[1].char_end == 11
+
+
++def test_prepared_adapter_projects_character_span_before_kokoro_g2p() -> None:
++    text = "Because someone called A R T finally."
++    start = text.index("A R T")
++    request = SynthesisRequest(
++        id="characters",
++        text=text,
++        language="en-us",
++        say_as=(SayAsSpan(start, start + len("A R T"), "characters"),),
++    )
++    module = ShadowTextG2P()
++
++    prepared = PreparedG2PAdapter(module).phonemize(request, _config())
++
++    assert len(module.calls) == 1
++    assert module.calls[0][0] == "Because someone called A- R- T finally."
++    assert prepared.text == text
++    assert (prepared.alignment_tokens[0].char_start, prepared.alignment_tokens[0].char_end) == (
++        0,
++        len(text),
++    )
++    assert prepared.alignment_tokens[0].text == text
++
++
++def test_prepared_adapter_projects_parenthetical_characters_in_one_request() -> None:
++    text = "Because someone (A R T) thought this part could use more verisimilitude."
++    start = text.index("A R T")
++    request = SynthesisRequest(
++        id="parenthetical-characters",
++        text=text,
++        language="en-us",
++        say_as=(SayAsSpan(start, start + len("A R T"), "characters"),),
++    )
++    module = ShadowTextG2P()
++
++    prepared = PreparedG2PAdapter(module).phonemize(request, _config())
++
++    assert [call[0] for call in module.calls] == [
++        "Because someone (A- R- T) thought this part could use more verisimilitude."
++    ]
++    assert prepared.text == text
++    assert prepared.alignment_tokens[0].text == text
++
++
++def test_prepared_adapter_maps_overrides_tokens_and_alignment_around_projection() -> None:
++    text = "ART now"
++    request = SynthesisRequest(
++        id="characters-with-context",
++        text=text,
++        language="en-us",
++        pronunciation_overrides=(PronunciationOverride(4, 7, phonemes="naʊ"),),
++        tokens=(LinguisticToken(4, 7, text="now", pos="ADV"),),
++        say_as=(SayAsSpan(0, 3, "characters"),),
++    )
++    module = ShadowTextG2P()
++
++    prepared = PreparedG2PAdapter(module).phonemize(request, _config())
++
++    assert module.calls[0][0] == "A- R- T now"
++    override = module.calls[0][1]["overrides"][0]
++    annotation = module.calls[0][1]["annotations"][0]
++    assert (override.char_start, override.char_end) == (8, 11)
++    assert (annotation.start, annotation.end, annotation.text) == (8, 11, "now")
++    assert [(item.text, item.char_start, item.char_end) for item in prepared.alignment_tokens] == [
++        ("ART", 0, 3),
++        ("now", 4, 7),
++    ]
++
++
+ def test_prepared_adapter_forwards_local_g2lex_without_named_installation(
+     monkeypatch: pytest.MonkeyPatch,
+ ) -> None:
+diff --git a/tests/test_public_engine_api.py b/tests/test_public_engine_api.py
+index 6ec7ef4..e6e9273 100644
+--- a/tests/test_public_engine_api.py
++++ b/tests/test_public_engine_api.py
+@@ -19,6 +19,7 @@ from pykokoro import (
+     ReferenceVoice,
+     RenderedSegment,
+     RequestMeasure,
++    SayAsSpan,
+     SynthesisConfig,
+     SynthesisIdentity,
+     SynthesisInputTooLongError,
+@@ -86,6 +87,7 @@ def test_public_api_exports_request_and_result_types() -> None:
+         "RenderedSegment",
+         "RequestMeasure",
+         "PronunciationOverride",
++        "SayAsSpan",
+         "ReferenceVoice",
+         "LinguisticToken",
+         "WordTiming",
+@@ -119,6 +121,7 @@ def test_public_api_exports_request_and_result_types() -> None:
+             VoiceLevelApplication,
+             LanguageRoutingConfig,
+             PronunciationOverride,
++            SayAsSpan,
+             ReferenceVoice,
+             LinguisticToken,
+             VoiceBlend,
+diff --git a/tests/test_reference_frontend_parity.py b/tests/test_reference_frontend_parity.py
+index 783d60d..de590e7 100644
+--- a/tests/test_reference_frontend_parity.py
++++ b/tests/test_reference_frontend_parity.py
+@@ -5,7 +5,12 @@ from kokorog2p import phonemes_to_ids
+
+ from pykokoro.prepared_g2p import PreparedG2PAdapter
+ from pykokoro.synthesis_config import SynthesisConfig
+-from pykokoro.synthesis_types import LinguisticToken, PronunciationOverride, SynthesisSegment
++from pykokoro.synthesis_types import (
++    LinguisticToken,
++    PronunciationOverride,
++    SayAsSpan,
++    SynthesisSegment,
++)
+ from pykokoro.synthesizer import KokoroSynthesizer
+
+
+@@ -44,3 +49,21 @@ def test_request_measure_uses_the_preparation_frontend_for_structured_inputs() -
+     measured = synthesizer.measure_request(request)
+
+     assert measured.amount == len(prepared.token_ids)
++
++
++def test_request_measure_uses_character_shadow_frontend_token_count() -> None:
++    text = "Because someone called A R T finally."
++    start = text.index("A R T")
++    request = SynthesisSegment(
++        "character-measure-parity",
++        text,
++        "en-us",
++        say_as=(SayAsSpan(start, start + len("A R T"), "characters"),),
++    )
++    synthesizer = KokoroSynthesizer(g2p=PreparedG2PAdapter())
++
++    prepared = synthesizer.prepare(request)
++    measured = synthesizer.measure_request(request)
++
++    assert prepared.text == text
++    assert measured.amount == len(prepared.token_ids)
+diff --git a/tests/test_request_api_contract.py b/tests/test_request_api_contract.py
+index 08d0242..665fe96 100644
+--- a/tests/test_request_api_contract.py
++++ b/tests/test_request_api_contract.py
+@@ -9,16 +9,16 @@ import pykokoro
+ from pykokoro.api_contract import REQUEST_API_VERSION, RequestApiContract, request_api_contract
+
+
+-def test_request_api_version_is_one() -> None:
+-    assert REQUEST_API_VERSION == 1
+-    assert pykokoro.REQUEST_API_VERSION == 1
++def test_request_api_version_is_two() -> None:
++    assert REQUEST_API_VERSION == 2
++    assert pykokoro.REQUEST_API_VERSION == 2
+
+
+ def test_request_api_contract_declares_stable_capabilities() -> None:
+     contract = request_api_contract()
+
+     assert contract == RequestApiContract(
+-        version=1,
++        version=2,
+         request_type="SynthesisRequest",
+         result_type="RenderedSegment",
+         synthesizer_type="KokoroSynthesizer",
+@@ -35,6 +35,8 @@ def test_request_api_contract_declares_stable_capabilities() -> None:
+         supports_request_measurement=True,
+         supports_reference_voice=True,
+         supports_voice_enrollment=True,
++        supports_say_as=True,
++        say_as_interpretations=("characters",),
+     )
+     assert pykokoro.RequestApiContract is RequestApiContract
+     assert pykokoro.RequestMeasure is not None
+@@ -43,6 +45,8 @@ def test_request_api_contract_declares_stable_capabilities() -> None:
+     assert contract.supports_request_measurement is True
+     assert contract.supports_reference_voice is True
+     assert contract.supports_voice_enrollment is True
++    assert contract.supports_say_as is True
++    assert contract.say_as_interpretations == ("characters",)
+     assert pykokoro.request_api_contract is request_api_contract
+
+
+@@ -67,6 +71,8 @@ def test_request_api_contract_fields_remain_additive_for_positional_callers() ->
+     assert legacy.supports_request_measurement is False
+     assert legacy.supports_reference_voice is False
+     assert legacy.supports_voice_enrollment is False
++    assert legacy.supports_say_as is False
++    assert legacy.say_as_interpretations == ()
+
+
+ def test_request_api_contract_and_synthesizer_resolution_are_dependency_light() -> None:
+@@ -90,11 +96,13 @@ class RuntimeImportBlocker(importlib.abc.MetaPathFinder):
+ sys.meta_path.insert(0, RuntimeImportBlocker())
+ import pykokoro
+
+-assert pykokoro.REQUEST_API_VERSION == 1
++assert pykokoro.REQUEST_API_VERSION == 2
+ contract = pykokoro.request_api_contract()
+ assert contract.request_type == "SynthesisRequest"
+ assert contract.result_type == "RenderedSegment"
+ assert contract.synthesizer_type == "KokoroSynthesizer"
++assert contract.supports_say_as is True
++assert contract.say_as_interpretations == ("characters",)
+
+ synthesizer = pykokoro.KokoroSynthesizer
+ assert callable(synthesizer.prepare)
+diff --git a/tests/test_request_renderer.py b/tests/test_request_renderer.py
+index f5b2282..408f03d 100644
+--- a/tests/test_request_renderer.py
++++ b/tests/test_request_renderer.py
+@@ -13,7 +13,7 @@ from pykokoro.prepared_g2p import PreparedSynthesis
+ from pykokoro.request_renderer import OnnxRequestRenderer
+ from pykokoro.short_sentence_handler import ShortSentenceConfig
+ from pykokoro.synthesis_config import SynthesisConfig
+-from pykokoro.synthesis_types import SynthesisSegment
++from pykokoro.synthesis_types import SayAsSpan, SynthesisRequest, SynthesisSegment
+ from pykokoro.types import G2PAlignmentToken, PhonemeSegment, WordTiming
+ from pykokoro.voice_level import VoiceLevelConfig
+
+@@ -158,6 +158,7 @@ def test_renderer_keeps_one_request_independent_and_rebases_timings() -> None:
+     assert rendered.voice_level_applications[0].applied is True
+     assert rendered.voice_level_applications[0].gain_db == -2.5
+     assert rendered.voice_level_applications[0].source == "override"
++
+     assert rendered.short_sentence_mode is None
+     assert rendered.trace is not None
+     assert (
+@@ -183,6 +184,84 @@ def test_renderer_keeps_one_request_independent_and_rebases_timings() -> None:
+     assert backend.closed
+
+
++def test_renderer_traces_say_as_projection_and_identity_semantics() -> None:
++    text = "Hello A R T"
++    start = text.index("A R T")
++    request = SynthesisRequest(
++        id="say-as-trace",
++        text=text,
++        language="en-us",
++        voice="af_sarah",
++        say_as=(SayAsSpan(start, start + len("A R T"), "characters"),),
++    )
++    prepared = PreparedSynthesis(
++        request_id=request.id,
++        text=text,
++        language=request.language,
++        voice="af_sarah",
++        phonemes="həloʊ",
++        token_ids=(1, 2, 3),
++        alignment_tokens=(G2PAlignmentToken(text, "həloʊ", char_start=0, char_end=len(text)),),
++    )
++    renderer = OnnxRequestRenderer(FakeG2PAdapter(), backend_factory=lambda config: FakeBackend())
++
++    rendered = renderer.render(prepared, request, _config(return_trace=True))
++
++    assert rendered.trace is not None
++    assert rendered.trace.frontend["say_as"] == [
++        {
++            "start": start,
++            "end": start + len("A R T"),
++            "interpret_as": "characters",
++            "canonical": "A R T",
++            "frontend": "A- R- T",
++        }
++    ]
++    assert rendered.synthesis_identity is not None
++    assert rendered.synthesis_identity.say_as == (
++        (start, start + len("A R T"), "characters", None, None),
++    )
++    assert "A- R- T" not in repr(rendered.synthesis_identity.to_dict())
++
++
++def test_renderer_word_timings_remain_in_canonical_say_as_coordinates() -> None:
++    class CharacterTimingBackend(FakeBackend):
++        def generate_raw_audio_segments(self, segments, voice_style, speed, **kwargs):
++            result = super().generate_raw_audio_segments(segments, voice_style, speed, **kwargs)
++            for segment in result:
++                start = segment.text.index("A R T")
++                end = start + len("A R T")
++                segment.word_timings = [WordTiming("A R T", start, end, 0, 2, segment.id)]
++            return result
++
++    request = SynthesisRequest(
++        "canonical-timing",
++        "A R T",
++        "en-us",
++        voice="af_sarah",
++        say_as=(SayAsSpan(0, 5, "characters"),),
++    )
++    prepared = PreparedSynthesis(
++        request_id=request.id,
++        text=request.text,
++        language=request.language,
++        voice="af_sarah",
++        phonemes="letters",
++        token_ids=(1, 2, 3),
++        alignment_tokens=(G2PAlignmentToken("A R T", "letters", char_start=0, char_end=5),),
++    )
++    renderer = OnnxRequestRenderer(
++        FakeG2PAdapter(), backend_factory=lambda config: CharacterTimingBackend()
++    )
++
++    rendered = renderer.render(prepared, request, _config())
++
++    timing = rendered.word_timings[0]
++    assert (timing.text, timing.char_start, timing.char_end) == ("A R T", 0, 5)
++    assert rendered.text[timing.char_start : timing.char_end] == timing.text
++    assert "-" not in timing.text
++
++
+ def test_reference_inference_failure_keeps_inference_stage() -> None:
+     from pykokoro.reference_voice import ReferenceVoice
+
+diff --git a/tests/test_synthesis_identity.py b/tests/test_synthesis_identity.py
+index c307308..e3546b1 100644
+--- a/tests/test_synthesis_identity.py
++++ b/tests/test_synthesis_identity.py
+@@ -6,14 +6,19 @@ import pykokoro
+ from pykokoro.generation_config import GenerationConfig
+ from pykokoro.synthesis_config import SynthesisConfig, resolve_synthesis_config
+ from pykokoro.synthesis_identity import SynthesisIdentity, build_synthesis_identity
++from pykokoro.synthesis_types import SayAsSpan
+ from pykokoro.voice_pack import KokoroVoicePack
+
+
+-def _identity(config: SynthesisConfig | None = None) -> SynthesisIdentity:
++def _identity(
++    config: SynthesisConfig | None = None,
++    *,
++    say_as: tuple[SayAsSpan, ...] = (),
++) -> SynthesisIdentity:
+     resolved = resolve_synthesis_config(
+         config or SynthesisConfig(), language="en-us", voice="af_heart"
+     )
+-    return build_synthesis_identity(resolved, language="en-us", voice=resolved.voice)
++    return build_synthesis_identity(resolved, language="en-us", voice=resolved.voice, say_as=say_as)
+
+
+ def test_resolved_synthesis_identity_is_stable_and_output_sensitive() -> None:
+@@ -31,6 +36,17 @@ def test_resolved_synthesis_identity_is_stable_and_output_sensitive() -> None:
+     assert len(base.cache_key) == 64
+
+
++def test_synthesis_identity_includes_semantic_say_as_values() -> None:
++    first = _identity(say_as=(SayAsSpan(0, 3, "characters"),))
++    same = _identity(say_as=(SayAsSpan(0, 3, "characters"),))
++    changed_detail = _identity(say_as=(SayAsSpan(0, 3, "characters", detail="letters"),))
++
++    assert first.cache_key == same.cache_key
++    assert first.cache_key != changed_detail.cache_key
++    assert first.say_as == ((0, 3, "characters", None, None),)
++    assert "A- R- T" not in repr(first.to_dict())
++
++
+ def test_synthesis_identity_includes_active_long_text_policy() -> None:
+     base = _identity()
+     sentence = _identity(SynthesisConfig(long_text_split="sentence"))
+diff --git a/tests/test_synthesis_types.py b/tests/test_synthesis_types.py
+index da78e96..71ee40f 100644
+--- a/tests/test_synthesis_types.py
++++ b/tests/test_synthesis_types.py
+@@ -5,6 +5,8 @@ from pykokoro.exceptions import (
+     EmptyTextError,
+     InvalidLanguageError,
+     InvalidLinguisticTokensError,
++    InvalidPronunciationError,
++    InvalidRequestError,
+     InvalidVoiceError,
+ )
+ from pykokoro.synthesis_config import SynthesisConfig
+@@ -12,6 +14,7 @@ from pykokoro.synthesis_types import (
+     LinguisticToken,
+     PronunciationOverride,
+     RenderedSegment,
++    SayAsSpan,
+     SynthesisRequest,
+     SynthesisSegment,
+ )
+@@ -141,6 +144,26 @@ def test_language_spans_can_overlap_and_only_direct_phonemes_are_ambiguous():
+     assert len(request.pronunciation_overrides) == 2
+
+
++def test_say_as_rejects_whole_phonemes_and_overlapping_pronunciation_overrides() -> None:
++    with pytest.raises(InvalidPronunciationError, match="whole-request phonemes.*say_as"):
++        SynthesisRequest(
++            id="line",
++            text="ART",
++            language="en-us",
++            phonemes="ɑɹti",
++            say_as=(SayAsSpan(0, 3, "characters"),),
++        )
++
++    with pytest.raises(InvalidPronunciationError, match="overlap say_as"):
++        SynthesisRequest(
++            id="line",
++            text="ART now",
++            language="en-us",
++            pronunciation_overrides=(PronunciationOverride(1, 4, language="de"),),
++            say_as=(SayAsSpan(0, 3, "characters"),),
++        )
++
++
+ def test_rendered_segment_enforces_mono_float32_and_request_local_timing_bounds():
+     timing = WordTiming(
+         text="Hello", char_start=0, char_end=5, start_sample=1, end_sample=4, segment_id="line"
+@@ -230,6 +253,44 @@ def test_rendered_segment_rejects_empty_audio() -> None:
+         )
+
+
++def test_say_as_spans_are_immutable_and_validated_on_requests() -> None:
++    text = "Call A R T now"
++    start = text.index("A R T")
++    span = SayAsSpan(start, start + len("A R T"), "characters")
++    request = SynthesisRequest(id="line", text=text, language="en-us", say_as=[span])
++
++    assert request.say_as == (span,)
++    assert request != SynthesisRequest(id="line", text=text, language="en-us")
++    with pytest.raises((AttributeError, TypeError)):
++        span.start = 0  # type: ignore[misc]
++    with pytest.raises(InvalidRequestError, match="interpret_as"):
++        SayAsSpan(0, 1, " ")
++    with pytest.raises(InvalidRequestError, match="format"):
++        SayAsSpan(0, 1, "characters", format=" ")
++    with pytest.raises(InvalidRequestError, match="start must be an integer"):
++        SayAsSpan(True, 1, "characters")  # type: ignore[arg-type]
++    with pytest.raises(InvalidRequestError, match=r"say_as\[0\].*offsets"):
++        SynthesisRequest(
++            id="line", text=text, language="en-us", say_as=[SayAsSpan(0, 99, "characters")]
++        )
++    with pytest.raises(InvalidRequestError, match="sorted"):
++        SynthesisRequest(
++            id="line",
++            text=text,
++            language="en-us",
++            say_as=(SayAsSpan(5, 8, "characters"), SayAsSpan(0, 1, "characters")),
++        )
++    with pytest.raises(InvalidRequestError, match="overlapping"):
++        SynthesisRequest(
++            id="line",
++            text=text,
++            language="en-us",
++            say_as=(SayAsSpan(5, 10, "characters"), SayAsSpan(7, 8, "characters")),
++        )
++    with pytest.raises(InvalidRequestError, match="SayAsSpan"):
++        SynthesisRequest(id="line", text=text, language="en-us", say_as=[("bad",)])  # type: ignore[list-item]
++
++
+ def test_synthesis_config_only_accepts_engine_owned_options():
+     config = SynthesisConfig(voice="af_sarah")
+

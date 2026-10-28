@@ -1,0 +1,81 @@
+{
+  "candidate_count": 3,
+  "candidates": [
+    {
+      "additions": 536,
+      "deletions": 5,
+      "patch_file": "97315cd.patch",
+      "patch_sha256": "0a6de14f49827830e7aac618a2fc3bcaf04c371e3b664ad811b6f8416b2f1f57",
+      "paths": [
+        "docs/api_reference.md",
+        "pykokoro/__init__.py",
+        "pykokoro/g2lex_sources.py",
+        "pykokoro/prepared_g2p.py",
+        "pykokoro/request_renderer.py",
+        "pykokoro/tokenizer.py",
+        "pykokoro/types.py",
+        "tests/test_g2lex_sources.py",
+        "tests/test_prepared_g2p_adapter.py",
+        "tests/test_public_engine_api.py",
+        "tests/test_request_renderer.py"
+      ],
+      "sha": "97315cda5574aa39dc75a2a0455e0a3fbb4fb92f",
+      "short_sha": "97315cd",
+      "source_ref": "git:97315cda5574aa39dc75a2a0455e0a3fbb4fb92f"
+    },
+    {
+      "additions": 11,
+      "deletions": 11,
+      "patch_file": "1ae5863.patch",
+      "patch_sha256": "f0acf74a1f45ef04e6b58cf94f7ffa29d1f2eb239fc3b889f58c53cad7635c6a",
+      "paths": [
+        ".github/workflows/python-publish.yml",
+        ".github/workflows/tests.yml",
+        "pyproject.toml",
+        "tests/test_packaging_metadata.py",
+        "uv.lock"
+      ],
+      "sha": "1ae5863fbbd2671994a2d516f0482b1bb26ab701",
+      "short_sha": "1ae5863",
+      "source_ref": "git:1ae5863fbbd2671994a2d516f0482b1bb26ab701"
+    },
+    {
+      "additions": 945,
+      "deletions": 41,
+      "patch_file": "1c2e16c.patch",
+      "patch_sha256": "2c49657820d0e01982f6382a8e1a6e9ff55e69489e09d493dea57969639d641d",
+      "paths": [
+        "docs/advanced_features.md",
+        "docs/api_reference.md",
+        "pykokoro/__init__.py",
+        "pykokoro/api_contract.py",
+        "pykokoro/frontend_projection.py",
+        "pykokoro/prepared_g2p.py",
+        "pykokoro/request_renderer.py",
+        "pykokoro/synthesis_identity.py",
+        "pykokoro/synthesis_types.py",
+        "pykokoro/types.py",
+        "tests/test_frontend_projection.py",
+        "tests/test_long_text_splitting.py",
+        "tests/test_prepared_g2p_adapter.py",
+        "tests/test_public_engine_api.py",
+        "tests/test_reference_frontend_parity.py",
+        "tests/test_request_api_contract.py",
+        "tests/test_request_renderer.py",
+        "tests/test_synthesis_identity.py",
+        "tests/test_synthesis_types.py"
+      ],
+      "sha": "1c2e16c6bbbccef6f19242c0617204a452e43d1b",
+      "short_sha": "1c2e16c",
+      "source_ref": "git:1c2e16c6bbbccef6f19242c0617204a452e43d1b"
+    }
+  ],
+  "git_base_ref": "3ce4e838b529cf3ac47ec16348ebf9183845184a",
+  "git_base_sha": "3ce4e838b529cf3ac47ec16348ebf9183845184a",
+  "git_head_ref": "1c2e16c6bbbccef6f19242c0617204a452e43d1b",
+  "git_head_sha": "1c2e16c6bbbccef6f19242c0617204a452e43d1b",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "0.10.7",
+  "schema_version": 1
+}

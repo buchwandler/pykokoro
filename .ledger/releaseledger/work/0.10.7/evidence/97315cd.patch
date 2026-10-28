@@ -1,0 +1,758 @@
+ docs/api_reference.md              |  17 ++++
+ pykokoro/__init__.py               |  11 +++
+ pykokoro/g2lex_sources.py          | 158 ++++++++++++++++++++++++++++++++++++
+ pykokoro/prepared_g2p.py           |  41 +++++++++-
+ pykokoro/request_renderer.py       |   7 ++
+ pykokoro/tokenizer.py              |  20 +++++
+ pykokoro/types.py                  |   6 ++
+ tests/test_g2lex_sources.py        |  94 ++++++++++++++++++++++
+ tests/test_prepared_g2p_adapter.py | 161 +++++++++++++++++++++++++++++++++++++
+ tests/test_public_engine_api.py    |   3 +
+ tests/test_request_renderer.py     |  23 +++++-
+ 11 files changed, 536 insertions(+), 5 deletions(-)
+
+diff --git a/docs/api_reference.md b/docs/api_reference.md
+index 4d102e2..fb53c84 100644
+--- a/docs/api_reference.md
++++ b/docs/api_reference.md
+@@ -30,6 +30,7 @@ from pykokoro import (
+ | Voice enrollment          | `KokoroVoicePack`, `ReferenceVoice`, `InnoEnrollmentOptions`, `KokoroSynthesizer.enroll_voice()`                                                                                                                                                                                                                                                                                    |
+ | Model discovery           | `ModelCapabilities`, `ModelDiscoveryResult`, `VoiceCapabilities`, `VoiceEnrollerSpec`, `discover_models`                                                                                                                                                                                                                                                                            |
+ | Lexicon discovery         | `LexiconCapabilities`, `LexiconDiscoveryResult`, `discover_lexicons`                                                                                                                                                                                                                                                                                                                |
++| Local G2Lex inputs        | `G2LexFileRef`, `G2LexFileInspection`, `inspect_g2lex_file`                                                                                                                                                                                                                                                                                                                         |
+ | Asset progress            | `AssetProgressEvent`, `AssetProgressCallback`, `ConsoleAssetProgress`                                                                                                                                                                                                                                                                                                               |
+ | Synthesis identity        | `SynthesisIdentity`, `build_synthesis_identity`                                                                                                                                                                                                                                                                                                                                     |
+ | API contract              | `REQUEST_API_VERSION`, `RequestApiContract`, `request_api_contract`                                                                                                                                                                                                                                                                                                                 |
+@@ -152,6 +153,10 @@ them.
+    :members:
+    :undoc-members:
+
++.. autoclass:: pykokoro.G2LexFileRef
++   :members:
++   :undoc-members:
++
+ .. autoclass:: pykokoro.ShortSentenceConfig
+    :members:
+    :undoc-members:
+@@ -248,12 +253,24 @@ calibration is an engine-local option; it is not whole-program loudness masterin
+ .. autofunction:: pykokoro.discover_lexicons
+ ```
+
++.. autoclass:: pykokoro.G2LexFileInspection :members: :undoc-members:
++
++.. autofunction:: pykokoro.inspect_g2lex_file
++
+ Discovery reports metadata and runtime capability, including `VoiceEnrollerSpec`,
+ without loading synthesis weights or creating an ONNX session. Offline discovery uses
+ available local metadata; it does not install model or lexicon assets. Use the inventory
+ to select an available model/language/voice rather than inferring compatibility from a
+ voice name.
+
++`discover_lexicons()` covers registered selectors. For a local file, call
++`inspect_g2lex_file(path)` to validate and read its manifest without traversing the
++pronunciation entries; `inspection.to_ref()` creates an immutable reference pinned to
++the content and logical hashes. Add one or more references through
++`TokenizerConfig(g2lex_files=(ref,))`. Local sources are forwarded to KokoroG2P and
++never enter Lexphon's named-asset installer. Prepared alignment metadata retains the
++contextual heteronym decision and its reason when one was selected.
++
+ ## Asset progress
+
+ ```{eval-rst}
+diff --git a/pykokoro/__init__.py b/pykokoro/__init__.py
+index ba5618b..35cfdc6 100644
+--- a/pykokoro/__init__.py
++++ b/pykokoro/__init__.py
+@@ -118,6 +118,14 @@ def __getattr__(name: str) -> Any:
+             "LexiconDiscoveryResult": LexiconDiscoveryResult,
+             "discover_lexicons": discover_lexicons,
+         }[name]
++    if name in {"G2LexFileRef", "G2LexFileInspection", "inspect_g2lex_file"}:
++        from .g2lex_sources import G2LexFileInspection, G2LexFileRef, inspect_g2lex_file
++
++        return {
++            "G2LexFileRef": G2LexFileRef,
++            "G2LexFileInspection": G2LexFileInspection,
++            "inspect_g2lex_file": inspect_g2lex_file,
++        }[name]
+     if name == "KokoroSynthesizer":
+         from .synthesizer import KokoroSynthesizer
+
+@@ -137,6 +145,9 @@ __all__ = [
+     "LexiconCapabilities",
+     "LexiconDiscoveryResult",
+     "discover_lexicons",
++    "G2LexFileRef",
++    "G2LexFileInspection",
++    "inspect_g2lex_file",
+     "GenerationConfig",
+     "LanguageRoutingConfig",
+     "SynthesisConfig",
+diff --git a/pykokoro/g2lex_sources.py b/pykokoro/g2lex_sources.py
+new file mode 100644
+index 0000000..d69d002
+--- /dev/null
++++ b/pykokoro/g2lex_sources.py
+@@ -0,0 +1,158 @@
++"""Immutable references and metadata-only inspection for local G2Lex files."""
++
++from __future__ import annotations
++
++import hashlib
++import os
++import re
++from collections.abc import Mapping
++from dataclasses import dataclass
++from pathlib import Path
++from types import MappingProxyType
++from typing import TYPE_CHECKING, Any
++
++import g2lex
++
++if TYPE_CHECKING:
++    from kokorog2p.lexicons.registry import FileLexiconSource
++
++_SHA256_RE = re.compile(r"[0-9a-f]{64}")
++
++
++def _normalize_sha256(value: str | None, *, label: str) -> str | None:
++    if value is None:
++        return None
++    if not isinstance(value, str):
++        raise TypeError(f"{label} must be a SHA-256 digest string")
++    digest = value.strip().casefold().removeprefix("sha256:")
++    if not _SHA256_RE.fullmatch(digest):
++        raise ValueError(f"{label} must be a 64-character SHA-256 hex digest")
++    return f"sha256:{digest}"
++
++
++def _file_sha256(path: Path) -> str:
++    digest = hashlib.sha256()
++    with path.open("rb") as stream:
++        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
++            digest.update(chunk)
++    return f"sha256:{digest.hexdigest()}"
++
++
++@dataclass(frozen=True, slots=True)
++class G2LexFileRef:
++    """Pinned, immutable reference to a local G2Lex source file.
++
++    Digests are optional for interactive use. Applications that persist a source
++    should pin ``sha256`` (and may also pin ``logical_sha256``) from inspection.
++    Local files are runtime inputs, not named Lexphon assets to be installed.
++    """
++
++    path: str | os.PathLike[str]
++    sha256: str | None = None
++    logical_sha256: str | None = None
++
++    def __post_init__(self) -> None:
++        if not isinstance(self.path, (str, os.PathLike)):
++            raise TypeError("G2Lex file path must be a string or path-like value")
++        path = os.fspath(self.path).strip()
++        if not path:
++            raise ValueError("G2Lex file path must not be empty")
++        object.__setattr__(self, "path", str(Path(path).expanduser()))
++        object.__setattr__(self, "sha256", _normalize_sha256(self.sha256, label="sha256"))
++        object.__setattr__(
++            self,
++            "logical_sha256",
++            _normalize_sha256(self.logical_sha256, label="logical_sha256"),
++        )
++
++    def to_source(self) -> FileLexiconSource:
++        """Convert to the KokoroG2P runtime source type."""
++        from kokorog2p.lexicons.registry import FileLexiconSource
++
++        return FileLexiconSource(
++            path=self.path,
++            sha256=self.sha256,
++            logical_sha256=self.logical_sha256,
++        )
++
++
++@dataclass(frozen=True, slots=True)
++class G2LexFileInspection:
++    """Read-only G2Lex manifest inspection with reproducible content pins."""
++
++    path: str
++    sha256: str
++    logical_sha256: str | None
++    metadata: Mapping[str, Any]
++
++    def __post_init__(self) -> None:
++        object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
++
++    def to_ref(self) -> G2LexFileRef:
++        """Create a file reference pinned to this inspection's hashes."""
++        return G2LexFileRef(
++            path=self.path,
++            sha256=self.sha256,
++            logical_sha256=self.logical_sha256,
++        )
++
++    def to_dict(self) -> dict[str, Any]:
++        """Return a JSON-friendly inspection summary."""
++        return {
++            "path": self.path,
++            "sha256": self.sha256,
++            "logical_sha256": self.logical_sha256,
++            "metadata": dict(self.metadata),
++        }
++
++
++def inspect_g2lex_file(path: str | os.PathLike[str]) -> G2LexFileInspection:
++    """Inspect a local G2Lex manifest without iterating pronunciation entries.
++
++    The container is opened through G2Lex's validated reader, and the content hash
++    is streamed from disk. Only manifest metadata is returned; the lexical mapping
++    is never traversed or materialized by this helper.
++    """
++    raw_path = Path(path).expanduser()
++    try:
++        resolved_path = raw_path.resolve(strict=True)
++    except FileNotFoundError as exc:
++        raise FileNotFoundError(f"G2Lex file does not exist: {raw_path}") from exc
++    if not resolved_path.is_file():
++        raise ValueError(f"G2Lex path is not a file: {resolved_path}")
++
++    try:
++        handle = g2lex.open(resolved_path)
++    except Exception as exc:
++        raise ValueError(f"Invalid G2Lex file {resolved_path}: {exc}") from exc
++    try:
++        manifest = getattr(handle, "metadata", None)
++        if not isinstance(manifest, Mapping):
++            raise ValueError(f"G2Lex file {resolved_path} has no manifest metadata")
++        metadata = dict(manifest)
++    finally:
++        close = getattr(handle, "close", None)
++        if close is not None:
++            close()
++
++    language = metadata.get("language") or metadata.get("locale")
++    if not isinstance(language, str) or not language.strip():
++        raise ValueError(f"G2Lex file {resolved_path} has no language metadata")
++    encoding = metadata.get("phoneme_encoding")
++    if not isinstance(encoding, str) or not encoding.strip():
++        raise ValueError(f"G2Lex file {resolved_path} has no phoneme_encoding metadata")
++
++    logical_sha256 = metadata.get("logical_sha256")
++    normalized_logical_sha256 = _normalize_sha256(
++        str(logical_sha256) if logical_sha256 is not None else None,
++        label="logical_sha256",
++    )
++    return G2LexFileInspection(
++        path=str(resolved_path),
++        sha256=_file_sha256(resolved_path),
++        logical_sha256=normalized_logical_sha256,
++        metadata=metadata,
++    )
++
++
++__all__ = ["G2LexFileInspection", "G2LexFileRef", "inspect_g2lex_file"]
+diff --git a/pykokoro/prepared_g2p.py b/pykokoro/prepared_g2p.py
+index 39538bf..42184ce 100644
+--- a/pykokoro/prepared_g2p.py
++++ b/pykokoro/prepared_g2p.py
+@@ -3,6 +3,7 @@
+ from __future__ import annotations
+
+ import threading
++from collections.abc import Mapping
+ from dataclasses import dataclass
+ from typing import Any
+
+@@ -173,6 +174,9 @@ class PreparedG2PAdapter:
+         def get(name: str, default: Any = None) -> Any:
+             if isinstance(value, dict):
+                 return value.get(name, default)
++            metadata = getattr(value, "meta", None)
++            if isinstance(metadata, Mapping) and name in metadata:
++                return metadata.get(name, default)
+             return getattr(value, name, default)
+
+         text = get("text", "")
+@@ -199,6 +203,27 @@ class PreparedG2PAdapter:
+                 if isinstance(model_token_count, int)
+                 else None
+             )
++        heteronym_resolution = get("heteronym_resolution")
++        heteronym_resolution = get("heteronym_resolution")
++        if not isinstance(heteronym_resolution, Mapping):
++            heteronym_resolution = None
++        else:
++            heteronym_resolution = dict(heteronym_resolution)
++        pronunciation_source_details = get("pronunciation_source_details")
++        if not isinstance(pronunciation_source_details, Mapping):
++            pronunciation_source_details = None
++        else:
++            pronunciation_source_details = dict(pronunciation_source_details)
++        pronunciation_source = get("pronunciation_source")
++        pronunciation_provider = get("pronunciation_provider")
++        pronunciation_lexicon_id = get("pronunciation_lexicon_id")
++        pronunciation_source_ipa = get("pronunciation_source_ipa")
++        if heteronym_resolution is not None:
++            pronunciation_provider = pronunciation_provider or heteronym_resolution.get("source")
++            pronunciation_lexicon_id = pronunciation_lexicon_id or heteronym_resolution.get(
++                "lexicon_id"
++            )
++            pronunciation_source_ipa = pronunciation_source_ipa or heteronym_resolution.get("ipa")
+         return G2PAlignmentToken(
+             text=text if isinstance(text, str) else "",
+             phonemes=phonemes if isinstance(phonemes, str) else "",
+@@ -207,12 +232,14 @@ class PreparedG2PAdapter:
+             char_end=get("char_end"),
+             model_token_count=model_token_count,
+             model_span_token_count=model_span_token_count,
+-            pronunciation_source=get("pronunciation_source"),
+-            pronunciation_provider=get("pronunciation_provider"),
+-            pronunciation_lexicon_id=get("pronunciation_lexicon_id"),
++            pronunciation_source=pronunciation_source,
++            pronunciation_provider=pronunciation_provider,
++            pronunciation_lexicon_id=pronunciation_lexicon_id,
+             pronunciation_requested_language=get("pronunciation_requested_language"),
+-            pronunciation_source_ipa=get("pronunciation_source_ipa"),
++            pronunciation_source_ipa=pronunciation_source_ipa,
+             pronunciation_language_markers=get("pronunciation_language_markers"),
++            heteronym_resolution=heteronym_resolution,
++            pronunciation_source_details=pronunciation_source_details,
+         )
+
+     def _load(self) -> Any:
+@@ -259,6 +286,12 @@ class PreparedG2PAdapter:
+             "backend": backend,
+             "lexicons": lexicons,
+         }
++        if tokenizer_config.g2lex_files:
++            kwargs["g2lex_files"] = tuple(
++                reference.to_source() for reference in tokenizer_config.g2lex_files
++            )
++        if backend == "kokorog2p" and normalized_language.startswith("en"):
++            kwargs["resolve_heteronyms"] = tokenizer_config.resolve_heteronyms
+         if profile is not None and profile.variant == "ar-nabra":
+             kwargs["model_profile"] = "nabra-82m-v0.1"
+         key = tuple(sorted((name, repr(value)) for name, value in kwargs.items())) + (
+diff --git a/pykokoro/request_renderer.py b/pykokoro/request_renderer.py
+index 9219472..be8c452 100644
+--- a/pykokoro/request_renderer.py
++++ b/pykokoro/request_renderer.py
+@@ -130,6 +130,13 @@ class OnnxRequestRenderer:
+                     {"voice_mode": "static", "voicepack_fingerprint": voice_pack.fingerprint}
+                 )
+             trace.warnings.extend(prepared.diagnostics)
++            pronunciation_alignment = [
++                item.to_dict()
++                for item in prepared.alignment_tokens
++                if item.pronunciation_source is not None or item.heteronym_resolution is not None
++            ]
++            if pronunciation_alignment:
++                trace.model["pronunciation_alignment"] = pronunciation_alignment
+
+         if not prepared.token_ids:
+             raise BackendError(
+diff --git a/pykokoro/tokenizer.py b/pykokoro/tokenizer.py
+index f89bfc9..b764b09 100644
+--- a/pykokoro/tokenizer.py
++++ b/pykokoro/tokenizer.py
+@@ -9,6 +9,7 @@ from typing import Literal, TypeAlias
+ import kokorog2p as _kokorog2p
+
+ from .constants import MAX_PHONEME_LENGTH
++from .g2lex_sources import G2LexFileRef
+ from .spacy_models import SpacyModelSize, make_spacy_model_request
+
+ N_TOKENS = _kokorog2p.N_TOKENS
+@@ -51,6 +52,8 @@ class TokenizerConfig:
+     spacy_model_size: SpacyModelSize | None = None
+     backend: BackendType = "kokorog2p"
+     lexicons: str | Sequence[str] | None = None
++    g2lex_files: G2LexFileRef | Sequence[G2LexFileRef] | None = None
++    resolve_heteronyms: bool = True
+     lexicon_data_policy: LexiconDataPolicy = "auto"
+
+     def __post_init__(self) -> None:
+@@ -67,6 +70,23 @@ class TokenizerConfig:
+                 raise ValueError("lexicons must contain non-empty names")
+             self.lexicons = tuple(value.strip() for value in values)
+
++        if not isinstance(self.resolve_heteronyms, bool):
++            raise ValueError("resolve_heteronyms must be a boolean")
++        if self.g2lex_files is not None:
++            files = (
++                (self.g2lex_files,)
++                if isinstance(self.g2lex_files, G2LexFileRef)
++                else tuple(self.g2lex_files)
++            )
++            if any(not isinstance(value, G2LexFileRef) for value in files):
++                raise TypeError("g2lex_files must contain G2LexFileRef values")
++            paths = [value.path for value in files]
++            if len(paths) != len(set(paths)):
++                raise ValueError("g2lex_files must not contain duplicate paths")
++            if files and self.backend.casefold() != "kokorog2p":
++                raise ValueError("g2lex_files require the kokorog2p backend")
++            self.g2lex_files = files
++
+
+ def _default_lexicons_for_language(language: str) -> tuple[str, ...] | None:
+     normalized = language.lower().replace("_", "-")
+diff --git a/pykokoro/types.py b/pykokoro/types.py
+index eaeaa74..468d28b 100644
+--- a/pykokoro/types.py
++++ b/pykokoro/types.py
+@@ -48,6 +48,8 @@ class G2PAlignmentToken:
+     pronunciation_requested_language: str | None = None
+     pronunciation_source_ipa: str | None = None
+     pronunciation_language_markers: list[dict[str, Any]] | None = None
++    heteronym_resolution: dict[str, Any] | None = None
++    pronunciation_source_details: dict[str, Any] | None = None
+
+     def to_dict(self) -> dict[str, Any]:
+         result: dict[str, Any] = {
+@@ -64,6 +66,10 @@ class G2PAlignmentToken:
+             "pronunciation_source_ipa": self.pronunciation_source_ipa,
+             "pronunciation_language_markers": self.pronunciation_language_markers,
+         }
++        if self.heteronym_resolution is not None:
++            result["heteronym_resolution"] = dict(self.heteronym_resolution)
++        if self.pronunciation_source_details is not None:
++            result["pronunciation_source_details"] = dict(self.pronunciation_source_details)
+         if self.model_span_token_count is not None:
+             result["model_span_token_count"] = self.model_span_token_count
+         return result
+diff --git a/tests/test_g2lex_sources.py b/tests/test_g2lex_sources.py
+new file mode 100644
+index 0000000..2dabd71
+--- /dev/null
++++ b/tests/test_g2lex_sources.py
+@@ -0,0 +1,94 @@
++"""Public local-G2Lex reference and metadata inspection regressions."""
++
++from __future__ import annotations
++
++import json
++from dataclasses import FrozenInstanceError
++from pathlib import Path
++
++import g2lex
++import pytest
++
++import pykokoro
++from pykokoro.g2lex_sources import G2LexFileInspection, G2LexFileRef, inspect_g2lex_file
++from pykokoro.tokenizer import TokenizerConfig
++
++
++def _write_g2lex(tmp_path: Path) -> Path:
++    source = tmp_path / "lexicon.json"
++    output = tmp_path / "local.g2lex"
++    source.write_text(json.dumps({"hello": "hɛˈloʊ"}), encoding="utf-8")
++    g2lex.pack_file(
++        source,
++        output,
++        input_format="kokoro-json",
++        metadata={
++            "id": "fixture:local",
++            "name": "local",
++            "language": "en-us",
++            "phoneme_encoding": "ipa",
++        },
++    )
++    return output
++
++
++def test_inspection_pins_file_and_logical_hashes(tmp_path: Path) -> None:
++    path = _write_g2lex(tmp_path)
++    inspection = pykokoro.inspect_g2lex_file(path)
++
++    assert isinstance(inspection, G2LexFileInspection)
++    assert inspection.path == str(path.resolve())
++    assert inspection.sha256.startswith("sha256:")
++    assert inspection.logical_sha256 is not None
++    assert inspection.metadata["language"] == "en-us"
++    assert inspection.to_ref() == G2LexFileRef(
++        path=path.resolve(),
++        sha256=inspection.sha256,
++        logical_sha256=inspection.logical_sha256,
++    )
++    assert pykokoro.G2LexFileRef is G2LexFileRef
++    with pytest.raises(TypeError):
++        inspection.metadata["language"] = "de-de"  # type: ignore[index]
++
++
++def test_inspection_reads_metadata_without_iterating_entries(
++    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
++) -> None:
++    path = tmp_path / "metadata-only.g2lex"
++    path.write_bytes(b"container bytes")
++
++    class MetadataHandle:
++        metadata = {"language": "en-us", "phoneme_encoding": "ipa"}
++
++        def __iter__(self):
++            pytest.fail("inspection must not iterate pronunciation entries")
++
++        def close(self) -> None:
++            pass
++
++    monkeypatch.setattr("pykokoro.g2lex_sources.g2lex.open", lambda _path: MetadataHandle())
++    result = inspect_g2lex_file(path)
++    assert result.metadata["phoneme_encoding"] == "ipa"
++
++
++def test_file_ref_is_immutable_pinned_and_config_normalizes_to_tuple() -> None:
++    ref = G2LexFileRef("lexicons/local.g2lex", sha256="A" * 64)
++    config = TokenizerConfig(g2lex_files=ref, lexicons=("gold", "lexhint"))
++
++    assert ref.sha256 == f"sha256:{'a' * 64}"
++    assert config.g2lex_files == (ref,)
++    assert config.lexicons == ("gold", "lexhint")
++    with pytest.raises(FrozenInstanceError):
++        ref.path = "changed.g2lex"  # type: ignore[misc]
++
++
++def test_file_ref_rejects_invalid_pins_duplicates_and_other_backends() -> None:
++    with pytest.raises(ValueError, match="64-character"):
++        G2LexFileRef("local.g2lex", sha256="not-a-hash")
++    ref = G2LexFileRef("local.g2lex")
++    with pytest.raises(ValueError, match="duplicate"):
++        TokenizerConfig(g2lex_files=(ref, ref))
++    with pytest.raises(TypeError, match="G2LexFileRef"):
++        TokenizerConfig(g2lex_files=("local.g2lex",))  # type: ignore[arg-type]
++    with pytest.raises(ValueError, match="kokorog2p backend"):
++        TokenizerConfig(backend="espeak", g2lex_files=(ref,))
+diff --git a/tests/test_prepared_g2p_adapter.py b/tests/test_prepared_g2p_adapter.py
+index d6ce2c0..5486e7a 100644
+--- a/tests/test_prepared_g2p_adapter.py
++++ b/tests/test_prepared_g2p_adapter.py
+@@ -1,7 +1,13 @@
++import hashlib
++from pathlib import Path
+ from types import SimpleNamespace
+
++import g2lex
++import pytest
+ from kokorog2p import OverrideSpan, TokenAnnotation
++from kokorog2p.lexicons.registry import FileLexiconSource
+
++from pykokoro import G2LexFileRef
+ from pykokoro.language_routing import LanguageRoutingConfig
+ from pykokoro.prepared_g2p import PreparedG2PAdapter
+ from pykokoro.synthesis_config import SynthesisConfig
+@@ -94,6 +100,161 @@ def test_prepared_adapter_forwards_request_text_overrides_annotations_and_routin
+     assert result.alignment_tokens[1].char_end == 11
+
+
++def test_prepared_adapter_forwards_local_g2lex_without_named_installation(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    installations = []
++    monkeypatch.setattr(
++        "pykokoro.lexicon_data.install_missing_lexphon_data",
++        lambda language, lexicons: installations.append((language, lexicons)) or (),
++    )
++    ref = G2LexFileRef("custom/local.g2lex", sha256="a" * 64)
++    config = SynthesisConfig(
++        tokenizer_config=TokenizerConfig(
++            lexicons=(),
++            g2lex_files=(ref,),
++            resolve_heteronyms=False,
++        )
++    )
++    module = FakeKokoroG2P()
++    adapter = PreparedG2PAdapter(module)
++
++    adapter.phonemize(
++        SynthesisSegment(id="local-source", text="Hello", language="en-us"),
++        config,
++    )
++
++    kwargs = module.g2p_creations[0][0]
++    assert kwargs["lexicons"] == ()
++    assert kwargs["g2lex_files"] == (
++        FileLexiconSource(
++            path=ref.path,
++            sha256=ref.sha256,
++            logical_sha256=ref.logical_sha256,
++        ),
++    )
++    assert kwargs["resolve_heteronyms"] is False
++    assert installations == [("en-us", ())]
++
++
++def test_alignment_preserves_contextual_heteronym_provenance() -> None:
++    decision = {
++        "source": "english-context-resolver",
++        "context_rule": "lead.metal",
++        "ipa": "lɛd",
++        "reason": "A metal-object complement selects the element pronunciation.",
++        "lexicon_id": "en-us:gold",
++    }
++    token = SimpleNamespace(
++        text="lead",
++        phonemes="lɛd",
++        whitespace="",
++        char_start=0,
++        char_end=4,
++        meta={
++            "pronunciation_source": "contextual-heteronym",
++            "heteronym_resolution": decision,
++        },
++    )
++
++    alignment = PreparedG2PAdapter._alignment_token(token, FakeKokoroG2P(), "1.0")
++
++    assert alignment.pronunciation_source == "contextual-heteronym"
++    assert alignment.pronunciation_provider == "english-context-resolver"
++    assert alignment.pronunciation_lexicon_id == "en-us:gold"
++    assert alignment.pronunciation_source_ipa == "lɛd"
++    assert alignment.heteronym_resolution == decision
++    assert alignment.to_dict()["heteronym_resolution"] == decision
++
++
++def test_alignment_preserves_local_g2lex_source_details() -> None:
++    details = {
++        "source_kind": "file",
++        "selector": "editorial",
++        "lexicon_id": "en-us:editorial",
++        "source_path": "/tmp/editorial.g2lex",
++        "sha256": "sha256:" + "a" * 64,
++        "logical_sha256": "sha256:" + "b" * 64,
++        "phoneme_encoding": "ipa",
++    }
++    token = SimpleNamespace(
++        text="lead",
++        phonemes="lɛd",
++        whitespace="",
++        char_start=0,
++        char_end=4,
++        meta={
++            "pronunciation_source": "local-g2lex",
++            "pronunciation_provider": "file",
++            "pronunciation_lexicon_id": "en-us:editorial",
++            "pronunciation_source_details": details,
++        },
++    )
++
++    alignment = PreparedG2PAdapter._alignment_token(token, FakeKokoroG2P(), "1.0")
++
++    assert alignment.pronunciation_source == "local-g2lex"
++    assert alignment.pronunciation_provider == "file"
++    assert alignment.pronunciation_lexicon_id == "en-us:editorial"
++    assert alignment.pronunciation_source_details == details
++    assert alignment.to_dict()["pronunciation_source_details"] == details
++
++
++def test_local_g2lex_provenance_reaches_prepared_alignment(tmp_path: Path) -> None:
++    source_json = tmp_path / "editorial.json"
++    source_path = tmp_path / "editorial.g2lex"
++    source_json.write_text(
++        '{"read": {"DEFAULT": "riːd", "VERB": "riːd", "VBN": "rɛd"}}',
++        encoding="utf-8",
++    )
++    g2lex.pack_file(
++        source_json,
++        source_path,
++        input_format="kokoro-json",
++        metadata={
++            "id": "fixture:editorial",
++            "name": "editorial",
++            "language": "en-us",
++            "phoneme_encoding": "ipa",
++        },
++    )
++    digest = hashlib.sha256(source_path.read_bytes()).hexdigest()
++    config = SynthesisConfig(
++        tokenizer_config=TokenizerConfig(
++            lexicons=(),
++            g2lex_files=(G2LexFileRef(str(source_path), sha256=digest),),
++            use_spacy=False,
++            resolve_heteronyms=False,
++        )
++    )
++    request = SynthesisSegment(
++        id="local-g2lex",
++        text="had read",
++        language="en-us",
++        tokens=(
++            LinguisticToken(
++                4,
++                8,
++                text="read",
++                pos="VERB",
++                tag="VBN",
++                lemma="read",
++                morph="VerbForm=Part",
++            ),
++        ),
++    )
++
++    result = PreparedG2PAdapter().phonemize(request, config)
++    alignment = next(item for item in result.alignment_tokens if item.text == "read")
++
++    assert alignment.phonemes == "ɹɛd"
++    assert alignment.pronunciation_source == "local-g2lex"
++    assert alignment.pronunciation_provider == "file"
++    assert alignment.pronunciation_source_details is not None
++    assert alignment.pronunciation_source_details["source_path"] == str(source_path.resolve())
++    assert alignment.pronunciation_source_details["sha256"] == f"sha256:{digest}"
++
++
+ def test_prepared_adapter_preserves_tagged_live_annotation():
+     module = FakeKokoroG2P()
+     adapter = PreparedG2PAdapter(module)
+diff --git a/tests/test_public_engine_api.py b/tests/test_public_engine_api.py
+index 1d93e03..6ec7ef4 100644
+--- a/tests/test_public_engine_api.py
++++ b/tests/test_public_engine_api.py
+@@ -48,6 +48,9 @@ def test_public_api_exports_request_and_result_types() -> None:
+         "LexiconCapabilities",
+         "LexiconDiscoveryResult",
+         "discover_lexicons",
++        "G2LexFileRef",
++        "G2LexFileInspection",
++        "inspect_g2lex_file",
+         "GenerationConfig",
+         "LanguageRoutingConfig",
+         "SynthesisConfig",
+diff --git a/tests/test_request_renderer.py b/tests/test_request_renderer.py
+index 359d7d8..f5b2282 100644
+--- a/tests/test_request_renderer.py
++++ b/tests/test_request_renderer.py
+@@ -113,7 +113,21 @@ def test_renderer_keeps_one_request_independent_and_rebases_timings() -> None:
+         voice="af_sarah",
+         phonemes="həlˈoʊ",
+         token_ids=(1, 2, 3),
+-        alignment_tokens=(G2PAlignmentToken("Hello", "həlˈoʊ", char_start=0, char_end=5),),
++        alignment_tokens=(
++            G2PAlignmentToken(
++                "Hello",
++                "həlˈoʊ",
++                char_start=0,
++                char_end=5,
++                pronunciation_source="local-g2lex",
++                pronunciation_provider="file",
++                pronunciation_lexicon_id="en-us:fixture",
++                pronunciation_source_details={
++                    "source_path": "/tmp/fixture.g2lex",
++                    "sha256": "sha256:" + "a" * 64,
++                },
++            ),
++        ),
+         diagnostics=("frontend note",),
+     )
+
+@@ -146,6 +160,13 @@ def test_renderer_keeps_one_request_independent_and_rebases_timings() -> None:
+     assert rendered.voice_level_applications[0].source == "override"
+     assert rendered.short_sentence_mode is None
+     assert rendered.trace is not None
++    assert (
++        rendered.trace.model["pronunciation_alignment"][0]["pronunciation_source"] == "local-g2lex"
++    )
++    assert (
++        rendered.trace.model["pronunciation_alignment"][0]["pronunciation_source_details"]["sha256"]
++        == "sha256:" + "a" * 64
++    )
+     assert rendered.trace.warnings == ["frontend note"]
+     assert backend.preprocessed[0].tokens == [1, 2, 3]
+     assert factory_configs[0].voice == "af_sarah"

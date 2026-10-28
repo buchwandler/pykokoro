@@ -1,0 +1,93 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 1
+release_version: 0.10.7
+git_base_ref: v0.10.6
+git_base_sha: 3ce4e838b529cf3ac47ec16348ebf9183845184a
+git_head_ref: HEAD
+git_head_sha: 1c2e16c6bbbccef6f19242c0617204a452e43d1b
+git_range: 3ce4e838b529cf3ac47ec16348ebf9183845184a..1c2e16c6bbbccef6f19242c0617204a452e43d1b
+commit_count: 3
+rows:
+  - sha: 97315cda5574aa39dc75a2a0455e0a3fbb4fb92f
+    source_ref: git:97315cda5574aa39dc75a2a0455e0a3fbb4fb92f
+    short_sha: 97315cd
+    changed_paths:
+      - docs/api_reference.md
+      - pykokoro/__init__.py
+      - pykokoro/g2lex_sources.py
+      - pykokoro/prepared_g2p.py
+      - pykokoro/request_renderer.py
+      - pykokoro/tokenizer.py
+      - pykokoro/types.py
+      - tests/test_g2lex_sources.py
+      - tests/test_prepared_g2p_adapter.py
+      - tests/test_public_engine_api.py
+      - tests/test_request_renderer.py
+    stats:
+      files_changed: 11
+      insertions: 536
+      deletions: 5
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: better heteronym handling"
+  - sha: 1ae5863fbbd2671994a2d516f0482b1bb26ab701
+    source_ref: git:1ae5863fbbd2671994a2d516f0482b1bb26ab701
+    short_sha: 1ae5863
+    changed_paths:
+      - .github/workflows/python-publish.yml
+      - .github/workflows/tests.yml
+      - pyproject.toml
+      - tests/test_packaging_metadata.py
+      - uv.lock
+    stats:
+      files_changed: 5
+      insertions: 11
+      deletions: 11
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: increase floor"
+  - sha: 1c2e16c6bbbccef6f19242c0617204a452e43d1b
+    source_ref: git:1c2e16c6bbbccef6f19242c0617204a452e43d1b
+    short_sha: 1c2e16c
+    changed_paths:
+      - docs/advanced_features.md
+      - docs/api_reference.md
+      - pykokoro/__init__.py
+      - pykokoro/api_contract.py
+      - pykokoro/frontend_projection.py
+      - pykokoro/prepared_g2p.py
+      - pykokoro/request_renderer.py
+      - pykokoro/synthesis_identity.py
+      - pykokoro/synthesis_types.py
+      - pykokoro/types.py
+      - tests/test_frontend_projection.py
+      - tests/test_long_text_splitting.py
+      - tests/test_prepared_g2p_adapter.py
+      - tests/test_public_engine_api.py
+      - tests/test_reference_frontend_parity.py
+      - tests/test_request_api_contract.py
+      - tests/test_request_renderer.py
+      - tests/test_synthesis_identity.py
+      - tests/test_synthesis_types.py
+    stats:
+      files_changed: 19
+      insertions: 945
+      deletions: 41
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: say as support"

@@ -1,0 +1,85 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: 0.10.7
+git_base_ref: 3ce4e838b529cf3ac47ec16348ebf9183845184a
+git_base_sha: 3ce4e838b529cf3ac47ec16348ebf9183845184a
+git_head_ref: 1c2e16c6bbbccef6f19242c0617204a452e43d1b
+git_head_sha: 1c2e16c6bbbccef6f19242c0617204a452e43d1b
+include_merges: nontrivial
+entries:
+  - kind: added
+    summary:
+      "Added local G2Lex file references, metadata inspection, and pronunciation
+      provenance"
+    status: accepted
+    source_refs:
+      - git:97315cda5574aa39dc75a2a0455e0a3fbb4fb92f
+    paths:
+      - docs/api_reference.md
+      - pykokoro/__init__.py
+      - pykokoro/g2lex_sources.py
+      - pykokoro/prepared_g2p.py
+      - pykokoro/request_renderer.py
+      - pykokoro/tokenizer.py
+      - pykokoro/types.py
+      - tests/test_g2lex_sources.py
+      - tests/test_prepared_g2p_adapter.py
+      - tests/test_public_engine_api.py
+      - tests/test_request_renderer.py
+    sources:
+      - git:97315cda5574aa39dc75a2a0455e0a3fbb4fb92f
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: changed
+    summary: "Changed the minimum supported kokorog2p version to 0.9.16"
+    status: accepted
+    source_refs:
+      - git:1ae5863fbbd2671994a2d516f0482b1bb26ab701
+    paths:
+      - .github/workflows/python-publish.yml
+      - .github/workflows/tests.yml
+      - pyproject.toml
+      - tests/test_packaging_metadata.py
+      - uv.lock
+    sources:
+      - git:1ae5863fbbd2671994a2d516f0482b1bb26ab701
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary:
+      "Added source-aligned character say-as spans with canonical timing and tracing"
+    status: accepted
+    source_refs:
+      - git:1c2e16c6bbbccef6f19242c0617204a452e43d1b
+    paths:
+      - docs/advanced_features.md
+      - docs/api_reference.md
+      - pykokoro/__init__.py
+      - pykokoro/api_contract.py
+      - pykokoro/frontend_projection.py
+      - pykokoro/prepared_g2p.py
+      - pykokoro/request_renderer.py
+      - pykokoro/synthesis_identity.py
+      - pykokoro/synthesis_types.py
+      - pykokoro/types.py
+      - tests/test_frontend_projection.py
+      - tests/test_long_text_splitting.py
+      - tests/test_prepared_g2p_adapter.py
+      - tests/test_public_engine_api.py
+      - tests/test_reference_frontend_parity.py
+      - tests/test_request_api_contract.py
+      - tests/test_request_renderer.py
+      - tests/test_synthesis_identity.py
+      - tests/test_synthesis_types.py
+    sources:
+      - git:1c2e16c6bbbccef6f19242c0617204a452e43d1b
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
