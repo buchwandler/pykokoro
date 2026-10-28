@@ -9,10 +9,16 @@ import numpy as np
 import pytest
 
 from pykokoro import SynthesisInputTooLongError
+from pykokoro.exceptions import InvalidRequestError
 from pykokoro.prepared_g2p import PreparedSynthesis
 from pykokoro.request_renderer import OnnxRequestRenderer
 from pykokoro.synthesis_config import SynthesisConfig
-from pykokoro.synthesis_types import LinguisticToken, PronunciationOverride, SynthesisSegment
+from pykokoro.synthesis_types import (
+    LinguisticToken,
+    PronunciationOverride,
+    SayAsSpan,
+    SynthesisSegment,
+)
 from pykokoro.types import G2PAlignmentToken, PhonemeSegment, Trace, WordTiming
 
 
@@ -277,6 +283,47 @@ def test_sentence_mode_rebases_pronunciation_overrides_and_annotations() -> None
         7,
         "Second",
     )
+
+
+def test_sentence_mode_protects_and_rebases_say_as_spans(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    text = "ART one two three"
+    say_as = (SayAsSpan(0, 3, "characters"),)
+    request = _request(text, say_as=say_as)
+    renderer = FakeRenderer()
+
+    def split_source_spans(self, request, config, *, start, end, mode):
+        assert mode == "sentence"
+        return self._merge_protected_boundaries([(start, 2), (2, 8), (8, end)], request)
+
+    monkeypatch.setattr(OnnxRequestRenderer, "_split_source_spans", split_source_spans)
+    segments = renderer._build_phoneme_segments(
+        request,
+        _prepared(text, 5),
+        _config(long_text_split="sentence"),
+        max_tokens=2,
+    )
+
+    assert [(segment.char_start, segment.char_end) for segment in segments] == [
+        (0, 8),
+        (8, len(text)),
+    ]
+    assert [(child.text, child.say_as) for child in renderer.g2p_adapter.phonemized_segments] == [
+        ("ART one ", (SayAsSpan(0, 3, "characters"),)),
+        ("two three", ()),
+        (text, say_as),
+    ]
+    assert "".join(segment.text for segment in segments) == text
+
+
+def test_phonemize_child_rejects_partial_say_as_intersections() -> None:
+    text = "ART now"
+    request = _request(text, say_as=(SayAsSpan(0, 3, "characters"),))
+    renderer = FakeRenderer()
+
+    with pytest.raises(InvalidRequestError, match="cuts through a say_as span"):
+        renderer._phonemize_source_span(request, _config(), start=0, end=2)
 
 
 def test_sentence_mode_long_sentence_falls_back_to_word_boundaries() -> None:

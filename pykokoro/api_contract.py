@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-REQUEST_API_VERSION = 1
+REQUEST_API_VERSION = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +29,8 @@ class RequestApiContract:
     supports_request_measurement: bool = False
     supports_reference_voice: bool = False
     supports_voice_enrollment: bool = False
+    supports_say_as: bool = False
+    say_as_interpretations: tuple[str, ...] = ()
 
 
 def request_api_contract() -> RequestApiContract:
@@ -51,4 +53,6 @@ def request_api_contract() -> RequestApiContract:
         supports_request_measurement=True,
         supports_reference_voice=True,
         supports_voice_enrollment=True,
+        supports_say_as=True,
+        say_as_interpretations=("characters",),
     )

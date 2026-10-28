@@ -221,6 +221,7 @@ class Trace:
     inference: list[dict[str, Any]] = field(default_factory=list)
     model: dict[str, Any] = field(default_factory=dict)
     counters: dict[str, int] = field(default_factory=dict)
+    frontend: dict[str, Any] = field(default_factory=dict)
 
     def increment_counter(self, name: str, amount: int = 1) -> None:
         """Increment a named trace counter."""

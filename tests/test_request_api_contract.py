@@ -9,16 +9,16 @@ import pykokoro
 from pykokoro.api_contract import REQUEST_API_VERSION, RequestApiContract, request_api_contract
 
 
-def test_request_api_version_is_one() -> None:
-    assert REQUEST_API_VERSION == 1
-    assert pykokoro.REQUEST_API_VERSION == 1
+def test_request_api_version_is_two() -> None:
+    assert REQUEST_API_VERSION == 2
+    assert pykokoro.REQUEST_API_VERSION == 2
 
 
 def test_request_api_contract_declares_stable_capabilities() -> None:
     contract = request_api_contract()
 
     assert contract == RequestApiContract(
-        version=1,
+        version=2,
         request_type="SynthesisRequest",
         result_type="RenderedSegment",
         synthesizer_type="KokoroSynthesizer",
@@ -35,6 +35,8 @@ def test_request_api_contract_declares_stable_capabilities() -> None:
         supports_request_measurement=True,
         supports_reference_voice=True,
         supports_voice_enrollment=True,
+        supports_say_as=True,
+        say_as_interpretations=("characters",),
     )
     assert pykokoro.RequestApiContract is RequestApiContract
     assert pykokoro.RequestMeasure is not None
@@ -43,6 +45,8 @@ def test_request_api_contract_declares_stable_capabilities() -> None:
     assert contract.supports_request_measurement is True
     assert contract.supports_reference_voice is True
     assert contract.supports_voice_enrollment is True
+    assert contract.supports_say_as is True
+    assert contract.say_as_interpretations == ("characters",)
     assert pykokoro.request_api_contract is request_api_contract
 
 
@@ -67,6 +71,8 @@ def test_request_api_contract_fields_remain_additive_for_positional_callers() ->
     assert legacy.supports_request_measurement is False
     assert legacy.supports_reference_voice is False
     assert legacy.supports_voice_enrollment is False
+    assert legacy.supports_say_as is False
+    assert legacy.say_as_interpretations == ()
 
 
 def test_request_api_contract_and_synthesizer_resolution_are_dependency_light() -> None:
@@ -90,11 +96,13 @@ class RuntimeImportBlocker(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, RuntimeImportBlocker())
 import pykokoro
 
-assert pykokoro.REQUEST_API_VERSION == 1
+assert pykokoro.REQUEST_API_VERSION == 2
 contract = pykokoro.request_api_contract()
 assert contract.request_type == "SynthesisRequest"
 assert contract.result_type == "RenderedSegment"
 assert contract.synthesizer_type == "KokoroSynthesizer"
+assert contract.supports_say_as is True
+assert contract.say_as_interpretations == ("characters",)
 
 synthesizer = pykokoro.KokoroSynthesizer
 assert callable(synthesizer.prepare)

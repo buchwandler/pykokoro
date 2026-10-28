@@ -14,10 +14,12 @@ from ._error_utils import backend_error_from_exception
 from .exceptions import (
     BackendError,
     ConfigurationError,
+    InvalidRequestError,
     InvalidVoiceError,
     PyKokoroError,
     SynthesisInputTooLongError,
 )
+from .frontend_projection import project_frontend_text
 from .model_profiles import get_model_profile
 
 if TYPE_CHECKING:
@@ -91,7 +93,10 @@ class OnnxRequestRenderer:
     ) -> RenderedSegment:
         resolved = resolve_synthesis_config(config, language=request.language, voice=request.voice)
         identity = build_synthesis_identity(
-            resolved, language=request.language, voice=resolved.voice
+            resolved,
+            language=request.language,
+            voice=resolved.voice,
+            say_as=request.say_as,
         )
         profile = get_model_profile(
             resolved.model_variant or "v1.0", resolved.model_source or "github"
@@ -109,6 +114,20 @@ class OnnxRequestRenderer:
                 raise ConfigurationError("reference voice synthesis requires speed=1.0")
         trace = Trace() if resolved.return_trace else None
         if trace is not None:
+            if request.say_as:
+                projection = project_frontend_text(request.text, request.say_as)
+                trace.frontend["say_as"] = [
+                    {
+                        "start": span.start,
+                        "end": span.end,
+                        "interpret_as": span.interpret_as,
+                        "canonical": request.text[span.start : span.end],
+                        "frontend": projection.frontend_text[
+                            slice(*projection.map_canonical_span(span.start, span.end))
+                        ],
+                    }
+                    for span in request.say_as
+                ]
             trace.model.update(
                 {
                     "model_source": resolved.model_source,
@@ -581,6 +600,12 @@ class OnnxRequestRenderer:
             for override in request.pronunciation_overrides
             if override.start < end and override.end > start
         )
+        say_as = []
+        for span in request.say_as:
+            if span.start >= start and span.end <= end:
+                say_as.append(replace(span, start=span.start - start, end=span.end - start))
+            elif span.start < end and span.end > start:
+                raise InvalidRequestError("long-text child span cuts through a say_as span")
         tokens = tuple(
             replace(
                 token,
@@ -598,6 +623,7 @@ class OnnxRequestRenderer:
             voice=request.voice,
             pronunciation_overrides=overrides,
             tokens=tokens,
+            say_as=tuple(say_as),
         )
         return self._g2p_adapter.phonemize(child_request, config)
 
@@ -631,7 +657,7 @@ class OnnxRequestRenderer:
             spans.append((start + cursor, end))
         if not spans:
             spans.append((start, end))
-        return self._merge_override_boundaries(spans, request)
+        return self._merge_protected_boundaries(spans, request)
 
     @staticmethod
     def _word_source_spans(
@@ -648,21 +674,24 @@ class OnnxRequestRenderer:
             spans.append((start + cursor, end))
         if not spans:
             spans.append((start, end))
-        return OnnxRequestRenderer._merge_override_boundaries(spans, request)
+        return OnnxRequestRenderer._merge_protected_boundaries(spans, request)
 
     @staticmethod
-    def _merge_override_boundaries(
+    def _merge_protected_boundaries(
         spans: list[tuple[int, int]], request: SynthesisSegment
     ) -> list[tuple[int, int]]:
         merged: list[tuple[int, int]] = []
         for start, end in spans:
-            if merged and any(
-                override.phonemes is not None and override.start < merged[-1][1] < override.end
-                for override in request.pronunciation_overrides
-            ):
-                merged[-1] = (merged[-1][0], end)
-            else:
-                merged.append((start, end))
+            if merged:
+                boundary = merged[-1][1]
+                protected = any(
+                    override.phonemes is not None and override.start < boundary < override.end
+                    for override in request.pronunciation_overrides
+                ) or any(span.start < boundary < span.end for span in request.say_as)
+                if protected:
+                    merged[-1] = (merged[-1][0], end)
+                    continue
+            merged.append((start, end))
         return merged
 
     @staticmethod

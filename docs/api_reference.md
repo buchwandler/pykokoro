@@ -14,6 +14,7 @@ from pykokoro import (
     VoiceEnrollerSpec,
     KokoroSynthesizer,
     SynthesisConfig,
+    SayAsSpan,
     SynthesisRequest,
 )
 ```
@@ -24,7 +25,7 @@ from pykokoro import (
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Synthesis                 | `KokoroSynthesizer`, `SynthesisRequest`, `SynthesisSegment`, `RenderedSegment`                                                                                                                                                                                                                                                                                                      |
 | Request measurement       | `RequestMeasure`, `KokoroSynthesizer.measure_request()`                                                                                                                                                                                                                                                                                                                             |
-| Source context and timing | `PronunciationOverride`, `LinguisticToken`, `WordTiming`                                                                                                                                                                                                                                                                                                                            |
+| Source context and timing | `PronunciationOverride`, `LinguisticToken`, `SayAsSpan`, `WordTiming`                                                                                                                                                                                                                                                                                                               |
 | Configuration             | `SynthesisConfig`, `GenerationConfig`, `LanguageRoutingConfig`, `TokenizerConfig`, `ShortSentenceConfig`, `LongTextSplitMode`                                                                                                                                                                                                                                                       |
 | Voice level               | `VoiceLevelConfig`, `VoiceLevelApplication`, `VoiceBlend`                                                                                                                                                                                                                                                                                                                           |
 | Voice enrollment          | `KokoroVoicePack`, `ReferenceVoice`, `InnoEnrollmentOptions`, `KokoroSynthesizer.enroll_voice()`                                                                                                                                                                                                                                                                                    |
@@ -53,12 +54,13 @@ constructing an engine:
 import pykokoro
 
 contract = pykokoro.request_api_contract()
-assert contract.version == pykokoro.REQUEST_API_VERSION == 1
+assert contract.version == pykokoro.REQUEST_API_VERSION == 2
 assert contract.request_type == "SynthesisRequest"
 assert contract.result_type == "RenderedSegment"
 assert contract.measurement_method == "measure_request"
 assert contract.voice_enrollment_method == "enroll_voice"
 assert contract.supports_request_measurement and contract.supports_reference_voice
+assert contract.supports_say_as and contract.say_as_interpretations == ("characters",)
 assert contract.supports_voice_enrollment
 ```
 
@@ -93,6 +95,11 @@ ONNX inference.
 ## Requests, results, and source alignment
 
 ```{eval-rst}
+.. autoclass:: pykokoro.SayAsSpan
+   :members:
+   :undoc-members:
+
+
 .. autoclass:: pykokoro.SynthesisRequest
    :members:
    :undoc-members:
@@ -124,10 +131,15 @@ Request language and voice are explicit. `PronunciationOverride` and `Linguistic
 offsets are half-open character ranges into the exact `text` carried by that request;
 `tokens` is the canonical `SynthesisRequest` field.
 
-`RequestMeasure.amount` is the exact frontend token count. `maximum` is an optional
-caller-provided limit, and `fits` is true when the amount is within that limit, false
-when it exceeds it, and `None` when no limit was supplied. Measurement does not imply
-that reference audio is valid or enrollment will succeed.
+`SayAsSpan` marks an exact half-open range in `SynthesisRequest.text`. The currently
+supported interpretation is `characters`; only marked spans are projected to KokoroG2P's
+shadow frontend (for example, canonical `A R T` may be sent as `A- R- T`). The request,
+prepared text, public alignment, and word timings stay on canonical text and offsets. A
+marked phrase remains inside the caller's request; say-as does not add pauses or itself
+split text. `RequestMeasure.amount` is the exact frontend token count. `maximum` is an
+optional caller-provided limit, and `fits` is true when the amount is within that limit,
+false when it exceeds it, and `None` when no limit was supplied. Measurement does not
+imply that reference audio is valid or enrollment will succeed.
 
 `RenderedSegment` contains one request's waveform and metadata. `save_wav()` writes mono
 float32 WAV audio. `play()` uses the optional playback dependency. Results from a batch

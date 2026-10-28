@@ -6,14 +6,19 @@ import pykokoro
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.synthesis_config import SynthesisConfig, resolve_synthesis_config
 from pykokoro.synthesis_identity import SynthesisIdentity, build_synthesis_identity
+from pykokoro.synthesis_types import SayAsSpan
 from pykokoro.voice_pack import KokoroVoicePack
 
 
-def _identity(config: SynthesisConfig | None = None) -> SynthesisIdentity:
+def _identity(
+    config: SynthesisConfig | None = None,
+    *,
+    say_as: tuple[SayAsSpan, ...] = (),
+) -> SynthesisIdentity:
     resolved = resolve_synthesis_config(
         config or SynthesisConfig(), language="en-us", voice="af_heart"
     )
-    return build_synthesis_identity(resolved, language="en-us", voice=resolved.voice)
+    return build_synthesis_identity(resolved, language="en-us", voice=resolved.voice, say_as=say_as)
 
 
 def test_resolved_synthesis_identity_is_stable_and_output_sensitive() -> None:
@@ -29,6 +34,17 @@ def test_resolved_synthesis_identity_is_stable_and_output_sensitive() -> None:
     assert base.cache_key == same.cache_key
     assert base.cache_key != faster.cache_key
     assert len(base.cache_key) == 64
+
+
+def test_synthesis_identity_includes_semantic_say_as_values() -> None:
+    first = _identity(say_as=(SayAsSpan(0, 3, "characters"),))
+    same = _identity(say_as=(SayAsSpan(0, 3, "characters"),))
+    changed_detail = _identity(say_as=(SayAsSpan(0, 3, "characters", detail="letters"),))
+
+    assert first.cache_key == same.cache_key
+    assert first.cache_key != changed_detail.cache_key
+    assert first.say_as == ((0, 3, "characters", None, None),)
+    assert "A- R- T" not in repr(first.to_dict())
 
 
 def test_synthesis_identity_includes_active_long_text_policy() -> None:

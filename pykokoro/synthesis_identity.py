@@ -7,13 +7,16 @@ import json
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .reference_voice import ReferenceVoice
 from .synthesis_config import SynthesisConfig
 from .voice_level import default_voice_calibration
 from .voice_manager import VoiceBlend
 from .voice_pack import KokoroVoicePack
+
+if TYPE_CHECKING:
+    from .synthesis_types import SayAsSpan
 
 
 def _identity_value(value: Any) -> Any:
@@ -69,6 +72,7 @@ class SynthesisIdentity:
     voice_level_gain_db: float | None
     calibration_dataset: str | None
     calibration_sha256: str | None
+    say_as: tuple[tuple[int, int, str, str | None, str | None], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-safe representation without transient filesystem paths."""
@@ -85,6 +89,7 @@ def build_synthesis_identity(
     *,
     language: str,
     voice: str | VoiceBlend | KokoroVoicePack | ReferenceVoice | None,
+    say_as: tuple[SayAsSpan, ...] = (),
 ) -> SynthesisIdentity:
     """Build a stable identity from resolved settings that can affect output."""
     from . import __version__
@@ -126,6 +131,9 @@ def build_synthesis_identity(
     model_id = config.model_identity or ":".join(
         str(value) for value in (config.model_source, config.model_variant, config.model_quality)
     )
+    say_as_identity = tuple(
+        (span.start, span.end, span.interpret_as, span.format, span.detail) for span in say_as
+    )
 
     calibration_dataset = None
     calibration_sha256 = None
@@ -163,4 +171,5 @@ def build_synthesis_identity(
         ),
         calibration_dataset=calibration_dataset,
         calibration_sha256=calibration_sha256,
+        say_as=say_as_identity,
     )

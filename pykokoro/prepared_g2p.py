@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import threading
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from kokorog2p import OverrideSpan, TokenAnnotation
 
 from .constants import SUPPORTED_LANGUAGES
+from .exceptions import AlignmentError
 from .frontend_contracts import require_frontend
+from .frontend_projection import FrontendTextProjection, project_frontend_text
 from .lexicon_data import create_g2p_with_lexphon_retry
 from .model_profiles import get_model_profile
 from .synthesis_config import SynthesisConfig
@@ -48,6 +50,7 @@ class PreparedG2PAdapter:
 
     def phonemize(self, segment: SynthesisSegment, config: SynthesisConfig) -> PreparedSynthesis:
         g2p_module = self._load()
+        projection = project_frontend_text(segment.text, segment.say_as)
         target_model, profile = self._model_target(config)
         tokenizer_config = config.tokenizer_config or TokenizerConfig()
         if profile is not None:
@@ -60,8 +63,10 @@ class PreparedG2PAdapter:
             profile,
             use_spacy=False if segment.tokens else None,
         )
-        overrides = tuple(self._to_override(item) for item in segment.pronunciation_overrides)
-        annotations = tuple(self._to_annotation(item) for item in segment.tokens)
+        overrides = tuple(
+            self._to_override(item, projection) for item in segment.pronunciation_overrides
+        )
+        annotations = tuple(self._to_annotation(item, projection) for item in segment.tokens)
         routing = config.language_routing
         language_routing = (
             None
@@ -76,7 +81,7 @@ class PreparedG2PAdapter:
             warnings: tuple[str, ...] = ()
         else:
             result = g2p_module.phonemize_prepared(
-                segment.text,
+                projection.frontend_text,
                 language=language,
                 overrides=overrides or None,
                 annotations=annotations or None,
@@ -104,7 +109,10 @@ class PreparedG2PAdapter:
             warnings = tuple(str(item) for item in getattr(result, "warnings", ()) or ())
 
         alignments = tuple(
-            self._alignment_token(token, g2p_module, target_model) for token in raw_tokens
+            self._map_alignment_to_canonical(
+                self._alignment_token(token, g2p_module, target_model), projection, segment.text
+            )
+            for token in raw_tokens
         )
         return PreparedSynthesis(
             request_id=segment.id,
@@ -148,20 +156,27 @@ class PreparedG2PAdapter:
         )
 
     @staticmethod
-    def _to_override(value: PronunciationOverride) -> OverrideSpan:
+    def _to_override(
+        value: PronunciationOverride, projection: FrontendTextProjection
+    ) -> OverrideSpan:
         attrs: dict[str, str] = {}
         if value.phonemes is not None:
             attrs["ph"] = value.phonemes
         if value.language is not None:
             attrs["lang"] = value.language
-        return OverrideSpan(char_start=value.start, char_end=value.end, attrs=attrs)
+        start, end = projection.map_canonical_span(value.start, value.end)
+        return OverrideSpan(char_start=start, char_end=end, attrs=attrs)
 
     @staticmethod
-    def _to_annotation(value: LinguisticToken) -> TokenAnnotation:
+    def _to_annotation(
+        value: LinguisticToken, projection: FrontendTextProjection
+    ) -> TokenAnnotation:
+        start, end = projection.map_canonical_span(value.start, value.end)
+        text = projection.frontend_text[start:end] if value.text is not None else None
         return TokenAnnotation(
-            start=value.start,
-            end=value.end,
-            text=value.text,
+            start=start,
+            end=end,
+            text=text,
             pos=value.pos,
             tag=value.tag,
             lemma=value.lemma,
@@ -240,6 +255,30 @@ class PreparedG2PAdapter:
             pronunciation_language_markers=get("pronunciation_language_markers"),
             heteronym_resolution=heteronym_resolution,
             pronunciation_source_details=pronunciation_source_details,
+        )
+
+    @staticmethod
+    def _map_alignment_to_canonical(
+        alignment: G2PAlignmentToken,
+        projection: FrontendTextProjection,
+        canonical_text: str,
+    ) -> G2PAlignmentToken:
+        if projection.frontend_text == projection.canonical_text:
+            return alignment
+        char_start = alignment.char_start
+        char_end = alignment.char_end
+        if char_start is None or char_end is None:
+            if projection.frontend_text != projection.canonical_text and alignment.text:
+                raise AlignmentError(
+                    "KokoroG2P alignment lacks character offsets for projected frontend text"
+                )
+            return alignment
+        canonical_start, canonical_end = projection.map_frontend_span(char_start, char_end)
+        return replace(
+            alignment,
+            text=canonical_text[canonical_start:canonical_end],
+            char_start=canonical_start,
+            char_end=canonical_end,
         )
 
     def _load(self) -> Any:

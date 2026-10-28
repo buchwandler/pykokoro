@@ -58,6 +58,33 @@ def _normalize_language(language: str, label: str) -> str:
 
 
 @dataclass(frozen=True, slots=True)
+class SayAsSpan:
+    """Source-aligned text interpretation requested by the caller."""
+
+    start: int
+    end: int
+    interpret_as: str
+    format: str | None = None
+    detail: str | None = None
+
+    def __post_init__(self) -> None:
+        for name in ("start", "end"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise InvalidRequestError(f"say_as {name} must be an integer")
+        if not 0 <= self.start < self.end:
+            raise InvalidRequestError(
+                f"say_as offsets must satisfy 0 <= start < end, got [{self.start}, {self.end})"
+            )
+        if not isinstance(self.interpret_as, str) or not self.interpret_as.strip():
+            raise InvalidRequestError("say_as interpret_as must be a non-empty string")
+        for name in ("format", "detail"):
+            value = getattr(self, name)
+            if value is not None and (not isinstance(value, str) or not value.strip()):
+                raise InvalidRequestError(f"say_as {name} must be a non-empty string or None")
+
+
+@dataclass(frozen=True, slots=True)
 class RequestMeasure:
     """Frontend measurement of one request, expressed in model tokens."""
 
@@ -153,6 +180,7 @@ class SynthesisRequest:
     pronunciation_overrides: tuple[PronunciationOverride, ...]
     tokens: tuple[LinguisticToken, ...]
     phonemes: str | None
+    say_as: tuple[SayAsSpan, ...]
 
     def __init__(
         self,
@@ -166,7 +194,10 @@ class SynthesisRequest:
         phonemes: str | None = None,
         *,
         tokens: tuple[LinguisticToken, ...] | list[LinguisticToken] | None = None,
+        say_as: tuple[SayAsSpan, ...] | list[SayAsSpan] = (),
     ) -> None:
+        if not isinstance(say_as, (tuple, list)):
+            raise InvalidRequestError("say_as must be a tuple or list of SayAsSpan values")
         if tokens is not None and annotations is not None and tuple(tokens) != tuple(annotations):
             raise InvalidLinguisticTokensError(
                 "tokens and legacy annotations cannot provide different values"
@@ -179,6 +210,7 @@ class SynthesisRequest:
         object.__setattr__(self, "pronunciation_overrides", tuple(pronunciation_overrides))
         object.__setattr__(self, "tokens", tuple(request_tokens))
         object.__setattr__(self, "phonemes", phonemes)
+        object.__setattr__(self, "say_as", tuple(say_as))
         self.__post_init__()
 
     @property
@@ -215,6 +247,28 @@ class SynthesisRequest:
             )
         if any(not isinstance(item, LinguisticToken) for item in tokens):
             raise InvalidLinguisticTokensError("tokens must contain LinguisticToken values")
+        say_as = self.say_as
+        if any(not isinstance(item, SayAsSpan) for item in say_as):
+            raise InvalidRequestError("say_as must contain SayAsSpan values")
+        previous_say_as: SayAsSpan | None = None
+        for index, span in enumerate(say_as):
+            _validate_offset(
+                span.start,
+                span.end,
+                len(self.text),
+                f"say_as[{index}]",
+                InvalidRequestError,
+            )
+            if previous_say_as is not None:
+                if (span.start, span.end) < (previous_say_as.start, previous_say_as.end):
+                    raise InvalidRequestError("say_as spans must be sorted by (start, end)")
+                if span.start < previous_say_as.end:
+                    raise InvalidRequestError("overlapping say_as spans are ambiguous")
+            previous_say_as = span
+        if self.phonemes is not None and say_as:
+            raise InvalidPronunciationError(
+                "whole-request phonemes cannot be combined with say_as spans"
+            )
 
         for index, override in enumerate(overrides):
             _validate_offset(
@@ -224,6 +278,11 @@ class SynthesisRequest:
                 f"override[{index}]",
                 InvalidPronunciationError,
             )
+        for override in overrides:
+            if any(override.start < span.end and span.start < override.end for span in say_as):
+                raise InvalidPronunciationError(
+                    "pronunciation overrides cannot overlap say_as spans"
+                )
         direct_overrides = sorted(
             (item for item in overrides if item.phonemes is not None), key=lambda item: item.start
         )

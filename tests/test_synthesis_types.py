@@ -5,6 +5,8 @@ from pykokoro.exceptions import (
     EmptyTextError,
     InvalidLanguageError,
     InvalidLinguisticTokensError,
+    InvalidPronunciationError,
+    InvalidRequestError,
     InvalidVoiceError,
 )
 from pykokoro.synthesis_config import SynthesisConfig
@@ -12,6 +14,7 @@ from pykokoro.synthesis_types import (
     LinguisticToken,
     PronunciationOverride,
     RenderedSegment,
+    SayAsSpan,
     SynthesisRequest,
     SynthesisSegment,
 )
@@ -141,6 +144,26 @@ def test_language_spans_can_overlap_and_only_direct_phonemes_are_ambiguous():
     assert len(request.pronunciation_overrides) == 2
 
 
+def test_say_as_rejects_whole_phonemes_and_overlapping_pronunciation_overrides() -> None:
+    with pytest.raises(InvalidPronunciationError, match="whole-request phonemes.*say_as"):
+        SynthesisRequest(
+            id="line",
+            text="ART",
+            language="en-us",
+            phonemes="ɑɹti",
+            say_as=(SayAsSpan(0, 3, "characters"),),
+        )
+
+    with pytest.raises(InvalidPronunciationError, match="overlap say_as"):
+        SynthesisRequest(
+            id="line",
+            text="ART now",
+            language="en-us",
+            pronunciation_overrides=(PronunciationOverride(1, 4, language="de"),),
+            say_as=(SayAsSpan(0, 3, "characters"),),
+        )
+
+
 def test_rendered_segment_enforces_mono_float32_and_request_local_timing_bounds():
     timing = WordTiming(
         text="Hello", char_start=0, char_end=5, start_sample=1, end_sample=4, segment_id="line"
@@ -228,6 +251,44 @@ def test_rendered_segment_rejects_empty_audio() -> None:
             phonemes="hello",
             token_ids=(1,),
         )
+
+
+def test_say_as_spans_are_immutable_and_validated_on_requests() -> None:
+    text = "Call A R T now"
+    start = text.index("A R T")
+    span = SayAsSpan(start, start + len("A R T"), "characters")
+    request = SynthesisRequest(id="line", text=text, language="en-us", say_as=[span])
+
+    assert request.say_as == (span,)
+    assert request != SynthesisRequest(id="line", text=text, language="en-us")
+    with pytest.raises((AttributeError, TypeError)):
+        span.start = 0  # type: ignore[misc]
+    with pytest.raises(InvalidRequestError, match="interpret_as"):
+        SayAsSpan(0, 1, " ")
+    with pytest.raises(InvalidRequestError, match="format"):
+        SayAsSpan(0, 1, "characters", format=" ")
+    with pytest.raises(InvalidRequestError, match="start must be an integer"):
+        SayAsSpan(True, 1, "characters")  # type: ignore[arg-type]
+    with pytest.raises(InvalidRequestError, match=r"say_as\[0\].*offsets"):
+        SynthesisRequest(
+            id="line", text=text, language="en-us", say_as=[SayAsSpan(0, 99, "characters")]
+        )
+    with pytest.raises(InvalidRequestError, match="sorted"):
+        SynthesisRequest(
+            id="line",
+            text=text,
+            language="en-us",
+            say_as=(SayAsSpan(5, 8, "characters"), SayAsSpan(0, 1, "characters")),
+        )
+    with pytest.raises(InvalidRequestError, match="overlapping"):
+        SynthesisRequest(
+            id="line",
+            text=text,
+            language="en-us",
+            say_as=(SayAsSpan(5, 10, "characters"), SayAsSpan(7, 8, "characters")),
+        )
+    with pytest.raises(InvalidRequestError, match="SayAsSpan"):
+        SynthesisRequest(id="line", text=text, language="en-us", say_as=[("bad",)])  # type: ignore[list-item]
 
 
 def test_synthesis_config_only_accepts_engine_owned_options():

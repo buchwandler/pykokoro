@@ -41,6 +41,32 @@ cannot be combined with span-level direct-phoneme overrides. Ambiguous overlappi
 direct overrides are rejected. Offsets refer to the exact prepared request string, not
 an earlier source file or markup document.
 
+## Character say-as spans
+
+`SayAsSpan` requests character-by-character reading for an exact, half-open range in the
+prepared request text. For example, PyKokoro may send `A- R- T` to KokoroG2P for the
+marked canonical text `A R T`; the caller's text is not rewritten:
+
+```python
+from pykokoro import SayAsSpan, SynthesisSegment
+
+text = "Because someone called A R T."
+start = text.index("A R T")
+request = SynthesisSegment(
+    id="character-say-as",
+    text=text,
+    language="en-us",
+    say_as=(SayAsSpan(start, start + len("A R T"), interpret_as="characters"),),
+)
+```
+
+Only explicitly marked spans are transformed, and `characters` is the supported
+interpretation. Request/result text, source alignment, and word-timing offsets remain in
+the canonical text. The marked phrase stays inside the caller's request: say-as does not
+add requests or pauses. The normal token-capacity policy still applies; opt-in long-text
+splitting protects marked spans from being cut. `measure_request()` uses the same
+projected frontend as synthesis.
+
 ## Caller-provided linguistic tokens
 
 `LinguisticToken` supplies source-aligned POS, tag, lemma, morphology, and optional

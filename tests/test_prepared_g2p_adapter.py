@@ -11,7 +11,13 @@ from pykokoro import G2LexFileRef
 from pykokoro.language_routing import LanguageRoutingConfig
 from pykokoro.prepared_g2p import PreparedG2PAdapter
 from pykokoro.synthesis_config import SynthesisConfig
-from pykokoro.synthesis_types import LinguisticToken, PronunciationOverride, SynthesisSegment
+from pykokoro.synthesis_types import (
+    LinguisticToken,
+    PronunciationOverride,
+    SayAsSpan,
+    SynthesisRequest,
+    SynthesisSegment,
+)
 from pykokoro.tokenizer import TokenizerConfig
 
 
@@ -52,6 +58,23 @@ class FakeKokoroG2P:
 
     def phonemes_to_ids(self, phonemes, model):
         return [ord(char) for char in phonemes]
+
+
+class ShadowTextG2P(FakeKokoroG2P):
+    def phonemize_prepared(self, text, **kwargs):
+        self.calls.append((text, kwargs))
+        if text == "A- R- T now":
+            tokens = (
+                {"text": "A- R- T", "phonemes": "letters", "char_start": 0, "char_end": 7},
+                {"text": "now", "phonemes": "naʊ", "char_start": 8, "char_end": 11},
+            )
+        else:
+            tokens = (
+                {"text": text, "phonemes": "sentence", "char_start": 0, "char_end": len(text)},
+            )
+        return SimpleNamespace(
+            phonemes="shadow phonemes", token_ids=(1, 2), tokens=tokens, warnings=()
+        )
 
 
 def _config():
@@ -98,6 +121,74 @@ def test_prepared_adapter_forwards_request_text_overrides_annotations_and_routin
     assert result.request_id == request.id
     assert result.alignment_tokens[1].char_start == 6
     assert result.alignment_tokens[1].char_end == 11
+
+
+def test_prepared_adapter_projects_character_span_before_kokoro_g2p() -> None:
+    text = "Because someone called A R T finally."
+    start = text.index("A R T")
+    request = SynthesisRequest(
+        id="characters",
+        text=text,
+        language="en-us",
+        say_as=(SayAsSpan(start, start + len("A R T"), "characters"),),
+    )
+    module = ShadowTextG2P()
+
+    prepared = PreparedG2PAdapter(module).phonemize(request, _config())
+
+    assert len(module.calls) == 1
+    assert module.calls[0][0] == "Because someone called A- R- T finally."
+    assert prepared.text == text
+    assert (prepared.alignment_tokens[0].char_start, prepared.alignment_tokens[0].char_end) == (
+        0,
+        len(text),
+    )
+    assert prepared.alignment_tokens[0].text == text
+
+
+def test_prepared_adapter_projects_parenthetical_characters_in_one_request() -> None:
+    text = "Because someone (A R T) thought this part could use more verisimilitude."
+    start = text.index("A R T")
+    request = SynthesisRequest(
+        id="parenthetical-characters",
+        text=text,
+        language="en-us",
+        say_as=(SayAsSpan(start, start + len("A R T"), "characters"),),
+    )
+    module = ShadowTextG2P()
+
+    prepared = PreparedG2PAdapter(module).phonemize(request, _config())
+
+    assert [call[0] for call in module.calls] == [
+        "Because someone (A- R- T) thought this part could use more verisimilitude."
+    ]
+    assert prepared.text == text
+    assert prepared.alignment_tokens[0].text == text
+
+
+def test_prepared_adapter_maps_overrides_tokens_and_alignment_around_projection() -> None:
+    text = "ART now"
+    request = SynthesisRequest(
+        id="characters-with-context",
+        text=text,
+        language="en-us",
+        pronunciation_overrides=(PronunciationOverride(4, 7, phonemes="naʊ"),),
+        tokens=(LinguisticToken(4, 7, text="now", pos="ADV"),),
+        say_as=(SayAsSpan(0, 3, "characters"),),
+    )
+    module = ShadowTextG2P()
+
+    prepared = PreparedG2PAdapter(module).phonemize(request, _config())
+
+    assert module.calls[0][0] == "A- R- T now"
+    override = module.calls[0][1]["overrides"][0]
+    annotation = module.calls[0][1]["annotations"][0]
+    assert (override.char_start, override.char_end) == (8, 11)
+    assert (annotation.start, annotation.end, annotation.text) == (8, 11, "now")
+    assert [(item.text, item.char_start, item.char_end) for item in prepared.alignment_tokens] == [
+        ("ART", 0, 3),
+        ("now", 4, 7),
+    ]
 
 
 def test_prepared_adapter_forwards_local_g2lex_without_named_installation(

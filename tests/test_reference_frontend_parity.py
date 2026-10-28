@@ -5,7 +5,12 @@ from kokorog2p import phonemes_to_ids
 
 from pykokoro.prepared_g2p import PreparedG2PAdapter
 from pykokoro.synthesis_config import SynthesisConfig
-from pykokoro.synthesis_types import LinguisticToken, PronunciationOverride, SynthesisSegment
+from pykokoro.synthesis_types import (
+    LinguisticToken,
+    PronunciationOverride,
+    SayAsSpan,
+    SynthesisSegment,
+)
 from pykokoro.synthesizer import KokoroSynthesizer
 
 
@@ -43,4 +48,22 @@ def test_request_measure_uses_the_preparation_frontend_for_structured_inputs() -
     prepared = synthesizer.prepare(request)
     measured = synthesizer.measure_request(request)
 
+    assert measured.amount == len(prepared.token_ids)
+
+
+def test_request_measure_uses_character_shadow_frontend_token_count() -> None:
+    text = "Because someone called A R T finally."
+    start = text.index("A R T")
+    request = SynthesisSegment(
+        "character-measure-parity",
+        text,
+        "en-us",
+        say_as=(SayAsSpan(start, start + len("A R T"), "characters"),),
+    )
+    synthesizer = KokoroSynthesizer(g2p=PreparedG2PAdapter())
+
+    prepared = synthesizer.prepare(request)
+    measured = synthesizer.measure_request(request)
+
+    assert prepared.text == text
     assert measured.amount == len(prepared.token_ids)
