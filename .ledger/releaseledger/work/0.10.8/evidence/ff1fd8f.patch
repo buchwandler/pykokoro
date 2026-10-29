@@ -1,0 +1,357 @@
+ .../work/0.10.7/evidence/1c2e16c.patch             |   1 -
+ pykokoro/frontend_projection.py                    | 102 +++++++++++++++++++--
+ tests/test_frontend_projection.py                  |  44 ++++++++-
+ tests/test_prepared_g2p_adapter.py                 |  58 ++++++++++++
+ tests/test_request_renderer.py                     |  56 +++++++++++
+ 5 files changed, 251 insertions(+), 10 deletions(-)
+
+diff --git a/.ledger/releaseledger/work/0.10.7/evidence/1c2e16c.patch b/.ledger/releaseledger/work/0.10.7/evidence/1c2e16c.patch
+index 03fac7e..c90fbce 100644
+--- a/.ledger/releaseledger/work/0.10.7/evidence/1c2e16c.patch
++++ b/.ledger/releaseledger/work/0.10.7/evidence/1c2e16c.patch
+@@ -1560,4 +1560,3 @@ index da78e96..71ee40f 100644
+ +
+  def test_synthesis_config_only_accepts_engine_owned_options():
+      config = SynthesisConfig(voice="af_sarah")
+-
+diff --git a/pykokoro/frontend_projection.py b/pykokoro/frontend_projection.py
+index 993fe0d..b0dc726 100644
+--- a/pykokoro/frontend_projection.py
++++ b/pykokoro/frontend_projection.py
+@@ -229,19 +229,107 @@ def _project_character_surface(
+     surface: str,
+     canonical_start: int,
+ ) -> tuple[str, list[int], list[int], list[int]]:
+-    if not (_COMPACT_CHARACTERS.fullmatch(surface) or _SPACED_CHARACTERS.fullmatch(surface)):
+-        raise InvalidRequestError(
+-            f"say_as characters span has unsupported surface {surface!r}; "
+-            "use at least two ASCII letters or digits, compact or whitespace-separated"
+-        )
++    prefix, core, suffix = _split_character_surface(surface)
++    core_start = canonical_start + len(prefix)
++
++    frontend_parts: list[str] = []
++    canonical_left: list[int | None] = [None] * (len(surface) + 1)
++    canonical_right: list[int | None] = [None] * (len(surface) + 1)
++    frontend_left: list[int] = []
++    frontend_right: list[int] = []
++    frontend_cursor = 0
++
++    prefix_frontier = list(range(len(prefix) + 1))
++    _append_piece(
++        prefix,
++        0,
++        frontend_cursor,
++        prefix_frontier,
++        prefix_frontier,
++        frontend_parts,
++        canonical_left,
++        canonical_right,
++        frontend_left,
++        frontend_right,
++        frontend_to_canonical=list(range(canonical_start, canonical_start + len(prefix) + 1)),
++    )
++    frontend_cursor += len(prefix)
++
++    core_frontend, core_canonical_left, core_canonical_right, core_frontend_to_canonical = (
++        _project_character_core(core, core_start)
++    )
++    _append_piece(
++        core_frontend,
++        len(prefix),
++        frontend_cursor,
++        core_canonical_left,
++        core_canonical_right,
++        frontend_parts,
++        canonical_left,
++        canonical_right,
++        frontend_left,
++        frontend_right,
++        frontend_to_canonical=core_frontend_to_canonical,
++    )
++    frontend_cursor += len(core_frontend)
++
++    suffix_start = core_start + len(core)
++    suffix_frontier = list(range(len(suffix) + 1))
++    _append_piece(
++        suffix,
++        len(prefix) + len(core),
++        frontend_cursor,
++        suffix_frontier,
++        suffix_frontier,
++        frontend_parts,
++        canonical_left,
++        canonical_right,
++        frontend_left,
++        frontend_right,
++        frontend_to_canonical=list(range(suffix_start, suffix_start + len(suffix) + 1)),
++    )
++    frontend_cursor += len(suffix)
++
++    if any(value is None for value in (*canonical_left, *canonical_right)):
++        raise RuntimeError("character surface projection left a canonical boundary unmapped")
++    if len(frontend_left) != frontend_cursor + 1 or len(frontend_right) != frontend_cursor + 1:
++        raise RuntimeError("character surface projection left a frontend boundary unmapped")
++    return (
++        "".join(frontend_parts),
++        [value for value in canonical_left if value is not None],
++        [value for value in canonical_right if value is not None],
++        frontend_left,
++    )
+
++
++def _split_character_surface(surface: str) -> tuple[str, str, str]:
+     matches = tuple(_CHARACTER.finditer(surface))
+     if len(matches) < 2:
+         raise InvalidRequestError("say_as characters spans must contain at least two characters")
++
++    core_start = matches[0].start()
++    core_end = matches[-1].end()
++    prefix = surface[:core_start]
++    core = surface[core_start:core_end]
++    suffix = surface[core_end:]
++    if not (_COMPACT_CHARACTERS.fullmatch(core) or _SPACED_CHARACTERS.fullmatch(core)):
++        raise InvalidRequestError(
++            f"say_as characters span has unsupported character payload {core!r}; "
++            "use at least two ASCII letters or digits, compact or whitespace-separated; "
++            "outer punctuation is allowed"
++        )
++    return prefix, core, suffix
++
++
++def _project_character_core(
++    core: str,
++    canonical_start: int,
++) -> tuple[str, list[int], list[int], list[int]]:
++    matches = tuple(_CHARACTER.finditer(core))
+     characters = [match.group() for match in matches]
+     frontend = "- ".join(characters)
+-    canonical_left: list[int | None] = [None] * (len(surface) + 1)
+-    canonical_right: list[int | None] = [None] * (len(surface) + 1)
++    canonical_left: list[int | None] = [None] * (len(core) + 1)
++    canonical_right: list[int | None] = [None] * (len(core) + 1)
+     frontend_to_canonical: list[int | None] = [None] * (len(frontend) + 1)
+     output_cursor = 0
+
+diff --git a/tests/test_frontend_projection.py b/tests/test_frontend_projection.py
+index 684aa36..0d80fae 100644
+--- a/tests/test_frontend_projection.py
++++ b/tests/test_frontend_projection.py
+@@ -28,6 +28,46 @@ def test_projection_handles_compact_spaced_and_digit_sequences() -> None:
+     assert compact.map_frontend_span(0, 7) == (0, 3)
+
+
++def test_projection_preserves_outer_parentheses_around_character_span() -> None:
++    text = "(A R T)"
++    span = SayAsSpan(0, len(text), "characters")
++
++    projection = project_frontend_text(text, (span,))
++
++    expected = "(A- R- T)"
++    assert projection.frontend_text == expected
++    assert projection.canonical_text == text
++    assert (span.start, span.end) == (0, len(text))
++    assert projection.map_canonical_span(0, len(text)) == (0, len(expected))
++    assert projection.map_frontend_span(0, len(expected)) == (0, len(text))
++    assert projection.map_canonical_span(0, 1) == (0, 1)
++    assert projection.map_canonical_span(len(text) - 1, len(text)) == (
++        len(expected) - 1,
++        len(expected),
++    )
++
++    inner_start = text.index("A")
++    inner_end = text.rindex("T") + 1
++    frontend_start, frontend_end = projection.map_canonical_span(inner_start, inner_end)
++    assert projection.frontend_text[frontend_start:frontend_end] == "A- R- T"
++    assert projection.map_frontend_span(frontend_start, frontend_end) == (inner_start, inner_end)
++
++
++@pytest.mark.parametrize(
++    ("surface", "expected"),
++    [
++        ("[ART]", "[A- R- T]"),
++        ('"R2D2"', '"R- 2- D- 2"'),
++        ("(A R T).", "(A- R- T)."),
++    ],
++)
++def test_projection_preserves_outer_wrapper_text(surface: str, expected: str) -> None:
++    projection = project_frontend_text(surface, (SayAsSpan(0, len(surface), "characters"),))
++
++    assert projection.frontend_text == expected
++    assert projection.canonical_text == surface
++
++
+ def test_projection_preserves_possessive_suffixes_and_unmarked_text() -> None:
+     straight = "A R T's house is nice."
+     curly = "A R T’s house is nice."
+@@ -57,12 +97,12 @@ def test_projection_composes_multiple_spans_and_maps_cumulative_offsets() -> Non
+
+ @pytest.mark.parametrize(
+     "surface",
+-    ["A&B", "A / B", "A-B", "A, B", "one two", "A R word", "A"],
++    ["A&B", "A / B", "A-B", "A, B", "one two", "A R word", "A", "(A-B)"],
+ )
+ def test_projection_rejects_unsupported_character_surfaces(surface: str) -> None:
+     projection_span = SayAsSpan(0, len(surface), "characters")
+
+-    with pytest.raises(InvalidRequestError, match="unsupported surface|at least two"):
++    with pytest.raises(InvalidRequestError, match="unsupported character payload|at least two"):
+         project_frontend_text(surface, (projection_span,))
+
+
+diff --git a/tests/test_prepared_g2p_adapter.py b/tests/test_prepared_g2p_adapter.py
+index 535d0ae..0e4a895 100644
+--- a/tests/test_prepared_g2p_adapter.py
++++ b/tests/test_prepared_g2p_adapter.py
+@@ -1,8 +1,10 @@
+ import hashlib
+ from pathlib import Path
+ from types import SimpleNamespace
++from typing import Any
+
+ import g2lex
++import numpy as np
+ import pytest
+ from kokorog2p import OverrideSpan, TokenAnnotation
+ from kokorog2p.lexicons.registry import FileLexiconSource
+@@ -14,10 +16,12 @@ from pykokoro.synthesis_config import SynthesisConfig
+ from pykokoro.synthesis_types import (
+     LinguisticToken,
+     PronunciationOverride,
++    RenderedSegment,
+     SayAsSpan,
+     SynthesisRequest,
+     SynthesisSegment,
+ )
++from pykokoro.synthesizer import KokoroSynthesizer
+ from pykokoro.tokenizer import TokenizerConfig
+
+
+@@ -166,6 +170,60 @@ def test_prepared_adapter_projects_parenthetical_characters_in_one_request() ->
+     assert prepared.alignment_tokens[0].text == text
+
+
++def test_parenthesized_characters_measure_and_synthesize_through_shared_projection() -> None:
++    text = "Because someone (A R T) thought this part could use more verisimilitude."
++    surface = "(A R T)"
++    start = text.index(surface)
++    span = SayAsSpan(start, start + len(surface), "characters")
++    request = SynthesisRequest(
++        id="parenthetical-measure-and-synthesis",
++        text=text,
++        language="en-us",
++        voice="af_sarah",
++        say_as=(span,),
++    )
++    module = ShadowTextG2P()
++
++    class RecordingRenderer:
++        def __init__(self) -> None:
++            self.prepared_requests = []
++
++        def render(self, prepared, request, config):
++            self.prepared_requests.append((prepared, request))
++            return RenderedSegment(
++                id=request.id,
++                audio=np.zeros(1, dtype=np.float32),
++                sample_rate=24000,
++                text=request.text,
++                language=request.language,
++                voice=request.voice,
++                phonemes=prepared.phonemes,
++                token_ids=prepared.token_ids,
++            )
++
++    renderer: Any = RecordingRenderer()
++    synthesizer = KokoroSynthesizer(
++        _config(),
++        g2p=PreparedG2PAdapter(module),
++        renderer=renderer,
++    )
++
++    measured = synthesizer.measure_request(request)
++    rendered = synthesizer.synthesize(request)
++
++    expected_frontend = "Because someone (A- R- T) thought this part could use more verisimilitude."
++    assert measured.amount == 2
++    assert [call[0] for call in module.calls] == [expected_frontend, expected_frontend]
++    assert len(renderer.prepared_requests) == 1
++    prepared, rendered_request = renderer.prepared_requests[0]
++    assert prepared.text == request.text
++    assert rendered_request.say_as == (span,)
++    assert (span.start, span.end) == (start, start + len(surface))
++    assert prepared.alignment_tokens[0].char_start == 0
++    assert prepared.alignment_tokens[0].char_end == len(text)
++    assert rendered.text == text
++
++
+ def test_prepared_adapter_maps_overrides_tokens_and_alignment_around_projection() -> None:
+     text = "ART now"
+     request = SynthesisRequest(
+diff --git a/tests/test_request_renderer.py b/tests/test_request_renderer.py
+index 408f03d..e8abf87 100644
+--- a/tests/test_request_renderer.py
++++ b/tests/test_request_renderer.py
+@@ -224,6 +224,62 @@ def test_renderer_traces_say_as_projection_and_identity_semantics() -> None:
+     assert "A- R- T" not in repr(rendered.synthesis_identity.to_dict())
+
+
++def test_renderer_traces_full_parenthesized_say_as_projection() -> None:
++    text = "Hello (A R T)"
++    surface = "(A R T)"
++    start = text.index(surface)
++    end = start + len(surface)
++    span = SayAsSpan(start, end, "characters")
++    request = SynthesisRequest(
++        id="parenthetical-say-as-trace",
++        text=text,
++        language="en-us",
++        voice="af_sarah",
++        say_as=(span,),
++    )
++    prepared = PreparedSynthesis(
++        request_id=request.id,
++        text=text,
++        language=request.language,
++        voice="af_sarah",
++        phonemes="letters",
++        token_ids=(1, 2, 3),
++        alignment_tokens=(G2PAlignmentToken(text, "letters", char_start=0, char_end=len(text)),),
++    )
++
++    class ParentheticalTimingBackend(FakeBackend):
++        def generate_raw_audio_segments(self, segments, voice_style, speed, **kwargs):
++            result = super().generate_raw_audio_segments(segments, voice_style, speed, **kwargs)
++            for segment in result:
++                timing_start = segment.text.index("(A R T)")
++                timing_end = timing_start + len("(A R T)")
++                segment.word_timings = [
++                    WordTiming("(A R T)", timing_start, timing_end, 0, 2, segment.id)
++                ]
++            return result
++
++    backend = ParentheticalTimingBackend()
++    renderer = OnnxRequestRenderer(FakeG2PAdapter(), backend_factory=lambda config: backend)
++
++    rendered = renderer.render(prepared, request, _config(return_trace=True))
++
++    assert rendered.trace is not None
++    assert rendered.trace.frontend["say_as"] == [
++        {
++            "start": start,
++            "end": end,
++            "interpret_as": "characters",
++            "canonical": surface,
++            "frontend": "(A- R- T)",
++        }
++    ]
++    assert rendered.synthesis_identity is not None
++    assert rendered.synthesis_identity.say_as == ((start, end, "characters", None, None),)
++    timing = rendered.word_timings[0]
++    assert (timing.text, timing.char_start, timing.char_end) == (surface, start, end)
++    assert rendered.text[timing.char_start : timing.char_end] == surface
++
++
+ def test_renderer_word_timings_remain_in_canonical_say_as_coordinates() -> None:
+     class CharacterTimingBackend(FakeBackend):
+         def generate_raw_audio_segments(self, segments, voice_style, speed, **kwargs):

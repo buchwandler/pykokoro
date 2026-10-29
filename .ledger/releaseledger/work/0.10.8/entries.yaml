@@ -1,0 +1,29 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: 0.10.8
+git_base_ref: 187a5ae3618c1ff5591e4912db8636f051f00ded
+git_base_sha: 187a5ae3618c1ff5591e4912db8636f051f00ded
+git_head_ref: ff1fd8f8f16a781c8919b59b8612ed4b8701f0e5
+git_head_sha: ff1fd8f8f16a781c8919b59b8612ed4b8701f0e5
+include_merges: nontrivial
+entries:
+  - kind: fixed
+    summary: >-
+      Fixed character-level say-as projections to preserve outer punctuation and
+      canonical timing and offset mappings
+    status: accepted
+    source_refs:
+      - git:ff1fd8f8f16a781c8919b59b8612ed4b8701f0e5
+    paths:
+      - pykokoro/frontend_projection.py
+      - tests/test_frontend_projection.py
+      - tests/test_prepared_g2p_adapter.py
+      - tests/test_request_renderer.py
+    sources:
+      - git:ff1fd8f8f16a781c8919b59b8612ed4b8701f0e5
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

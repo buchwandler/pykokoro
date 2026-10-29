@@ -1,0 +1,33 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 1
+release_version: 0.10.8
+git_base_ref: v0.10.7
+git_base_sha: 187a5ae3618c1ff5591e4912db8636f051f00ded
+git_head_ref: HEAD
+git_head_sha: ff1fd8f8f16a781c8919b59b8612ed4b8701f0e5
+git_range: 187a5ae3618c1ff5591e4912db8636f051f00ded..ff1fd8f8f16a781c8919b59b8612ed4b8701f0e5
+commit_count: 1
+rows:
+  - sha: ff1fd8f8f16a781c8919b59b8612ed4b8701f0e5
+    source_ref: git:ff1fd8f8f16a781c8919b59b8612ed4b8701f0e5
+    short_sha: ff1fd8f
+    changed_paths:
+      - .ledger/releaseledger/work/0.10.7/evidence/1c2e16c.patch
+      - pykokoro/frontend_projection.py
+      - tests/test_frontend_projection.py
+      - tests/test_prepared_g2p_adapter.py
+      - tests/test_request_renderer.py
+    stats:
+      files_changed: 5
+      insertions: 251
+      deletions: 10
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: fix say as"
