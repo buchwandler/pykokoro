@@ -1560,4 +1560,3 @@ index da78e96..71ee40f 100644
 +
  def test_synthesis_config_only_accepts_engine_owned_options():
      config = SynthesisConfig(voice="af_sarah")
-

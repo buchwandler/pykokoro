@@ -28,6 +28,46 @@ def test_projection_handles_compact_spaced_and_digit_sequences() -> None:
     assert compact.map_frontend_span(0, 7) == (0, 3)
 
 
+def test_projection_preserves_outer_parentheses_around_character_span() -> None:
+    text = "(A R T)"
+    span = SayAsSpan(0, len(text), "characters")
+
+    projection = project_frontend_text(text, (span,))
+
+    expected = "(A- R- T)"
+    assert projection.frontend_text == expected
+    assert projection.canonical_text == text
+    assert (span.start, span.end) == (0, len(text))
+    assert projection.map_canonical_span(0, len(text)) == (0, len(expected))
+    assert projection.map_frontend_span(0, len(expected)) == (0, len(text))
+    assert projection.map_canonical_span(0, 1) == (0, 1)
+    assert projection.map_canonical_span(len(text) - 1, len(text)) == (
+        len(expected) - 1,
+        len(expected),
+    )
+
+    inner_start = text.index("A")
+    inner_end = text.rindex("T") + 1
+    frontend_start, frontend_end = projection.map_canonical_span(inner_start, inner_end)
+    assert projection.frontend_text[frontend_start:frontend_end] == "A- R- T"
+    assert projection.map_frontend_span(frontend_start, frontend_end) == (inner_start, inner_end)
+
+
+@pytest.mark.parametrize(
+    ("surface", "expected"),
+    [
+        ("[ART]", "[A- R- T]"),
+        ('"R2D2"', '"R- 2- D- 2"'),
+        ("(A R T).", "(A- R- T)."),
+    ],
+)
+def test_projection_preserves_outer_wrapper_text(surface: str, expected: str) -> None:
+    projection = project_frontend_text(surface, (SayAsSpan(0, len(surface), "characters"),))
+
+    assert projection.frontend_text == expected
+    assert projection.canonical_text == surface
+
+
 def test_projection_preserves_possessive_suffixes_and_unmarked_text() -> None:
     straight = "A R T's house is nice."
     curly = "A R T’s house is nice."
@@ -57,12 +97,12 @@ def test_projection_composes_multiple_spans_and_maps_cumulative_offsets() -> Non
 
 @pytest.mark.parametrize(
     "surface",
-    ["A&B", "A / B", "A-B", "A, B", "one two", "A R word", "A"],
+    ["A&B", "A / B", "A-B", "A, B", "one two", "A R word", "A", "(A-B)"],
 )
 def test_projection_rejects_unsupported_character_surfaces(surface: str) -> None:
     projection_span = SayAsSpan(0, len(surface), "characters")
 
-    with pytest.raises(InvalidRequestError, match="unsupported surface|at least two"):
+    with pytest.raises(InvalidRequestError, match="unsupported character payload|at least two"):
         project_frontend_text(surface, (projection_span,))
 
 

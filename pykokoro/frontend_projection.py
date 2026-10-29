@@ -229,19 +229,107 @@ def _project_character_surface(
     surface: str,
     canonical_start: int,
 ) -> tuple[str, list[int], list[int], list[int]]:
-    if not (_COMPACT_CHARACTERS.fullmatch(surface) or _SPACED_CHARACTERS.fullmatch(surface)):
-        raise InvalidRequestError(
-            f"say_as characters span has unsupported surface {surface!r}; "
-            "use at least two ASCII letters or digits, compact or whitespace-separated"
-        )
+    prefix, core, suffix = _split_character_surface(surface)
+    core_start = canonical_start + len(prefix)
 
+    frontend_parts: list[str] = []
+    canonical_left: list[int | None] = [None] * (len(surface) + 1)
+    canonical_right: list[int | None] = [None] * (len(surface) + 1)
+    frontend_left: list[int] = []
+    frontend_right: list[int] = []
+    frontend_cursor = 0
+
+    prefix_frontier = list(range(len(prefix) + 1))
+    _append_piece(
+        prefix,
+        0,
+        frontend_cursor,
+        prefix_frontier,
+        prefix_frontier,
+        frontend_parts,
+        canonical_left,
+        canonical_right,
+        frontend_left,
+        frontend_right,
+        frontend_to_canonical=list(range(canonical_start, canonical_start + len(prefix) + 1)),
+    )
+    frontend_cursor += len(prefix)
+
+    core_frontend, core_canonical_left, core_canonical_right, core_frontend_to_canonical = (
+        _project_character_core(core, core_start)
+    )
+    _append_piece(
+        core_frontend,
+        len(prefix),
+        frontend_cursor,
+        core_canonical_left,
+        core_canonical_right,
+        frontend_parts,
+        canonical_left,
+        canonical_right,
+        frontend_left,
+        frontend_right,
+        frontend_to_canonical=core_frontend_to_canonical,
+    )
+    frontend_cursor += len(core_frontend)
+
+    suffix_start = core_start + len(core)
+    suffix_frontier = list(range(len(suffix) + 1))
+    _append_piece(
+        suffix,
+        len(prefix) + len(core),
+        frontend_cursor,
+        suffix_frontier,
+        suffix_frontier,
+        frontend_parts,
+        canonical_left,
+        canonical_right,
+        frontend_left,
+        frontend_right,
+        frontend_to_canonical=list(range(suffix_start, suffix_start + len(suffix) + 1)),
+    )
+    frontend_cursor += len(suffix)
+
+    if any(value is None for value in (*canonical_left, *canonical_right)):
+        raise RuntimeError("character surface projection left a canonical boundary unmapped")
+    if len(frontend_left) != frontend_cursor + 1 or len(frontend_right) != frontend_cursor + 1:
+        raise RuntimeError("character surface projection left a frontend boundary unmapped")
+    return (
+        "".join(frontend_parts),
+        [value for value in canonical_left if value is not None],
+        [value for value in canonical_right if value is not None],
+        frontend_left,
+    )
+
+
+def _split_character_surface(surface: str) -> tuple[str, str, str]:
     matches = tuple(_CHARACTER.finditer(surface))
     if len(matches) < 2:
         raise InvalidRequestError("say_as characters spans must contain at least two characters")
+
+    core_start = matches[0].start()
+    core_end = matches[-1].end()
+    prefix = surface[:core_start]
+    core = surface[core_start:core_end]
+    suffix = surface[core_end:]
+    if not (_COMPACT_CHARACTERS.fullmatch(core) or _SPACED_CHARACTERS.fullmatch(core)):
+        raise InvalidRequestError(
+            f"say_as characters span has unsupported character payload {core!r}; "
+            "use at least two ASCII letters or digits, compact or whitespace-separated; "
+            "outer punctuation is allowed"
+        )
+    return prefix, core, suffix
+
+
+def _project_character_core(
+    core: str,
+    canonical_start: int,
+) -> tuple[str, list[int], list[int], list[int]]:
+    matches = tuple(_CHARACTER.finditer(core))
     characters = [match.group() for match in matches]
     frontend = "- ".join(characters)
-    canonical_left: list[int | None] = [None] * (len(surface) + 1)
-    canonical_right: list[int | None] = [None] * (len(surface) + 1)
+    canonical_left: list[int | None] = [None] * (len(core) + 1)
+    canonical_right: list[int | None] = [None] * (len(core) + 1)
     frontend_to_canonical: list[int | None] = [None] * (len(frontend) + 1)
     output_cursor = 0
 

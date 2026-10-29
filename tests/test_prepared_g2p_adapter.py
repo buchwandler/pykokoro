@@ -1,8 +1,10 @@
 import hashlib
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import g2lex
+import numpy as np
 import pytest
 from kokorog2p import OverrideSpan, TokenAnnotation
 from kokorog2p.lexicons.registry import FileLexiconSource
@@ -14,10 +16,12 @@ from pykokoro.synthesis_config import SynthesisConfig
 from pykokoro.synthesis_types import (
     LinguisticToken,
     PronunciationOverride,
+    RenderedSegment,
     SayAsSpan,
     SynthesisRequest,
     SynthesisSegment,
 )
+from pykokoro.synthesizer import KokoroSynthesizer
 from pykokoro.tokenizer import TokenizerConfig
 
 
@@ -164,6 +168,60 @@ def test_prepared_adapter_projects_parenthetical_characters_in_one_request() -> 
     ]
     assert prepared.text == text
     assert prepared.alignment_tokens[0].text == text
+
+
+def test_parenthesized_characters_measure_and_synthesize_through_shared_projection() -> None:
+    text = "Because someone (A R T) thought this part could use more verisimilitude."
+    surface = "(A R T)"
+    start = text.index(surface)
+    span = SayAsSpan(start, start + len(surface), "characters")
+    request = SynthesisRequest(
+        id="parenthetical-measure-and-synthesis",
+        text=text,
+        language="en-us",
+        voice="af_sarah",
+        say_as=(span,),
+    )
+    module = ShadowTextG2P()
+
+    class RecordingRenderer:
+        def __init__(self) -> None:
+            self.prepared_requests = []
+
+        def render(self, prepared, request, config):
+            self.prepared_requests.append((prepared, request))
+            return RenderedSegment(
+                id=request.id,
+                audio=np.zeros(1, dtype=np.float32),
+                sample_rate=24000,
+                text=request.text,
+                language=request.language,
+                voice=request.voice,
+                phonemes=prepared.phonemes,
+                token_ids=prepared.token_ids,
+            )
+
+    renderer: Any = RecordingRenderer()
+    synthesizer = KokoroSynthesizer(
+        _config(),
+        g2p=PreparedG2PAdapter(module),
+        renderer=renderer,
+    )
+
+    measured = synthesizer.measure_request(request)
+    rendered = synthesizer.synthesize(request)
+
+    expected_frontend = "Because someone (A- R- T) thought this part could use more verisimilitude."
+    assert measured.amount == 2
+    assert [call[0] for call in module.calls] == [expected_frontend, expected_frontend]
+    assert len(renderer.prepared_requests) == 1
+    prepared, rendered_request = renderer.prepared_requests[0]
+    assert prepared.text == request.text
+    assert rendered_request.say_as == (span,)
+    assert (span.start, span.end) == (start, start + len(surface))
+    assert prepared.alignment_tokens[0].char_start == 0
+    assert prepared.alignment_tokens[0].char_end == len(text)
+    assert rendered.text == text
 
 
 def test_prepared_adapter_maps_overrides_tokens_and_alignment_around_projection() -> None:

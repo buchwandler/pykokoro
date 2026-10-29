@@ -224,6 +224,62 @@ def test_renderer_traces_say_as_projection_and_identity_semantics() -> None:
     assert "A- R- T" not in repr(rendered.synthesis_identity.to_dict())
 
 
+def test_renderer_traces_full_parenthesized_say_as_projection() -> None:
+    text = "Hello (A R T)"
+    surface = "(A R T)"
+    start = text.index(surface)
+    end = start + len(surface)
+    span = SayAsSpan(start, end, "characters")
+    request = SynthesisRequest(
+        id="parenthetical-say-as-trace",
+        text=text,
+        language="en-us",
+        voice="af_sarah",
+        say_as=(span,),
+    )
+    prepared = PreparedSynthesis(
+        request_id=request.id,
+        text=text,
+        language=request.language,
+        voice="af_sarah",
+        phonemes="letters",
+        token_ids=(1, 2, 3),
+        alignment_tokens=(G2PAlignmentToken(text, "letters", char_start=0, char_end=len(text)),),
+    )
+
+    class ParentheticalTimingBackend(FakeBackend):
+        def generate_raw_audio_segments(self, segments, voice_style, speed, **kwargs):
+            result = super().generate_raw_audio_segments(segments, voice_style, speed, **kwargs)
+            for segment in result:
+                timing_start = segment.text.index("(A R T)")
+                timing_end = timing_start + len("(A R T)")
+                segment.word_timings = [
+                    WordTiming("(A R T)", timing_start, timing_end, 0, 2, segment.id)
+                ]
+            return result
+
+    backend = ParentheticalTimingBackend()
+    renderer = OnnxRequestRenderer(FakeG2PAdapter(), backend_factory=lambda config: backend)
+
+    rendered = renderer.render(prepared, request, _config(return_trace=True))
+
+    assert rendered.trace is not None
+    assert rendered.trace.frontend["say_as"] == [
+        {
+            "start": start,
+            "end": end,
+            "interpret_as": "characters",
+            "canonical": surface,
+            "frontend": "(A- R- T)",
+        }
+    ]
+    assert rendered.synthesis_identity is not None
+    assert rendered.synthesis_identity.say_as == ((start, end, "characters", None, None),)
+    timing = rendered.word_timings[0]
+    assert (timing.text, timing.char_start, timing.char_end) == (surface, start, end)
+    assert rendered.text[timing.char_start : timing.char_end] == surface
+
+
 def test_renderer_word_timings_remain_in_canonical_say_as_coordinates() -> None:
     class CharacterTimingBackend(FakeBackend):
         def generate_raw_audio_segments(self, segments, voice_style, speed, **kwargs):
