@@ -67,10 +67,10 @@ class FakeKokoroG2P:
 class ShadowTextG2P(FakeKokoroG2P):
     def phonemize_prepared(self, text, **kwargs):
         self.calls.append((text, kwargs))
-        if text == "A- R- T now":
+        if text == "A-R-T- now":
             tokens = (
-                {"text": "A- R- T", "phonemes": "letters", "char_start": 0, "char_end": 7},
-                {"text": "now", "phonemes": "naʊ", "char_start": 8, "char_end": 11},
+                {"text": "A-R-T-", "phonemes": "letters", "char_start": 0, "char_end": 6},
+                {"text": "now", "phonemes": "naʊ", "char_start": 7, "char_end": 10},
             )
         else:
             tokens = (
@@ -141,7 +141,7 @@ def test_prepared_adapter_projects_character_span_before_kokoro_g2p() -> None:
     prepared = PreparedG2PAdapter(module).phonemize(request, _config())
 
     assert len(module.calls) == 1
-    assert module.calls[0][0] == "Because someone called A- R- T finally."
+    assert module.calls[0][0] == "Because someone called A-R-T- finally."
     assert prepared.text == text
     assert (prepared.alignment_tokens[0].char_start, prepared.alignment_tokens[0].char_end) == (
         0,
@@ -164,7 +164,7 @@ def test_prepared_adapter_projects_parenthetical_characters_in_one_request() -> 
     prepared = PreparedG2PAdapter(module).phonemize(request, _config())
 
     assert [call[0] for call in module.calls] == [
-        "Because someone (A- R- T) thought this part could use more verisimilitude."
+        "Because someone (A-R-T-) thought this part could use more verisimilitude."
     ]
     assert prepared.text == text
     assert prepared.alignment_tokens[0].text == text
@@ -211,7 +211,7 @@ def test_parenthesized_characters_measure_and_synthesize_through_shared_projecti
     measured = synthesizer.measure_request(request)
     rendered = synthesizer.synthesize(request)
 
-    expected_frontend = "Because someone (A- R- T) thought this part could use more verisimilitude."
+    expected_frontend = "Because someone (A-R-T-) thought this part could use more verisimilitude."
     assert measured.amount == 2
     assert [call[0] for call in module.calls] == [expected_frontend, expected_frontend]
     assert len(renderer.prepared_requests) == 1
@@ -238,11 +238,11 @@ def test_prepared_adapter_maps_overrides_tokens_and_alignment_around_projection(
 
     prepared = PreparedG2PAdapter(module).phonemize(request, _config())
 
-    assert module.calls[0][0] == "A- R- T now"
+    assert module.calls[0][0] == "A-R-T- now"
     override = module.calls[0][1]["overrides"][0]
     annotation = module.calls[0][1]["annotations"][0]
-    assert (override.char_start, override.char_end) == (8, 11)
-    assert (annotation.start, annotation.end, annotation.text) == (8, 11, "now")
+    assert (override.char_start, override.char_end) == (7, 10)
+    assert (annotation.start, annotation.end, annotation.text) == (7, 10, "now")
     assert [(item.text, item.char_start, item.char_end) for item in prepared.alignment_tokens] == [
         ("ART", 0, 3),
         ("now", 4, 7),

@@ -327,7 +327,7 @@ def _project_character_core(
 ) -> tuple[str, list[int], list[int], list[int]]:
     matches = tuple(_CHARACTER.finditer(core))
     characters = [match.group() for match in matches]
-    frontend = "- ".join(characters)
+    frontend = "".join(f"{character}-" for character in characters)
     canonical_left: list[int | None] = [None] * (len(core) + 1)
     canonical_right: list[int | None] = [None] * (len(core) + 1)
     frontend_to_canonical: list[int | None] = [None] * (len(frontend) + 1)
@@ -353,18 +353,22 @@ def _project_character_core(
             separator_start = output_cursor
             if source_end == next_start:
                 canonical_left[source_end] = separator_start
-                canonical_right[source_end] = separator_start + 2
+                canonical_right[source_end] = separator_start + 1
             else:
                 for boundary in range(source_end, next_start):
                     canonical_left[boundary] = separator_start
-                    canonical_right[boundary] = separator_start + 2
-                canonical_left[next_start] = separator_start + 2
-                canonical_right[next_start] = separator_start + 2
+                    canonical_right[boundary] = separator_start + 1
+                canonical_left[next_start] = separator_start + 1
+                canonical_right[next_start] = separator_start + 1
             frontend_to_canonical[separator_start] = canonical_boundary_end
-            frontend_to_canonical[separator_start + 1] = canonical_boundary_end
-            frontend_to_canonical[separator_start + 2] = canonical_start + next_start
-            output_cursor += 2
-
+            frontend_to_canonical[separator_start + 1] = canonical_start + next_start
+            output_cursor += 1
+        else:
+            # Both boundaries around the terminal hyphen map to the final
+            # canonical character boundary.
+            frontend_to_canonical[output_cursor] = canonical_boundary_end
+            output_cursor += 1
+            frontend_to_canonical[output_cursor] = canonical_boundary_end
     canonical_left[0] = 0
     canonical_right[0] = 0
     canonical_left[-1] = len(frontend)

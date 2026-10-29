@@ -214,14 +214,14 @@ def test_renderer_traces_say_as_projection_and_identity_semantics() -> None:
             "end": start + len("A R T"),
             "interpret_as": "characters",
             "canonical": "A R T",
-            "frontend": "A- R- T",
+            "frontend": "A-R-T-",
         }
     ]
     assert rendered.synthesis_identity is not None
     assert rendered.synthesis_identity.say_as == (
         (start, start + len("A R T"), "characters", None, None),
     )
-    assert "A- R- T" not in repr(rendered.synthesis_identity.to_dict())
+    assert "A-R-T-" not in repr(rendered.synthesis_identity.to_dict())
 
 
 def test_renderer_traces_full_parenthesized_say_as_projection() -> None:
@@ -270,7 +270,7 @@ def test_renderer_traces_full_parenthesized_say_as_projection() -> None:
             "end": end,
             "interpret_as": "characters",
             "canonical": surface,
-            "frontend": "(A- R- T)",
+            "frontend": "(A-R-T-)",
         }
     ]
     assert rendered.synthesis_identity is not None

@@ -44,7 +44,7 @@ an earlier source file or markup document.
 ## Character say-as spans
 
 `SayAsSpan` requests character-by-character reading for an exact, half-open range in the
-prepared request text. For example, PyKokoro may send `A- R- T` to KokoroG2P for the
+prepared request text. For example, PyKokoro may send `A-R-T-` to KokoroG2P for the
 marked canonical text `A R T`; the caller's text is not rewritten:
 
 ```python
@@ -60,6 +60,8 @@ request = SynthesisSegment(
 )
 ```
 
+The shadow frontend removes whitespace between marked characters and appends `-` after
+every character. The caller's canonical request text and public offsets are unchanged.
 Only explicitly marked spans are transformed, and `characters` is the supported
 interpretation. Request/result text, source alignment, and word-timing offsets remain in
 the canonical text. The marked phrase stays inside the caller's request: say-as does not

@@ -131,15 +131,16 @@ Request language and voice are explicit. `PronunciationOverride` and `Linguistic
 offsets are half-open character ranges into the exact `text` carried by that request;
 `tokens` is the canonical `SynthesisRequest` field.
 
-`SayAsSpan` marks an exact half-open range in `SynthesisRequest.text`. The currently
-supported interpretation is `characters`; only marked spans are projected to KokoroG2P's
-shadow frontend (for example, canonical `A R T` may be sent as `A- R- T`). The request,
-prepared text, public alignment, and word timings stay on canonical text and offsets. A
-marked phrase remains inside the caller's request; say-as does not add pauses or itself
-split text. `RequestMeasure.amount` is the exact frontend token count. `maximum` is an
-optional caller-provided limit, and `fits` is true when the amount is within that limit,
-false when it exceeds it, and `None` when no limit was supplied. Measurement does not
-imply that reference audio is valid or enrollment will succeed.
+`SayAsSpan` marks an exact half-open range in `SynthesisRequest.text`. The supported
+interpretation is `characters`. The shadow frontend removes whitespace between marked
+characters and appends `-` after every character (for example, `A R T` becomes
+`A-R-T-`). The caller's canonical request text and public offsets, including prepared
+text, public alignment, and word timings, remain unchanged. A marked phrase stays inside
+the caller's request; say-as does not add pauses or split text. `RequestMeasure.amount`
+is the exact frontend token count. `maximum` is an optional caller-provided limit, and
+`fits` is true when the amount is within that limit, false when it exceeds it, and
+`None` when no limit was supplied. Measurement does not imply that reference audio is
+valid or enrollment will succeed.
 
 `RenderedSegment` contains one request's waveform and metadata. `save_wav()` writes mono
 float32 WAV audio. `play()` uses the optional playback dependency. Results from a batch

@@ -19,13 +19,21 @@ def test_projection_handles_compact_spaced_and_digit_sequences() -> None:
     spaced = project_frontend_text("A R T", (SayAsSpan(0, 5, "characters"),))
     digits = project_frontend_text("R2D2", (SayAsSpan(0, 4, "characters"),))
 
-    assert compact.frontend_text == "A- R- T"
-    assert spaced.frontend_text == "A- R- T"
-    assert digits.frontend_text == "R- 2- D- 2"
-    assert compact.map_canonical_span(0, 3) == (0, 7)
-    assert spaced.map_canonical_span(0, 5) == (0, 7)
-    assert compact.map_canonical_span(1, 2) == (3, 4)
-    assert compact.map_frontend_span(0, 7) == (0, 3)
+    assert compact.frontend_text == "A-R-T-"
+    assert spaced.frontend_text == "A-R-T-"
+    assert digits.frontend_text == "R-2-D-2-"
+    assert compact.map_canonical_span(0, 3) == (0, 6)
+    assert spaced.map_canonical_span(0, 5) == (0, 6)
+    assert compact.map_canonical_span(1, 2) == (2, 3)
+    assert compact.map_frontend_span(0, 6) == (0, 3)
+    assert compact.map_canonical_span(1, 1, start_bias="left", end_bias="left") == (1, 1)
+    assert compact.map_canonical_span(1, 1, start_bias="right", end_bias="right") == (2, 2)
+    assert spaced.map_canonical_span(1, 1, start_bias="left", end_bias="left") == (1, 1)
+    assert spaced.map_canonical_span(1, 1, start_bias="right", end_bias="right") == (2, 2)
+    assert spaced.map_canonical_span(2, 2) == (2, 2)
+    assert compact.map_canonical_span(3, 3) == (6, 6)
+    assert compact.map_frontend_span(5, 5) == (3, 3)
+    assert compact.map_frontend_span(6, 6) == (3, 3)
 
 
 def test_projection_preserves_outer_parentheses_around_character_span() -> None:
@@ -34,7 +42,7 @@ def test_projection_preserves_outer_parentheses_around_character_span() -> None:
 
     projection = project_frontend_text(text, (span,))
 
-    expected = "(A- R- T)"
+    expected = "(A-R-T-)"
     assert projection.frontend_text == expected
     assert projection.canonical_text == text
     assert (span.start, span.end) == (0, len(text))
@@ -49,16 +57,16 @@ def test_projection_preserves_outer_parentheses_around_character_span() -> None:
     inner_start = text.index("A")
     inner_end = text.rindex("T") + 1
     frontend_start, frontend_end = projection.map_canonical_span(inner_start, inner_end)
-    assert projection.frontend_text[frontend_start:frontend_end] == "A- R- T"
+    assert projection.frontend_text[frontend_start:frontend_end] == "A-R-T-"
     assert projection.map_frontend_span(frontend_start, frontend_end) == (inner_start, inner_end)
 
 
 @pytest.mark.parametrize(
     ("surface", "expected"),
     [
-        ("[ART]", "[A- R- T]"),
-        ('"R2D2"', '"R- 2- D- 2"'),
-        ("(A R T).", "(A- R- T)."),
+        ("[ART]", "[A-R-T-]"),
+        ('"R2D2"', '"R-2-D-2-"'),
+        ("(A R T).", "(A-R-T-)."),
     ],
 )
 def test_projection_preserves_outer_wrapper_text(surface: str, expected: str) -> None:
@@ -68,6 +76,42 @@ def test_projection_preserves_outer_wrapper_text(surface: str, expected: str) ->
     assert projection.canonical_text == surface
 
 
+@pytest.mark.parametrize(
+    ("text", "surface", "expected"),
+    [
+        ("ART", "ART", "A-R-T-"),
+        ("A R T", "A R T", "A-R-T-"),
+        ("R2D2", "R2D2", "R-2-D-2-"),
+        ("(A R T)", "(A R T)", "(A-R-T-)"),
+        ('"R2D2"', '"R2D2"', '"R-2-D-2-"'),
+    ],
+)
+def test_projection_maps_every_boundary_and_complete_marked_span(
+    text: str, surface: str, expected: str
+) -> None:
+    span = _span(text, surface)
+    projection = project_frontend_text(text, (span,))
+    frontend_span = projection.map_canonical_span(span.start, span.end)
+
+    assert projection.frontend_text[frontend_span[0] : frontend_span[1]] == expected
+    assert projection.map_frontend_span(*frontend_span) == (span.start, span.end)
+    for boundary in range(len(text) + 1):
+        projection.map_canonical_span(boundary, boundary)
+    for boundary in range(len(projection.frontend_text) + 1):
+        projection.map_frontend_span(boundary, boundary)
+
+
+def test_projection_maps_post_span_ranges_after_terminal_hyphen() -> None:
+    text = "ART now"
+    projection = project_frontend_text(text, (_span(text, "ART"),))
+
+    assert projection.frontend_text == "A-R-T- now"
+    frontend_now = projection.map_canonical_span(4, 7)
+    assert frontend_now == (7, 10)
+    assert projection.frontend_text[frontend_now[0] : frontend_now[1]] == "now"
+    assert projection.map_frontend_span(*frontend_now) == (4, 7)
+
+
 def test_projection_preserves_possessive_suffixes_and_unmarked_text() -> None:
     straight = "A R T's house is nice."
     curly = "A R T’s house is nice."
@@ -75,10 +119,10 @@ def test_projection_preserves_possessive_suffixes_and_unmarked_text() -> None:
     projected_straight = project_frontend_text(straight, (_span(straight, "A R T"),))
     projected_curly = project_frontend_text(curly, (_span(curly, "A R T"),))
 
-    assert projected_straight.frontend_text == "A- R- T's house is nice."
-    assert projected_curly.frontend_text == "A- R- T’s house is nice."
-    assert "T-'" not in projected_straight.frontend_text
-    assert "T-’" not in projected_curly.frontend_text
+    assert projected_straight.frontend_text == "A-R-T-'s house is nice."
+    assert projected_curly.frontend_text == "A-R-T-’s house is nice."
+    assert "T-'" in projected_straight.frontend_text
+    assert "T-’" in projected_curly.frontend_text
     assert projected_straight.canonical_text == straight
 
 
@@ -88,11 +132,15 @@ def test_projection_composes_multiple_spans_and_maps_cumulative_offsets() -> Non
     second = _span(text, "U S A")
     projection = project_frontend_text(text, (first, second))
 
-    assert projection.frontend_text == "A- R- T met U- S- A."
-    assert projection.map_canonical_span(first.start, first.end) == (0, 7)
+    assert projection.frontend_text == "A-R-T- met U-S-A-."
+    assert projection.map_canonical_span(first.start, first.end) == (0, 6)
     second_frontend = projection.map_canonical_span(second.start, second.end)
-    assert projection.frontend_text[slice(*second_frontend)] == "U- S- A"
+    assert projection.frontend_text[slice(*second_frontend)] == "U-S-A-"
     assert projection.map_frontend_span(*second_frontend) == (second.start, second.end)
+    for boundary in range(len(text) + 1):
+        projection.map_canonical_span(boundary, boundary)
+    for boundary in range(len(projection.frontend_text) + 1):
+        projection.map_frontend_span(boundary, boundary)
 
 
 @pytest.mark.parametrize(

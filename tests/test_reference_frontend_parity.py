@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from kokorog2p import phonemes_to_ids
 
+from pykokoro.frontend_projection import project_frontend_text
 from pykokoro.prepared_g2p import PreparedG2PAdapter
 from pykokoro.synthesis_config import SynthesisConfig
 from pykokoro.synthesis_types import (
@@ -64,6 +65,15 @@ def test_request_measure_uses_character_shadow_frontend_token_count() -> None:
 
     prepared = synthesizer.prepare(request)
     measured = synthesizer.measure_request(request)
+    projected_text = project_frontend_text(text, request.say_as).frontend_text
+    projected = PreparedG2PAdapter().phonemize(
+        SynthesisSegment("projected-reference-parity", projected_text, "en-us"),
+        SynthesisConfig(),
+    )
+
+    assert projected_text == "Because someone called A-R-T- finally."
+    assert prepared.token_ids == projected.token_ids
+    assert prepared.text == text
 
     assert prepared.text == text
     assert measured.amount == len(prepared.token_ids)
