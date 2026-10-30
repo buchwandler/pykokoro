@@ -1,0 +1,1054 @@
+ .../data/ledgers/main/events/events.jsonl          |   2 +
+ .../main/releases/0.10.9/entries/entry-0001.md     |  19 +-
+ docs/advanced_features.md                          |  21 +-
+ docs/api_reference.md                              |  21 +-
+ docs/changelog.md                                  |   3 +-
+ pykokoro/frontend_projection.py                    | 408 +++++++--------------
+ tests/test_frontend_projection.py                  | 165 +++++----
+ tests/test_prepared_g2p_adapter.py                 |  43 ++-
+ tests/test_reference_frontend_parity.py            |   8 +-
+ tests/test_request_renderer.py                     |  31 +-
+ tests/test_synthesis_identity.py                   |   1 -
+ 11 files changed, 339 insertions(+), 383 deletions(-)
+
+diff --git a/.ledger/releaseledger/data/ledgers/main/events/events.jsonl b/.ledger/releaseledger/data/ledgers/main/events/events.jsonl
+index 2ba8518..e7e53f5 100644
+--- a/.ledger/releaseledger/data/ledgers/main/events/events.jsonl
++++ b/.ledger/releaseledger/data/ledgers/main/events/events.jsonl
+@@ -424,3 +424,5 @@
+ {"data":{"released_at":"2026-10-29"},"event":"release.finalized","event_id":"event-0424","record_revisions":{"release:0.10.8":4},"release_version":"0.10.8","schema_version":2}
+ {"data":{"status":"planned"},"event":"release.created","event_id":"event-0425","record_revisions":{"release:0.10.9":1},"release_version":"0.10.9","schema_version":2}
+ {"data":{"kind":"fixed","status":"accepted"},"entry_id":"entry-0001","event":"entry.added","event_id":"event-0426","record_revisions":{"entry:0.10.9/entry-0001":1,"release:0.10.9":2},"release_version":"0.10.9","schema_version":2}
++{"data":{"added_source_refs":["tl:task-0125"],"fields":["body","paths","source_refs","summary"],"removed_source_refs":[],"source_refs_mode":"merge"},"entry_id":"entry-0001","event":"entry.updated","event_id":"event-0427","record_revisions":{"entry:0.10.9/entry-0001":2},"release_version":"0.10.9","schema_version":2}
++{"data":{"added_source_refs":[],"fields":["summary"],"removed_source_refs":[],"source_refs_mode":"unchanged"},"entry_id":"entry-0001","event":"entry.updated","event_id":"event-0428","record_revisions":{"entry:0.10.9/entry-0001":3},"release_version":"0.10.9","schema_version":2}
+diff --git a/.ledger/releaseledger/data/ledgers/main/releases/0.10.9/entries/entry-0001.md b/.ledger/releaseledger/data/ledgers/main/releases/0.10.9/entries/entry-0001.md
+index 1dc81c2..53ca42f 100644
+--- a/.ledger/releaseledger/data/ledgers/main/releases/0.10.9/entries/entry-0001.md
++++ b/.ledger/releaseledger/data/ledgers/main/releases/0.10.9/entries/entry-0001.md
+@@ -3,20 +3,29 @@ schema_version: 2
+ object_type: release_entry
+ versioning:
+   schema_version: 1
+-  revision: 1
++  revision: 3
+ entry_id: entry-0001
+ release_version: 0.10.9
+ kind: fixed
+ summary:
+-  Fixed character say-as projection to use space-free hyphens and a terminal hyphen
++  Fixed character say-as projection to preserve spaced spelling and attach detached
++  possessive suffixes
+ status: accepted
+ audience: null
+ scopes: []
+ source_refs:
+   - tl:task-0124
++  - tl:task-0125
+ paths:
+   - pykokoro/frontend_projection.py
+   - tests/test_frontend_projection.py
++  - tests/test_prepared_g2p_adapter.py
++  - tests/test_request_renderer.py
++  - tests/test_reference_frontend_parity.py
++  - tests/test_synthesis_identity.py
++  - docs/advanced_features.md
++  - docs/api_reference.md
++  - docs/changelog.md
+ issues: []
+ prs: []
+ sources: []
+@@ -26,5 +35,7 @@ internal: false
+ order: 1
+ ---
+
+-Marked letters and digits now map through the full projected span while public request
+-text, alignment, and word-timing coordinates remain canonical.
++Character say-as now keeps already-separated characters as ordinary spaced text,
++separates compact character sequences with spaces, and joins a detached adjacent 's/’s
++suffix in the private frontend projection while preserving canonical request, alignment,
++and timing coordinates.
+diff --git a/docs/advanced_features.md b/docs/advanced_features.md
+index 746c138..7156b6a 100644
+--- a/docs/advanced_features.md
++++ b/docs/advanced_features.md
+@@ -44,7 +44,7 @@ an earlier source file or markup document.
+ ## Character say-as spans
+
+ `SayAsSpan` requests character-by-character reading for an exact, half-open range in the
+-prepared request text. For example, PyKokoro may send `A-R-T-` to KokoroG2P for the
++prepared request text. For example, PyKokoro may send `A R T` to KokoroG2P for the
+ marked canonical text `A R T`; the caller's text is not rewritten:
+
+ ```python
+@@ -60,14 +60,17 @@ request = SynthesisSegment(
+ )
+ ```
+
+-The shadow frontend removes whitespace between marked characters and appends `-` after
+-every character. The caller's canonical request text and public offsets are unchanged.
+-Only explicitly marked spans are transformed, and `characters` is the supported
+-interpretation. Request/result text, source alignment, and word-timing offsets remain in
+-the canonical text. The marked phrase stays inside the caller's request: say-as does not
+-add requests or pauses. The normal token-capacity policy still applies; opt-in long-text
+-splitting protects marked spans from being cut. `measure_request()` uses the same
+-projected frontend as synthesis.
++Character `say_as` uses a private frontend projection while keeping the caller's
++canonical request text unchanged. Compact character sequences are separated with spaces
++(`ART` → `A R T`); already separated sequences remain unchanged (`A R T` → `A R T`). If
++a detached possessive suffix immediately follows a marked character span, the shadow
++frontend attaches it (`A R T 's` → `A R T's`) so the frontend can process the suffix as
++part of the final spelled character. Public request text, offsets, alignments, and word
++timings remain canonical. Only explicitly marked spans are transformed, and `characters`
++is the supported interpretation. The marked phrase stays inside the caller's request:
++say-as does not add requests or pauses. The normal token-capacity policy still applies;
++opt-in long-text splitting protects marked spans from being cut. `measure_request()`
++uses the same projected frontend as synthesis.
+
+ ## Caller-provided linguistic tokens
+
+diff --git a/docs/api_reference.md b/docs/api_reference.md
+index bb5774c..e5ef26f 100644
+--- a/docs/api_reference.md
++++ b/docs/api_reference.md
+@@ -132,15 +132,18 @@ offsets are half-open character ranges into the exact `text` carried by that req
+ `tokens` is the canonical `SynthesisRequest` field.
+
+ `SayAsSpan` marks an exact half-open range in `SynthesisRequest.text`. The supported
+-interpretation is `characters`. The shadow frontend removes whitespace between marked
+-characters and appends `-` after every character (for example, `A R T` becomes
+-`A-R-T-`). The caller's canonical request text and public offsets, including prepared
+-text, public alignment, and word timings, remain unchanged. A marked phrase stays inside
+-the caller's request; say-as does not add pauses or split text. `RequestMeasure.amount`
+-is the exact frontend token count. `maximum` is an optional caller-provided limit, and
+-`fits` is true when the amount is within that limit, false when it exceeds it, and
+-`None` when no limit was supplied. Measurement does not imply that reference audio is
+-valid or enrollment will succeed.
++interpretation is `characters`. The private, source-aligned shadow frontend separates
++compact marked sequences with spaces (`ART` → `A R T`) and leaves already spaced
++sequences unchanged (`A R T` → `A R T`). Only a detached possessive suffix immediately
++after a marked character span is joined (`A R T 's` → `A R T's`, or `A R T ’s` →
++`A R T’s`); only the horizontal separator is deleted from the private projection. This
++transformation does not change canonical request text, prepared text, public offsets,
++alignment, or word timings. The marked phrase stays inside the caller’s request; say-as
++does not add pauses or split text. `RequestMeasure.amount` is the exact frontend token
++count. `maximum` is an optional caller-provided limit, and `fits` is true when the
++amount is within that limit, false when it exceeds it, and `None` when no limit was
++supplied. Measurement does not imply that reference audio is valid or enrollment will
++succeed.
+
+ `RenderedSegment` contains one request's waveform and metadata. `save_wav()` writes mono
+ float32 WAV audio. `play()` uses the optional playback dependency. Results from a batch
+diff --git a/docs/changelog.md b/docs/changelog.md
+index 192fb24..db125a9 100644
+--- a/docs/changelog.md
++++ b/docs/changelog.md
+@@ -7,7 +7,8 @@
+
+ ### Fixed
+
+-- Fixed character say-as projection to use space-free hyphens and a terminal hyphen
++- Fixed character say-as projection to preserve spaced spelling and attach detached
++  possessive suffixes
+
+ <!-- generated by releaseledger -->
+
+diff --git a/pykokoro/frontend_projection.py b/pykokoro/frontend_projection.py
+index d0a5128..2ad6f9f 100644
+--- a/pykokoro/frontend_projection.py
++++ b/pykokoro/frontend_projection.py
+@@ -3,9 +3,10 @@
+ from __future__ import annotations
+
+ import re
++import unicodedata
+ from collections.abc import Sequence
+ from dataclasses import dataclass
+-from typing import Literal, cast
++from typing import Literal
+
+ from .exceptions import InvalidRequestError, UnsupportedFeatureError
+ from .synthesis_types import SayAsSpan
+@@ -74,13 +75,12 @@ def project_frontend_text(
+     if not isinstance(say_as, (tuple, list)):
+         raise InvalidRequestError("say_as must be a tuple or list of SayAsSpan values")
+
+-    raw_spans = tuple(say_as)
+     spans: list[SayAsSpan] = []
+     previous: SayAsSpan | None = None
+-    for index, candidate in enumerate(raw_spans):
++    for index, candidate in enumerate(say_as):
+         if not isinstance(candidate, SayAsSpan):
+             raise InvalidRequestError("say_as must contain SayAsSpan values")
+-        span = cast(SayAsSpan, candidate)
++        span = candidate
+         _validate_span(span.start, span.end, len(canonical_text), f"say_as[{index}]")
+         if previous is not None:
+             if (span.start, span.end) < (previous.start, previous.end):
+@@ -94,212 +94,148 @@ def project_frontend_text(
+         spans.append(span)
+         previous = span
+
+-    frontend_parts: list[str] = []
+-    canonical_left: list[int | None] = [None] * (len(canonical_text) + 1)
+-    canonical_right: list[int | None] = [None] * (len(canonical_text) + 1)
+-    frontend_left: list[int] = []
+-    frontend_right: list[int] = []
+-    canonical_cursor = 0
+-    frontend_cursor = 0
+-
+-    for span in spans:
+-        if canonical_cursor < span.start:
+-            piece = canonical_text[canonical_cursor : span.start]
+-            local_frontier = list(range(len(piece) + 1))
+-            _append_piece(
+-                piece,
+-                canonical_cursor,
+-                frontend_cursor,
+-                local_frontier,
+-                local_frontier,
+-                frontend_parts,
+-                canonical_left,
+-                canonical_right,
+-                frontend_left,
+-                frontend_right,
++    builder = _ProjectionBuilder(canonical_text)
++    for index, span in enumerate(spans):
++        builder.copy_until(span.start)
++        surface = canonical_text[span.start : span.end]
++        prefix, core, _ = _split_character_surface(surface)
++        core_start = span.start + len(prefix)
++        builder.copy_until(core_start)
++
++        if _SPACED_CHARACTERS.fullmatch(core):
++            builder.copy_until(core_start + len(core))
++        else:
++            characters = tuple(_CHARACTER.finditer(core))
++            for character_index, match in enumerate(characters):
++                builder.copy_until(core_start + match.end())
++                if character_index + 1 < len(characters):
++                    builder.insert(" ")
++
++        builder.copy_until(span.end)
++        next_span_start = spans[index + 1].start if index + 1 < len(spans) else len(canonical_text)
++        separator_end = _detached_possessive_separator_end(
++            canonical_text, span.end, next_span_start
++        )
++        if separator_end is not None:
++            builder.delete_until(separator_end)
++
++    builder.copy_until(len(canonical_text))
++    return builder.finish()
++
++
++class _ProjectionBuilder:
++    """Build projection text and both boundary maps from source-aligned edits."""
++
++    def __init__(self, canonical_text: str) -> None:
++        self._canonical_text = canonical_text
++        self._canonical_cursor = 0
++        self._frontend_parts: list[str] = []
++        self._canonical_left: list[int | None] = [None] * (len(canonical_text) + 1)
++        self._canonical_right: list[int | None] = [None] * (len(canonical_text) + 1)
++        self._frontend_left = [0]
++        self._frontend_right = [0]
++        self._set_canonical_boundary(0, 0, 0)
++
++    def copy_until(self, end: int) -> None:
++        if not self._canonical_cursor <= end <= len(self._canonical_text):
++            raise RuntimeError("projection copy range is not monotonic")
++        while self._canonical_cursor < end:
++            self._copy_character()
++
++    def insert(self, text: str) -> None:
++        if not text:
++            return
++        frontend_start = len(self._frontend_left) - 1
++        frontend_end = frontend_start + len(text)
++        self._set_canonical_boundary(self._canonical_cursor, frontend_start, frontend_end)
++        self._frontend_parts.append(text)
++        for _ in text:
++            self._frontend_left.append(self._canonical_cursor)
++            self._frontend_right.append(self._canonical_cursor)
++
++    def delete_until(self, end: int) -> None:
++        if not self._canonical_cursor <= end <= len(self._canonical_text):
++            raise RuntimeError("projection deletion range is not monotonic")
++        if end == self._canonical_cursor:
++            return
++        frontend_boundary = len(self._frontend_left) - 1
++        start = self._canonical_cursor
++        for boundary in range(start, end + 1):
++            self._set_canonical_boundary(boundary, frontend_boundary, frontend_boundary)
++        self._frontend_left[frontend_boundary] = min(self._frontend_left[frontend_boundary], start)
++        self._frontend_right[frontend_boundary] = max(self._frontend_right[frontend_boundary], end)
++        self._canonical_cursor = end
++
++    def finish(self) -> FrontendTextProjection:
++        if self._canonical_cursor != len(self._canonical_text):
++            raise RuntimeError("projection builder did not consume all canonical text")
++        if any(value is None for value in (*self._canonical_left, *self._canonical_right)):
++            raise RuntimeError("canonical-to-frontend projection left an unmapped boundary")
++        frontend_text = "".join(self._frontend_parts)
++        if (
++            len(self._frontend_left) != len(frontend_text) + 1
++            or len(self._frontend_right) != len(frontend_text) + 1
++        ):
++            raise RuntimeError("frontend-to-canonical projection left an unmapped boundary")
++        mappings = tuple(
++            tuple(value for value in mapping if value is not None)
++            for mapping in (
++                self._canonical_left,
++                self._canonical_right,
++                self._frontend_left,
++                self._frontend_right,
+             )
+-            frontend_cursor += len(piece)
++        )
++        if any(mapping != tuple(sorted(mapping)) for mapping in mappings):
++            raise RuntimeError("projection boundary mappings are not monotonic")
++        return FrontendTextProjection(
++            canonical_text=self._canonical_text,
++            frontend_text=frontend_text,
++            _canonical_left=tuple(value for value in self._canonical_left if value is not None),
++            _canonical_right=tuple(value for value in self._canonical_right if value is not None),
++            _frontend_left=tuple(self._frontend_left),
++            _frontend_right=tuple(self._frontend_right),
++        )
+
+-        surface = canonical_text[span.start : span.end]
+-        frontend, local_canonical_left, local_canonical_right, local_frontend = (
+-            _project_character_surface(surface, span.start)
++    def _copy_character(self) -> None:
++        canonical_index = self._canonical_cursor
++        frontend_boundary = len(self._frontend_left) - 1
++        self._set_canonical_boundary(canonical_index, frontend_boundary, frontend_boundary)
++        self._frontend_left[frontend_boundary] = min(
++            self._frontend_left[frontend_boundary], canonical_index
+         )
+-        _append_piece(
+-            frontend,
+-            span.start,
+-            frontend_cursor,
+-            local_canonical_left,
+-            local_canonical_right,
+-            frontend_parts,
+-            canonical_left,
+-            canonical_right,
+-            frontend_left,
+-            frontend_right,
+-            frontend_to_canonical=local_frontend,
++        self._frontend_right[frontend_boundary] = max(
++            self._frontend_right[frontend_boundary], canonical_index
+         )
+-        frontend_cursor += len(frontend)
+-        canonical_cursor = span.end
+-
+-    if canonical_cursor < len(canonical_text):
+-        piece = canonical_text[canonical_cursor:]
+-        local_frontier = list(range(len(piece) + 1))
+-        _append_piece(
+-            piece,
+-            canonical_cursor,
+-            frontend_cursor,
+-            local_frontier,
+-            local_frontier,
+-            frontend_parts,
+-            canonical_left,
+-            canonical_right,
+-            frontend_left,
+-            frontend_right,
++        self._frontend_parts.append(self._canonical_text[canonical_index])
++        self._canonical_cursor += 1
++        next_frontend_boundary = frontend_boundary + 1
++        self._frontend_left.append(self._canonical_cursor)
++        self._frontend_right.append(self._canonical_cursor)
++        self._set_canonical_boundary(
++            self._canonical_cursor, next_frontend_boundary, next_frontend_boundary
+         )
+-        frontend_cursor += len(piece)
+-    elif not spans:
+-        local_frontier = list(range(len(canonical_text) + 1))
+-        _append_piece(
+-            canonical_text,
+-            0,
+-            0,
+-            local_frontier,
+-            local_frontier,
+-            frontend_parts,
+-            canonical_left,
+-            canonical_right,
+-            frontend_left,
+-            frontend_right,
++
++    def _set_canonical_boundary(self, boundary: int, left: int, right: int) -> None:
++        existing_left = self._canonical_left[boundary]
++        existing_right = self._canonical_right[boundary]
++        self._canonical_left[boundary] = left if existing_left is None else min(existing_left, left)
++        self._canonical_right[boundary] = (
++            right if existing_right is None else max(existing_right, right)
+         )
+-        frontend_cursor = len(canonical_text)
+-
+-    if any(value is None for value in (*canonical_left, *canonical_right)):
+-        raise RuntimeError("canonical-to-frontend projection left an unmapped boundary")
+-    if len(frontend_left) != frontend_cursor + 1 or len(frontend_right) != frontend_cursor + 1:
+-        raise RuntimeError("frontend-to-canonical projection left an unmapped boundary")
+-
+-    return FrontendTextProjection(
+-        canonical_text=canonical_text,
+-        frontend_text="".join(frontend_parts),
+-        _canonical_left=tuple(value for value in canonical_left if value is not None),
+-        _canonical_right=tuple(value for value in canonical_right if value is not None),
+-        _frontend_left=tuple(frontend_left),
+-        _frontend_right=tuple(frontend_right),
+-    )
+-
+-
+-def _append_piece(
+-    frontend: str,
+-    canonical_start: int,
+-    frontend_start: int,
+-    canonical_to_frontend_left: list[int],
+-    canonical_to_frontend_right: list[int],
+-    frontend_parts: list[str],
+-    canonical_left: list[int | None],
+-    canonical_right: list[int | None],
+-    frontend_left: list[int],
+-    frontend_right: list[int],
+-    *,
+-    frontend_to_canonical: list[int] | None = None,
+-) -> None:
+-    frontend_parts.append(frontend)
+-    for local, (left, right) in enumerate(
+-        zip(canonical_to_frontend_left, canonical_to_frontend_right, strict=True)
+-    ):
+-        index = canonical_start + local
+-        canonical_left[index] = frontend_start + left
+-        canonical_right[index] = frontend_start + right
+-
+-    if frontend_to_canonical is None:
+-        frontend_to_canonical = list(range(canonical_start, canonical_start + len(frontend) + 1))
+-    if len(frontend_to_canonical) != len(frontend) + 1:
+-        raise RuntimeError("projection piece has invalid frontend boundary mapping")
+-    piece_left = frontend_to_canonical
+-    piece_right = frontend_to_canonical
+-    if not frontend_left:
+-        frontend_left.extend(piece_left)
+-        frontend_right.extend(piece_right)
+-        return
+-    if frontend_left[-1] != piece_left[0] or frontend_right[-1] != piece_right[0]:
+-        raise RuntimeError("projection pieces disagree at their shared boundary")
+-    frontend_left.extend(piece_left[1:])
+-    frontend_right.extend(piece_right[1:])
+-
+-
+-def _project_character_surface(
+-    surface: str,
+-    canonical_start: int,
+-) -> tuple[str, list[int], list[int], list[int]]:
+-    prefix, core, suffix = _split_character_surface(surface)
+-    core_start = canonical_start + len(prefix)
+-
+-    frontend_parts: list[str] = []
+-    canonical_left: list[int | None] = [None] * (len(surface) + 1)
+-    canonical_right: list[int | None] = [None] * (len(surface) + 1)
+-    frontend_left: list[int] = []
+-    frontend_right: list[int] = []
+-    frontend_cursor = 0
+-
+-    prefix_frontier = list(range(len(prefix) + 1))
+-    _append_piece(
+-        prefix,
+-        0,
+-        frontend_cursor,
+-        prefix_frontier,
+-        prefix_frontier,
+-        frontend_parts,
+-        canonical_left,
+-        canonical_right,
+-        frontend_left,
+-        frontend_right,
+-        frontend_to_canonical=list(range(canonical_start, canonical_start + len(prefix) + 1)),
+-    )
+-    frontend_cursor += len(prefix)
+-
+-    core_frontend, core_canonical_left, core_canonical_right, core_frontend_to_canonical = (
+-        _project_character_core(core, core_start)
+-    )
+-    _append_piece(
+-        core_frontend,
+-        len(prefix),
+-        frontend_cursor,
+-        core_canonical_left,
+-        core_canonical_right,
+-        frontend_parts,
+-        canonical_left,
+-        canonical_right,
+-        frontend_left,
+-        frontend_right,
+-        frontend_to_canonical=core_frontend_to_canonical,
+-    )
+-    frontend_cursor += len(core_frontend)
+-
+-    suffix_start = core_start + len(core)
+-    suffix_frontier = list(range(len(suffix) + 1))
+-    _append_piece(
+-        suffix,
+-        len(prefix) + len(core),
+-        frontend_cursor,
+-        suffix_frontier,
+-        suffix_frontier,
+-        frontend_parts,
+-        canonical_left,
+-        canonical_right,
+-        frontend_left,
+-        frontend_right,
+-        frontend_to_canonical=list(range(suffix_start, suffix_start + len(suffix) + 1)),
+-    )
+-    frontend_cursor += len(suffix)
+-
+-    if any(value is None for value in (*canonical_left, *canonical_right)):
+-        raise RuntimeError("character surface projection left a canonical boundary unmapped")
+-    if len(frontend_left) != frontend_cursor + 1 or len(frontend_right) != frontend_cursor + 1:
+-        raise RuntimeError("character surface projection left a frontend boundary unmapped")
+-    return (
+-        "".join(frontend_parts),
+-        [value for value in canonical_left if value is not None],
+-        [value for value in canonical_right if value is not None],
+-        frontend_left,
+-    )
++
++
++def _detached_possessive_separator_end(text: str, start: int, limit: int) -> int | None:
++    """Return the start of an adjacent possessive suffix's horizontal separator."""
++    cursor = start
++    while cursor < limit and (text[cursor] == "\t" or unicodedata.category(text[cursor]) == "Zs"):
++        cursor += 1
++    if cursor == start or cursor + 2 > limit or text[cursor : cursor + 2] not in ("'s", "’s"):
++        return None
++    suffix_end = cursor + 2
++    if suffix_end < len(text) and re.match(r"\w", text[suffix_end]) is not None:
++        return None
++    return cursor
+
+
+ def _split_character_surface(surface: str) -> tuple[str, str, str]:
+@@ -321,70 +257,6 @@ def _split_character_surface(surface: str) -> tuple[str, str, str]:
+     return prefix, core, suffix
+
+
+-def _project_character_core(
+-    core: str,
+-    canonical_start: int,
+-) -> tuple[str, list[int], list[int], list[int]]:
+-    matches = tuple(_CHARACTER.finditer(core))
+-    characters = [match.group() for match in matches]
+-    frontend = "".join(f"{character}-" for character in characters)
+-    canonical_left: list[int | None] = [None] * (len(core) + 1)
+-    canonical_right: list[int | None] = [None] * (len(core) + 1)
+-    frontend_to_canonical: list[int | None] = [None] * (len(frontend) + 1)
+-    output_cursor = 0
+-
+-    for index, match in enumerate(matches):
+-        source_start = match.start()
+-        source_end = match.end()
+-        canonical_boundary_start = canonical_start + source_start
+-        canonical_boundary_end = canonical_start + source_end
+-        if canonical_left[source_start] is None:
+-            canonical_left[source_start] = output_cursor
+-        canonical_right[source_start] = output_cursor
+-        frontend_to_canonical[output_cursor] = canonical_boundary_start
+-        output_cursor += 1
+-        canonical_left[source_end] = output_cursor
+-        canonical_right[source_end] = output_cursor
+-        frontend_to_canonical[output_cursor] = canonical_boundary_end
+-
+-        if index + 1 < len(matches):
+-            next_match = matches[index + 1]
+-            next_start = next_match.start()
+-            separator_start = output_cursor
+-            if source_end == next_start:
+-                canonical_left[source_end] = separator_start
+-                canonical_right[source_end] = separator_start + 1
+-            else:
+-                for boundary in range(source_end, next_start):
+-                    canonical_left[boundary] = separator_start
+-                    canonical_right[boundary] = separator_start + 1
+-                canonical_left[next_start] = separator_start + 1
+-                canonical_right[next_start] = separator_start + 1
+-            frontend_to_canonical[separator_start] = canonical_boundary_end
+-            frontend_to_canonical[separator_start + 1] = canonical_start + next_start
+-            output_cursor += 1
+-        else:
+-            # Both boundaries around the terminal hyphen map to the final
+-            # canonical character boundary.
+-            frontend_to_canonical[output_cursor] = canonical_boundary_end
+-            output_cursor += 1
+-            frontend_to_canonical[output_cursor] = canonical_boundary_end
+-    canonical_left[0] = 0
+-    canonical_right[0] = 0
+-    canonical_left[-1] = len(frontend)
+-    canonical_right[-1] = len(frontend)
+-    if any(value is None for value in (*canonical_left, *canonical_right)):
+-        raise RuntimeError("character projection left a canonical boundary unmapped")
+-    if any(value is None for value in frontend_to_canonical):
+-        raise RuntimeError("character projection left a frontend boundary unmapped")
+-    return (
+-        frontend,
+-        [value for value in canonical_left if value is not None],
+-        [value for value in canonical_right if value is not None],
+-        [value for value in frontend_to_canonical if value is not None],
+-    )
+-
+-
+ def _validate_span(start: int, end: int, length: int, label: str) -> None:
+     if isinstance(start, bool) or not isinstance(start, int):
+         raise InvalidRequestError(f"{label} start must be an integer")
+diff --git a/tests/test_frontend_projection.py b/tests/test_frontend_projection.py
+index 399ccdb..a88cd79 100644
+--- a/tests/test_frontend_projection.py
++++ b/tests/test_frontend_projection.py
+@@ -14,59 +14,62 @@ def _span(text: str, surface: str) -> SayAsSpan:
+     return SayAsSpan(start, start + len(surface), "characters")
+
+
+-def test_projection_handles_compact_spaced_and_digit_sequences() -> None:
+-    compact = project_frontend_text("ART", (SayAsSpan(0, 3, "characters"),))
+-    spaced = project_frontend_text("A R T", (SayAsSpan(0, 5, "characters"),))
+-    digits = project_frontend_text("R2D2", (SayAsSpan(0, 4, "characters"),))
+-
+-    assert compact.frontend_text == "A-R-T-"
+-    assert spaced.frontend_text == "A-R-T-"
+-    assert digits.frontend_text == "R-2-D-2-"
+-    assert compact.map_canonical_span(0, 3) == (0, 6)
+-    assert spaced.map_canonical_span(0, 5) == (0, 6)
+-    assert compact.map_canonical_span(1, 2) == (2, 3)
+-    assert compact.map_frontend_span(0, 6) == (0, 3)
+-    assert compact.map_canonical_span(1, 1, start_bias="left", end_bias="left") == (1, 1)
+-    assert compact.map_canonical_span(1, 1, start_bias="right", end_bias="right") == (2, 2)
+-    assert spaced.map_canonical_span(1, 1, start_bias="left", end_bias="left") == (1, 1)
+-    assert spaced.map_canonical_span(1, 1, start_bias="right", end_bias="right") == (2, 2)
+-    assert spaced.map_canonical_span(2, 2) == (2, 2)
+-    assert compact.map_canonical_span(3, 3) == (6, 6)
+-    assert compact.map_frontend_span(5, 5) == (3, 3)
+-    assert compact.map_frontend_span(6, 6) == (3, 3)
++def test_projection_inserts_spaces_between_compact_characters_with_boundary_bias() -> None:
++    projection = project_frontend_text("ART", (SayAsSpan(0, 3, "characters"),))
++
++    assert projection.frontend_text == "A R T"
++    assert projection.canonical_text == "ART"
++    assert projection.map_canonical_span(0, 3) == (0, 5)
++    assert projection.map_frontend_span(0, 5) == (0, 3)
++    assert projection.map_canonical_span(1, 1, start_bias="left", end_bias="left") == (1, 1)
++    assert projection.map_canonical_span(1, 1, start_bias="right", end_bias="right") == (2, 2)
++    assert projection.map_canonical_span(2, 2, start_bias="left", end_bias="left") == (3, 3)
++    assert projection.map_canonical_span(2, 2, start_bias="right", end_bias="right") == (4, 4)
++    assert projection.map_canonical_span(3, 3) == (5, 5)
++
++
++def test_projection_separates_mixed_ascii_letters_and_digits() -> None:
++    projection = project_frontend_text("R2D2", (SayAsSpan(0, 4, "characters"),))
++
++    assert projection.frontend_text == "R 2 D 2"
++    assert projection.map_canonical_span(0, 4) == (0, 7)
++    assert projection.map_frontend_span(0, 7) == (0, 4)
++
++
++def test_projection_preserves_already_spaced_core_and_identity_boundaries() -> None:
++    text = "A R T"
++    projection = project_frontend_text(text, (SayAsSpan(0, len(text), "characters"),))
++
++    assert projection.frontend_text == text
++    assert projection.canonical_text == text
++    assert projection.map_canonical_span(0, len(text)) == (0, len(text))
++    assert projection.map_frontend_span(0, len(text)) == (0, len(text))
++    for boundary in range(len(text) + 1):
++        assert projection.map_canonical_span(boundary, boundary) == (boundary, boundary)
++        assert projection.map_frontend_span(boundary, boundary) == (boundary, boundary)
+
+
+ def test_projection_preserves_outer_parentheses_around_character_span() -> None:
+     text = "(A R T)"
+     span = SayAsSpan(0, len(text), "characters")
+-
+     projection = project_frontend_text(text, (span,))
+
+-    expected = "(A-R-T-)"
+-    assert projection.frontend_text == expected
++    assert projection.frontend_text == "(A R T)"
+     assert projection.canonical_text == text
+     assert (span.start, span.end) == (0, len(text))
+-    assert projection.map_canonical_span(0, len(text)) == (0, len(expected))
+-    assert projection.map_frontend_span(0, len(expected)) == (0, len(text))
+-    assert projection.map_canonical_span(0, 1) == (0, 1)
+-    assert projection.map_canonical_span(len(text) - 1, len(text)) == (
+-        len(expected) - 1,
+-        len(expected),
+-    )
+-
++    assert projection.map_canonical_span(0, len(text)) == (0, len(text))
++    assert projection.map_frontend_span(0, len(text)) == (0, len(text))
+     inner_start = text.index("A")
+     inner_end = text.rindex("T") + 1
+-    frontend_start, frontend_end = projection.map_canonical_span(inner_start, inner_end)
+-    assert projection.frontend_text[frontend_start:frontend_end] == "A-R-T-"
+-    assert projection.map_frontend_span(frontend_start, frontend_end) == (inner_start, inner_end)
++    assert projection.map_canonical_span(inner_start, inner_end) == (inner_start, inner_end)
+
+
+ @pytest.mark.parametrize(
+     ("surface", "expected"),
+     [
+-        ("[ART]", "[A-R-T-]"),
+-        ('"R2D2"', '"R-2-D-2-"'),
+-        ("(A R T).", "(A-R-T-)."),
++        ("[ART]", "[A R T]"),
++        ('"R2D2"', '"R 2 D 2"'),
++        ("(A R T).", "(A R T)."),
+     ],
+ )
+ def test_projection_preserves_outer_wrapper_text(surface: str, expected: str) -> None:
+@@ -79,11 +82,11 @@ def test_projection_preserves_outer_wrapper_text(surface: str, expected: str) ->
+ @pytest.mark.parametrize(
+     ("text", "surface", "expected"),
+     [
+-        ("ART", "ART", "A-R-T-"),
+-        ("A R T", "A R T", "A-R-T-"),
+-        ("R2D2", "R2D2", "R-2-D-2-"),
+-        ("(A R T)", "(A R T)", "(A-R-T-)"),
+-        ('"R2D2"', '"R2D2"', '"R-2-D-2-"'),
++        ("ART", "ART", "A R T"),
++        ("A R T", "A R T", "A R T"),
++        ("R2D2", "R2D2", "R 2 D 2"),
++        ("(A R T)", "(A R T)", "(A R T)"),
++        ('"R2D2"', '"R2D2"', '"R 2 D 2"'),
+     ],
+ )
+ def test_projection_maps_every_boundary_and_complete_marked_span(
+@@ -101,41 +104,79 @@ def test_projection_maps_every_boundary_and_complete_marked_span(
+         projection.map_frontend_span(boundary, boundary)
+
+
+-def test_projection_maps_post_span_ranges_after_terminal_hyphen() -> None:
++def test_projection_maps_post_span_ranges_after_inserted_spaces() -> None:
+     text = "ART now"
+     projection = project_frontend_text(text, (_span(text, "ART"),))
+
+-    assert projection.frontend_text == "A-R-T- now"
++    assert projection.frontend_text == "A R T now"
+     frontend_now = projection.map_canonical_span(4, 7)
+-    assert frontend_now == (7, 10)
++    assert frontend_now == (6, 9)
+     assert projection.frontend_text[frontend_now[0] : frontend_now[1]] == "now"
+     assert projection.map_frontend_span(*frontend_now) == (4, 7)
+
+
+-def test_projection_preserves_possessive_suffixes_and_unmarked_text() -> None:
+-    straight = "A R T's house is nice."
+-    curly = "A R T’s house is nice."
++@pytest.mark.parametrize(
++    ("text", "surface", "expected"),
++    [
++        ("A R T's house is nice.", "A R T", "A R T's house is nice."),
++        ("A R T’s house is nice.", "A R T", "A R T’s house is nice."),
++        ("A R T 's house is nice.", "A R T", "A R T's house is nice."),
++        ("A R T ’s house is nice.", "A R T", "A R T’s house is nice."),
++        ("ART 's house is nice.", "ART", "A R T's house is nice."),
++        ("A R T 'sample' is quoted.", "A R T", "A R T 'sample' is quoted."),
++        ("A R T\n's house is split.", "A R T", "A R T\n's house is split."),
++    ],
++)
++def test_projection_joins_only_adjacent_detached_possessive_after_marked_characters(
++    text: str, surface: str, expected: str
++) -> None:
++    projection = project_frontend_text(text, (_span(text, surface),))
++
++    assert projection.frontend_text == expected
++    assert projection.canonical_text == text
++
+
+-    projected_straight = project_frontend_text(straight, (_span(straight, "A R T"),))
+-    projected_curly = project_frontend_text(curly, (_span(curly, "A R T"),))
++def test_projection_does_not_join_unmarked_possessive() -> None:
++    text = "A R T 's house"
++    projection = project_frontend_text(text)
++
++    assert projection.frontend_text == text
++    assert projection.canonical_text == text
+
+-    assert projected_straight.frontend_text == "A-R-T-'s house is nice."
+-    assert projected_curly.frontend_text == "A-R-T-’s house is nice."
+-    assert "T-'" in projected_straight.frontend_text
+-    assert "T-’" in projected_curly.frontend_text
+-    assert projected_straight.canonical_text == straight
+
++def test_deleted_possessive_separator_has_zero_width_source_mapping() -> None:
++    text = "A R T 's house"
++    projection = project_frontend_text(text, (_span(text, "A R T"),))
+
+-def test_projection_composes_multiple_spans_and_maps_cumulative_offsets() -> None:
+-    text = "A R T met U S A."
+-    first = _span(text, "A R T")
+-    second = _span(text, "U S A")
++    assert projection.frontend_text == "A R T's house"
++    assert projection.canonical_text == text
++    assert projection.map_canonical_span(5, 6) == (5, 5)
++    assert projection.map_canonical_span(9, 14) == (8, 13)
++    assert projection.map_frontend_span(0, 7) == (0, 8)
++    assert projection.map_frontend_span(8, 13) == (9, 14)
++    assert len(projection._canonical_left) == len(text) + 1
++    assert len(projection._canonical_right) == len(text) + 1
++    assert len(projection._frontend_left) == len(projection.frontend_text) + 1
++    assert len(projection._frontend_right) == len(projection.frontend_text) + 1
++    for mapping in (
++        projection._canonical_left,
++        projection._canonical_right,
++        projection._frontend_left,
++        projection._frontend_right,
++    ):
++        assert tuple(mapping) == tuple(sorted(mapping))
++
++
++def test_projection_composes_multiple_compact_spans_and_maps_cumulative_offsets() -> None:
++    text = "ART met USA."
++    first = _span(text, "ART")
++    second = _span(text, "USA")
+     projection = project_frontend_text(text, (first, second))
+
+-    assert projection.frontend_text == "A-R-T- met U-S-A-."
+-    assert projection.map_canonical_span(first.start, first.end) == (0, 6)
++    assert projection.frontend_text == "A R T met U S A."
++    assert projection.map_canonical_span(first.start, first.end) == (0, 5)
+     second_frontend = projection.map_canonical_span(second.start, second.end)
+-    assert projection.frontend_text[slice(*second_frontend)] == "U-S-A-"
++    assert projection.frontend_text[slice(*second_frontend)] == "U S A"
+     assert projection.map_frontend_span(*second_frontend) == (second.start, second.end)
+     for boundary in range(len(text) + 1):
+         projection.map_canonical_span(boundary, boundary)
+diff --git a/tests/test_prepared_g2p_adapter.py b/tests/test_prepared_g2p_adapter.py
+index dfc84cd..10bbeaf 100644
+--- a/tests/test_prepared_g2p_adapter.py
++++ b/tests/test_prepared_g2p_adapter.py
+@@ -67,10 +67,15 @@ class FakeKokoroG2P:
+ class ShadowTextG2P(FakeKokoroG2P):
+     def phonemize_prepared(self, text, **kwargs):
+         self.calls.append((text, kwargs))
+-        if text == "A-R-T- now":
++        if text == "A R T now":
+             tokens = (
+-                {"text": "A-R-T-", "phonemes": "letters", "char_start": 0, "char_end": 6},
+-                {"text": "now", "phonemes": "naʊ", "char_start": 7, "char_end": 10},
++                {"text": "A R T", "phonemes": "letters", "char_start": 0, "char_end": 5},
++                {"text": "now", "phonemes": "naʊ", "char_start": 6, "char_end": 9},
++            )
++        elif text == "A R T's house":
++            tokens = (
++                {"text": "A R T's", "phonemes": "letters", "char_start": 0, "char_end": 7},
++                {"text": "house", "phonemes": "haʊs", "char_start": 8, "char_end": 13},
+             )
+         else:
+             tokens = (
+@@ -141,7 +146,7 @@ def test_prepared_adapter_projects_character_span_before_kokoro_g2p() -> None:
+     prepared = PreparedG2PAdapter(module).phonemize(request, _config())
+
+     assert len(module.calls) == 1
+-    assert module.calls[0][0] == "Because someone called A-R-T- finally."
++    assert module.calls[0][0] == "Because someone called A R T finally."
+     assert prepared.text == text
+     assert (prepared.alignment_tokens[0].char_start, prepared.alignment_tokens[0].char_end) == (
+         0,
+@@ -164,7 +169,7 @@ def test_prepared_adapter_projects_parenthetical_characters_in_one_request() ->
+     prepared = PreparedG2PAdapter(module).phonemize(request, _config())
+
+     assert [call[0] for call in module.calls] == [
+-        "Because someone (A-R-T-) thought this part could use more verisimilitude."
++        "Because someone (A R T) thought this part could use more verisimilitude."
+     ]
+     assert prepared.text == text
+     assert prepared.alignment_tokens[0].text == text
+@@ -211,7 +216,7 @@ def test_parenthesized_characters_measure_and_synthesize_through_shared_projecti
+     measured = synthesizer.measure_request(request)
+     rendered = synthesizer.synthesize(request)
+
+-    expected_frontend = "Because someone (A-R-T-) thought this part could use more verisimilitude."
++    expected_frontend = "Because someone (A R T) thought this part could use more verisimilitude."
+     assert measured.amount == 2
+     assert [call[0] for call in module.calls] == [expected_frontend, expected_frontend]
+     assert len(renderer.prepared_requests) == 1
+@@ -238,17 +243,37 @@ def test_prepared_adapter_maps_overrides_tokens_and_alignment_around_projection(
+
+     prepared = PreparedG2PAdapter(module).phonemize(request, _config())
+
+-    assert module.calls[0][0] == "A-R-T- now"
++    assert module.calls[0][0] == "A R T now"
+     override = module.calls[0][1]["overrides"][0]
+     annotation = module.calls[0][1]["annotations"][0]
+-    assert (override.char_start, override.char_end) == (7, 10)
+-    assert (annotation.start, annotation.end, annotation.text) == (7, 10, "now")
++    assert (override.char_start, override.char_end) == (6, 9)
++    assert (annotation.start, annotation.end, annotation.text) == (6, 9, "now")
+     assert [(item.text, item.char_start, item.char_end) for item in prepared.alignment_tokens] == [
+         ("ART", 0, 3),
+         ("now", 4, 7),
+     ]
+
+
++def test_prepared_adapter_joins_detached_possessive_and_maps_alignment_to_source() -> None:
++    text = "A R T 's house"
++    request = SynthesisRequest(
++        id="characters-possessive",
++        text=text,
++        language="en-us",
++        say_as=(SayAsSpan(0, len("A R T"), "characters"),),
++    )
++    module = ShadowTextG2P()
++
++    prepared = PreparedG2PAdapter(module).phonemize(request, _config())
++
++    assert module.calls[0][0] == "A R T's house"
++    assert prepared.text == text
++    assert [(item.text, item.char_start, item.char_end) for item in prepared.alignment_tokens] == [
++        ("A R T 's", 0, 8),
++        ("house", 9, 14),
++    ]
++
++
+ def test_prepared_adapter_forwards_local_g2lex_without_named_installation(
+     monkeypatch: pytest.MonkeyPatch,
+ ) -> None:
+diff --git a/tests/test_reference_frontend_parity.py b/tests/test_reference_frontend_parity.py
+index b0dd9e2..57cf411 100644
+--- a/tests/test_reference_frontend_parity.py
++++ b/tests/test_reference_frontend_parity.py
+@@ -53,13 +53,13 @@ def test_request_measure_uses_the_preparation_frontend_for_structured_inputs() -
+
+
+ def test_request_measure_uses_character_shadow_frontend_token_count() -> None:
+-    text = "Because someone called A R T finally."
+-    start = text.index("A R T")
++    text = "Because someone called ART finally."
++    start = text.index("ART")
+     request = SynthesisSegment(
+         "character-measure-parity",
+         text,
+         "en-us",
+-        say_as=(SayAsSpan(start, start + len("A R T"), "characters"),),
++        say_as=(SayAsSpan(start, start + len("ART"), "characters"),),
+     )
+     synthesizer = KokoroSynthesizer(g2p=PreparedG2PAdapter())
+
+@@ -71,7 +71,7 @@ def test_request_measure_uses_character_shadow_frontend_token_count() -> None:
+         SynthesisConfig(),
+     )
+
+-    assert projected_text == "Because someone called A-R-T- finally."
++    assert projected_text == "Because someone called A R T finally."
+     assert prepared.token_ids == projected.token_ids
+     assert prepared.text == text
+
+diff --git a/tests/test_request_renderer.py b/tests/test_request_renderer.py
+index 6499f4d..4bf4cb1 100644
+--- a/tests/test_request_renderer.py
++++ b/tests/test_request_renderer.py
+@@ -185,14 +185,14 @@ def test_renderer_keeps_one_request_independent_and_rebases_timings() -> None:
+
+
+ def test_renderer_traces_say_as_projection_and_identity_semantics() -> None:
+-    text = "Hello A R T"
+-    start = text.index("A R T")
++    text = "Hello ART"
++    start = text.index("ART")
+     request = SynthesisRequest(
+         id="say-as-trace",
+         text=text,
+         language="en-us",
+         voice="af_sarah",
+-        say_as=(SayAsSpan(start, start + len("A R T"), "characters"),),
++        say_as=(SayAsSpan(start, start + len("ART"), "characters"),),
+     )
+     prepared = PreparedSynthesis(
+         request_id=request.id,
+@@ -211,17 +211,16 @@ def test_renderer_traces_say_as_projection_and_identity_semantics() -> None:
+     assert rendered.trace.frontend["say_as"] == [
+         {
+             "start": start,
+-            "end": start + len("A R T"),
++            "end": start + len("ART"),
+             "interpret_as": "characters",
+-            "canonical": "A R T",
+-            "frontend": "A-R-T-",
++            "canonical": "ART",
++            "frontend": "A R T",
+         }
+     ]
+     assert rendered.synthesis_identity is not None
+     assert rendered.synthesis_identity.say_as == (
+-        (start, start + len("A R T"), "characters", None, None),
++        (start, start + len("ART"), "characters", None, None),
+     )
+-    assert "A-R-T-" not in repr(rendered.synthesis_identity.to_dict())
+
+
+ def test_renderer_traces_full_parenthesized_say_as_projection() -> None:
+@@ -270,7 +269,7 @@ def test_renderer_traces_full_parenthesized_say_as_projection() -> None:
+             "end": end,
+             "interpret_as": "characters",
+             "canonical": surface,
+-            "frontend": "(A-R-T-)",
++            "frontend": "(A R T)",
+         }
+     ]
+     assert rendered.synthesis_identity is not None
+@@ -285,17 +284,17 @@ def test_renderer_word_timings_remain_in_canonical_say_as_coordinates() -> None:
+         def generate_raw_audio_segments(self, segments, voice_style, speed, **kwargs):
+             result = super().generate_raw_audio_segments(segments, voice_style, speed, **kwargs)
+             for segment in result:
+-                start = segment.text.index("A R T")
+-                end = start + len("A R T")
+-                segment.word_timings = [WordTiming("A R T", start, end, 0, 2, segment.id)]
++                start = segment.text.index("ART")
++                end = start + len("ART")
++                segment.word_timings = [WordTiming("ART", start, end, 0, 2, segment.id)]
+             return result
+
+     request = SynthesisRequest(
+         "canonical-timing",
+-        "A R T",
++        "ART",
+         "en-us",
+         voice="af_sarah",
+-        say_as=(SayAsSpan(0, 5, "characters"),),
++        say_as=(SayAsSpan(0, 3, "characters"),),
+     )
+     prepared = PreparedSynthesis(
+         request_id=request.id,
+@@ -304,7 +303,7 @@ def test_renderer_word_timings_remain_in_canonical_say_as_coordinates() -> None:
+         voice="af_sarah",
+         phonemes="letters",
+         token_ids=(1, 2, 3),
+-        alignment_tokens=(G2PAlignmentToken("A R T", "letters", char_start=0, char_end=5),),
++        alignment_tokens=(G2PAlignmentToken("ART", "letters", char_start=0, char_end=3),),
+     )
+     renderer = OnnxRequestRenderer(
+         FakeG2PAdapter(), backend_factory=lambda config: CharacterTimingBackend()
+@@ -313,7 +312,7 @@ def test_renderer_word_timings_remain_in_canonical_say_as_coordinates() -> None:
+     rendered = renderer.render(prepared, request, _config())
+
+     timing = rendered.word_timings[0]
+-    assert (timing.text, timing.char_start, timing.char_end) == ("A R T", 0, 5)
++    assert (timing.text, timing.char_start, timing.char_end) == ("ART", 0, 3)
+     assert rendered.text[timing.char_start : timing.char_end] == timing.text
+     assert "-" not in timing.text
+
+diff --git a/tests/test_synthesis_identity.py b/tests/test_synthesis_identity.py
+index f7cad35..8af4d64 100644
+--- a/tests/test_synthesis_identity.py
++++ b/tests/test_synthesis_identity.py
+@@ -44,7 +44,6 @@ def test_synthesis_identity_includes_semantic_say_as_values() -> None:
+     assert first.cache_key == same.cache_key
+     assert first.cache_key != changed_detail.cache_key
+     assert first.say_as == ((0, 3, "characters", None, None),)
+-    assert "A-R-T-" not in repr(first.to_dict())
+
+
+ def test_synthesis_identity_includes_active_long_text_policy() -> None:

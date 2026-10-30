@@ -1,0 +1,41 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: 0.10.10
+git_base_ref: 39c20040569dd8b917e88f617b53718d32504dfb
+git_base_sha: 39c20040569dd8b917e88f617b53718d32504dfb
+git_head_ref: 263a3f8943631e74e91e6b5dd45a087bcdc6eadc
+git_head_sha: 263a3f8943631e74e91e6b5dd45a087bcdc6eadc
+include_merges: nontrivial
+entries:
+  - kind: fixed
+    summary:
+      Fixed character say-as projection to preserve spaced spelling and attach detached
+      possessive suffixes
+    status: accepted
+    body: >-
+      Updated the private character say-as projection to preserve spaced spelling,
+      separate compact character sequences, and attach an immediately following detached
+      possessive suffix while keeping canonical request text, offsets, alignments, and
+      timings unchanged.
+    source_refs:
+      - git:263a3f8943631e74e91e6b5dd45a087bcdc6eadc
+    paths:
+      - .ledger/releaseledger/data/ledgers/main/events/events.jsonl
+      - .ledger/releaseledger/data/ledgers/main/releases/0.10.9/entries/entry-0001.md
+      - docs/advanced_features.md
+      - docs/api_reference.md
+      - docs/changelog.md
+      - pykokoro/frontend_projection.py
+      - tests/test_frontend_projection.py
+      - tests/test_prepared_g2p_adapter.py
+      - tests/test_reference_frontend_parity.py
+      - tests/test_request_renderer.py
+      - tests/test_synthesis_identity.py
+    sources:
+      - git:263a3f8943631e74e91e6b5dd45a087bcdc6eadc
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

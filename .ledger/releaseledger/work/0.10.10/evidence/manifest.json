@@ -1,0 +1,35 @@
+{
+  "candidate_count": 1,
+  "candidates": [
+    {
+      "additions": 339,
+      "deletions": 383,
+      "patch_file": "263a3f8.patch",
+      "patch_sha256": "f7c83be6aad8e3c6e5bc2c57e0dc1292993f4fcf1be9131b6b208e889487be86",
+      "paths": [
+        ".ledger/releaseledger/data/ledgers/main/events/events.jsonl",
+        ".ledger/releaseledger/data/ledgers/main/releases/0.10.9/entries/entry-0001.md",
+        "docs/advanced_features.md",
+        "docs/api_reference.md",
+        "docs/changelog.md",
+        "pykokoro/frontend_projection.py",
+        "tests/test_frontend_projection.py",
+        "tests/test_prepared_g2p_adapter.py",
+        "tests/test_reference_frontend_parity.py",
+        "tests/test_request_renderer.py",
+        "tests/test_synthesis_identity.py"
+      ],
+      "sha": "263a3f8943631e74e91e6b5dd45a087bcdc6eadc",
+      "short_sha": "263a3f8",
+      "source_ref": "git:263a3f8943631e74e91e6b5dd45a087bcdc6eadc"
+    }
+  ],
+  "git_base_ref": "39c20040569dd8b917e88f617b53718d32504dfb",
+  "git_base_sha": "39c20040569dd8b917e88f617b53718d32504dfb",
+  "git_head_ref": "263a3f8943631e74e91e6b5dd45a087bcdc6eadc",
+  "git_head_sha": "263a3f8943631e74e91e6b5dd45a087bcdc6eadc",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "0.10.10",
+  "schema_version": 1
+}

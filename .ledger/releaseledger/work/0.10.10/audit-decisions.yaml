@@ -1,0 +1,27 @@
+rows:
+  - sha: 263a3f8943631e74e91e6b5dd45a087bcdc6eadc
+    inspected: true
+    inspected_paths:
+      - .ledger/releaseledger/data/ledgers/main/events/events.jsonl
+      - .ledger/releaseledger/data/ledgers/main/releases/0.10.9/entries/entry-0001.md
+      - docs/advanced_features.md
+      - docs/api_reference.md
+      - docs/changelog.md
+      - pykokoro/frontend_projection.py
+      - tests/test_frontend_projection.py
+      - tests/test_prepared_g2p_adapter.py
+      - tests/test_reference_frontend_parity.py
+      - tests/test_request_renderer.py
+      - tests/test_synthesis_identity.py
+    observed_behavior:
+      "Updated the private character say-as projection to preserve spaced spelling,
+      separate compact character sequences, and attach an immediately following detached
+      possessive suffix while keeping canonical request text, offsets, alignments, and
+      timings unchanged; expanded regression coverage and synchronized the public API
+      documentation."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false
