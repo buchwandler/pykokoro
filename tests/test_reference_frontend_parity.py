@@ -53,13 +53,13 @@ def test_request_measure_uses_the_preparation_frontend_for_structured_inputs() -
 
 
 def test_request_measure_uses_character_shadow_frontend_token_count() -> None:
-    text = "Because someone called A R T finally."
-    start = text.index("A R T")
+    text = "Because someone called ART finally."
+    start = text.index("ART")
     request = SynthesisSegment(
         "character-measure-parity",
         text,
         "en-us",
-        say_as=(SayAsSpan(start, start + len("A R T"), "characters"),),
+        say_as=(SayAsSpan(start, start + len("ART"), "characters"),),
     )
     synthesizer = KokoroSynthesizer(g2p=PreparedG2PAdapter())
 
@@ -71,7 +71,7 @@ def test_request_measure_uses_character_shadow_frontend_token_count() -> None:
         SynthesisConfig(),
     )
 
-    assert projected_text == "Because someone called A-R-T- finally."
+    assert projected_text == "Because someone called A R T finally."
     assert prepared.token_ids == projected.token_ids
     assert prepared.text == text
 

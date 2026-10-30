@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal, cast
+from typing import Literal
 
 from .exceptions import InvalidRequestError, UnsupportedFeatureError
 from .synthesis_types import SayAsSpan
@@ -74,13 +75,12 @@ def project_frontend_text(
     if not isinstance(say_as, (tuple, list)):
         raise InvalidRequestError("say_as must be a tuple or list of SayAsSpan values")
 
-    raw_spans = tuple(say_as)
     spans: list[SayAsSpan] = []
     previous: SayAsSpan | None = None
-    for index, candidate in enumerate(raw_spans):
+    for index, candidate in enumerate(say_as):
         if not isinstance(candidate, SayAsSpan):
             raise InvalidRequestError("say_as must contain SayAsSpan values")
-        span = cast(SayAsSpan, candidate)
+        span = candidate
         _validate_span(span.start, span.end, len(canonical_text), f"say_as[{index}]")
         if previous is not None:
             if (span.start, span.end) < (previous.start, previous.end):
@@ -94,212 +94,148 @@ def project_frontend_text(
         spans.append(span)
         previous = span
 
-    frontend_parts: list[str] = []
-    canonical_left: list[int | None] = [None] * (len(canonical_text) + 1)
-    canonical_right: list[int | None] = [None] * (len(canonical_text) + 1)
-    frontend_left: list[int] = []
-    frontend_right: list[int] = []
-    canonical_cursor = 0
-    frontend_cursor = 0
-
-    for span in spans:
-        if canonical_cursor < span.start:
-            piece = canonical_text[canonical_cursor : span.start]
-            local_frontier = list(range(len(piece) + 1))
-            _append_piece(
-                piece,
-                canonical_cursor,
-                frontend_cursor,
-                local_frontier,
-                local_frontier,
-                frontend_parts,
-                canonical_left,
-                canonical_right,
-                frontend_left,
-                frontend_right,
-            )
-            frontend_cursor += len(piece)
-
+    builder = _ProjectionBuilder(canonical_text)
+    for index, span in enumerate(spans):
+        builder.copy_until(span.start)
         surface = canonical_text[span.start : span.end]
-        frontend, local_canonical_left, local_canonical_right, local_frontend = (
-            _project_character_surface(surface, span.start)
+        prefix, core, _ = _split_character_surface(surface)
+        core_start = span.start + len(prefix)
+        builder.copy_until(core_start)
+
+        if _SPACED_CHARACTERS.fullmatch(core):
+            builder.copy_until(core_start + len(core))
+        else:
+            characters = tuple(_CHARACTER.finditer(core))
+            for character_index, match in enumerate(characters):
+                builder.copy_until(core_start + match.end())
+                if character_index + 1 < len(characters):
+                    builder.insert(" ")
+
+        builder.copy_until(span.end)
+        next_span_start = spans[index + 1].start if index + 1 < len(spans) else len(canonical_text)
+        separator_end = _detached_possessive_separator_end(
+            canonical_text, span.end, next_span_start
         )
-        _append_piece(
-            frontend,
-            span.start,
-            frontend_cursor,
-            local_canonical_left,
-            local_canonical_right,
-            frontend_parts,
-            canonical_left,
-            canonical_right,
-            frontend_left,
-            frontend_right,
-            frontend_to_canonical=local_frontend,
+        if separator_end is not None:
+            builder.delete_until(separator_end)
+
+    builder.copy_until(len(canonical_text))
+    return builder.finish()
+
+
+class _ProjectionBuilder:
+    """Build projection text and both boundary maps from source-aligned edits."""
+
+    def __init__(self, canonical_text: str) -> None:
+        self._canonical_text = canonical_text
+        self._canonical_cursor = 0
+        self._frontend_parts: list[str] = []
+        self._canonical_left: list[int | None] = [None] * (len(canonical_text) + 1)
+        self._canonical_right: list[int | None] = [None] * (len(canonical_text) + 1)
+        self._frontend_left = [0]
+        self._frontend_right = [0]
+        self._set_canonical_boundary(0, 0, 0)
+
+    def copy_until(self, end: int) -> None:
+        if not self._canonical_cursor <= end <= len(self._canonical_text):
+            raise RuntimeError("projection copy range is not monotonic")
+        while self._canonical_cursor < end:
+            self._copy_character()
+
+    def insert(self, text: str) -> None:
+        if not text:
+            return
+        frontend_start = len(self._frontend_left) - 1
+        frontend_end = frontend_start + len(text)
+        self._set_canonical_boundary(self._canonical_cursor, frontend_start, frontend_end)
+        self._frontend_parts.append(text)
+        for _ in text:
+            self._frontend_left.append(self._canonical_cursor)
+            self._frontend_right.append(self._canonical_cursor)
+
+    def delete_until(self, end: int) -> None:
+        if not self._canonical_cursor <= end <= len(self._canonical_text):
+            raise RuntimeError("projection deletion range is not monotonic")
+        if end == self._canonical_cursor:
+            return
+        frontend_boundary = len(self._frontend_left) - 1
+        start = self._canonical_cursor
+        for boundary in range(start, end + 1):
+            self._set_canonical_boundary(boundary, frontend_boundary, frontend_boundary)
+        self._frontend_left[frontend_boundary] = min(self._frontend_left[frontend_boundary], start)
+        self._frontend_right[frontend_boundary] = max(self._frontend_right[frontend_boundary], end)
+        self._canonical_cursor = end
+
+    def finish(self) -> FrontendTextProjection:
+        if self._canonical_cursor != len(self._canonical_text):
+            raise RuntimeError("projection builder did not consume all canonical text")
+        if any(value is None for value in (*self._canonical_left, *self._canonical_right)):
+            raise RuntimeError("canonical-to-frontend projection left an unmapped boundary")
+        frontend_text = "".join(self._frontend_parts)
+        if (
+            len(self._frontend_left) != len(frontend_text) + 1
+            or len(self._frontend_right) != len(frontend_text) + 1
+        ):
+            raise RuntimeError("frontend-to-canonical projection left an unmapped boundary")
+        mappings = tuple(
+            tuple(value for value in mapping if value is not None)
+            for mapping in (
+                self._canonical_left,
+                self._canonical_right,
+                self._frontend_left,
+                self._frontend_right,
+            )
         )
-        frontend_cursor += len(frontend)
-        canonical_cursor = span.end
-
-    if canonical_cursor < len(canonical_text):
-        piece = canonical_text[canonical_cursor:]
-        local_frontier = list(range(len(piece) + 1))
-        _append_piece(
-            piece,
-            canonical_cursor,
-            frontend_cursor,
-            local_frontier,
-            local_frontier,
-            frontend_parts,
-            canonical_left,
-            canonical_right,
-            frontend_left,
-            frontend_right,
+        if any(mapping != tuple(sorted(mapping)) for mapping in mappings):
+            raise RuntimeError("projection boundary mappings are not monotonic")
+        return FrontendTextProjection(
+            canonical_text=self._canonical_text,
+            frontend_text=frontend_text,
+            _canonical_left=tuple(value for value in self._canonical_left if value is not None),
+            _canonical_right=tuple(value for value in self._canonical_right if value is not None),
+            _frontend_left=tuple(self._frontend_left),
+            _frontend_right=tuple(self._frontend_right),
         )
-        frontend_cursor += len(piece)
-    elif not spans:
-        local_frontier = list(range(len(canonical_text) + 1))
-        _append_piece(
-            canonical_text,
-            0,
-            0,
-            local_frontier,
-            local_frontier,
-            frontend_parts,
-            canonical_left,
-            canonical_right,
-            frontend_left,
-            frontend_right,
+
+    def _copy_character(self) -> None:
+        canonical_index = self._canonical_cursor
+        frontend_boundary = len(self._frontend_left) - 1
+        self._set_canonical_boundary(canonical_index, frontend_boundary, frontend_boundary)
+        self._frontend_left[frontend_boundary] = min(
+            self._frontend_left[frontend_boundary], canonical_index
         )
-        frontend_cursor = len(canonical_text)
+        self._frontend_right[frontend_boundary] = max(
+            self._frontend_right[frontend_boundary], canonical_index
+        )
+        self._frontend_parts.append(self._canonical_text[canonical_index])
+        self._canonical_cursor += 1
+        next_frontend_boundary = frontend_boundary + 1
+        self._frontend_left.append(self._canonical_cursor)
+        self._frontend_right.append(self._canonical_cursor)
+        self._set_canonical_boundary(
+            self._canonical_cursor, next_frontend_boundary, next_frontend_boundary
+        )
 
-    if any(value is None for value in (*canonical_left, *canonical_right)):
-        raise RuntimeError("canonical-to-frontend projection left an unmapped boundary")
-    if len(frontend_left) != frontend_cursor + 1 or len(frontend_right) != frontend_cursor + 1:
-        raise RuntimeError("frontend-to-canonical projection left an unmapped boundary")
-
-    return FrontendTextProjection(
-        canonical_text=canonical_text,
-        frontend_text="".join(frontend_parts),
-        _canonical_left=tuple(value for value in canonical_left if value is not None),
-        _canonical_right=tuple(value for value in canonical_right if value is not None),
-        _frontend_left=tuple(frontend_left),
-        _frontend_right=tuple(frontend_right),
-    )
-
-
-def _append_piece(
-    frontend: str,
-    canonical_start: int,
-    frontend_start: int,
-    canonical_to_frontend_left: list[int],
-    canonical_to_frontend_right: list[int],
-    frontend_parts: list[str],
-    canonical_left: list[int | None],
-    canonical_right: list[int | None],
-    frontend_left: list[int],
-    frontend_right: list[int],
-    *,
-    frontend_to_canonical: list[int] | None = None,
-) -> None:
-    frontend_parts.append(frontend)
-    for local, (left, right) in enumerate(
-        zip(canonical_to_frontend_left, canonical_to_frontend_right, strict=True)
-    ):
-        index = canonical_start + local
-        canonical_left[index] = frontend_start + left
-        canonical_right[index] = frontend_start + right
-
-    if frontend_to_canonical is None:
-        frontend_to_canonical = list(range(canonical_start, canonical_start + len(frontend) + 1))
-    if len(frontend_to_canonical) != len(frontend) + 1:
-        raise RuntimeError("projection piece has invalid frontend boundary mapping")
-    piece_left = frontend_to_canonical
-    piece_right = frontend_to_canonical
-    if not frontend_left:
-        frontend_left.extend(piece_left)
-        frontend_right.extend(piece_right)
-        return
-    if frontend_left[-1] != piece_left[0] or frontend_right[-1] != piece_right[0]:
-        raise RuntimeError("projection pieces disagree at their shared boundary")
-    frontend_left.extend(piece_left[1:])
-    frontend_right.extend(piece_right[1:])
+    def _set_canonical_boundary(self, boundary: int, left: int, right: int) -> None:
+        existing_left = self._canonical_left[boundary]
+        existing_right = self._canonical_right[boundary]
+        self._canonical_left[boundary] = left if existing_left is None else min(existing_left, left)
+        self._canonical_right[boundary] = (
+            right if existing_right is None else max(existing_right, right)
+        )
 
 
-def _project_character_surface(
-    surface: str,
-    canonical_start: int,
-) -> tuple[str, list[int], list[int], list[int]]:
-    prefix, core, suffix = _split_character_surface(surface)
-    core_start = canonical_start + len(prefix)
-
-    frontend_parts: list[str] = []
-    canonical_left: list[int | None] = [None] * (len(surface) + 1)
-    canonical_right: list[int | None] = [None] * (len(surface) + 1)
-    frontend_left: list[int] = []
-    frontend_right: list[int] = []
-    frontend_cursor = 0
-
-    prefix_frontier = list(range(len(prefix) + 1))
-    _append_piece(
-        prefix,
-        0,
-        frontend_cursor,
-        prefix_frontier,
-        prefix_frontier,
-        frontend_parts,
-        canonical_left,
-        canonical_right,
-        frontend_left,
-        frontend_right,
-        frontend_to_canonical=list(range(canonical_start, canonical_start + len(prefix) + 1)),
-    )
-    frontend_cursor += len(prefix)
-
-    core_frontend, core_canonical_left, core_canonical_right, core_frontend_to_canonical = (
-        _project_character_core(core, core_start)
-    )
-    _append_piece(
-        core_frontend,
-        len(prefix),
-        frontend_cursor,
-        core_canonical_left,
-        core_canonical_right,
-        frontend_parts,
-        canonical_left,
-        canonical_right,
-        frontend_left,
-        frontend_right,
-        frontend_to_canonical=core_frontend_to_canonical,
-    )
-    frontend_cursor += len(core_frontend)
-
-    suffix_start = core_start + len(core)
-    suffix_frontier = list(range(len(suffix) + 1))
-    _append_piece(
-        suffix,
-        len(prefix) + len(core),
-        frontend_cursor,
-        suffix_frontier,
-        suffix_frontier,
-        frontend_parts,
-        canonical_left,
-        canonical_right,
-        frontend_left,
-        frontend_right,
-        frontend_to_canonical=list(range(suffix_start, suffix_start + len(suffix) + 1)),
-    )
-    frontend_cursor += len(suffix)
-
-    if any(value is None for value in (*canonical_left, *canonical_right)):
-        raise RuntimeError("character surface projection left a canonical boundary unmapped")
-    if len(frontend_left) != frontend_cursor + 1 or len(frontend_right) != frontend_cursor + 1:
-        raise RuntimeError("character surface projection left a frontend boundary unmapped")
-    return (
-        "".join(frontend_parts),
-        [value for value in canonical_left if value is not None],
-        [value for value in canonical_right if value is not None],
-        frontend_left,
-    )
+def _detached_possessive_separator_end(text: str, start: int, limit: int) -> int | None:
+    """Return the start of an adjacent possessive suffix's horizontal separator."""
+    cursor = start
+    while cursor < limit and (text[cursor] == "\t" or unicodedata.category(text[cursor]) == "Zs"):
+        cursor += 1
+    if cursor == start or cursor + 2 > limit or text[cursor : cursor + 2] not in ("'s", "’s"):
+        return None
+    suffix_end = cursor + 2
+    if suffix_end < len(text) and re.match(r"\w", text[suffix_end]) is not None:
+        return None
+    return cursor
 
 
 def _split_character_surface(surface: str) -> tuple[str, str, str]:
@@ -319,70 +255,6 @@ def _split_character_surface(surface: str) -> tuple[str, str, str]:
             "outer punctuation is allowed"
         )
     return prefix, core, suffix
-
-
-def _project_character_core(
-    core: str,
-    canonical_start: int,
-) -> tuple[str, list[int], list[int], list[int]]:
-    matches = tuple(_CHARACTER.finditer(core))
-    characters = [match.group() for match in matches]
-    frontend = "".join(f"{character}-" for character in characters)
-    canonical_left: list[int | None] = [None] * (len(core) + 1)
-    canonical_right: list[int | None] = [None] * (len(core) + 1)
-    frontend_to_canonical: list[int | None] = [None] * (len(frontend) + 1)
-    output_cursor = 0
-
-    for index, match in enumerate(matches):
-        source_start = match.start()
-        source_end = match.end()
-        canonical_boundary_start = canonical_start + source_start
-        canonical_boundary_end = canonical_start + source_end
-        if canonical_left[source_start] is None:
-            canonical_left[source_start] = output_cursor
-        canonical_right[source_start] = output_cursor
-        frontend_to_canonical[output_cursor] = canonical_boundary_start
-        output_cursor += 1
-        canonical_left[source_end] = output_cursor
-        canonical_right[source_end] = output_cursor
-        frontend_to_canonical[output_cursor] = canonical_boundary_end
-
-        if index + 1 < len(matches):
-            next_match = matches[index + 1]
-            next_start = next_match.start()
-            separator_start = output_cursor
-            if source_end == next_start:
-                canonical_left[source_end] = separator_start
-                canonical_right[source_end] = separator_start + 1
-            else:
-                for boundary in range(source_end, next_start):
-                    canonical_left[boundary] = separator_start
-                    canonical_right[boundary] = separator_start + 1
-                canonical_left[next_start] = separator_start + 1
-                canonical_right[next_start] = separator_start + 1
-            frontend_to_canonical[separator_start] = canonical_boundary_end
-            frontend_to_canonical[separator_start + 1] = canonical_start + next_start
-            output_cursor += 1
-        else:
-            # Both boundaries around the terminal hyphen map to the final
-            # canonical character boundary.
-            frontend_to_canonical[output_cursor] = canonical_boundary_end
-            output_cursor += 1
-            frontend_to_canonical[output_cursor] = canonical_boundary_end
-    canonical_left[0] = 0
-    canonical_right[0] = 0
-    canonical_left[-1] = len(frontend)
-    canonical_right[-1] = len(frontend)
-    if any(value is None for value in (*canonical_left, *canonical_right)):
-        raise RuntimeError("character projection left a canonical boundary unmapped")
-    if any(value is None for value in frontend_to_canonical):
-        raise RuntimeError("character projection left a frontend boundary unmapped")
-    return (
-        frontend,
-        [value for value in canonical_left if value is not None],
-        [value for value in canonical_right if value is not None],
-        [value for value in frontend_to_canonical if value is not None],
-    )
 
 
 def _validate_span(start: int, end: int, length: int, label: str) -> None:

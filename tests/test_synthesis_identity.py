@@ -44,7 +44,6 @@ def test_synthesis_identity_includes_semantic_say_as_values() -> None:
     assert first.cache_key == same.cache_key
     assert first.cache_key != changed_detail.cache_key
     assert first.say_as == ((0, 3, "characters", None, None),)
-    assert "A-R-T-" not in repr(first.to_dict())
 
 
 def test_synthesis_identity_includes_active_long_text_policy() -> None:

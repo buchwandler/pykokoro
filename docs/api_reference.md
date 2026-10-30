@@ -132,15 +132,18 @@ offsets are half-open character ranges into the exact `text` carried by that req
 `tokens` is the canonical `SynthesisRequest` field.
 
 `SayAsSpan` marks an exact half-open range in `SynthesisRequest.text`. The supported
-interpretation is `characters`. The shadow frontend removes whitespace between marked
-characters and appends `-` after every character (for example, `A R T` becomes
-`A-R-T-`). The caller's canonical request text and public offsets, including prepared
-text, public alignment, and word timings, remain unchanged. A marked phrase stays inside
-the caller's request; say-as does not add pauses or split text. `RequestMeasure.amount`
-is the exact frontend token count. `maximum` is an optional caller-provided limit, and
-`fits` is true when the amount is within that limit, false when it exceeds it, and
-`None` when no limit was supplied. Measurement does not imply that reference audio is
-valid or enrollment will succeed.
+interpretation is `characters`. The private, source-aligned shadow frontend separates
+compact marked sequences with spaces (`ART` → `A R T`) and leaves already spaced
+sequences unchanged (`A R T` → `A R T`). Only a detached possessive suffix immediately
+after a marked character span is joined (`A R T 's` → `A R T's`, or `A R T ’s` →
+`A R T’s`); only the horizontal separator is deleted from the private projection. This
+transformation does not change canonical request text, prepared text, public offsets,
+alignment, or word timings. The marked phrase stays inside the caller’s request; say-as
+does not add pauses or split text. `RequestMeasure.amount` is the exact frontend token
+count. `maximum` is an optional caller-provided limit, and `fits` is true when the
+amount is within that limit, false when it exceeds it, and `None` when no limit was
+supplied. Measurement does not imply that reference audio is valid or enrollment will
+succeed.
 
 `RenderedSegment` contains one request's waveform and metadata. `save_wav()` writes mono
 float32 WAV audio. `play()` uses the optional playback dependency. Results from a batch

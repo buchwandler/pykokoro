@@ -424,3 +424,5 @@
 {"data":{"released_at":"2026-10-29"},"event":"release.finalized","event_id":"event-0424","record_revisions":{"release:0.10.8":4},"release_version":"0.10.8","schema_version":2}
 {"data":{"status":"planned"},"event":"release.created","event_id":"event-0425","record_revisions":{"release:0.10.9":1},"release_version":"0.10.9","schema_version":2}
 {"data":{"kind":"fixed","status":"accepted"},"entry_id":"entry-0001","event":"entry.added","event_id":"event-0426","record_revisions":{"entry:0.10.9/entry-0001":1,"release:0.10.9":2},"release_version":"0.10.9","schema_version":2}
+{"data":{"added_source_refs":["tl:task-0125"],"fields":["body","paths","source_refs","summary"],"removed_source_refs":[],"source_refs_mode":"merge"},"entry_id":"entry-0001","event":"entry.updated","event_id":"event-0427","record_revisions":{"entry:0.10.9/entry-0001":2},"release_version":"0.10.9","schema_version":2}
+{"data":{"added_source_refs":[],"fields":["summary"],"removed_source_refs":[],"source_refs_mode":"unchanged"},"entry_id":"entry-0001","event":"entry.updated","event_id":"event-0428","record_revisions":{"entry:0.10.9/entry-0001":3},"release_version":"0.10.9","schema_version":2}

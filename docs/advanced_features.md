@@ -44,7 +44,7 @@ an earlier source file or markup document.
 ## Character say-as spans
 
 `SayAsSpan` requests character-by-character reading for an exact, half-open range in the
-prepared request text. For example, PyKokoro may send `A-R-T-` to KokoroG2P for the
+prepared request text. For example, PyKokoro may send `A R T` to KokoroG2P for the
 marked canonical text `A R T`; the caller's text is not rewritten:
 
 ```python
@@ -60,14 +60,17 @@ request = SynthesisSegment(
 )
 ```
 
-The shadow frontend removes whitespace between marked characters and appends `-` after
-every character. The caller's canonical request text and public offsets are unchanged.
-Only explicitly marked spans are transformed, and `characters` is the supported
-interpretation. Request/result text, source alignment, and word-timing offsets remain in
-the canonical text. The marked phrase stays inside the caller's request: say-as does not
-add requests or pauses. The normal token-capacity policy still applies; opt-in long-text
-splitting protects marked spans from being cut. `measure_request()` uses the same
-projected frontend as synthesis.
+Character `say_as` uses a private frontend projection while keeping the caller's
+canonical request text unchanged. Compact character sequences are separated with spaces
+(`ART` → `A R T`); already separated sequences remain unchanged (`A R T` → `A R T`). If
+a detached possessive suffix immediately follows a marked character span, the shadow
+frontend attaches it (`A R T 's` → `A R T's`) so the frontend can process the suffix as
+part of the final spelled character. Public request text, offsets, alignments, and word
+timings remain canonical. Only explicitly marked spans are transformed, and `characters`
+is the supported interpretation. The marked phrase stays inside the caller's request:
+say-as does not add requests or pauses. The normal token-capacity policy still applies;
+opt-in long-text splitting protects marked spans from being cut. `measure_request()`
+uses the same projected frontend as synthesis.
 
 ## Caller-provided linguistic tokens
 

@@ -185,14 +185,14 @@ def test_renderer_keeps_one_request_independent_and_rebases_timings() -> None:
 
 
 def test_renderer_traces_say_as_projection_and_identity_semantics() -> None:
-    text = "Hello A R T"
-    start = text.index("A R T")
+    text = "Hello ART"
+    start = text.index("ART")
     request = SynthesisRequest(
         id="say-as-trace",
         text=text,
         language="en-us",
         voice="af_sarah",
-        say_as=(SayAsSpan(start, start + len("A R T"), "characters"),),
+        say_as=(SayAsSpan(start, start + len("ART"), "characters"),),
     )
     prepared = PreparedSynthesis(
         request_id=request.id,
@@ -211,17 +211,16 @@ def test_renderer_traces_say_as_projection_and_identity_semantics() -> None:
     assert rendered.trace.frontend["say_as"] == [
         {
             "start": start,
-            "end": start + len("A R T"),
+            "end": start + len("ART"),
             "interpret_as": "characters",
-            "canonical": "A R T",
-            "frontend": "A-R-T-",
+            "canonical": "ART",
+            "frontend": "A R T",
         }
     ]
     assert rendered.synthesis_identity is not None
     assert rendered.synthesis_identity.say_as == (
-        (start, start + len("A R T"), "characters", None, None),
+        (start, start + len("ART"), "characters", None, None),
     )
-    assert "A-R-T-" not in repr(rendered.synthesis_identity.to_dict())
 
 
 def test_renderer_traces_full_parenthesized_say_as_projection() -> None:
@@ -270,7 +269,7 @@ def test_renderer_traces_full_parenthesized_say_as_projection() -> None:
             "end": end,
             "interpret_as": "characters",
             "canonical": surface,
-            "frontend": "(A-R-T-)",
+            "frontend": "(A R T)",
         }
     ]
     assert rendered.synthesis_identity is not None
@@ -285,17 +284,17 @@ def test_renderer_word_timings_remain_in_canonical_say_as_coordinates() -> None:
         def generate_raw_audio_segments(self, segments, voice_style, speed, **kwargs):
             result = super().generate_raw_audio_segments(segments, voice_style, speed, **kwargs)
             for segment in result:
-                start = segment.text.index("A R T")
-                end = start + len("A R T")
-                segment.word_timings = [WordTiming("A R T", start, end, 0, 2, segment.id)]
+                start = segment.text.index("ART")
+                end = start + len("ART")
+                segment.word_timings = [WordTiming("ART", start, end, 0, 2, segment.id)]
             return result
 
     request = SynthesisRequest(
         "canonical-timing",
-        "A R T",
+        "ART",
         "en-us",
         voice="af_sarah",
-        say_as=(SayAsSpan(0, 5, "characters"),),
+        say_as=(SayAsSpan(0, 3, "characters"),),
     )
     prepared = PreparedSynthesis(
         request_id=request.id,
@@ -304,7 +303,7 @@ def test_renderer_word_timings_remain_in_canonical_say_as_coordinates() -> None:
         voice="af_sarah",
         phonemes="letters",
         token_ids=(1, 2, 3),
-        alignment_tokens=(G2PAlignmentToken("A R T", "letters", char_start=0, char_end=5),),
+        alignment_tokens=(G2PAlignmentToken("ART", "letters", char_start=0, char_end=3),),
     )
     renderer = OnnxRequestRenderer(
         FakeG2PAdapter(), backend_factory=lambda config: CharacterTimingBackend()
@@ -313,7 +312,7 @@ def test_renderer_word_timings_remain_in_canonical_say_as_coordinates() -> None:
     rendered = renderer.render(prepared, request, _config())
 
     timing = rendered.word_timings[0]
-    assert (timing.text, timing.char_start, timing.char_end) == ("A R T", 0, 5)
+    assert (timing.text, timing.char_start, timing.char_end) == ("ART", 0, 3)
     assert rendered.text[timing.char_start : timing.char_end] == timing.text
     assert "-" not in timing.text
 
