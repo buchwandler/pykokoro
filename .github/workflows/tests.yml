@@ -124,9 +124,11 @@ jobs:
     - name: Install German frontend lexicon data
       run: lexphon data install de-de:gold
     - name: Verify German AKinVox frontend fixture
+      env:
+        PYKOKORO_VERIFY_AKINVOX_GERMAN_FIXTURE: "1"
       run: >-
         python -m pytest -q tests/test_akinvox_multispeaker.py
-        -k 'frontend_matches_release_ready_phoneme_and_token_fixtures and akinvox-multispeaker-v1-de'
+        -k 'frontend_has_valid_release_ready_phonemes_and_tokens and akinvox-multispeaker-v1-de'
 
   lower-bounds:
     runs-on: ubuntu-latest

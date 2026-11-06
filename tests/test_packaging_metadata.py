@@ -90,6 +90,7 @@ def test_akinvox_german_frontend_job_pins_espeak_ng_151() -> None:
     assert "grep -Eq '1\\.51([[:space:]]|$)'" in workflow
     assert "akinvox-multispeaker-v1-de" in workflow
     assert "lexphon data install de-de:gold" in workflow
+    assert 'PYKOKORO_VERIFY_AKINVOX_GERMAN_FIXTURE: "1"' in workflow
 
 
 def test_goruut_extra_uses_companion_provider_contract() -> None:
