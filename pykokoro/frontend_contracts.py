@@ -70,7 +70,7 @@ FRONTEND_FIXTURES: dict[ModelVariant, FrontendFixture] = {
         "de",
         "Willkommen zu unserer nächsten Geschichte.",
         "kokorog2p",
-        "vɪlkˈɔmən ʦʊ ˈʊnzərɜ nˈɛçstən ɡəʃˈɪçtə.",
+        "vɪlkˈɔmən ʦˈuː ˌʊnzərɜ nˈɛçstən ɡəʃˈɪçtə.",
         release_ready=True,
     ),
 }
