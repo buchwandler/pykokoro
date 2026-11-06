@@ -4,6 +4,7 @@ from typing import Any
 
 import numpy as np
 import pytest
+
 from pykokoro import SynthesisInputTooLongError
 from pykokoro.error_diagnostics import error_diagnostic
 from pykokoro.exceptions import BackendError, ConfigurationError, InvalidVoiceError

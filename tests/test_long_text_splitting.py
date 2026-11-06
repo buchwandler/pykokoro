@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import builtins
+import re
 from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
@@ -57,6 +58,37 @@ class FakeG2PAdapter:
             phonemes=f"phonemes:{segment.text}",
             token_ids=tuple(range(token_count)),
             alignment_tokens=alignments,
+        )
+
+
+class WordAlignedG2PAdapter(FakeG2PAdapter):
+    def phonemize(self, segment: SynthesisSegment, config: SynthesisConfig) -> PreparedSynthesis:
+        self.phonemized_segments.append(segment)
+        words = list(re.finditer(r"\S+", segment.text))
+        alignment_tokens = tuple(
+            G2PAlignmentToken(
+                text=match.group(),
+                phonemes=f"phonemes:{match.group()}",
+                whitespace=(
+                    segment.text[match.end() : words[index + 1].start()]
+                    if index + 1 < len(words)
+                    else ""
+                ),
+                char_start=match.start(),
+                char_end=match.end(),
+                model_token_count=1,
+                model_span_token_count=1,
+            )
+            for index, match in enumerate(words)
+        )
+        return PreparedSynthesis(
+            request_id=segment.id,
+            text=segment.text,
+            language=segment.language,
+            voice=segment.voice if isinstance(segment.voice, str) else None,
+            phonemes=f"phonemes:{segment.text}",
+            token_ids=tuple(range(len(words))),
+            alignment_tokens=alignment_tokens,
         )
 
 
@@ -125,6 +157,93 @@ def _prepared(text: str, token_count: int) -> PreparedSynthesis:
 
 def _request(text: str, **kwargs: Any) -> SynthesisSegment:
     return SynthesisSegment("request", text, "en-us", **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("language", "voice", "words", "max_tokens", "expected_context_counts"),
+    [
+        (
+            "en-us",
+            "AV_ariala",
+            "one two three four five six seven eight",
+            5,
+            [(0, 2), (1, 2), (1, 0)],
+        ),
+        (
+            "de-de",
+            "AV_thorsten",
+            "eins zwei drei vier fünf sechs sieben",
+            4,
+            [(0, 1), (1, 1), (1, 0)],
+        ),
+    ],
+)
+def test_akinvox_context_chunks_reserve_tokens_and_follow_language_policy(
+    monkeypatch: pytest.MonkeyPatch,
+    language: str,
+    voice: str,
+    words: str,
+    max_tokens: int,
+    expected_context_counts: list[tuple[int, int]],
+) -> None:
+    text = words
+    request = SynthesisSegment("request", text, language, voice=voice)
+    config = SynthesisConfig(
+        voice=voice,
+        model_source="github",
+        model_variant="akinvox-multispeaker-v1",
+        long_text_split="sentence",
+    )
+    adapter = WordAlignedG2PAdapter()
+    renderer = OnnxRequestRenderer(adapter, backend_factory=lambda _: FakeBackend())
+    monkeypatch.setattr(
+        renderer,
+        "_split_source_spans",
+        lambda _request, _config, *, start, end, mode: [(start, end)],
+    )
+
+    segments = renderer._build_phoneme_segments(
+        request,
+        _prepared(text, len(text.split())),
+        config,
+        max_tokens=max_tokens,
+    )
+
+    metadata = [segment.engine_metadata["__akinvox_narration_context"] for segment in segments]
+    assert [
+        (item["context_before_words"], item["context_after_words"]) for item in metadata
+    ] == expected_context_counts
+    assert "".join(item["body"]["text"] for item in metadata) == text
+    assert all(len(segment.tokens) <= max_tokens for segment in segments)
+    assert all(
+        segment.text == text[item["context_char_start"] : item["context_char_end"]]
+        for segment, item in zip(segments, metadata, strict=True)
+    )
+
+
+def test_akinvox_context_requires_exact_alignment_ownership(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    text = "one two three four five six"
+    request = SynthesisSegment("request", text, "en-us", voice="AV_ariala")
+    config = SynthesisConfig(
+        voice="AV_ariala",
+        model_source="github",
+        model_variant="akinvox-multispeaker-v1",
+        long_text_split="sentence",
+    )
+    renderer = FakeRenderer()
+    monkeypatch.setattr(
+        renderer,
+        "_split_source_spans",
+        lambda _request, _config, *, start, end, mode: [(start, end)],
+    )
+
+    segments = renderer._build_phoneme_segments(request, _prepared(text, 6), config, max_tokens=2)
+
+    assert all(segment.engine_metadata is None for segment in segments)
+    assert "".join(segment.text for segment in segments) == text
+    assert all(len(segment.tokens) <= 2 for segment in segments)
 
 
 def test_atomic_request_keeps_exact_text_in_one_phoneme_segment() -> None:

@@ -57,6 +57,22 @@ FRONTEND_FIXTURES: dict[ModelVariant, FrontendFixture] = {
     "ru-zaakirio-base": FrontendFixture("ru-zaakirio-base", "ru", "Привет", "kokorog2p", "privˈet"),
     "ru-zaakirio-dima": FrontendFixture("ru-zaakirio-dima", "ru", "Привет", "kokorog2p", "privˈet"),
     "th-wayu": FrontendFixture("th-wayu", "th", "สวัสดี", "kokorog2p", "sawatdi"),
+    "akinvox-multispeaker-v1": FrontendFixture(
+        "akinvox-multispeaker-v1",
+        "en-us",
+        "Welcome to our next story.",
+        "kokorog2p",
+        "wˈɛlkəm tʊ ˌWəɹ nˈɛkst stˈɔɹi.",
+        release_ready=True,
+    ),
+    "akinvox-multispeaker-v1-de": FrontendFixture(
+        "akinvox-multispeaker-v1",
+        "de",
+        "Willkommen zu unserer nächsten Geschichte.",
+        "kokorog2p",
+        "vɪlkˈɔmən ʦʊ ˈʊnzərɜ nˈɛçstən ɡəʃˈɪçtə.",
+        release_ready=True,
+    ),
 }
 
 FRONTEND_NAMED_LEXICONS: dict[str, tuple[str, ...]] = {

@@ -5,6 +5,7 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 import pykokoro.discovery as discovery
+from pykokoro.model_profiles import get_registry_model_profile
 from pykokoro.model_registry import ModelRegistry
 
 
@@ -62,6 +63,7 @@ def _model(
     voice_mode: str = "static",
     layout: str = "single-onnx-v1",
     voice_enrollers: list[dict] | None = None,
+    runtime_extra: dict | None = None,
 ) -> dict:
     return {
         "runtime": {
@@ -74,12 +76,35 @@ def _model(
             "sample_rate": 24000,
             "max_tokens": 510,
             "voice_enrollers": voice_enrollers or [],
+            **(runtime_extra or {}),
         },
         "runtime_available": runtime_available,
         "redistribution_allowed": redistribution_allowed,
         "model_source": source,
         "distributions": distributions if distributions is not None else [_distribution()],
     }
+
+
+_AKINVOX_ENGLISH_VOICES = (
+    "AV_ariala",
+    "AV_brody",
+    "AV_david",
+    "AV_elliott",
+    "AV_ralph",
+    "AV_cori",
+    "AV_phil",
+    "AV_helen",
+)
+_AKINVOX_GERMAN_VOICES = (
+    "AV_thorsten",
+    "AV_bernd",
+    "AV_eva_k",
+    "AV_karlsson",
+    "AV_kerstin",
+    "AV_mucky",
+    "AV_hokuspokus",
+    "AV_julia",
+)
 
 
 def _registry() -> ModelRegistry:
@@ -103,6 +128,37 @@ def _registry() -> ModelRegistry:
                     default_voice=None,
                     voice_mode="reference",
                     layout="cloning-onnx-v1",
+                ),
+                "akinvox-multispeaker-v1": _model(
+                    "akinvox-multispeaker-v1",
+                    frontend="akinvox-multispeaker-v1",
+                    languages=["en", "en-us", "en-gb", "de", "de-de", "de-at", "de-ch"],
+                    voices=list(_AKINVOX_ENGLISH_VOICES + _AKINVOX_GERMAN_VOICES),
+                    default_voice="AV_ariala",
+                    layout="language-router-onnx-v1",
+                    runtime_extra={
+                        "language_models": {"en": "model_en", "de": "model_de"},
+                        "voice_metadata": {
+                            **{
+                                voice: {
+                                    "gender": "unknown",
+                                    "language": "en",
+                                    "locale": "en",
+                                    "language_label": "English",
+                                }
+                                for voice in _AKINVOX_ENGLISH_VOICES
+                            },
+                            **{
+                                voice: {
+                                    "gender": "unknown",
+                                    "language": "de",
+                                    "locale": "de",
+                                    "language_label": "German",
+                                }
+                                for voice in _AKINVOX_GERMAN_VOICES
+                            },
+                        },
+                    },
                 ),
                 "de-crane": _model(
                     "de-crane",
@@ -185,6 +241,7 @@ def test_discovery_returns_complete_sorted_contract(monkeypatch: pytest.MonkeyPa
 
     result = discovery.discover_models(offline=True)
     assert [model.model_id for model in result.models] == [
+        "akinvox-multispeaker-v1",
         "de-anna",
         "de-crane",
         "de-thorsten",
@@ -203,6 +260,20 @@ def test_discovery_returns_complete_sorted_contract(monkeypatch: pytest.MonkeyPa
     assert cloning.voice_mode == "reference"
     assert cloning.supports_reference_enrollment is True
     assert cloning.speed_supported is False
+
+    akinvox = next(model for model in result.models if model.model_id == "akinvox-multispeaker-v1")
+    assert akinvox.languages == ("en", "en-us", "en-gb", "de", "de-de", "de-at", "de-ch")
+    assert akinvox.default_voice == "AV_ariala"
+    assert akinvox.voices == _AKINVOX_ENGLISH_VOICES + _AKINVOX_GERMAN_VOICES
+    assert len(akinvox.voice_details) == 16
+    assert akinvox.layout == "language-router-onnx-v1"
+    assert akinvox.frontend == "akinvox-multispeaker-v1"
+    assert akinvox.status == "ready"
+    profile = get_registry_model_profile("akinvox-multispeaker-v1", registry=_registry())
+    assert profile.voice_languages == {
+        **dict.fromkeys(_AKINVOX_ENGLISH_VOICES, ("en",)),
+        **dict.fromkeys(_AKINVOX_GERMAN_VOICES, ("de",)),
+    }
 
     anna = next(model for model in result.models if model.model_id == "de-anna")
     assert anna.source == "github"

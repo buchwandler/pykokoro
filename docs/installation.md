@@ -120,6 +120,32 @@ config = SynthesisConfig(asset_progress=report_progress)
 Explicit custom `model_path` and `voices_path` values are used in place and validated;
 they are not silently replaced with managed downloads.
 
+## AKinVox multispeaker
+
+For the release-compatible German frontend expectation, use eSpeak-NG 1.51. CI installs
+that version explicitly and checks the German KokoroG2P fixture. Other eSpeak-NG
+versions may produce different phonemes or token IDs.
+
+The `AV_*` voice selects `github/akinvox-multispeaker-v1`, but the request language must
+still be explicit. English and German voices are not interchangeable. The language and
+voice are validated before ONNX inference.
+
+### Optional local published-release audio smoke
+
+This smoke requires the project checkout, a CPU ONNX Runtime provider, and a locally
+installed release manifest whose relative model and voice assets already exist. It
+passes the manifest directly to PyKokoro, so the test does not download model assets.
+From the repository root, set the manifest path and run:
+
+```bash
+pip install -e ".[cpu]"
+export PYKOKORO_AKINVOX_RELEASE_MANIFEST=/absolute/path/to/release.json
+python -m pytest -m slow -q tests/test_akinvox_multispeaker.py -k local_published_release_audio_smoke
+```
+
+The smoke synthesizes one short English request with `AV_ariala` and one German request
+with `AV_thorsten`. Ordinary tests do not require these assets.
+
 ## Development install
 
 ```bash

@@ -42,6 +42,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+_AKINVOX_NARRATION_CONTEXT_KEY = "__akinvox_narration_context"
+
+
 def _waveform_metrics(audio: np.ndarray) -> dict[str, float | int | bool]:
     """Return compact, JSON-friendly metrics for a segment waveform."""
     values = np.asarray(audio, dtype=np.float64).reshape(-1)
@@ -123,6 +126,12 @@ def _is_stationary_broadband_noise(audio: np.ndarray) -> tuple[bool, dict[str, f
 ModelSource = Literal["huggingface", "github"]
 
 
+def _normalize_acoustic_route(language: str | None) -> str | None:
+    if language is None:
+        return None
+    return language.strip().lower().replace("_", "-").split("-", 1)[0]
+
+
 class AudioGenerator:
     """Generate audio using a producer-neutral Kokoro inference runtime.
 
@@ -202,6 +211,7 @@ class AudioGenerator:
         inputs: dict[str, np.ndarray | list[int]],
         runtime_identity: object = None,
         reference_identity: tuple[str, int | None] | None = None,
+        acoustic_route: str | None = None,
     ) -> bytes:
         """Build a digest from producer inputs and runtime identity."""
         digest = hashlib.blake2b(digest_size=20)
@@ -209,6 +219,10 @@ class AudioGenerator:
         digest.update(b"\0")
         if reference_identity is not None:
             digest.update(repr(reference_identity).encode("utf-8"))
+            digest.update(b"\0")
+        if acoustic_route is not None:
+            digest.update(b"route\0")
+            digest.update(acoustic_route.encode("utf-8"))
             digest.update(b"\0")
         for name in sorted(inputs):
             array = np.ascontiguousarray(np.asarray(inputs[name]))
@@ -275,6 +289,7 @@ class AudioGenerator:
         cache_hit: bool,
         cache_key: bytes,
         attempt_kind: str,
+        acoustic_route: str | None = None,
     ) -> None:
         self._inference_call_number += 1
         if trace is None:
@@ -295,6 +310,7 @@ class AudioGenerator:
                 "token_ids": list(tokens),
                 "token_count": len(tokens),
                 "attempt_kind": attempt_kind,
+                "acoustic_route": acoustic_route,
                 "inputs": {
                     name: {
                         "dtype": str(np.asarray(value).dtype),
@@ -443,11 +459,23 @@ class AudioGenerator:
             if speed != 1.0:
                 raise ConfigurationError("reference voice synthesis requires speed=1.0")
         runtime_identity = getattr(self._runtime, "cache_identity", None)
+        runtime_metadata = getattr(getattr(self._runtime, "resolved", None), "metadata", None)
+        routing_metadata = (
+            runtime_metadata.get("runtime") if isinstance(runtime_metadata, Mapping) else None
+        )
+        is_language_router = (
+            isinstance(routing_metadata, Mapping)
+            and routing_metadata.get("layout") == "language-router-onnx-v1"
+        )
+        acoustic_route = _normalize_acoustic_route(language) if is_language_router else None
         reference_identity = (
             (reference_voice.fingerprint, seed) if reference_voice is not None else None
         )
         cache_key = self._inference_cache_key(
-            inputs, runtime_identity, reference_identity=reference_identity
+            inputs,
+            runtime_identity,
+            reference_identity=reference_identity,
+            acoustic_route=acoustic_route,
         )
         cached = self._get_cached_inference(cache_key)
         result: Any | None = None
@@ -458,15 +486,7 @@ class AudioGenerator:
         else:
             started = time.perf_counter()
             runtime_kwargs: dict[str, Any] = {"speed": speed, "seed": seed}
-            runtime_metadata = getattr(getattr(self._runtime, "resolved", None), "metadata", None)
-            routing_metadata = (
-                runtime_metadata.get("runtime") if isinstance(runtime_metadata, Mapping) else None
-            )
-            if (
-                language is not None
-                and isinstance(routing_metadata, Mapping)
-                and routing_metadata.get("layout") == "language-router-onnx-v1"
-            ):
+            if language is not None and is_language_router:
                 runtime_kwargs["language"] = language
             if reference_voice is None:
                 assert voice_style_indexed is not None
@@ -506,6 +526,7 @@ class AudioGenerator:
             cache_hit=cache_hit,
             cache_key=cache_key,
             attempt_kind=attempt_kind,
+            acoustic_route=acoustic_route,
         )
         timing_summary = None
         output_summary: dict[str, Any] = {}
@@ -522,11 +543,12 @@ class AudioGenerator:
             }
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
-                "inference.finish cache_hit=%s attempt=%s phonemes=%d tokens=%d "
+                "inference.finish cache_hit=%s attempt=%s acoustic_route=%s phonemes=%d tokens=%d "
                 "samples=%d runtime_ms=%.3f timing_layout=%s timing_values=%d "
                 "expected_timing_count=%s timestamp_support=%s outputs=%s",
                 cache_hit,
                 attempt_kind,
+                acoustic_route,
                 len(effective_phonemes),
                 len(effective_tokens),
                 int(np.asarray(audio).size),
@@ -771,6 +793,13 @@ class AudioGenerator:
         noise_flags: list[bool] = []
         for segment in segments:
             short_sentence_metadata = (segment.engine_metadata or {}).get(SHORT_SENTENCE_META_KEY)
+            narration_context = (segment.engine_metadata or {}).get(_AKINVOX_NARRATION_CONTEXT_KEY)
+            if isinstance(narration_context, dict) and isinstance(short_sentence_metadata, dict):
+                self._restore_narration_body_segment(
+                    segment, narration_context, discard_short_sentence=True
+                )
+                narration_context = None
+                short_sentence_metadata = None
             if trace is not None and isinstance(short_sentence_metadata, dict):
                 trace.increment_counter("short_sentence_detected")
                 if short_sentence_metadata.get("kind") in {"phrase", "randomized-phrase"}:
@@ -814,6 +843,39 @@ class AudioGenerator:
                     }
                 )
             segment.word_timings = self._map_pred_dur_to_word_timings(segment, pred_dur, len(audio))
+            if isinstance(narration_context, dict):
+                trimmed = self._trim_narration_context(segment, audio, narration_context)
+                if trimmed is None:
+                    if not self._restore_narration_body_segment(segment, narration_context):
+                        raise ConfigurationError(
+                            "AKinVox narration context could not be safely restored body-only"
+                        )
+                    if trace is not None:
+                        trace.increment_counter("narration_context_body_only_fallback")
+                    inference_kwargs: dict[str, Any] = {
+                        "attempt_kind": "fallback",
+                        "tokens": segment.tokens or None,
+                        "seed": seed,
+                        "reference_voice": reference_voice,
+                        "language": segment.lang,
+                    }
+                    if trace is not None:
+                        inference_kwargs["trace"] = trace
+                    audio, pred_dur = self._run_voice_conditioned_onnx(
+                        segment.phonemes,
+                        segment_voice_style,
+                        speed,
+                        **inference_kwargs,
+                    )
+                    segment.word_timings = self._map_pred_dur_to_word_timings(
+                        segment, pred_dur, len(audio)
+                    )
+                else:
+                    audio, body_timings = trimmed
+                    self._restore_narration_body_segment(
+                        segment, narration_context, clear_word_timings=False
+                    )
+                    segment.word_timings = body_timings
             self._log_short_sentence_timestamps(segment, pred_dur)
             segment.raw_audio = self._prepare_short_sentence_phrase_audio(
                 segment,
@@ -839,6 +901,176 @@ class AudioGenerator:
                 raise ConfigurationError(message)
             logger.warning(message)
         return segments
+
+    @staticmethod
+    def _restore_narration_body_segment(
+        segment: PhonemeSegment,
+        context: Mapping[str, Any],
+        *,
+        clear_word_timings: bool = True,
+        discard_short_sentence: bool = False,
+    ) -> bool:
+        body = context.get("body")
+        if not isinstance(body, Mapping):
+            return False
+        raw_alignment = body.get("alignment_tokens")
+        if not isinstance(raw_alignment, list):
+            return False
+        try:
+            alignment_tokens = [
+                G2PAlignmentToken(**dict(item))
+                for item in raw_alignment
+                if isinstance(item, Mapping)
+            ]
+        except (TypeError, ValueError):
+            return False
+        if len(alignment_tokens) != len(raw_alignment):
+            return False
+        required = ("text", "phonemes", "tokens", "char_start", "char_end")
+        if any(key not in body for key in required):
+            return False
+        if not isinstance(body["tokens"], list):
+            return False
+        segment.text = str(body["text"])
+        segment.phonemes = str(body["phonemes"])
+        segment.tokens = list(body["tokens"])
+        segment.char_start = int(body["char_start"])
+        segment.char_end = int(body["char_end"])
+        segment.alignment_tokens = alignment_tokens
+        metadata = dict(segment.engine_metadata or {})
+        metadata.pop(_AKINVOX_NARRATION_CONTEXT_KEY, None)
+        if discard_short_sentence:
+            metadata.pop(SHORT_SENTENCE_META_KEY, None)
+        segment.engine_metadata = metadata or None
+        if clear_word_timings:
+            segment.word_timings = []
+        segment.raw_audio = None
+        segment.processed_audio = None
+        return True
+
+    @staticmethod
+    def _timing_spans_cover_word(timings: list[WordTiming], word_start: int, word_end: int) -> bool:
+        intervals = sorted(
+            (max(word_start, timing.char_start), min(word_end, timing.char_end))
+            for timing in timings
+            if timing.char_start < word_end and timing.char_end > word_start
+        )
+        cursor = word_start
+        for start, end in intervals:
+            if start > cursor:
+                return False
+            cursor = max(cursor, end)
+        return cursor >= word_end
+
+    @classmethod
+    def _trim_narration_context(
+        cls,
+        segment: PhonemeSegment,
+        audio: np.ndarray,
+        context: Mapping[str, Any],
+    ) -> tuple[np.ndarray, list[WordTiming]] | None:
+        def spans(value: object) -> list[tuple[int, int]] | None:
+            if not isinstance(value, list):
+                return None
+            result: list[tuple[int, int]] = []
+            for item in value:
+                if (
+                    not isinstance(item, (list, tuple))
+                    or len(item) != 2
+                    or not all(isinstance(position, int) for position in item)
+                    or item[0] >= item[1]
+                ):
+                    return None
+                result.append((item[0], item[1]))
+            return result
+
+        source_spans = spans(context.get("source_word_spans"))
+        body_spans = spans(context.get("body_word_spans"))
+        body_start = context.get("body_char_start")
+        body_end = context.get("body_char_end")
+        context_start = context.get("context_char_start")
+        context_end = context.get("context_char_end")
+        context_text = context.get("context_text")
+        if (
+            not source_spans
+            or not body_spans
+            or not all(
+                isinstance(value, int)
+                for value in (body_start, body_end, context_start, context_end)
+            )
+            or not isinstance(context_text, str)
+            or segment.char_start != context_start
+            or segment.text != context_text
+            or not context_start <= body_start < body_end <= context_end
+            or context_text != segment.text
+        ):
+            return None
+        body = context.get("body")
+        if not isinstance(body, Mapping):
+            return None
+        local_start = body_start - context_start
+        local_end = body_end - context_start
+        if context_text[local_start:local_end] != body.get("text"):
+            return None
+        if not segment.word_timings:
+            return None
+
+        before_timings: list[WordTiming] = []
+        body_timings: list[WordTiming] = []
+        after_timings: list[WordTiming] = []
+        audio_length = int(np.asarray(audio).size)
+        for timing in segment.word_timings:
+            if (
+                timing.start_sample < 0
+                or timing.end_sample <= timing.start_sample
+                or timing.end_sample > audio_length
+                or timing.char_start < context_start
+                or timing.char_end > context_end
+                or context_text[timing.char_start - context_start : timing.char_end - context_start]
+                != timing.text
+                or not any(
+                    timing.char_start >= start and timing.char_end <= end
+                    for start, end in source_spans
+                )
+            ):
+                return None
+            if timing.char_start >= body_start and timing.char_end <= body_end:
+                body_timings.append(timing)
+            elif timing.char_end <= body_start:
+                before_timings.append(timing)
+            elif timing.char_start >= body_end:
+                after_timings.append(timing)
+            else:
+                return None
+        if not body_timings:
+            return None
+        if any(
+            not cls._timing_spans_cover_word(segment.word_timings, start, end)
+            for start, end in source_spans
+        ):
+            return None
+        if int(context.get("context_before_words", 0)) and not before_timings:
+            return None
+        if int(context.get("context_after_words", 0)) and not after_timings:
+            return None
+
+        cut_start = min(timing.start_sample for timing in body_timings)
+        cut_end = max(timing.end_sample for timing in body_timings)
+        if cut_start >= cut_end or cut_end > audio_length:
+            return None
+        if before_timings and max(item.end_sample for item in before_timings) > cut_start:
+            return None
+        if after_timings and min(item.start_sample for item in after_timings) < cut_end:
+            return None
+        cropped_timings = [
+            dataclasses.replace(
+                timing,
+                start_sample=timing.start_sample - cut_start,
+                end_sample=timing.end_sample - cut_start,
+            )
+            for timing in body_timings
+        ]
+        return np.asarray(audio).reshape(-1)[cut_start:cut_end].copy(), cropped_timings
 
     def _generate_reference_audio_segments(
         self,

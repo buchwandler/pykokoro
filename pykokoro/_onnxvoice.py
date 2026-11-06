@@ -902,9 +902,9 @@ class KokoroRuntimeAdapter:
         *,
         style: Any | None = None,
         reference: Any | None = None,
-        speed: float,
-        seed: int | None = None,
         language: str | None = None,
+        speed: float = 1.0,
+        seed: int | None = None,
     ) -> Any:
         if self._closed:
             raise RuntimeError("Kokoro runtime is closed")

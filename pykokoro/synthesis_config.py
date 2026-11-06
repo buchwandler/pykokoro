@@ -133,6 +133,11 @@ def _manifest_model_name(
     return None
 
 
+_LANGUAGE_ROUTER_LAYOUT = "language-router-onnx-v1"
+_LANGUAGE_ROUTER_COMPONENTS = ("model_en", "model_de")
+_LANGUAGE_ROUTER_MODELS = {"en": "model_en", "de": "model_de"}
+
+
 _REFERENCE_ARTIFACTS = frozenset(
     {
         "reference_wavlm",
@@ -145,6 +150,108 @@ _REFERENCE_ARTIFACTS = frozenset(
         "config",
     }
 )
+
+
+def _resolve_language_router_manifest_paths(
+    config: SynthesisConfig, data: dict[str, Any], manifest_path: Path
+) -> SynthesisConfig:
+    runtime = data.get("runtime")
+    if not isinstance(runtime, dict) or runtime.get("layout") != _LANGUAGE_ROUTER_LAYOUT:
+        raise ValueError(
+            f"Release manifest {manifest_path} must declare runtime layout "
+            f"{_LANGUAGE_ROUTER_LAYOUT!r}"
+        )
+    if runtime.get("language_models") != _LANGUAGE_ROUTER_MODELS:
+        raise ValueError(
+            f"Release manifest {manifest_path} must map language_models to "
+            "en:model_en and de:model_de"
+        )
+    if config.model_path is not None:
+        raise ValueError(
+            "Language-router manifests require component model_artifacts, not model_path"
+        )
+
+    assets = [item for item in data.get("assets", []) if isinstance(item, dict)]
+    model_assets = [item for item in assets if item.get("role") == "model"]
+    unexpected = {
+        item.get("component")
+        for item in model_assets
+        if item.get("component") not in _LANGUAGE_ROUTER_COMPONENTS
+    }
+    if unexpected:
+        raise ValueError(
+            f"Release manifest {manifest_path} has unsupported model components: "
+            + ", ".join(sorted(repr(component) for component in unexpected))
+        )
+
+    base = manifest_path.parent
+
+    def asset_path(item: dict[str, Any]) -> Path:
+        name = item.get("name", item.get("filename", item.get("local_name", item.get("path"))))
+        if not isinstance(name, str) or not name:
+            raise ValueError(f"Release manifest {manifest_path} has an unnamed asset")
+        return base / name
+
+    artifacts: dict[str, Path] = {}
+    for component in _LANGUAGE_ROUTER_COMPONENTS:
+        matches = [
+            item
+            for item in model_assets
+            if item.get("component") == component and item.get("quality") == config.model_quality
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                f"Release manifest {manifest_path} requires exactly one model asset for "
+                f"component {component!r} and quality {config.model_quality!r}"
+            )
+        artifacts[component] = asset_path(matches[0])
+
+    voices = [
+        item
+        for item in assets
+        if item.get("role") == "voices" and item.get("format") == "numpy-npz"
+    ]
+    if len(voices) != 1:
+        raise ValueError(
+            f"Release manifest {manifest_path} requires exactly one voices numpy-npz asset"
+        )
+    voices_path = (
+        Path(config.voices_path) if config.voices_path is not None else asset_path(voices[0])
+    )
+
+    config_assets = [item for item in assets if item.get("role") == "config"]
+    if len(config_assets) > 1:
+        raise ValueError(f"Release manifest {manifest_path} has multiple config assets")
+    manifest_config = asset_path(config_assets[0]) if config_assets else None
+    config_path = (
+        Path(config.model_config_path) if config.model_config_path is not None else manifest_config
+    )
+    artifacts.update({name: Path(path) for name, path in (config.model_artifacts or {}).items()})
+    unexpected = set(artifacts) - set(_LANGUAGE_ROUTER_COMPONENTS)
+    if unexpected:
+        raise ValueError(
+            "Language-router model_artifacts contain unsupported components: "
+            + ", ".join(sorted(unexpected))
+        )
+    for component, path in artifacts.items():
+        if not path.is_file():
+            raise ValueError(
+                f"Release manifest {manifest_path} component {component!r} does not exist: {path}"
+            )
+    if not voices_path.is_file():
+        raise ValueError(
+            f"Release manifest {manifest_path} voices NPZ does not exist: {voices_path}"
+        )
+    if config_path is not None and not config_path.is_file():
+        raise ValueError(f"Release manifest {manifest_path} config does not exist: {config_path}")
+
+    return replace(
+        config,
+        model_path=None,
+        model_artifacts=artifacts,
+        voices_path=voices_path,
+        model_config_path=config_path,
+    )
 
 
 def _resolve_reference_manifest_paths(
@@ -216,6 +323,8 @@ def _resolve_manifest_paths(config: SynthesisConfig) -> SynthesisConfig:
     profile = get_model_profile(config.model_variant or "v1.0", config.model_source or "github")
     if profile.voice_mode == "reference":
         return _resolve_reference_manifest_paths(config, data, manifest_path)
+    if profile.layout == _LANGUAGE_ROUTER_LAYOUT:
+        return _resolve_language_router_manifest_paths(config, data, manifest_path)
     model = _manifest_model_name(assets, quality=config.model_quality, manifest_path=manifest_path)
     voices = next(
         (
@@ -364,7 +473,7 @@ def resolve_synthesis_config(
     if resolved.voice is None:
         resolved = replace(resolved, voice=profile.default_voice)
     elif (
-        resolved.voices_path is None
+        config.voices_path is None
         and isinstance(resolved.voice, str)
         and profile.voice_names
         and resolved.voice not in profile.voice_names
@@ -374,4 +483,16 @@ def resolve_synthesis_config(
             f"Voice {resolved.voice!r} is not available for model variant {variant!r}. "
             f"Available voices: {available}"
         )
+    if config.voices_path is None and isinstance(resolved.voice, str):
+        voice_languages = profile.voice_languages.get(resolved.voice)
+        requested_language = normalize_language_code(language).split("-", 1)[0]
+        supported_languages = {
+            normalize_language_code(code).split("-", 1)[0] for code in voice_languages or ()
+        }
+        if supported_languages and requested_language not in supported_languages:
+            available = ", ".join(sorted(supported_languages))
+            raise InvalidVoiceError(
+                f"Voice {resolved.voice!r} does not support language {language!r}. "
+                f"Supported language(s): {available}"
+            )
     return replace(resolved, generation=replace(resolved.generation, lang=language))

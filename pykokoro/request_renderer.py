@@ -29,10 +29,17 @@ from .reference_voice import ReferenceVoice
 from .synthesis_config import SynthesisConfig, resolve_synthesis_config
 from .synthesis_identity import build_synthesis_identity
 from .synthesis_types import RenderedSegment, SynthesisSegment
-from .types import PhonemeSegment, Trace, WordTiming
+from .types import (
+    PhonemeSegment,
+    Trace,
+    WordTiming,
+    _exact_timing_geometry,
+)
 from .voice_enrollment import InnoEnrollmentOptions
 from .voice_level import resolve_voice_level_application
 from .voice_pack import KokoroVoicePack
+
+_AKINVOX_NARRATION_CONTEXT_KEY = "__akinvox_narration_context"
 
 
 def _call_backend_operation(
@@ -564,6 +571,15 @@ class OnnxRequestRenderer:
 
         if not safe_spans:
             raise BackendError(f"PhraseSplit produced no usable spans for request {request.id!r}")
+        context_counts = self._akinvox_narration_context_counts(request, config)
+        if context_counts is not None:
+            return self._pack_contextual_chunks(
+                request,
+                safe_spans,
+                phonemize_span,
+                max_tokens,
+                context_counts,
+            )
 
         packed: list[tuple[int, int, PreparedSynthesis]] = []
         chunk_start, chunk_end = safe_spans[0]
@@ -585,6 +601,223 @@ class OnnxRequestRenderer:
             )
             for index, (start, end, prepared) in enumerate(packed)
         ]
+
+    @staticmethod
+    def _akinvox_narration_context_counts(
+        request: SynthesisSegment, config: SynthesisConfig
+    ) -> tuple[int, int] | None:
+        if (
+            config.model_source != "github"
+            or config.model_variant != "akinvox-multispeaker-v1"
+            or not isinstance(request.voice, str)
+            or not request.voice.startswith("AV_")
+        ):
+            return None
+        language = request.language.strip().lower().replace("_", "-").split("-", 1)[0]
+        if language == "en":
+            return 1, 2
+        if language == "de":
+            return 1, 1
+        return None
+
+    @staticmethod
+    def _narration_context_window(
+        text: str,
+        start: int,
+        end: int,
+        before_words: int,
+        after_words: int,
+    ) -> dict[str, Any] | None:
+        words = [(match.start(), match.end()) for match in re.finditer(r"\S+", text)]
+        body_indices = [
+            index
+            for index, (word_start, word_end) in enumerate(words)
+            if word_start < end and word_end > start
+        ]
+        if not body_indices:
+            return None
+        if any(
+            word_start < start < word_end or word_start < end < word_end
+            for word_start, word_end in words
+        ):
+            return None
+        first, last = body_indices[0], body_indices[-1]
+        before_index = max(0, first - before_words)
+        after_index = min(len(words) - 1, last + after_words)
+        actual_before = first - before_index
+        actual_after = after_index - last
+        if not actual_before and not actual_after:
+            return None
+        context_start = words[before_index][0] if actual_before else start
+        context_end = words[after_index][1] if actual_after else end
+        return {
+            "context_char_start": context_start,
+            "context_char_end": context_end,
+            "body_char_start": start,
+            "body_char_end": end,
+            "context_before_words": actual_before,
+            "context_after_words": actual_after,
+            "source_word_spans": [list(span) for span in words[before_index : after_index + 1]],
+            "body_word_spans": [list(words[index]) for index in range(first, last + 1)],
+        }
+
+    @staticmethod
+    def _has_exact_narration_alignment(
+        request: SynthesisSegment,
+        prepared: PreparedSynthesis,
+        context: dict[str, Any],
+    ) -> bool:
+        context_start = context["context_char_start"]
+        context_end = context["context_char_end"]
+        body_start = context["body_char_start"]
+        body_end = context["body_char_end"]
+        if (
+            prepared.text != request.text[context_start:context_end]
+            or not prepared.alignment_tokens
+        ):
+            return False
+        intervals: list[tuple[int, int]] = []
+        for token in prepared.alignment_tokens:
+            start = token.char_start
+            end = token.char_end
+            if (
+                not isinstance(start, int)
+                or isinstance(start, bool)
+                or not isinstance(end, int)
+                or isinstance(end, bool)
+                or start < 0
+                or end <= start
+                or end > context_end - context_start
+                or prepared.text[start:end] != token.text
+                or _exact_timing_geometry(token) is None
+            ):
+                return False
+            absolute_start = context_start + start
+            absolute_end = context_start + end
+            if (
+                absolute_start < body_start < absolute_end
+                or absolute_start < body_end < absolute_end
+            ):
+                return False
+            intervals.append((absolute_start, absolute_end))
+
+        for word_start, word_end in context["source_word_spans"]:
+            cursor = word_start
+            for start, end in sorted(
+                (left, right) for left, right in intervals if left < word_end and right > word_start
+            ):
+                if start > cursor:
+                    return False
+                cursor = max(cursor, end)
+            if cursor < word_end:
+                return False
+        return True
+
+    def _pack_contextual_chunks(
+        self,
+        request: SynthesisSegment,
+        safe_spans: list[tuple[int, int]],
+        phonemize_span: Callable[[int, int], PreparedSynthesis],
+        max_tokens: int,
+        context_counts: tuple[int, int],
+    ) -> list[PhonemeSegment]:
+        before_words, after_words = context_counts
+        segments: list[PhonemeSegment] = []
+        position = 0
+        phoneme_id = 0
+        while position < len(safe_spans):
+            body_start = safe_spans[position][0]
+            best_body: tuple[int, int, PreparedSynthesis] | None = None
+            best_context: (
+                tuple[int, int, PreparedSynthesis, int, int, PreparedSynthesis, dict[str, Any]]
+                | None
+            ) = None
+            context_budget_exhausted = False
+            for stop in range(position + 1, len(safe_spans) + 1):
+                body_end = safe_spans[stop - 1][1]
+                body_prepared = phonemize_span(body_start, body_end)
+                if len(body_prepared.token_ids) > max_tokens:
+                    break
+                best_body = (stop, body_end, body_prepared)
+                if context_budget_exhausted:
+                    continue
+                context = self._narration_context_window(
+                    request.text, body_start, body_end, before_words, after_words
+                )
+                if context is None:
+                    continue
+                context_start = context["context_char_start"]
+                context_end = context["context_char_end"]
+                try:
+                    context_prepared = phonemize_span(context_start, context_end)
+                except InvalidRequestError:
+                    continue
+                if len(context_prepared.token_ids) > max_tokens:
+                    context_budget_exhausted = True
+                    continue
+                if self._has_exact_narration_alignment(request, context_prepared, context):
+                    best_context = (
+                        stop,
+                        body_end,
+                        body_prepared,
+                        context_start,
+                        context_end,
+                        context_prepared,
+                        context,
+                    )
+            if best_context is not None:
+                (
+                    stop,
+                    body_end,
+                    body_prepared,
+                    context_start,
+                    context_end,
+                    context_prepared,
+                    context,
+                ) = best_context
+                segment = self._phoneme_segment_from_prepared(
+                    request,
+                    context_prepared,
+                    start=context_start,
+                    end=context_end,
+                    phoneme_id=phoneme_id,
+                )
+                body_segment = self._phoneme_segment_from_prepared(
+                    request,
+                    body_prepared,
+                    start=body_start,
+                    end=body_end,
+                    phoneme_id=phoneme_id,
+                )
+                context["context_text"] = request.text[context_start:context_end]
+                context["body"] = {
+                    "text": body_segment.text,
+                    "phonemes": body_segment.phonemes,
+                    "tokens": list(body_segment.tokens),
+                    "char_start": body_segment.char_start,
+                    "char_end": body_segment.char_end,
+                    "alignment_tokens": [
+                        token.to_dict() for token in body_segment.alignment_tokens
+                    ],
+                }
+                segment.engine_metadata = {_AKINVOX_NARRATION_CONTEXT_KEY: context}
+            else:
+                if best_body is None:
+                    raise BackendError(
+                        f"PhraseSplit produced no usable chunks for request {request.id!r}"
+                    )
+                stop, body_end, body_prepared = best_body
+                segment = self._phoneme_segment_from_prepared(
+                    request,
+                    body_prepared,
+                    start=body_start,
+                    end=body_end,
+                    phoneme_id=phoneme_id,
+                )
+            segments.append(segment)
+            position = stop
+            phoneme_id += 1
+        return segments
 
     def _phonemize_source_span(
         self,

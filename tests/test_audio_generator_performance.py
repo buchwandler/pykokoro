@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from pykokoro.audio_generator import AudioGenerator
-from pykokoro.types import Trace
+from pykokoro.types import G2PAlignmentToken, PhonemeSegment, Trace
 
 
 class _Input:
@@ -47,6 +47,121 @@ class _Session:
 def _generator(**kwargs: Any) -> tuple[AudioGenerator, _Session]:
     session = _Session(**kwargs.pop("session_kwargs", {}))
     return AudioGenerator(session, _Tokenizer(), **kwargs), session
+
+
+class _ContextSession:
+    supports_timings = True
+    sample_rate = 24_000
+    cache_identity = ("context-test", "fp32", "cpu")
+    resolved = SimpleNamespace(metadata={"runtime": {"layout": "language-router-onnx-v1"}})
+
+    def __init__(self, responses: list[tuple[int, list[float] | None]]) -> None:
+        self.responses = responses
+        self.calls: list[tuple[list[int], str | None]] = []
+
+    def infer(self, token_ids, *, style, speed, seed=None, language=None):
+        _ = style, speed, seed
+        self.calls.append((list(token_ids), language))
+        audio_length, timings = self.responses[len(self.calls) - 1]
+        return SimpleNamespace(
+            audio=np.arange(audio_length, dtype=np.float32),
+            timings=None if timings is None else np.asarray(timings, dtype=np.float32),
+        )
+
+
+def _narration_context_segment() -> PhonemeSegment:
+    text = "before body after"
+    context_tokens = [
+        G2PAlignmentToken(
+            token,
+            token,
+            char_start=start,
+            char_end=end,
+            model_token_count=1,
+            model_span_token_count=1,
+        )
+        for token, start, end in (("before", 0, 6), ("body", 7, 11), ("after", 12, 17))
+    ]
+    body_token = G2PAlignmentToken(
+        "body",
+        "body",
+        char_start=7,
+        char_end=11,
+        model_token_count=1,
+        model_span_token_count=1,
+    )
+    return PhonemeSegment(
+        id="request:phoneme:0",
+        segment_id="request",
+        phoneme_id=0,
+        text=text,
+        phonemes="before body after",
+        tokens=[1, 2, 3],
+        lang="de-de",
+        char_start=0,
+        char_end=len(text),
+        engine_metadata={
+            "__akinvox_narration_context": {
+                "context_char_start": 0,
+                "context_char_end": len(text),
+                "body_char_start": 7,
+                "body_char_end": 11,
+                "context_before_words": 1,
+                "context_after_words": 1,
+                "context_text": text,
+                "source_word_spans": [[0, 6], [7, 11], [12, 17]],
+                "body_word_spans": [[7, 11]],
+                "body": {
+                    "text": "body",
+                    "phonemes": "body",
+                    "tokens": [2],
+                    "char_start": 7,
+                    "char_end": 11,
+                    "alignment_tokens": [body_token.to_dict()],
+                },
+            }
+        },
+        alignment_tokens=context_tokens,
+    )
+
+
+def test_narration_context_audio_is_trimmed_using_exact_word_timings() -> None:
+    session = _ContextSession([(1800, [1.0, 1.0, 1.0])])
+    generator = AudioGenerator(session, _Tokenizer(), inference_cache_enabled=False)
+    segment = _narration_context_segment()
+
+    result = generator._generate_raw_audio_segments(
+        [segment], np.zeros((2, 256), dtype=np.float32), 1.0
+    )
+
+    assert len(session.calls) == 1
+    assert session.calls[0] == ([1, 2, 3], "de-de")
+    assert result[0].text == "body"
+    assert result[0].raw_audio is not None
+    np.testing.assert_array_equal(result[0].raw_audio, np.arange(600, 1200, dtype=np.float32))
+    assert [(timing.char_start, timing.char_end) for timing in result[0].word_timings] == [(7, 11)]
+    assert (result[0].word_timings[0].start_sample, result[0].word_timings[0].end_sample) == (
+        0,
+        600,
+    )
+
+
+def test_narration_context_without_exact_timings_retries_body_only() -> None:
+    session = _ContextSession([(1800, None), (600, [1.0])])
+    generator = AudioGenerator(session, _Tokenizer(), inference_cache_enabled=False)
+    segment = _narration_context_segment()
+    trace = Trace()
+
+    result = generator._generate_raw_audio_segments(
+        [segment], np.zeros((2, 256), dtype=np.float32), 1.0, trace
+    )
+
+    assert session.calls == [([1, 2, 3], "de-de"), ([2], "de-de")]
+    assert result[0].text == "body"
+    assert result[0].raw_audio is not None
+    assert result[0].raw_audio.size == 600
+    assert trace.counters["narration_context_body_only_fallback"] == 1
+    assert [(timing.char_start, timing.char_end) for timing in result[0].word_timings] == [(7, 11)]
 
 
 def test_trace_records_ort_timing_and_aggregate_metrics() -> None:
@@ -310,3 +425,33 @@ def test_retry_failure_uses_one_retry_and_wrap_fallback(monkeypatch) -> None:
     assert session.calls == 3
     assert trace.inference_summary()["short_sentence_phrase_retry"] == 1
     assert trace.inference_summary()["short_sentence_wrap_fallback"] == 1
+
+
+class _LanguageRouterSession(_Session):
+    def __init__(self) -> None:
+        super().__init__()
+        self.resolved = SimpleNamespace(metadata={"runtime": {"layout": "language-router-onnx-v1"}})
+        self.languages: list[str | None] = []
+
+    def infer(self, token_ids, *, style, speed, seed=None, language=None):
+        self.languages.append(language)
+        return super().infer(token_ids, style=style, speed=speed, seed=seed)
+
+
+def test_router_inference_cache_is_language_specific_and_traces_route() -> None:
+    session = _LanguageRouterSession()
+    generator = AudioGenerator(session, _Tokenizer())
+    style = np.zeros((2, 256), dtype=np.float32)
+    english_trace = Trace()
+    german_trace = Trace()
+    repeated_english_trace = Trace()
+
+    generator._run_onnx("abc", style, 1.0, english_trace, language="en-US")
+    generator._run_onnx("abc", style, 1.0, german_trace, language="de-DE")
+    generator._run_onnx("abc", style, 1.0, repeated_english_trace, language="en-GB")
+
+    assert session.calls == 2
+    assert session.languages == ["en-US", "de-DE"]
+    assert english_trace.inference[0]["acoustic_route"] == "en"
+    assert german_trace.inference[0]["acoustic_route"] == "de"
+    assert repeated_english_trace.inference[0]["cache_hit"] is True

@@ -58,6 +58,7 @@ class ModelCapabilities:
     max_tokens: int | None = None
     voice_details: tuple[VoiceCapabilities, ...] = ()
 
+    layout: str = ""
     voice_mode: str = "static"
     supports_reference_enrollment: bool = False
     speed_supported: bool = True
@@ -189,6 +190,7 @@ def _capabilities_for_model(
         provider=distribution.provider if distribution is not None else None,
         sample_rate=model.sample_rate,
         max_tokens=model.max_tokens,
+        layout=model.layout,
         voice_mode=voice_mode,
         supports_reference_enrollment=voice_mode == "reference",
         speed_supported=speed_supported,

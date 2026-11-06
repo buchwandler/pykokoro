@@ -301,33 +301,82 @@ class Kokoro:
         provider = self._provider or ("auto" if self._use_gpu else "cpu")
         profile = get_model_profile(self._model_variant, self._model_source)
         if self._model_artifacts is not None:
-            if profile.voice_mode != "reference":
-                raise ConfigurationError(
-                    "Componentized model_artifacts require a reference-voice model"
+            if profile.layout == "cloning-onnx-v1" and profile.voice_mode == "reference":
+                artifacts = {
+                    (
+                        "config"
+                        if component == "config"
+                        else "metadata:source_params"
+                        if component == "source_params"
+                        else f"model:{component}"
+                    ): path
+                    for component, path in self._model_artifacts.items()
+                }
+                if self._model_config_path is not None:
+                    artifacts["config"] = self._model_config_path
+                runtime = open_local_kokoro(
+                    artifacts=artifacts,
+                    runtime={"layout": profile.layout, "voice_mode": profile.voice_mode},
+                    metadata={"model_id": self._model_variant},
+                    sample_rate=profile.sample_rate,
+                    providers=provider,
+                    provider_options=self._provider_options,
+                    session_options=self._session_options,
                 )
-            artifacts = {
-                (
-                    "config"
-                    if component == "config"
-                    else "metadata:source_params"
-                    if component == "source_params"
-                    else f"model:{component}"
-                ): path
-                for component, path in self._model_artifacts.items()
-            }
-            if self._model_config_path is not None:
-                artifacts["config"] = self._model_config_path
-            runtime = open_local_kokoro(
-                artifacts=artifacts,
-                runtime={"layout": profile.layout, "voice_mode": profile.voice_mode},
-                metadata={"model_id": self._model_variant},
-                sample_rate=profile.sample_rate,
-                providers=provider,
-                provider_options=self._provider_options,
-                session_options=self._session_options,
-            )
+            elif profile.layout == "language-router-onnx-v1" and profile.voice_mode == "static":
+                required_components = {"model_en", "model_de"}
+                if set(self._model_artifacts) != required_components:
+                    raise ConfigurationError(
+                        "Language-router model_artifacts must contain exactly model_en and model_de"
+                    )
+                if self._model_path is not None:
+                    raise ConfigurationError(
+                        "Language-router local loading requires componentized model_artifacts, "
+                        "not model_path"
+                    )
+                if self._voices_path is None:
+                    raise ConfigurationError("Language-router local loading requires a voices_path")
+                artifacts = {
+                    f"model:{component}": self._model_artifacts[component]
+                    for component in ("model_en", "model_de")
+                }
+                artifacts["voices"] = self._voices_path
+                if self._model_config_path is not None:
+                    artifacts["config"] = self._model_config_path
+                runtime_metadata = {
+                    "layout": profile.layout,
+                    "voice_mode": profile.voice_mode,
+                    "language_models": {"en": "model_en", "de": "model_de"},
+                    "language_codes": list(profile.language_codes),
+                    "voice_metadata": {
+                        voice: {"language": languages[0]}
+                        for voice, languages in profile.voice_languages.items()
+                        if languages
+                    },
+                }
+                runtime = open_local_kokoro(
+                    artifacts=artifacts,
+                    runtime=runtime_metadata,
+                    metadata={
+                        "model_id": self._model_variant,
+                        "selected_quality": self._model_quality,
+                    },
+                    sample_rate=profile.sample_rate,
+                    providers=provider,
+                    provider_options=self._provider_options,
+                    session_options=self._session_options,
+                )
+            else:
+                raise ConfigurationError(
+                    "Componentized model_artifacts are supported only for cloning and "
+                    "language-router layouts"
+                )
             resolved = runtime.resolved
         elif self._model_path is not None or self._voices_path is not None:
+            if profile.layout == "language-router-onnx-v1":
+                raise ConfigurationError(
+                    "Language-router local loading requires componentized model_artifacts"
+                )
             if profile.voice_mode == "reference":
                 raise ConfigurationError(
                     "Reference-only models require componentized model_artifacts"
@@ -372,7 +421,11 @@ class Kokoro:
         )
         self._runtime = runtime
         self._model_path = resolved.model_paths[0] if resolved.model_paths else None
-        self._voices_path = resolved.voices_path
+        self._model_path = (
+            resolved.model_paths[0]
+            if resolved.model_paths and profile.layout != "language-router-onnx-v1"
+            else None
+        )
         self._model_config_path = resolved.config_path
         if profile.voice_mode == "static":
             if self._voices_path is None:

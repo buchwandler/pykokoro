@@ -37,6 +37,7 @@ class RuntimeProfile:
     quality_files: Mapping[str, str] = field(default_factory=dict)
     voice_names: tuple[str, ...] = ()
 
+    voice_languages: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     layout: str = "single-onnx-v1"
     runtime_available: bool = True
     redistribution_allowed: bool = True
@@ -347,6 +348,53 @@ MODEL_PROFILES[("github", "en-akinvox-cloning-v1")] = RuntimeProfile(
 )
 
 
+_AKINVOX_ENGLISH_VOICES = (
+    "AV_ariala",
+    "AV_brody",
+    "AV_david",
+    "AV_elliott",
+    "AV_ralph",
+    "AV_cori",
+    "AV_phil",
+    "AV_helen",
+)
+_AKINVOX_GERMAN_VOICES = (
+    "AV_thorsten",
+    "AV_bernd",
+    "AV_eva_k",
+    "AV_karlsson",
+    "AV_kerstin",
+    "AV_mucky",
+    "AV_hokuspokus",
+    "AV_julia",
+)
+MODEL_PROFILES[("github", "akinvox-multispeaker-v1")] = RuntimeProfile(
+    source="github",
+    variant="akinvox-multispeaker-v1",
+    language_codes=("en", "en-us", "en-gb", "de", "de-de", "de-at", "de-ch"),
+    default_voice="AV_ariala",
+    vocabulary_source="builtin-v1.0",
+    tokenizer_vocab_version="1.0",
+    frontend="akinvox-multispeaker-v1",
+    frontend_experimental=False,
+    onnx_inputs={"tokens": "int64", "style": "float32", "speed": "float32"},
+    sample_rate=24_000,
+    max_tokens=510,
+    voice_names=_AKINVOX_ENGLISH_VOICES + _AKINVOX_GERMAN_VOICES,
+    voice_languages={
+        **dict.fromkeys(_AKINVOX_ENGLISH_VOICES, ("en",)),
+        **dict.fromkeys(_AKINVOX_GERMAN_VOICES, ("de",)),
+    },
+    layout="language-router-onnx-v1",
+    runtime_available=True,
+    redistribution_allowed=True,
+    support_status="ready",
+    g2p_backend="kokorog2p",
+    auto_select_for_language=False,
+    auto_select_for_voice=True,
+)
+
+
 GERMAN_MARTIN_V1_2 = MODEL_PROFILES[("github", "v1.2-de-martin")]
 
 
@@ -446,8 +494,14 @@ IMPLEMENTED_FRONTENDS = {
     "kokorog2p-ru-v1",
     "kokorog2p-th-wayu-v1",
     "tts-eu-pt-v1",
+    "akinvox-multispeaker-v1",
 }
-IMPLEMENTED_LAYOUTS = {"single-onnx-v1", "split-onnx-v1", "cloning-onnx-v1"}
+IMPLEMENTED_LAYOUTS = {
+    "single-onnx-v1",
+    "split-onnx-v1",
+    "cloning-onnx-v1",
+    "language-router-onnx-v1",
+}
 
 
 def canonical_voice_name(model_id: str, voice: str) -> str:
@@ -558,6 +612,11 @@ def get_registry_model_profile(
         max_tokens=model.max_tokens,
         quality_files=qualities,
         voice_names=model.voices,
+        voice_languages={
+            voice: (metadata["language"],)
+            for voice, metadata in model.voice_metadata.items()
+            if isinstance(metadata.get("language"), str) and metadata["language"]
+        },
         layout=model.layout,
         runtime_available=model.runtime_available,
         redistribution_allowed=model.redistribution_allowed,

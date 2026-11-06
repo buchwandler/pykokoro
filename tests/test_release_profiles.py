@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -277,3 +278,164 @@ def test_nabra_loads_direct_release_vocabulary(tmp_path):
     vocab = load_vocab_from_config("ar-nabra", vocab_path)
 
     assert vocab == {"ʕ": 7, "ħ": 8, "a": 43}
+
+
+_ROUTER_LANGUAGE_MODELS = {"en": "model_en", "de": "model_de"}
+
+
+def _write_language_router_manifest(
+    tmp_path: Path,
+    *,
+    assets: list[dict[str, object]] | None = None,
+    runtime: dict[str, object] | None = None,
+) -> Path:
+    manifest_assets = assets or [
+        {
+            "name": "model_en.onnx",
+            "role": "model",
+            "component": "model_en",
+            "quality": "fp32",
+        },
+        {
+            "name": "model_de.onnx",
+            "role": "model",
+            "component": "model_de",
+            "quality": "fp32",
+        },
+        {"name": "voices.npz", "role": "voices", "format": "numpy-npz"},
+    ]
+    for asset in manifest_assets:
+        name = asset.get("name")
+        if isinstance(name, str):
+            (tmp_path / name).write_bytes(b"asset")
+    manifest = tmp_path / "language-router-manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "schema": 2,
+                "runtime": runtime
+                or {
+                    "layout": "language-router-onnx-v1",
+                    "language_models": _ROUTER_LANGUAGE_MODELS,
+                },
+                "assets": manifest_assets,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return manifest
+
+
+def _resolve_language_router_manifest(manifest: Path) -> SynthesisConfig:
+    return _resolve(
+        SynthesisConfig(
+            release_manifest_path=manifest,
+            model_source="github",
+            model_variant="akinvox-multispeaker-v1",
+            model_quality="fp32",
+            voice="AV_cori",
+            generation=GenerationConfig(lang="en"),
+        )
+    )
+
+
+def test_release_manifest_resolves_language_router_components_by_quality(tmp_path: Path) -> None:
+    assets = [
+        {
+            "name": f"{component}-{quality}.onnx",
+            "role": "model",
+            "component": component,
+            "quality": quality,
+        }
+        for component in ("model_en", "model_de")
+        for quality in ("q8", "fp32")
+    ]
+    assets.append({"name": "voices.npz", "role": "voices", "format": "numpy-npz"})
+    manifest = _write_language_router_manifest(tmp_path, assets=assets)
+
+    resolved = _resolve_language_router_manifest(manifest)
+
+    assert resolved.model_path is None
+    assert resolved.model_artifacts == {
+        "model_en": tmp_path / "model_en-fp32.onnx",
+        "model_de": tmp_path / "model_de-fp32.onnx",
+    }
+    assert resolved.voices_path == tmp_path / "voices.npz"
+
+
+def test_release_manifest_rejects_missing_language_router_component(tmp_path: Path) -> None:
+    assets = [item for item in _write_router_assets() if item.get("component") != "model_de"]
+    manifest = _write_language_router_manifest(tmp_path, assets=assets)
+
+    with pytest.raises(ValueError, match="exactly one model asset.*model_de.*fp32"):
+        _resolve_language_router_manifest(manifest)
+
+
+def test_release_manifest_rejects_duplicate_language_router_component(tmp_path: Path) -> None:
+    assets = _write_router_assets()
+    assets.append(
+        {
+            "name": "model_en-copy.onnx",
+            "role": "model",
+            "component": "model_en",
+            "quality": "fp32",
+        }
+    )
+    manifest = _write_language_router_manifest(tmp_path, assets=assets)
+
+    with pytest.raises(ValueError, match="exactly one model asset.*model_en.*fp32"):
+        _resolve_language_router_manifest(manifest)
+
+
+def test_release_manifest_rejects_wrong_language_router_quality(tmp_path: Path) -> None:
+    assets = _write_router_assets()
+    assets[1]["quality"] = "q8"
+    manifest = _write_language_router_manifest(tmp_path, assets=assets)
+
+    with pytest.raises(ValueError, match="exactly one model asset.*model_de.*fp32"):
+        _resolve_language_router_manifest(manifest)
+
+
+@pytest.mark.parametrize(
+    ("runtime", "message"),
+    [
+        ({"layout": "single-onnx-v1", "language_models": _ROUTER_LANGUAGE_MODELS}, "layout"),
+        (
+            {"layout": "language-router-onnx-v1", "language_models": {"en": "model_de"}},
+            "language_models",
+        ),
+    ],
+)
+def test_release_manifest_rejects_invalid_language_router_metadata(
+    tmp_path: Path, runtime: dict[str, object], message: str
+) -> None:
+    manifest = _write_language_router_manifest(tmp_path, runtime=runtime)
+
+    with pytest.raises(ValueError, match=message):
+        _resolve_language_router_manifest(manifest)
+
+
+def test_release_manifest_requires_existing_language_router_voices_npz(tmp_path: Path) -> None:
+    manifest = _write_language_router_manifest(tmp_path)
+    (tmp_path / "voices.npz").unlink()
+
+    with pytest.raises(ValueError, match="voices NPZ does not exist"):
+        _resolve_language_router_manifest(manifest)
+
+
+def _write_router_assets() -> list[dict[str, object]]:
+    return [
+        {
+            "name": "model_en.onnx",
+            "role": "model",
+            "component": "model_en",
+            "quality": "fp32",
+        },
+        {
+            "name": "model_de.onnx",
+            "role": "model",
+            "component": "model_de",
+            "quality": "fp32",
+        },
+        {"name": "voices.npz", "role": "voices", "format": "numpy-npz"},
+    ]

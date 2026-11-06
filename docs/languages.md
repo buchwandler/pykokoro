@@ -118,3 +118,15 @@ Reference-only profiles report `voice_mode="reference"`, an empty `voices` tuple
 default voice, `supports_reference_enrollment=True`, and `speed_supported=False`. Use
 `KokoroSynthesizer.enroll_voice()` before synthesis with such a profile. See the
 [English reference voice guide](reference_voice.md).
+
+## AKinVox multispeaker
+
+`github/akinvox-multispeaker-v1` supports English and German with fixed `AV_*` voices.
+The voice can select this profile, but the request language remains explicit and
+mismatched voice/language pairs are rejected. The profile is not selected as a global
+English or German default.
+
+For reproducible German frontend output, use eSpeak-NG 1.51. The German AKinVox fixture
+runs in a dedicated CI job that verifies this exact major/minor version before testing
+the existing KokoroG2P frontend. See
+[installation](installation.md#akinvox-multispeaker) for the opt-in local release smoke.

@@ -5,8 +5,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
-import pykokoro._onnxvoice as boundary
 import pytest
+
+import pykokoro._onnxvoice as boundary
 from pykokoro.asset_progress import AssetProgressEvent
 from pykokoro.error_diagnostics import error_diagnostic
 from pykokoro.exceptions import BackendError, ConfigurationError
@@ -509,8 +510,6 @@ def test_cache_identity_uses_paths_for_local_models(tmp_path: Path) -> None:
     assert adapter.cache_identity[2] == str(voices.resolve())
 
 
-
-
 def test_language_router_cache_identity_includes_layout_and_both_graph_paths(
     tmp_path: Path,
 ) -> None:
@@ -544,6 +543,7 @@ def test_language_router_cache_identity_includes_layout_and_both_graph_paths(
     assert routed_adapter.cache_identity[1] == tuple(str(path.resolve()) for path in paths)
     assert routed_adapter.cache_identity[-1] == "language-router-onnx-v1"
     assert routed_adapter.cache_identity != single_adapter.cache_identity
+
 
 def test_different_distributions_produce_different_cache_identities(tmp_path: Path) -> None:
     model = tmp_path / "model.onnx"
@@ -1000,3 +1000,104 @@ def test_reference_backend_opens_components_without_a_voice_archive(
     assert backend.get_voices() == []
     with pytest.raises(ConfigurationError, match="Static voice styles are unavailable"):
         backend.get_voice_style("af_heart")
+
+
+def test_local_language_router_artifacts_preserve_components_and_runtime_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pykokoro.onnx_backend as onnx_backend
+    from pykokoro.model_profiles import get_model_profile
+
+    profile = get_model_profile("akinvox-multispeaker-v1", "github")
+    model_en = tmp_path / "model_en.onnx"
+    model_de = tmp_path / "model_de.onnx"
+    voices = tmp_path / "voices.npz"
+    model_artifacts = {"model_en": model_en, "model_de": model_de}
+    route_metadata = {
+        "layout": "language-router-onnx-v1",
+        "voice_mode": "static",
+        "language_models": {"en": "model_en", "de": "model_de"},
+        "language_codes": list(profile.language_codes),
+        "voice_metadata": {
+            voice: {"language": languages[0]}
+            for voice, languages in profile.voice_languages.items()
+        },
+    }
+    resolved = boundary.ResolvedKokoroModel(
+        ref=None,
+        model_id="akinvox-multispeaker-v1",
+        quality="fp32",
+        distribution=None,
+        storage_id=None,
+        installation=None,
+        metadata={"runtime": route_metadata},
+        sample_rate=24_000,
+        model_paths=(model_en, model_de),
+        voices_path=voices,
+        config_path=None,
+        model_artifacts=model_artifacts,
+    )
+    runtime = SimpleNamespace(resolved=resolved)
+    calls: list[dict[str, object]] = []
+
+    def open_local(**kwargs: object) -> SimpleNamespace:
+        calls.append(kwargs)
+        return runtime
+
+    class VoiceManagerStub:
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+            self.voices_path: Path | None = None
+
+        def load_voices(self, *, voices_path: Path) -> None:
+            self.voices_path = voices_path
+
+    class AudioGeneratorStub:
+        def __init__(self, **kwargs: object) -> None:
+            self.kwargs = kwargs
+
+    monkeypatch.setattr(onnx_backend, "open_local_kokoro", open_local)
+    monkeypatch.setattr(
+        onnx_backend,
+        "runtime_diagnostics",
+        lambda _runtime: {"timing_contract": {"supports_timings": False}},
+    )
+    monkeypatch.setattr(onnx_backend, "VoiceManager", VoiceManagerStub)
+    monkeypatch.setattr(onnx_backend, "AudioGenerator", AudioGeneratorStub)
+
+    backend = onnx_backend.Kokoro(
+        model_artifacts=model_artifacts,
+        voices_path=voices,
+        model_variant="akinvox-multispeaker-v1",
+        model_quality="fp32",
+    )
+    backend._tokenizer = object()
+    backend._init_kokoro_locked()
+
+    assert calls[0]["artifacts"] == {
+        "model:model_en": model_en,
+        "model:model_de": model_de,
+        "voices": voices,
+    }
+    assert calls[0]["runtime"] == route_metadata
+    assert calls[0]["metadata"] == {
+        "model_id": "akinvox-multispeaker-v1",
+        "selected_quality": "fp32",
+    }
+    assert backend._model_path is None
+    assert backend._voice_manager is not None
+    assert backend._voice_manager.voices_path == voices
+
+
+def test_local_language_router_rejects_unsupported_components() -> None:
+    import pykokoro.onnx_backend as onnx_backend
+
+    backend = onnx_backend.Kokoro(
+        model_artifacts={"model_en": "en.onnx", "model_de": "de.onnx", "extra": "extra.onnx"},
+        voices_path="voices.npz",
+        model_variant="akinvox-multispeaker-v1",
+        model_quality="fp32",
+    )
+
+    with pytest.raises(ConfigurationError, match="exactly model_en and model_de"):
+        backend._init_kokoro_locked()

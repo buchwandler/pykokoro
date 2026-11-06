@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import numpy as np
+
 from pykokoro.audio_generator import AudioGenerator
 from pykokoro.short_sentence_handler import ShortSentenceConfig
 

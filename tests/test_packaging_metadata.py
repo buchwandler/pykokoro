@@ -73,9 +73,23 @@ def test_provider_extras_do_not_install_every_runtime_distribution() -> None:
         "onnxvoice",
     }
     assert all(
-        any(package.startswith("onnxvoice[") and ">=0.2.17,<0.3" in package for package in optional[extra])
+        any(
+            package.startswith("onnxvoice[") and ">=0.2.17,<0.3" in package
+            for package in optional[extra]
+        )
         for extra in ("cpu", "gpu", "openvino", "directml", "coreml")
     )
+
+
+def test_akinvox_german_frontend_job_pins_espeak_ng_151() -> None:
+    workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
+
+    assert "akinvox-german-frontend:" in workflow
+    assert "image: python:3.13-bookworm" in workflow
+    assert "Install and verify eSpeak-NG 1.51" in workflow
+    assert "grep -Eq '1\\.51([[:space:]]|$)'" in workflow
+    assert "akinvox-multispeaker-v1-de" in workflow
+    assert "lexphon data install de-de:gold" in workflow
 
 
 def test_goruut_extra_uses_companion_provider_contract() -> None:

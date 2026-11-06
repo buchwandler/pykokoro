@@ -36,6 +36,7 @@ class KokoroInferenceRuntime(Protocol):
         *,
         style: np.ndarray | None = None,
         reference: Any | None = None,
+        language: str | None = None,
         speed: float = 1.0,
         seed: int | None = None,
     ) -> Any: ...
