@@ -1,0 +1,91 @@
+{
+  "candidate_count": 4,
+  "candidates": [
+    {
+      "additions": 254,
+      "deletions": 21,
+      "patch_file": "b189296.patch",
+      "patch_sha256": "74d04d689ee53a6ebae31ebb00427e5206391abf02f680eaf3b3778f4a64ccdf",
+      "paths": [
+        ".github/workflows/python-publish.yml",
+        ".github/workflows/tests.yml",
+        "pykokoro/_onnxvoice.py",
+        "pykokoro/audio_generator.py",
+        "pykokoro/onnx_backend.py",
+        "pykokoro/request_renderer.py",
+        "pyproject.toml",
+        "tests/test_audio_generator_logging.py",
+        "tests/test_onnxvoice_boundary.py",
+        "tests/test_packaging_metadata.py",
+        "tests/test_request_renderer.py"
+      ],
+      "sha": "b189296d40b55da9be0b3d1bd931fcc8babf1db5",
+      "short_sha": "b189296",
+      "source_ref": "git:b189296d40b55da9be0b3d1bd931fcc8babf1db5"
+    },
+    {
+      "additions": 1640,
+      "deletions": 45,
+      "patch_file": "8798dc5.patch",
+      "patch_sha256": "a5aaffa88668a43784d4dc7a236bd5f6902b32563ec706e67e4893ebcebcee4a",
+      "paths": [
+        ".github/workflows/tests.yml",
+        "docs/installation.md",
+        "docs/languages.md",
+        "pykokoro/_onnxvoice.py",
+        "pykokoro/audio_generator.py",
+        "pykokoro/discovery.py",
+        "pykokoro/frontend_contracts.py",
+        "pykokoro/model_profiles.py",
+        "pykokoro/onnx_backend.py",
+        "pykokoro/request_renderer.py",
+        "pykokoro/runtime_protocol.py",
+        "pykokoro/synthesis_config.py",
+        "tests/test_akinvox_multispeaker.py",
+        "tests/test_audio_generator_logging.py",
+        "tests/test_audio_generator_performance.py",
+        "tests/test_long_text_splitting.py",
+        "tests/test_model_discovery.py",
+        "tests/test_onnxvoice_boundary.py",
+        "tests/test_packaging_metadata.py",
+        "tests/test_release_profiles.py",
+        "tests/test_request_renderer.py"
+      ],
+      "sha": "8798dc5970a39653c6647cd7a5b2c2cd00339d06",
+      "short_sha": "8798dc5",
+      "source_ref": "git:8798dc5970a39653c6647cd7a5b2c2cd00339d06"
+    },
+    {
+      "additions": 14,
+      "deletions": 5,
+      "patch_file": "8b93e5c.patch",
+      "patch_sha256": "509ce284a88682720a324bc45db6323f72deb5f923564532de4652e1249a88dd",
+      "paths": [
+        ".github/workflows/tests.yml",
+        "tests/test_akinvox_multispeaker.py",
+        "tests/test_packaging_metadata.py"
+      ],
+      "sha": "8b93e5c1632544a05ca7c1d436d2e9a17ea2a2ef",
+      "short_sha": "8b93e5c",
+      "source_ref": "git:8b93e5c1632544a05ca7c1d436d2e9a17ea2a2ef"
+    },
+    {
+      "additions": 1,
+      "deletions": 1,
+      "patch_file": "efc9ed0.patch",
+      "patch_sha256": "dba9d7fe0e7135b92ef58a444df7adebbe83d9482a5a5d041d9c53f462286719",
+      "paths": ["pykokoro/frontend_contracts.py"],
+      "sha": "efc9ed05aa11f06f9c09d6e97a9bc2d6c6fa5101",
+      "short_sha": "efc9ed0",
+      "source_ref": "git:efc9ed05aa11f06f9c09d6e97a9bc2d6c6fa5101"
+    }
+  ],
+  "git_base_ref": "c30b0b3b16a18048316f173a2ab4999d9ce20f14",
+  "git_base_sha": "c30b0b3b16a18048316f173a2ab4999d9ce20f14",
+  "git_head_ref": "efc9ed05aa11f06f9c09d6e97a9bc2d6c6fa5101",
+  "git_head_sha": "efc9ed05aa11f06f9c09d6e97a9bc2d6c6fa5101",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "0.10.11",
+  "schema_version": 1
+}

@@ -1,0 +1,161 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: 0.10.11
+git_base_ref: v0.10.10
+git_base_sha: c30b0b3b16a18048316f173a2ab4999d9ce20f14
+git_head_ref: HEAD
+git_head_sha: efc9ed05aa11f06f9c09d6e97a9bc2d6c6fa5101
+git_range: c30b0b3b16a18048316f173a2ab4999d9ce20f14..efc9ed05aa11f06f9c09d6e97a9bc2d6c6fa5101
+commit_count: 4
+rows:
+  - sha: b189296d40b55da9be0b3d1bd931fcc8babf1db5
+    source_ref: git:b189296d40b55da9be0b3d1bd931fcc8babf1db5
+    short_sha: b189296
+    changed_paths:
+      - .github/workflows/python-publish.yml
+      - .github/workflows/tests.yml
+      - pykokoro/_onnxvoice.py
+      - pykokoro/audio_generator.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/request_renderer.py
+      - pyproject.toml
+      - tests/test_audio_generator_logging.py
+      - tests/test_onnxvoice_boundary.py
+      - tests/test_packaging_metadata.py
+      - tests/test_request_renderer.py
+    stats:
+      files_changed: 11
+      insertions: 254
+      deletions: 21
+    inspected: true
+    inspected_paths:
+      - .github/workflows/python-publish.yml
+      - .github/workflows/tests.yml
+      - pykokoro/_onnxvoice.py
+      - pykokoro/audio_generator.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/request_renderer.py
+      - pyproject.toml
+      - tests/test_audio_generator_logging.py
+      - tests/test_onnxvoice_boundary.py
+      - tests/test_packaging_metadata.py
+      - tests/test_request_renderer.py
+    observed_behavior:
+      Raised the onnxvoice minimum to 0.2.17 and added request-language forwarding,
+      route-specific inference caching, and named-voice language validation for
+      language-routed ONNX models.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: update onnxvoice version"
+    target_entry_id: entry-0001
+    notes: Covered by the AKinVox multilingual support changelog entry.
+  - sha: 8798dc5970a39653c6647cd7a5b2c2cd00339d06
+    source_ref: git:8798dc5970a39653c6647cd7a5b2c2cd00339d06
+    short_sha: 8798dc5
+    changed_paths:
+      - .github/workflows/tests.yml
+      - docs/installation.md
+      - docs/languages.md
+      - pykokoro/_onnxvoice.py
+      - pykokoro/audio_generator.py
+      - pykokoro/discovery.py
+      - pykokoro/frontend_contracts.py
+      - pykokoro/model_profiles.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/request_renderer.py
+      - pykokoro/runtime_protocol.py
+      - pykokoro/synthesis_config.py
+      - tests/test_akinvox_multispeaker.py
+      - tests/test_audio_generator_logging.py
+      - tests/test_audio_generator_performance.py
+      - tests/test_long_text_splitting.py
+      - tests/test_model_discovery.py
+      - tests/test_onnxvoice_boundary.py
+      - tests/test_packaging_metadata.py
+      - tests/test_release_profiles.py
+      - tests/test_request_renderer.py
+    stats:
+      files_changed: 21
+      insertions: 1640
+      deletions: 45
+    inspected: true
+    inspected_paths:
+      - .github/workflows/tests.yml
+      - docs/installation.md
+      - docs/languages.md
+      - pykokoro/_onnxvoice.py
+      - pykokoro/audio_generator.py
+      - pykokoro/discovery.py
+      - pykokoro/frontend_contracts.py
+      - pykokoro/model_profiles.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/request_renderer.py
+      - pykokoro/runtime_protocol.py
+      - pykokoro/synthesis_config.py
+      - tests/test_akinvox_multispeaker.py
+      - tests/test_audio_generator_logging.py
+      - tests/test_audio_generator_performance.py
+      - tests/test_long_text_splitting.py
+      - tests/test_model_discovery.py
+      - tests/test_onnxvoice_boundary.py
+      - tests/test_packaging_metadata.py
+      - tests/test_release_profiles.py
+      - tests/test_request_renderer.py
+    observed_behavior:
+      Added AKinVox English and German support with language-specific voices,
+      language-routed inference, local component manifests, and context-aware long-text
+      chunking.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: add support for akinvox multispeaker"
+    target_entry_id: entry-0002
+    notes: Changelog entry covers user-visible AKinVox support and long-text behavior.
+  - sha: 8b93e5c1632544a05ca7c1d436d2e9a17ea2a2ef
+    source_ref: git:8b93e5c1632544a05ca7c1d436d2e9a17ea2a2ef
+    short_sha: 8b93e5c
+    changed_paths:
+      - .github/workflows/tests.yml
+      - tests/test_akinvox_multispeaker.py
+      - tests/test_packaging_metadata.py
+    stats:
+      files_changed: 3
+      insertions: 14
+      deletions: 5
+    inspected: true
+    inspected_paths:
+      - .github/workflows/tests.yml
+      - tests/test_akinvox_multispeaker.py
+      - tests/test_packaging_metadata.py
+    observed_behavior:
+      Updated the German fixture test selection and CI environment so exact phoneme
+      checks run under the pinned eSpeak-NG version; production behavior is unchanged.
+    public_impact: internal
+    decision: internal
+    stale: false
+    evidence_subject: "chore: fix pytest"
+    notes: Internal CI/test maintenance only, not a public product change.
+  - sha: efc9ed05aa11f06f9c09d6e97a9bc2d6c6fa5101
+    source_ref: git:efc9ed05aa11f06f9c09d6e97a9bc2d6c6fa5101
+    short_sha: efc9ed0
+    changed_paths:
+      - pykokoro/frontend_contracts.py
+    stats:
+      files_changed: 1
+      insertions: 1
+      deletions: 1
+    inspected: true
+    inspected_paths:
+      - pykokoro/frontend_contracts.py
+    observed_behavior:
+      Updated the expected German phoneme fixture to the verified output; no production
+      code changed.
+    public_impact: internal
+    decision: internal
+    stale: false
+    evidence_subject: "chore: fix phoneme"
+    notes: Internal release-fixture maintenance only; excluded from public changelog.

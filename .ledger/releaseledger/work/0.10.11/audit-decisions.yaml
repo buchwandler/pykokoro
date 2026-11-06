@@ -1,0 +1,87 @@
+rows:
+  - sha: b189296d40b55da9be0b3d1bd931fcc8babf1db5
+    inspected: true
+    inspected_paths:
+      - .github/workflows/python-publish.yml
+      - .github/workflows/tests.yml
+      - pykokoro/_onnxvoice.py
+      - pykokoro/audio_generator.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/request_renderer.py
+      - pyproject.toml
+      - tests/test_audio_generator_logging.py
+      - tests/test_onnxvoice_boundary.py
+      - tests/test_packaging_metadata.py
+      - tests/test_request_renderer.py
+    observed_behavior:
+      Raised the onnxvoice minimum to 0.2.17 and added request-language forwarding,
+      route-specific inference caching, and named-voice language validation for
+      language-routed ONNX models.
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: Covered by the AKinVox multilingual support changelog entry.
+    stale: false
+  - sha: 8798dc5970a39653c6647cd7a5b2c2cd00339d06
+    inspected: true
+    inspected_paths:
+      - .github/workflows/tests.yml
+      - docs/installation.md
+      - docs/languages.md
+      - pykokoro/_onnxvoice.py
+      - pykokoro/audio_generator.py
+      - pykokoro/discovery.py
+      - pykokoro/frontend_contracts.py
+      - pykokoro/model_profiles.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/request_renderer.py
+      - pykokoro/runtime_protocol.py
+      - pykokoro/synthesis_config.py
+      - tests/test_akinvox_multispeaker.py
+      - tests/test_audio_generator_logging.py
+      - tests/test_audio_generator_performance.py
+      - tests/test_long_text_splitting.py
+      - tests/test_model_discovery.py
+      - tests/test_onnxvoice_boundary.py
+      - tests/test_packaging_metadata.py
+      - tests/test_release_profiles.py
+      - tests/test_request_renderer.py
+    observed_behavior:
+      Added AKinVox English and German support with language-specific voices,
+      language-routed inference, local component manifests, and context-aware long-text
+      chunking.
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: Changelog entry covers user-visible AKinVox support and long-text behavior.
+    stale: false
+  - sha: 8b93e5c1632544a05ca7c1d436d2e9a17ea2a2ef
+    inspected: true
+    inspected_paths:
+      - .github/workflows/tests.yml
+      - tests/test_akinvox_multispeaker.py
+      - tests/test_packaging_metadata.py
+    observed_behavior:
+      Updated the German fixture test selection and CI environment so exact phoneme
+      checks run under the pinned eSpeak-NG version; production behavior is unchanged.
+    public_impact: internal
+    decision: internal
+    target_entry_key: null
+    target_entry_id: null
+    notes: Internal CI/test maintenance only, not a public product change.
+    stale: false
+  - sha: efc9ed05aa11f06f9c09d6e97a9bc2d6c6fa5101
+    inspected: true
+    inspected_paths:
+      - pykokoro/frontend_contracts.py
+    observed_behavior:
+      Updated the expected German phoneme fixture to the verified output; no production
+      code changed.
+    public_impact: internal
+    decision: internal
+    target_entry_key: null
+    target_entry_id: null
+    notes: Internal release-fixture maintenance only; excluded from public changelog.
+    stale: false

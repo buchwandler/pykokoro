@@ -1,0 +1,16 @@
+ pykokoro/frontend_contracts.py | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/pykokoro/frontend_contracts.py b/pykokoro/frontend_contracts.py
+index a5677a7..396292a 100644
+--- a/pykokoro/frontend_contracts.py
++++ b/pykokoro/frontend_contracts.py
+@@ -70,7 +70,7 @@ FRONTEND_FIXTURES: dict[ModelVariant, FrontendFixture] = {
+         "de",
+         "Willkommen zu unserer nächsten Geschichte.",
+         "kokorog2p",
+-        "vɪlkˈɔmən ʦʊ ˈʊnzərɜ nˈɛçstən ɡəʃˈɪçtə.",
++        "vɪlkˈɔmən ʦˈuː ˌʊnzərɜ nˈɛçstən ɡəʃˈɪçtə.",
+         release_ready=True,
+     ),
+ }

@@ -1,0 +1,620 @@
+ .github/workflows/python-publish.yml  |   2 +-
+ .github/workflows/tests.yml           |   2 +-
+ pykokoro/_onnxvoice.py                |  38 ++++++++++++
+ pykokoro/audio_generator.py           |  33 +++++++++--
+ pykokoro/onnx_backend.py              |   6 ++
+ pykokoro/request_renderer.py          |   4 ++
+ pyproject.toml                        |  12 ++--
+ tests/test_audio_generator_logging.py |  28 ++++++++-
+ tests/test_onnxvoice_boundary.py      | 105 +++++++++++++++++++++++++++++++++-
+ tests/test_packaging_metadata.py      |  10 +++-
+ tests/test_request_renderer.py        |  35 +++++++++++-
+ 11 files changed, 254 insertions(+), 21 deletions(-)
+
+diff --git a/.github/workflows/python-publish.yml b/.github/workflows/python-publish.yml
+index dcf125d..399e8a8 100644
+--- a/.github/workflows/python-publish.yml
++++ b/.github/workflows/python-publish.yml
+@@ -80,7 +80,7 @@ jobs:
+               assert has_minimum(requirements, "phrasplit", "0.3.9")
+               assert has_minimum(requirements, "audiosig", "0.1.4")
+               assert has_minimum(requirements, "soxr", "1.1.0")
+-              assert has_minimum(requirements, "onnxvoice", "0.2.2")
++              assert has_minimum(requirements, "onnxvoice", "0.2.17")
+               assert any(name.endswith("pykokoro/py.typed") for name in archive.namelist())
+           PY
+
+diff --git a/.github/workflows/tests.yml b/.github/workflows/tests.yml
+index f0ed73d..346dff5 100644
+--- a/.github/workflows/tests.yml
++++ b/.github/workflows/tests.yml
+@@ -126,7 +126,7 @@ jobs:
+           "phrasplit==0.3.9" \
+           "audiosig==0.1.4" \
+           "soxr==1.1.0" \
+-          "onnxvoice[cpu]==0.2.2" \
++          "onnxvoice[cpu]==0.2.17" \
+           platformdirs
+         python -m pip install -e .
+     - name: Install Lexphon data
+diff --git a/pykokoro/_onnxvoice.py b/pykokoro/_onnxvoice.py
+index 1be3759..89a29b4 100644
+--- a/pykokoro/_onnxvoice.py
++++ b/pykokoro/_onnxvoice.py
+@@ -793,6 +793,10 @@ class KokoroRuntimeAdapter:
+             "declared" if self.supports_timings is not None else "unknown",
+             _timing_output_name(resolved),
+         )
++        runtime_metadata = resolved.metadata.get("runtime")
++        runtime_layout = (
++            runtime_metadata.get("layout") if isinstance(runtime_metadata, Mapping) else None
++        )
+         # Managed installations use storage_id for cache identity.
+         # Local unmanaged models use path-sensitive identity.
+         if resolved.storage_id is not None:
+@@ -800,6 +804,7 @@ class KokoroRuntimeAdapter:
+                 "managed",
+                 resolved.ref,
+                 resolved.storage_id,
++                runtime_layout,
+             )
+         else:
+             self.cache_identity = (
+@@ -813,6 +818,7 @@ class KokoroRuntimeAdapter:
+                         for name, path in resolved.model_artifacts.items()
+                     )
+                 ),
++                runtime_layout,
+             )
+         self._closed = False
+
+@@ -866,6 +872,30 @@ class KokoroRuntimeAdapter:
+             lambda: prepare(reference_token_ids, audio_24k=audio_24k, audio_16k=audio_16k),
+         )
+
++    def validate_voice_language(self, voice_id: str, language: str) -> None:
++        runtime_metadata = self.resolved.metadata.get("runtime")
++        if not isinstance(runtime_metadata, Mapping) or runtime_metadata.get("layout") != (
++            "language-router-onnx-v1"
++        ):
++            return
++
++        from onnxvoice.inventory import language_base, voice_language_codes_from_catalog
++        from onnxvoice.types import CatalogItem
++
++        item = CatalogItem(
++            system="kokoro",
++            id=self.resolved.model_id or "local",
++            kind="model",
++            artifacts=(),
++            metadata=self.resolved.metadata,
++        )
++        supported = voice_language_codes_from_catalog(item, voice_id)
++        requested_language = language_base(language)
++        if requested_language not in {language_base(code) for code in supported}:
++            raise ConfigurationError(
++                f"Kokoro voice {voice_id!r} does not support language {language!r}"
++            )
++
+     def infer(
+         self,
+         token_ids: Sequence[int],
+@@ -874,6 +904,7 @@ class KokoroRuntimeAdapter:
+         reference: Any | None = None,
+         speed: float,
+         seed: int | None = None,
++        language: str | None = None,
+     ) -> Any:
+         if self._closed:
+             raise RuntimeError("Kokoro runtime is closed")
+@@ -881,6 +912,13 @@ class KokoroRuntimeAdapter:
+         runtime_kwargs: dict[str, Any] = {"speed": speed}
+         if seed is not None:
+             runtime_kwargs["seed"] = seed
++        if language is not None:
++            runtime_metadata = self.resolved.metadata.get("runtime")
++            if (
++                isinstance(runtime_metadata, Mapping)
++                and runtime_metadata.get("layout") == "language-router-onnx-v1"
++            ):
++                runtime_kwargs["language"] = language
+         if reference is None:
+             return _call(
+                 "infer",
+diff --git a/pykokoro/audio_generator.py b/pykokoro/audio_generator.py
+index c3028e8..a58d2c3 100644
+--- a/pykokoro/audio_generator.py
++++ b/pykokoro/audio_generator.py
+@@ -8,7 +8,7 @@ import logging
+ import random
+ import time
+ from collections import OrderedDict
+-from collections.abc import Callable
++from collections.abc import Callable, Mapping
+ from typing import TYPE_CHECKING, Any, Literal, cast
+
+ import numpy as np
+@@ -325,6 +325,7 @@ class AudioGenerator:
+         attempt_kind: str = "initial",
+         tokens: list[int] | None = None,
+         seed: int | None = None,
++        language: str | None = None,
+     ) -> tuple[np.ndarray, KokoroTimingPayload | None]:
+         return self._run_conditioned_onnx(
+             phonemes,
+@@ -334,6 +335,7 @@ class AudioGenerator:
+             attempt_kind=attempt_kind,
+             tokens=tokens,
+             seed=seed,
++            language=language,
+         )
+
+     def _run_reference_onnx(
+@@ -346,6 +348,7 @@ class AudioGenerator:
+         attempt_kind: str = "initial",
+         tokens: list[int] | None = None,
+         seed: int | None = None,
++        language: str | None = None,
+     ) -> tuple[np.ndarray, KokoroTimingPayload | None]:
+         if speed != 1.0:
+             raise ConfigurationError("reference voice synthesis requires speed=1.0")
+@@ -357,6 +360,7 @@ class AudioGenerator:
+             attempt_kind=attempt_kind,
+             tokens=tokens,
+             seed=seed,
++            language=language,
+             reference_voice=reference_voice,
+         )
+
+@@ -371,6 +375,7 @@ class AudioGenerator:
+         attempt_kind: str = "initial",
+         tokens: list[int] | None = None,
+         seed: int | None = None,
++        language: str | None = None,
+     ) -> tuple[np.ndarray, KokoroTimingPayload | None]:
+         if reference_voice is not None:
+             return self._run_reference_onnx(
+@@ -381,6 +386,7 @@ class AudioGenerator:
+                 attempt_kind=attempt_kind,
+                 tokens=tokens,
+                 seed=seed,
++                language=language,
+             )
+         if voice_style is None:
+             raise ValueError("static-voice inference requires a voice style")
+@@ -392,6 +398,7 @@ class AudioGenerator:
+             attempt_kind=attempt_kind,
+             tokens=tokens,
+             seed=seed,
++            language=language,
+         )
+
+     def _run_conditioned_onnx(
+@@ -404,6 +411,7 @@ class AudioGenerator:
+         attempt_kind: str = "initial",
+         tokens: list[int] | None = None,
+         seed: int | None = None,
++        language: str | None = None,
+         reference_voice: ReferenceVoice | None = None,
+     ) -> tuple[np.ndarray, KokoroTimingPayload | None]:
+         effective_phonemes = phonemes[:MAX_PHONEME_LENGTH]
+@@ -449,20 +457,29 @@ class AudioGenerator:
+             cache_hit = True
+         else:
+             started = time.perf_counter()
++            runtime_kwargs: dict[str, Any] = {"speed": speed, "seed": seed}
++            runtime_metadata = getattr(getattr(self._runtime, "resolved", None), "metadata", None)
++            routing_metadata = (
++                runtime_metadata.get("runtime") if isinstance(runtime_metadata, Mapping) else None
++            )
++            if (
++                language is not None
++                and isinstance(routing_metadata, Mapping)
++                and routing_metadata.get("layout") == "language-router-onnx-v1"
++            ):
++                runtime_kwargs["language"] = language
+             if reference_voice is None:
+                 assert voice_style_indexed is not None
+                 result = self._runtime.infer(
+                     effective_tokens,
+                     style=voice_style_indexed,
+-                    speed=speed,
+-                    seed=seed,
++                    **runtime_kwargs,
+                 )
+             else:
+                 result = self._runtime.infer(
+                     effective_tokens,
+                     reference=reference_voice,
+-                    speed=speed,
+-                    seed=seed,
++                    **runtime_kwargs,
+                 )
+             runtime_s = time.perf_counter() - started
+             audio = np.asarray(getattr(result, "audio", result), dtype=np.float32).reshape(-1)
+@@ -775,6 +792,7 @@ class AudioGenerator:
+                     tokens=segment.tokens or None,
+                     seed=seed,
+                     reference_voice=reference_voice,
++                    language=segment.lang,
+                 )
+             else:
+                 audio, pred_dur = self._run_voice_conditioned_onnx(
+@@ -786,6 +804,7 @@ class AudioGenerator:
+                     tokens=segment.tokens or None,
+                     seed=seed,
+                     reference_voice=reference_voice,
++                    language=segment.lang,
+                 )
+             if trace is not None:
+                 trace.inference[-1].update(
+@@ -1165,6 +1184,7 @@ class AudioGenerator:
+                 tokens=prepared_fallback_tokens,
+                 seed=seed,
+                 reference_voice=reference_voice,
++                language=segment.lang,
+             )
+         else:
+             fallback_audio, _ = self._run_voice_conditioned_onnx(
+@@ -1176,6 +1196,7 @@ class AudioGenerator:
+                 tokens=prepared_fallback_tokens,
+                 seed=seed,
+                 reference_voice=reference_voice,
++                language=segment.lang,
+             )
+         short_sentence_metadata["cut_applied"] = True
+         short_sentence_metadata["fallback_used"] = "wrap"
+@@ -1285,6 +1306,7 @@ class AudioGenerator:
+                     tokens=retry.tokens,
+                     seed=seed,
+                     reference_voice=reference_voice,
++                    language=segment.lang,
+                 )
+             else:
+                 retry_audio, pred_dur = self._run_voice_conditioned_onnx(
+@@ -1296,6 +1318,7 @@ class AudioGenerator:
+                     tokens=retry.tokens,
+                     seed=seed,
+                     reference_voice=reference_voice,
++                    language=segment.lang,
+                 )
+             timing_tokens = retry.metadata.get("timing_tokens")
+             retry_timings: list[WordTiming] = []
+diff --git a/pykokoro/onnx_backend.py b/pykokoro/onnx_backend.py
+index 3d0fc82..e1a8a4e 100644
+--- a/pykokoro/onnx_backend.py
++++ b/pykokoro/onnx_backend.py
+@@ -491,6 +491,12 @@ class Kokoro:
+             )
+         return self._voice_manager.get_voice_style(self._voice_manager_voice_name(voice_name))
+
++    def validate_voice_language(self, voice_name: str, language: str) -> None:
++        self._init_kokoro()
++        validate = getattr(self._runtime, "validate_voice_language", None)
++        if callable(validate):
++            validate(voice_name, language)
++
+     def create_blended_voice(self, blend: VoiceBlend) -> np.ndarray:
+         """Create a blended voice style vector from a VoiceBlend."""
+         self._require_static_voice_mode("Voice blending is unavailable for reference-only models")
+diff --git a/pykokoro/request_renderer.py b/pykokoro/request_renderer.py
+index 5dcb959..a42fc3b 100644
+--- a/pykokoro/request_renderer.py
++++ b/pykokoro/request_renderer.py
+@@ -170,6 +170,10 @@ class OnnxRequestRenderer:
+             request, prepared, resolved, profile.max_tokens, trace
+         )
+         backend = self._get_backend(resolved)
++        if voice_name is not None:
++            validate = getattr(backend, "validate_voice_language", None)
++            if callable(validate):
++                validate(voice_name, request.language)
+         if reference_voice is not None:
+             voice_style = None
+         elif voice_pack is not None:
+diff --git a/pyproject.toml b/pyproject.toml
+index ca4f941..fa0a975 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -28,7 +28,7 @@ dependencies = [
+     "numpy",
+     "audiosig>=0.1.4,<0.2",
+     "platformdirs",
+-    "onnxvoice>=0.2.2,<0.3",
++    "onnxvoice>=0.2.17,<0.3",
+     "soundfile",
+     "soxr>=1.1.0,<2.0",
+     "typing_extensions>=4.0"
+@@ -67,11 +67,11 @@ dev = [
+     "ruff>=0.1.0",
+     "mypy>=1.0.0",
+ ]
+-cpu = ["onnxvoice[cpu]>=0.2.2,<0.3"]
+-gpu = ["onnxvoice[gpu]>=0.2.2,<0.3"]
+-openvino = ["onnxvoice[openvino]>=0.2.2,<0.3"]
+-directml = ["onnxvoice[directml]>=0.2.2,<0.3"]
+-coreml = ["onnxvoice[coreml]>=0.2.2,<0.3"]
++cpu = ["onnxvoice[cpu]>=0.2.17,<0.3"]
++gpu = ["onnxvoice[gpu]>=0.2.17,<0.3"]
++openvino = ["onnxvoice[openvino]>=0.2.17,<0.3"]
++directml = ["onnxvoice[directml]>=0.2.17,<0.3"]
++coreml = ["onnxvoice[coreml]>=0.2.17,<0.3"]
+ goruut = [
+     "kokorog2p[goruut]>=0.9.8,<1.0",
+ ]
+diff --git a/tests/test_audio_generator_logging.py b/tests/test_audio_generator_logging.py
+index 963151b..7c709d1 100644
+--- a/tests/test_audio_generator_logging.py
++++ b/tests/test_audio_generator_logging.py
+@@ -5,7 +5,6 @@ from types import SimpleNamespace
+ from typing import Any, cast
+
+ import numpy as np
+-
+ from pykokoro.audio_generator import AudioGenerator
+ from pykokoro.short_sentence_handler import ShortSentenceConfig
+
+@@ -35,6 +34,33 @@ class _TimestampSession(_Session):
+         )
+
+
++def test_run_onnx_forwards_explicit_language() -> None:
++    class _LanguageSession:
++        supports_timings = False
++        sample_rate = 24_000
++
++        def __init__(self) -> None:
++            self.inference: dict[str, Any] | None = None
++            self.resolved = SimpleNamespace(
++                metadata={"runtime": {"layout": "language-router-onnx-v1"}}
++            )
++
++        def infer(self, token_ids, **kwargs):
++            self.inference = {"token_ids": token_ids, **kwargs}
++            return SimpleNamespace(audio=np.zeros(4, dtype=np.float32), timings=None)
++
++    session = _LanguageSession()
++    generator = AudioGenerator(
++        runtime=cast(Any, session),
++        tokenizer=cast(Any, _Tokenizer()),
++    )
++
++    generator._run_onnx("hello", np.zeros((16, 256), dtype=np.float32), 1.0, language="de")
++
++    assert session.inference is not None
++    assert session.inference["language"] == "de"
++
++
+ def test_inference_logging_reports_counts_cache_and_runtime_without_payload(caplog) -> None:
+     generator = AudioGenerator(
+         session=cast(Any, _Session()),
+diff --git a/tests/test_onnxvoice_boundary.py b/tests/test_onnxvoice_boundary.py
+index 1348abe..2d963e1 100644
+--- a/tests/test_onnxvoice_boundary.py
++++ b/tests/test_onnxvoice_boundary.py
+@@ -5,9 +5,8 @@ from pathlib import Path
+ from types import SimpleNamespace
+
+ import numpy as np
+-import pytest
+-
+ import pykokoro._onnxvoice as boundary
++import pytest
+ from pykokoro.asset_progress import AssetProgressEvent
+ from pykokoro.error_diagnostics import error_diagnostic
+ from pykokoro.exceptions import BackendError, ConfigurationError
+@@ -483,7 +482,7 @@ def test_cache_identity_uses_storage_id_for_managed_installations(tmp_path: Path
+     runtime = SimpleNamespace(infer=lambda *a, **kw: None)
+     adapter = boundary.KokoroRuntimeAdapter(runtime, resolved)
+
+-    assert adapter.cache_identity == ("managed", "kokoro:v1.0", "kokoro--sel-abc123")
++    assert adapter.cache_identity == ("managed", "kokoro:v1.0", "kokoro--sel-abc123", None)
+
+
+ def test_cache_identity_uses_paths_for_local_models(tmp_path: Path) -> None:
+@@ -510,6 +509,42 @@ def test_cache_identity_uses_paths_for_local_models(tmp_path: Path) -> None:
+     assert adapter.cache_identity[2] == str(voices.resolve())
+
+
++
++
++def test_language_router_cache_identity_includes_layout_and_both_graph_paths(
++    tmp_path: Path,
++) -> None:
++    model_en = tmp_path / "model_en.onnx"
++    model_de = tmp_path / "model_de.onnx"
++    paths = (model_en, model_de)
++    common = {
++        "ref": None,
++        "model_id": None,
++        "quality": None,
++        "distribution": None,
++        "storage_id": None,
++        "installation": None,
++        "sample_rate": 24_000,
++        "model_paths": paths,
++        "voices_path": None,
++        "config_path": None,
++        "model_artifacts": {"model:model_en": model_en, "model:model_de": model_de},
++    }
++    routed = boundary.ResolvedKokoroModel(
++        metadata={"runtime": {"layout": "language-router-onnx-v1"}}, **common
++    )
++    single = boundary.ResolvedKokoroModel(
++        metadata={"runtime": {"layout": "single-onnx-v1"}}, **common
++    )
++
++    runtime = SimpleNamespace(infer=lambda *args, **kwargs: None)
++    routed_adapter = boundary.KokoroRuntimeAdapter(runtime, routed)
++    single_adapter = boundary.KokoroRuntimeAdapter(runtime, single)
++
++    assert routed_adapter.cache_identity[1] == tuple(str(path.resolve()) for path in paths)
++    assert routed_adapter.cache_identity[-1] == "language-router-onnx-v1"
++    assert routed_adapter.cache_identity != single_adapter.cache_identity
++
+ def test_different_distributions_produce_different_cache_identities(tmp_path: Path) -> None:
+     model = tmp_path / "model.onnx"
+     resolved_a = boundary.ResolvedKokoroModel(
+@@ -661,6 +696,70 @@ def test_runtime_adapter_seed_keyword_contract(
+         assert runtime.inference["seed"] == seed
+
+
++def test_runtime_adapter_passes_language_for_router_inference() -> None:
++    class Runtime:
++        def __init__(self) -> None:
++            self.inference: dict[str, object] | None = None
++
++        def infer(self, token_ids: object, **kwargs: object) -> str:
++            self.inference = {"token_ids": token_ids, **kwargs}
++            return "inferred"
++
++    runtime = Runtime()
++    resolved = boundary.ResolvedKokoroModel(
++        ref="kokoro:akinvox-en-de",
++        model_id="akinvox-en-de",
++        quality="fp32",
++        distribution="fixture",
++        storage_id="router-installation",
++        installation=None,
++        metadata={"runtime": {"layout": "language-router-onnx-v1"}},
++        sample_rate=24_000,
++        model_paths=(),
++        voices_path=None,
++        config_path=None,
++    )
++    adapter = boundary.KokoroRuntimeAdapter(runtime, resolved)
++
++    assert adapter.infer([1, 2], style=np.zeros((1, 256)), speed=1.0, language="de") == "inferred"
++    assert runtime.inference is not None
++    assert runtime.inference["token_ids"] == [1, 2]
++    assert runtime.inference["speed"] == 1.0
++    assert runtime.inference["language"] == "de"
++    assert np.array_equal(runtime.inference["style"], np.zeros((1, 256)))
++
++
++def test_runtime_adapter_validates_router_voice_language() -> None:
++    metadata = {
++        "language_codes": ("en", "de"),
++        "runtime": {
++            "layout": "language-router-onnx-v1",
++            "voice_metadata": {
++                "AV_cori": {"language": "en"},
++                "AV_julia": {"language": "de"},
++            },
++        },
++    }
++    resolved = boundary.ResolvedKokoroModel(
++        ref="kokoro:akinvox-en-de",
++        model_id="akinvox-en-de",
++        quality="fp32",
++        distribution="fixture",
++        storage_id="router-installation",
++        installation=None,
++        metadata=metadata,
++        sample_rate=24_000,
++        model_paths=(),
++        voices_path=None,
++        config_path=None,
++    )
++    adapter = boundary.KokoroRuntimeAdapter(SimpleNamespace(), resolved)
++
++    adapter.validate_voice_language("AV_cori", "en-US")
++    with pytest.raises(ConfigurationError, match="AV_cori.*de"):
++        adapter.validate_voice_language("AV_cori", "de")
++
++
+ def test_runtime_adapter_prepares_and_converts_reference_state(
+     monkeypatch: pytest.MonkeyPatch,
+ ) -> None:
+diff --git a/tests/test_packaging_metadata.py b/tests/test_packaging_metadata.py
+index 8c34e06..3dca36c 100644
+--- a/tests/test_packaging_metadata.py
++++ b/tests/test_packaging_metadata.py
+@@ -47,7 +47,7 @@ def test_companion_dependency_floors_match_current_integration_contract() -> Non
+     assert "phrasplit>=0.3.9,<0.4" in dependencies
+     assert "audiosig>=0.1.4,<0.2" in dependencies
+     assert "soxr>=1.1.0,<2.0" in dependencies
+-    assert "onnxvoice>=0.2.2,<0.3" in dependencies
++    assert "onnxvoice>=0.2.17,<0.3" in dependencies
+
+
+ def test_test_requirements_keep_kokorog2p_in_supported_window() -> None:
+@@ -72,6 +72,10 @@ def test_provider_extras_do_not_install_every_runtime_distribution() -> None:
+     assert provider_packages == {
+         "onnxvoice",
+     }
++    assert all(
++        any(package.startswith("onnxvoice[") and ">=0.2.17,<0.3" in package for package in optional[extra])
++        for extra in ("cpu", "gpu", "openvino", "directml", "coreml")
++    )
+
+
+ def test_goruut_extra_uses_companion_provider_contract() -> None:
+@@ -200,7 +204,7 @@ def test_lower_bound_workflow_pins_match_project_floors() -> None:
+     assert {package: pins[package] for package in expected_packages} == {
+         package: floors[package] for package in expected_packages
+     }
+-    assert '"onnxvoice[cpu]==0.2.2"' in workflow
++    assert '"onnxvoice[cpu]==0.2.17"' in workflow
+     assert "tests/test_onnxvoice_boundary.py" in workflow
+     assert "tests/test_request_renderer.py" in workflow
+     assert "tests/test_voice_manager.py" in workflow
+@@ -233,4 +237,4 @@ def test_publish_workflow_validates_artifacts_before_upload() -> None:
+     assert 'has_minimum(requirements, "phrasplit", "0.3.9")' in workflow
+     assert 'has_minimum(requirements, "audiosig", "0.1.4")' in workflow
+     assert 'has_minimum(requirements, "soxr", "1.1.0")' in workflow
+-    assert 'has_minimum(requirements, "onnxvoice", "0.2.2")' in workflow
++    assert 'has_minimum(requirements, "onnxvoice", "0.2.17")' in workflow
+diff --git a/tests/test_request_renderer.py b/tests/test_request_renderer.py
+index 4bf4cb1..8a7746a 100644
+--- a/tests/test_request_renderer.py
++++ b/tests/test_request_renderer.py
+@@ -4,7 +4,6 @@ from typing import Any
+
+ import numpy as np
+ import pytest
+-
+ from pykokoro import SynthesisInputTooLongError
+ from pykokoro.error_diagnostics import error_diagnostic
+ from pykokoro.exceptions import BackendError, ConfigurationError, InvalidVoiceError
+@@ -383,6 +382,40 @@ def test_renderer_rejects_oversized_request_before_model_inference() -> None:
+     assert backend.generated == []
+
+
++def test_named_router_voice_language_is_validated_before_style_resolution() -> None:
++    class VoiceLanguageBackend(FakeBackend):
++        def __init__(self) -> None:
++            super().__init__()
++            self.style_resolution_called = False
++            self.validated: tuple[str, str] | None = None
++
++        def validate_voice_language(self, voice: str, language: str) -> None:
++            self.validated = (voice, language)
++            raise ConfigurationError("voice does not support requested language")
++
++        def resolve_voice_style(self, voice: str) -> str:
++            self.style_resolution_called = True
++            return super().resolve_voice_style(voice)
++
++    request = SynthesisSegment("router-voice", "Hello", "en-us", voice="AV_julia")
++    prepared = PreparedSynthesis(
++        request_id=request.id,
++        text=request.text,
++        language=request.language,
++        voice=request.voice,
++        phonemes="hello",
++        token_ids=(1, 2),
++    )
++    backend = VoiceLanguageBackend()
++    renderer = OnnxRequestRenderer(FakeG2PAdapter(), backend_factory=lambda _: backend)
++
++    with pytest.raises(ConfigurationError, match="requested language"):
++        renderer.render(prepared, request, _config())
++
++    assert backend.validated == ("AV_julia", "en-us")
++    assert not backend.style_resolution_called
++
++
+ def test_renderer_reports_invalid_voice_as_typed_error() -> None:
+     class MissingVoiceBackend(FakeBackend):
+         def resolve_voice_style(self, voice: str) -> str:

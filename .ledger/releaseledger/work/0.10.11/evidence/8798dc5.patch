@@ -1,0 +1,2200 @@
+ .github/workflows/tests.yml               |  24 +++
+ docs/installation.md                      |  26 +++
+ docs/languages.md                         |  12 ++
+ pykokoro/_onnxvoice.py                    |   4 +-
+ pykokoro/audio_generator.py               | 254 ++++++++++++++++++++++++++++--
+ pykokoro/discovery.py                     |   2 +
+ pykokoro/frontend_contracts.py            |  16 ++
+ pykokoro/model_profiles.py                |  61 ++++++-
+ pykokoro/onnx_backend.py                  | 101 +++++++++---
+ pykokoro/request_renderer.py              | 235 ++++++++++++++++++++++++++-
+ pykokoro/runtime_protocol.py              |   1 +
+ pykokoro/synthesis_config.py              | 123 ++++++++++++++-
+ tests/test_akinvox_multispeaker.py        | 202 ++++++++++++++++++++++++
+ tests/test_audio_generator_logging.py     |   1 +
+ tests/test_audio_generator_performance.py | 147 ++++++++++++++++-
+ tests/test_long_text_splitting.py         | 119 ++++++++++++++
+ tests/test_model_discovery.py             |  71 +++++++++
+ tests/test_onnxvoice_boundary.py          | 107 ++++++++++++-
+ tests/test_packaging_metadata.py          |  16 +-
+ tests/test_release_profiles.py            | 162 +++++++++++++++++++
+ tests/test_request_renderer.py            |   1 +
+ 21 files changed, 1640 insertions(+), 45 deletions(-)
+
+diff --git a/.github/workflows/tests.yml b/.github/workflows/tests.yml
+index 346dff5..72b211e 100644
+--- a/.github/workflows/tests.yml
++++ b/.github/workflows/tests.yml
+@@ -104,6 +104,30 @@ jobs:
+     - name: Tests
+       run: pytest -m "not slow"
+
++  akinvox-german-frontend:
++    runs-on: ubuntu-latest
++    container:
++      image: python:3.13-bookworm
++    steps:
++    - uses: actions/checkout@v4
++    - name: Install and verify eSpeak-NG 1.51
++      run: |
++        apt-get update
++        apt-get install -y espeak-ng
++        version="$(espeak-ng --version)"
++        printf '%s\n' "$version"
++        printf '%s\n' "$version" | grep -Eq '1\.51([[:space:]]|$)'
++    - name: Install project and test dependencies
++      run: |
++        python -m pip install --upgrade pip
++        python -m pip install pytest .
++    - name: Install German frontend lexicon data
++      run: lexphon data install de-de:gold
++    - name: Verify German AKinVox frontend fixture
++      run: >-
++        python -m pytest -q tests/test_akinvox_multispeaker.py
++        -k 'frontend_matches_release_ready_phoneme_and_token_fixtures and akinvox-multispeaker-v1-de'
++
+   lower-bounds:
+     runs-on: ubuntu-latest
+     steps:
+diff --git a/docs/installation.md b/docs/installation.md
+index 92513be..2b0b4c4 100644
+--- a/docs/installation.md
++++ b/docs/installation.md
+@@ -120,6 +120,32 @@ config = SynthesisConfig(asset_progress=report_progress)
+ Explicit custom `model_path` and `voices_path` values are used in place and validated;
+ they are not silently replaced with managed downloads.
+
++## AKinVox multispeaker
++
++For the release-compatible German frontend expectation, use eSpeak-NG 1.51. CI installs
++that version explicitly and checks the German KokoroG2P fixture. Other eSpeak-NG
++versions may produce different phonemes or token IDs.
++
++The `AV_*` voice selects `github/akinvox-multispeaker-v1`, but the request language must
++still be explicit. English and German voices are not interchangeable. The language and
++voice are validated before ONNX inference.
++
++### Optional local published-release audio smoke
++
++This smoke requires the project checkout, a CPU ONNX Runtime provider, and a locally
++installed release manifest whose relative model and voice assets already exist. It
++passes the manifest directly to PyKokoro, so the test does not download model assets.
++From the repository root, set the manifest path and run:
++
++```bash
++pip install -e ".[cpu]"
++export PYKOKORO_AKINVOX_RELEASE_MANIFEST=/absolute/path/to/release.json
++python -m pytest -m slow -q tests/test_akinvox_multispeaker.py -k local_published_release_audio_smoke
++```
++
++The smoke synthesizes one short English request with `AV_ariala` and one German request
++with `AV_thorsten`. Ordinary tests do not require these assets.
++
+ ## Development install
+
+ ```bash
+diff --git a/docs/languages.md b/docs/languages.md
+index cb4ca9c..1d577bd 100644
+--- a/docs/languages.md
++++ b/docs/languages.md
+@@ -118,3 +118,15 @@ Reference-only profiles report `voice_mode="reference"`, an empty `voices` tuple
+ default voice, `supports_reference_enrollment=True`, and `speed_supported=False`. Use
+ `KokoroSynthesizer.enroll_voice()` before synthesis with such a profile. See the
+ [English reference voice guide](reference_voice.md).
++
++## AKinVox multispeaker
++
++`github/akinvox-multispeaker-v1` supports English and German with fixed `AV_*` voices.
++The voice can select this profile, but the request language remains explicit and
++mismatched voice/language pairs are rejected. The profile is not selected as a global
++English or German default.
++
++For reproducible German frontend output, use eSpeak-NG 1.51. The German AKinVox fixture
++runs in a dedicated CI job that verifies this exact major/minor version before testing
++the existing KokoroG2P frontend. See
++[installation](installation.md#akinvox-multispeaker) for the opt-in local release smoke.
+diff --git a/pykokoro/_onnxvoice.py b/pykokoro/_onnxvoice.py
+index 89a29b4..81f01b8 100644
+--- a/pykokoro/_onnxvoice.py
++++ b/pykokoro/_onnxvoice.py
+@@ -902,9 +902,9 @@ class KokoroRuntimeAdapter:
+         *,
+         style: Any | None = None,
+         reference: Any | None = None,
+-        speed: float,
+-        seed: int | None = None,
+         language: str | None = None,
++        speed: float = 1.0,
++        seed: int | None = None,
+     ) -> Any:
+         if self._closed:
+             raise RuntimeError("Kokoro runtime is closed")
+diff --git a/pykokoro/audio_generator.py b/pykokoro/audio_generator.py
+index a58d2c3..bcc1beb 100644
+--- a/pykokoro/audio_generator.py
++++ b/pykokoro/audio_generator.py
+@@ -42,6 +42,9 @@ if TYPE_CHECKING:
+ logger = logging.getLogger(__name__)
+
+
++_AKINVOX_NARRATION_CONTEXT_KEY = "__akinvox_narration_context"
++
++
+ def _waveform_metrics(audio: np.ndarray) -> dict[str, float | int | bool]:
+     """Return compact, JSON-friendly metrics for a segment waveform."""
+     values = np.asarray(audio, dtype=np.float64).reshape(-1)
+@@ -123,6 +126,12 @@ def _is_stationary_broadband_noise(audio: np.ndarray) -> tuple[bool, dict[str, f
+ ModelSource = Literal["huggingface", "github"]
+
+
++def _normalize_acoustic_route(language: str | None) -> str | None:
++    if language is None:
++        return None
++    return language.strip().lower().replace("_", "-").split("-", 1)[0]
++
++
+ class AudioGenerator:
+     """Generate audio using a producer-neutral Kokoro inference runtime.
+
+@@ -202,6 +211,7 @@ class AudioGenerator:
+         inputs: dict[str, np.ndarray | list[int]],
+         runtime_identity: object = None,
+         reference_identity: tuple[str, int | None] | None = None,
++        acoustic_route: str | None = None,
+     ) -> bytes:
+         """Build a digest from producer inputs and runtime identity."""
+         digest = hashlib.blake2b(digest_size=20)
+@@ -210,6 +220,10 @@ class AudioGenerator:
+         if reference_identity is not None:
+             digest.update(repr(reference_identity).encode("utf-8"))
+             digest.update(b"\0")
++        if acoustic_route is not None:
++            digest.update(b"route\0")
++            digest.update(acoustic_route.encode("utf-8"))
++            digest.update(b"\0")
+         for name in sorted(inputs):
+             array = np.ascontiguousarray(np.asarray(inputs[name]))
+             digest.update(name.encode("utf-8"))
+@@ -275,6 +289,7 @@ class AudioGenerator:
+         cache_hit: bool,
+         cache_key: bytes,
+         attempt_kind: str,
++        acoustic_route: str | None = None,
+     ) -> None:
+         self._inference_call_number += 1
+         if trace is None:
+@@ -295,6 +310,7 @@ class AudioGenerator:
+                 "token_ids": list(tokens),
+                 "token_count": len(tokens),
+                 "attempt_kind": attempt_kind,
++                "acoustic_route": acoustic_route,
+                 "inputs": {
+                     name: {
+                         "dtype": str(np.asarray(value).dtype),
+@@ -443,11 +459,23 @@ class AudioGenerator:
+             if speed != 1.0:
+                 raise ConfigurationError("reference voice synthesis requires speed=1.0")
+         runtime_identity = getattr(self._runtime, "cache_identity", None)
++        runtime_metadata = getattr(getattr(self._runtime, "resolved", None), "metadata", None)
++        routing_metadata = (
++            runtime_metadata.get("runtime") if isinstance(runtime_metadata, Mapping) else None
++        )
++        is_language_router = (
++            isinstance(routing_metadata, Mapping)
++            and routing_metadata.get("layout") == "language-router-onnx-v1"
++        )
++        acoustic_route = _normalize_acoustic_route(language) if is_language_router else None
+         reference_identity = (
+             (reference_voice.fingerprint, seed) if reference_voice is not None else None
+         )
+         cache_key = self._inference_cache_key(
+-            inputs, runtime_identity, reference_identity=reference_identity
++            inputs,
++            runtime_identity,
++            reference_identity=reference_identity,
++            acoustic_route=acoustic_route,
+         )
+         cached = self._get_cached_inference(cache_key)
+         result: Any | None = None
+@@ -458,15 +486,7 @@ class AudioGenerator:
+         else:
+             started = time.perf_counter()
+             runtime_kwargs: dict[str, Any] = {"speed": speed, "seed": seed}
+-            runtime_metadata = getattr(getattr(self._runtime, "resolved", None), "metadata", None)
+-            routing_metadata = (
+-                runtime_metadata.get("runtime") if isinstance(runtime_metadata, Mapping) else None
+-            )
+-            if (
+-                language is not None
+-                and isinstance(routing_metadata, Mapping)
+-                and routing_metadata.get("layout") == "language-router-onnx-v1"
+-            ):
++            if language is not None and is_language_router:
+                 runtime_kwargs["language"] = language
+             if reference_voice is None:
+                 assert voice_style_indexed is not None
+@@ -506,6 +526,7 @@ class AudioGenerator:
+             cache_hit=cache_hit,
+             cache_key=cache_key,
+             attempt_kind=attempt_kind,
++            acoustic_route=acoustic_route,
+         )
+         timing_summary = None
+         output_summary: dict[str, Any] = {}
+@@ -522,11 +543,12 @@ class AudioGenerator:
+             }
+         if logger.isEnabledFor(logging.DEBUG):
+             logger.debug(
+-                "inference.finish cache_hit=%s attempt=%s phonemes=%d tokens=%d "
++                "inference.finish cache_hit=%s attempt=%s acoustic_route=%s phonemes=%d tokens=%d "
+                 "samples=%d runtime_ms=%.3f timing_layout=%s timing_values=%d "
+                 "expected_timing_count=%s timestamp_support=%s outputs=%s",
+                 cache_hit,
+                 attempt_kind,
++                acoustic_route,
+                 len(effective_phonemes),
+                 len(effective_tokens),
+                 int(np.asarray(audio).size),
+@@ -771,6 +793,13 @@ class AudioGenerator:
+         noise_flags: list[bool] = []
+         for segment in segments:
+             short_sentence_metadata = (segment.engine_metadata or {}).get(SHORT_SENTENCE_META_KEY)
++            narration_context = (segment.engine_metadata or {}).get(_AKINVOX_NARRATION_CONTEXT_KEY)
++            if isinstance(narration_context, dict) and isinstance(short_sentence_metadata, dict):
++                self._restore_narration_body_segment(
++                    segment, narration_context, discard_short_sentence=True
++                )
++                narration_context = None
++                short_sentence_metadata = None
+             if trace is not None and isinstance(short_sentence_metadata, dict):
+                 trace.increment_counter("short_sentence_detected")
+                 if short_sentence_metadata.get("kind") in {"phrase", "randomized-phrase"}:
+@@ -814,6 +843,39 @@ class AudioGenerator:
+                     }
+                 )
+             segment.word_timings = self._map_pred_dur_to_word_timings(segment, pred_dur, len(audio))
++            if isinstance(narration_context, dict):
++                trimmed = self._trim_narration_context(segment, audio, narration_context)
++                if trimmed is None:
++                    if not self._restore_narration_body_segment(segment, narration_context):
++                        raise ConfigurationError(
++                            "AKinVox narration context could not be safely restored body-only"
++                        )
++                    if trace is not None:
++                        trace.increment_counter("narration_context_body_only_fallback")
++                    inference_kwargs: dict[str, Any] = {
++                        "attempt_kind": "fallback",
++                        "tokens": segment.tokens or None,
++                        "seed": seed,
++                        "reference_voice": reference_voice,
++                        "language": segment.lang,
++                    }
++                    if trace is not None:
++                        inference_kwargs["trace"] = trace
++                    audio, pred_dur = self._run_voice_conditioned_onnx(
++                        segment.phonemes,
++                        segment_voice_style,
++                        speed,
++                        **inference_kwargs,
++                    )
++                    segment.word_timings = self._map_pred_dur_to_word_timings(
++                        segment, pred_dur, len(audio)
++                    )
++                else:
++                    audio, body_timings = trimmed
++                    self._restore_narration_body_segment(
++                        segment, narration_context, clear_word_timings=False
++                    )
++                    segment.word_timings = body_timings
+             self._log_short_sentence_timestamps(segment, pred_dur)
+             segment.raw_audio = self._prepare_short_sentence_phrase_audio(
+                 segment,
+@@ -840,6 +902,176 @@ class AudioGenerator:
+             logger.warning(message)
+         return segments
+
++    @staticmethod
++    def _restore_narration_body_segment(
++        segment: PhonemeSegment,
++        context: Mapping[str, Any],
++        *,
++        clear_word_timings: bool = True,
++        discard_short_sentence: bool = False,
++    ) -> bool:
++        body = context.get("body")
++        if not isinstance(body, Mapping):
++            return False
++        raw_alignment = body.get("alignment_tokens")
++        if not isinstance(raw_alignment, list):
++            return False
++        try:
++            alignment_tokens = [
++                G2PAlignmentToken(**dict(item))
++                for item in raw_alignment
++                if isinstance(item, Mapping)
++            ]
++        except (TypeError, ValueError):
++            return False
++        if len(alignment_tokens) != len(raw_alignment):
++            return False
++        required = ("text", "phonemes", "tokens", "char_start", "char_end")
++        if any(key not in body for key in required):
++            return False
++        if not isinstance(body["tokens"], list):
++            return False
++        segment.text = str(body["text"])
++        segment.phonemes = str(body["phonemes"])
++        segment.tokens = list(body["tokens"])
++        segment.char_start = int(body["char_start"])
++        segment.char_end = int(body["char_end"])
++        segment.alignment_tokens = alignment_tokens
++        metadata = dict(segment.engine_metadata or {})
++        metadata.pop(_AKINVOX_NARRATION_CONTEXT_KEY, None)
++        if discard_short_sentence:
++            metadata.pop(SHORT_SENTENCE_META_KEY, None)
++        segment.engine_metadata = metadata or None
++        if clear_word_timings:
++            segment.word_timings = []
++        segment.raw_audio = None
++        segment.processed_audio = None
++        return True
++
++    @staticmethod
++    def _timing_spans_cover_word(timings: list[WordTiming], word_start: int, word_end: int) -> bool:
++        intervals = sorted(
++            (max(word_start, timing.char_start), min(word_end, timing.char_end))
++            for timing in timings
++            if timing.char_start < word_end and timing.char_end > word_start
++        )
++        cursor = word_start
++        for start, end in intervals:
++            if start > cursor:
++                return False
++            cursor = max(cursor, end)
++        return cursor >= word_end
++
++    @classmethod
++    def _trim_narration_context(
++        cls,
++        segment: PhonemeSegment,
++        audio: np.ndarray,
++        context: Mapping[str, Any],
++    ) -> tuple[np.ndarray, list[WordTiming]] | None:
++        def spans(value: object) -> list[tuple[int, int]] | None:
++            if not isinstance(value, list):
++                return None
++            result: list[tuple[int, int]] = []
++            for item in value:
++                if (
++                    not isinstance(item, (list, tuple))
++                    or len(item) != 2
++                    or not all(isinstance(position, int) for position in item)
++                    or item[0] >= item[1]
++                ):
++                    return None
++                result.append((item[0], item[1]))
++            return result
++
++        source_spans = spans(context.get("source_word_spans"))
++        body_spans = spans(context.get("body_word_spans"))
++        body_start = context.get("body_char_start")
++        body_end = context.get("body_char_end")
++        context_start = context.get("context_char_start")
++        context_end = context.get("context_char_end")
++        context_text = context.get("context_text")
++        if (
++            not source_spans
++            or not body_spans
++            or not all(
++                isinstance(value, int)
++                for value in (body_start, body_end, context_start, context_end)
++            )
++            or not isinstance(context_text, str)
++            or segment.char_start != context_start
++            or segment.text != context_text
++            or not context_start <= body_start < body_end <= context_end
++            or context_text != segment.text
++        ):
++            return None
++        body = context.get("body")
++        if not isinstance(body, Mapping):
++            return None
++        local_start = body_start - context_start
++        local_end = body_end - context_start
++        if context_text[local_start:local_end] != body.get("text"):
++            return None
++        if not segment.word_timings:
++            return None
++
++        before_timings: list[WordTiming] = []
++        body_timings: list[WordTiming] = []
++        after_timings: list[WordTiming] = []
++        audio_length = int(np.asarray(audio).size)
++        for timing in segment.word_timings:
++            if (
++                timing.start_sample < 0
++                or timing.end_sample <= timing.start_sample
++                or timing.end_sample > audio_length
++                or timing.char_start < context_start
++                or timing.char_end > context_end
++                or context_text[timing.char_start - context_start : timing.char_end - context_start]
++                != timing.text
++                or not any(
++                    timing.char_start >= start and timing.char_end <= end
++                    for start, end in source_spans
++                )
++            ):
++                return None
++            if timing.char_start >= body_start and timing.char_end <= body_end:
++                body_timings.append(timing)
++            elif timing.char_end <= body_start:
++                before_timings.append(timing)
++            elif timing.char_start >= body_end:
++                after_timings.append(timing)
++            else:
++                return None
++        if not body_timings:
++            return None
++        if any(
++            not cls._timing_spans_cover_word(segment.word_timings, start, end)
++            for start, end in source_spans
++        ):
++            return None
++        if int(context.get("context_before_words", 0)) and not before_timings:
++            return None
++        if int(context.get("context_after_words", 0)) and not after_timings:
++            return None
++
++        cut_start = min(timing.start_sample for timing in body_timings)
++        cut_end = max(timing.end_sample for timing in body_timings)
++        if cut_start >= cut_end or cut_end > audio_length:
++            return None
++        if before_timings and max(item.end_sample for item in before_timings) > cut_start:
++            return None
++        if after_timings and min(item.start_sample for item in after_timings) < cut_end:
++            return None
++        cropped_timings = [
++            dataclasses.replace(
++                timing,
++                start_sample=timing.start_sample - cut_start,
++                end_sample=timing.end_sample - cut_start,
++            )
++            for timing in body_timings
++        ]
++        return np.asarray(audio).reshape(-1)[cut_start:cut_end].copy(), cropped_timings
++
+     def _generate_reference_audio_segments(
+         self,
+         segments: list[PhonemeSegment],
+diff --git a/pykokoro/discovery.py b/pykokoro/discovery.py
+index 7360e02..1d5baac 100644
+--- a/pykokoro/discovery.py
++++ b/pykokoro/discovery.py
+@@ -58,6 +58,7 @@ class ModelCapabilities:
+     max_tokens: int | None = None
+     voice_details: tuple[VoiceCapabilities, ...] = ()
+
++    layout: str = ""
+     voice_mode: str = "static"
+     supports_reference_enrollment: bool = False
+     speed_supported: bool = True
+@@ -189,6 +190,7 @@ def _capabilities_for_model(
+         provider=distribution.provider if distribution is not None else None,
+         sample_rate=model.sample_rate,
+         max_tokens=model.max_tokens,
++        layout=model.layout,
+         voice_mode=voice_mode,
+         supports_reference_enrollment=voice_mode == "reference",
+         speed_supported=speed_supported,
+diff --git a/pykokoro/frontend_contracts.py b/pykokoro/frontend_contracts.py
+index 1b735ce..a5677a7 100644
+--- a/pykokoro/frontend_contracts.py
++++ b/pykokoro/frontend_contracts.py
+@@ -57,6 +57,22 @@ FRONTEND_FIXTURES: dict[ModelVariant, FrontendFixture] = {
+     "ru-zaakirio-base": FrontendFixture("ru-zaakirio-base", "ru", "Привет", "kokorog2p", "privˈet"),
+     "ru-zaakirio-dima": FrontendFixture("ru-zaakirio-dima", "ru", "Привет", "kokorog2p", "privˈet"),
+     "th-wayu": FrontendFixture("th-wayu", "th", "สวัสดี", "kokorog2p", "sawatdi"),
++    "akinvox-multispeaker-v1": FrontendFixture(
++        "akinvox-multispeaker-v1",
++        "en-us",
++        "Welcome to our next story.",
++        "kokorog2p",
++        "wˈɛlkəm tʊ ˌWəɹ nˈɛkst stˈɔɹi.",
++        release_ready=True,
++    ),
++    "akinvox-multispeaker-v1-de": FrontendFixture(
++        "akinvox-multispeaker-v1",
++        "de",
++        "Willkommen zu unserer nächsten Geschichte.",
++        "kokorog2p",
++        "vɪlkˈɔmən ʦʊ ˈʊnzərɜ nˈɛçstən ɡəʃˈɪçtə.",
++        release_ready=True,
++    ),
+ }
+
+ FRONTEND_NAMED_LEXICONS: dict[str, tuple[str, ...]] = {
+diff --git a/pykokoro/model_profiles.py b/pykokoro/model_profiles.py
+index a3d6400..1a3792e 100644
+--- a/pykokoro/model_profiles.py
++++ b/pykokoro/model_profiles.py
+@@ -37,6 +37,7 @@ class RuntimeProfile:
+     quality_files: Mapping[str, str] = field(default_factory=dict)
+     voice_names: tuple[str, ...] = ()
+
++    voice_languages: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+     layout: str = "single-onnx-v1"
+     runtime_available: bool = True
+     redistribution_allowed: bool = True
+@@ -347,6 +348,53 @@ MODEL_PROFILES[("github", "en-akinvox-cloning-v1")] = RuntimeProfile(
+ )
+
+
++_AKINVOX_ENGLISH_VOICES = (
++    "AV_ariala",
++    "AV_brody",
++    "AV_david",
++    "AV_elliott",
++    "AV_ralph",
++    "AV_cori",
++    "AV_phil",
++    "AV_helen",
++)
++_AKINVOX_GERMAN_VOICES = (
++    "AV_thorsten",
++    "AV_bernd",
++    "AV_eva_k",
++    "AV_karlsson",
++    "AV_kerstin",
++    "AV_mucky",
++    "AV_hokuspokus",
++    "AV_julia",
++)
++MODEL_PROFILES[("github", "akinvox-multispeaker-v1")] = RuntimeProfile(
++    source="github",
++    variant="akinvox-multispeaker-v1",
++    language_codes=("en", "en-us", "en-gb", "de", "de-de", "de-at", "de-ch"),
++    default_voice="AV_ariala",
++    vocabulary_source="builtin-v1.0",
++    tokenizer_vocab_version="1.0",
++    frontend="akinvox-multispeaker-v1",
++    frontend_experimental=False,
++    onnx_inputs={"tokens": "int64", "style": "float32", "speed": "float32"},
++    sample_rate=24_000,
++    max_tokens=510,
++    voice_names=_AKINVOX_ENGLISH_VOICES + _AKINVOX_GERMAN_VOICES,
++    voice_languages={
++        **dict.fromkeys(_AKINVOX_ENGLISH_VOICES, ("en",)),
++        **dict.fromkeys(_AKINVOX_GERMAN_VOICES, ("de",)),
++    },
++    layout="language-router-onnx-v1",
++    runtime_available=True,
++    redistribution_allowed=True,
++    support_status="ready",
++    g2p_backend="kokorog2p",
++    auto_select_for_language=False,
++    auto_select_for_voice=True,
++)
++
++
+ GERMAN_MARTIN_V1_2 = MODEL_PROFILES[("github", "v1.2-de-martin")]
+
+
+@@ -446,8 +494,14 @@ IMPLEMENTED_FRONTENDS = {
+     "kokorog2p-ru-v1",
+     "kokorog2p-th-wayu-v1",
+     "tts-eu-pt-v1",
++    "akinvox-multispeaker-v1",
++}
++IMPLEMENTED_LAYOUTS = {
++    "single-onnx-v1",
++    "split-onnx-v1",
++    "cloning-onnx-v1",
++    "language-router-onnx-v1",
+ }
+-IMPLEMENTED_LAYOUTS = {"single-onnx-v1", "split-onnx-v1", "cloning-onnx-v1"}
+
+
+ def canonical_voice_name(model_id: str, voice: str) -> str:
+@@ -558,6 +612,11 @@ def get_registry_model_profile(
+         max_tokens=model.max_tokens,
+         quality_files=qualities,
+         voice_names=model.voices,
++        voice_languages={
++            voice: (metadata["language"],)
++            for voice, metadata in model.voice_metadata.items()
++            if isinstance(metadata.get("language"), str) and metadata["language"]
++        },
+         layout=model.layout,
+         runtime_available=model.runtime_available,
+         redistribution_allowed=model.redistribution_allowed,
+diff --git a/pykokoro/onnx_backend.py b/pykokoro/onnx_backend.py
+index e1a8a4e..51b7e78 100644
+--- a/pykokoro/onnx_backend.py
++++ b/pykokoro/onnx_backend.py
+@@ -301,33 +301,82 @@ class Kokoro:
+         provider = self._provider or ("auto" if self._use_gpu else "cpu")
+         profile = get_model_profile(self._model_variant, self._model_source)
+         if self._model_artifacts is not None:
+-            if profile.voice_mode != "reference":
++            if profile.layout == "cloning-onnx-v1" and profile.voice_mode == "reference":
++                artifacts = {
++                    (
++                        "config"
++                        if component == "config"
++                        else "metadata:source_params"
++                        if component == "source_params"
++                        else f"model:{component}"
++                    ): path
++                    for component, path in self._model_artifacts.items()
++                }
++                if self._model_config_path is not None:
++                    artifacts["config"] = self._model_config_path
++                runtime = open_local_kokoro(
++                    artifacts=artifacts,
++                    runtime={"layout": profile.layout, "voice_mode": profile.voice_mode},
++                    metadata={"model_id": self._model_variant},
++                    sample_rate=profile.sample_rate,
++                    providers=provider,
++                    provider_options=self._provider_options,
++                    session_options=self._session_options,
++                )
++            elif profile.layout == "language-router-onnx-v1" and profile.voice_mode == "static":
++                required_components = {"model_en", "model_de"}
++                if set(self._model_artifacts) != required_components:
++                    raise ConfigurationError(
++                        "Language-router model_artifacts must contain exactly model_en and model_de"
++                    )
++                if self._model_path is not None:
++                    raise ConfigurationError(
++                        "Language-router local loading requires componentized model_artifacts, "
++                        "not model_path"
++                    )
++                if self._voices_path is None:
++                    raise ConfigurationError("Language-router local loading requires a voices_path")
++                artifacts = {
++                    f"model:{component}": self._model_artifacts[component]
++                    for component in ("model_en", "model_de")
++                }
++                artifacts["voices"] = self._voices_path
++                if self._model_config_path is not None:
++                    artifacts["config"] = self._model_config_path
++                runtime_metadata = {
++                    "layout": profile.layout,
++                    "voice_mode": profile.voice_mode,
++                    "language_models": {"en": "model_en", "de": "model_de"},
++                    "language_codes": list(profile.language_codes),
++                    "voice_metadata": {
++                        voice: {"language": languages[0]}
++                        for voice, languages in profile.voice_languages.items()
++                        if languages
++                    },
++                }
++                runtime = open_local_kokoro(
++                    artifacts=artifacts,
++                    runtime=runtime_metadata,
++                    metadata={
++                        "model_id": self._model_variant,
++                        "selected_quality": self._model_quality,
++                    },
++                    sample_rate=profile.sample_rate,
++                    providers=provider,
++                    provider_options=self._provider_options,
++                    session_options=self._session_options,
++                )
++            else:
+                 raise ConfigurationError(
+-                    "Componentized model_artifacts require a reference-voice model"
++                    "Componentized model_artifacts are supported only for cloning and "
++                    "language-router layouts"
+                 )
+-            artifacts = {
+-                (
+-                    "config"
+-                    if component == "config"
+-                    else "metadata:source_params"
+-                    if component == "source_params"
+-                    else f"model:{component}"
+-                ): path
+-                for component, path in self._model_artifacts.items()
+-            }
+-            if self._model_config_path is not None:
+-                artifacts["config"] = self._model_config_path
+-            runtime = open_local_kokoro(
+-                artifacts=artifacts,
+-                runtime={"layout": profile.layout, "voice_mode": profile.voice_mode},
+-                metadata={"model_id": self._model_variant},
+-                sample_rate=profile.sample_rate,
+-                providers=provider,
+-                provider_options=self._provider_options,
+-                session_options=self._session_options,
+-            )
+             resolved = runtime.resolved
+         elif self._model_path is not None or self._voices_path is not None:
++            if profile.layout == "language-router-onnx-v1":
++                raise ConfigurationError(
++                    "Language-router local loading requires componentized model_artifacts"
++                )
+             if profile.voice_mode == "reference":
+                 raise ConfigurationError(
+                     "Reference-only models require componentized model_artifacts"
+@@ -372,7 +421,11 @@ class Kokoro:
+         )
+         self._runtime = runtime
+         self._model_path = resolved.model_paths[0] if resolved.model_paths else None
+-        self._voices_path = resolved.voices_path
++        self._model_path = (
++            resolved.model_paths[0]
++            if resolved.model_paths and profile.layout != "language-router-onnx-v1"
++            else None
++        )
+         self._model_config_path = resolved.config_path
+         if profile.voice_mode == "static":
+             if self._voices_path is None:
+diff --git a/pykokoro/request_renderer.py b/pykokoro/request_renderer.py
+index a42fc3b..4ec9622 100644
+--- a/pykokoro/request_renderer.py
++++ b/pykokoro/request_renderer.py
+@@ -29,11 +29,18 @@ from .reference_voice import ReferenceVoice
+ from .synthesis_config import SynthesisConfig, resolve_synthesis_config
+ from .synthesis_identity import build_synthesis_identity
+ from .synthesis_types import RenderedSegment, SynthesisSegment
+-from .types import PhonemeSegment, Trace, WordTiming
++from .types import (
++    PhonemeSegment,
++    Trace,
++    WordTiming,
++    _exact_timing_geometry,
++)
+ from .voice_enrollment import InnoEnrollmentOptions
+ from .voice_level import resolve_voice_level_application
+ from .voice_pack import KokoroVoicePack
+
++_AKINVOX_NARRATION_CONTEXT_KEY = "__akinvox_narration_context"
++
+
+ def _call_backend_operation(
+     function: Callable[[], Any],
+@@ -564,6 +571,15 @@ class OnnxRequestRenderer:
+
+         if not safe_spans:
+             raise BackendError(f"PhraseSplit produced no usable spans for request {request.id!r}")
++        context_counts = self._akinvox_narration_context_counts(request, config)
++        if context_counts is not None:
++            return self._pack_contextual_chunks(
++                request,
++                safe_spans,
++                phonemize_span,
++                max_tokens,
++                context_counts,
++            )
+
+         packed: list[tuple[int, int, PreparedSynthesis]] = []
+         chunk_start, chunk_end = safe_spans[0]
+@@ -586,6 +602,223 @@ class OnnxRequestRenderer:
+             for index, (start, end, prepared) in enumerate(packed)
+         ]
+
++    @staticmethod
++    def _akinvox_narration_context_counts(
++        request: SynthesisSegment, config: SynthesisConfig
++    ) -> tuple[int, int] | None:
++        if (
++            config.model_source != "github"
++            or config.model_variant != "akinvox-multispeaker-v1"
++            or not isinstance(request.voice, str)
++            or not request.voice.startswith("AV_")
++        ):
++            return None
++        language = request.language.strip().lower().replace("_", "-").split("-", 1)[0]
++        if language == "en":
++            return 1, 2
++        if language == "de":
++            return 1, 1
++        return None
++
++    @staticmethod
++    def _narration_context_window(
++        text: str,
++        start: int,
++        end: int,
++        before_words: int,
++        after_words: int,
++    ) -> dict[str, Any] | None:
++        words = [(match.start(), match.end()) for match in re.finditer(r"\S+", text)]
++        body_indices = [
++            index
++            for index, (word_start, word_end) in enumerate(words)
++            if word_start < end and word_end > start
++        ]
++        if not body_indices:
++            return None
++        if any(
++            word_start < start < word_end or word_start < end < word_end
++            for word_start, word_end in words
++        ):
++            return None
++        first, last = body_indices[0], body_indices[-1]
++        before_index = max(0, first - before_words)
++        after_index = min(len(words) - 1, last + after_words)
++        actual_before = first - before_index
++        actual_after = after_index - last
++        if not actual_before and not actual_after:
++            return None
++        context_start = words[before_index][0] if actual_before else start
++        context_end = words[after_index][1] if actual_after else end
++        return {
++            "context_char_start": context_start,
++            "context_char_end": context_end,
++            "body_char_start": start,
++            "body_char_end": end,
++            "context_before_words": actual_before,
++            "context_after_words": actual_after,
++            "source_word_spans": [list(span) for span in words[before_index : after_index + 1]],
++            "body_word_spans": [list(words[index]) for index in range(first, last + 1)],
++        }
++
++    @staticmethod
++    def _has_exact_narration_alignment(
++        request: SynthesisSegment,
++        prepared: PreparedSynthesis,
++        context: dict[str, Any],
++    ) -> bool:
++        context_start = context["context_char_start"]
++        context_end = context["context_char_end"]
++        body_start = context["body_char_start"]
++        body_end = context["body_char_end"]
++        if (
++            prepared.text != request.text[context_start:context_end]
++            or not prepared.alignment_tokens
++        ):
++            return False
++        intervals: list[tuple[int, int]] = []
++        for token in prepared.alignment_tokens:
++            start = token.char_start
++            end = token.char_end
++            if (
++                not isinstance(start, int)
++                or isinstance(start, bool)
++                or not isinstance(end, int)
++                or isinstance(end, bool)
++                or start < 0
++                or end <= start
++                or end > context_end - context_start
++                or prepared.text[start:end] != token.text
++                or _exact_timing_geometry(token) is None
++            ):
++                return False
++            absolute_start = context_start + start
++            absolute_end = context_start + end
++            if (
++                absolute_start < body_start < absolute_end
++                or absolute_start < body_end < absolute_end
++            ):
++                return False
++            intervals.append((absolute_start, absolute_end))
++
++        for word_start, word_end in context["source_word_spans"]:
++            cursor = word_start
++            for start, end in sorted(
++                (left, right) for left, right in intervals if left < word_end and right > word_start
++            ):
++                if start > cursor:
++                    return False
++                cursor = max(cursor, end)
++            if cursor < word_end:
++                return False
++        return True
++
++    def _pack_contextual_chunks(
++        self,
++        request: SynthesisSegment,
++        safe_spans: list[tuple[int, int]],
++        phonemize_span: Callable[[int, int], PreparedSynthesis],
++        max_tokens: int,
++        context_counts: tuple[int, int],
++    ) -> list[PhonemeSegment]:
++        before_words, after_words = context_counts
++        segments: list[PhonemeSegment] = []
++        position = 0
++        phoneme_id = 0
++        while position < len(safe_spans):
++            body_start = safe_spans[position][0]
++            best_body: tuple[int, int, PreparedSynthesis] | None = None
++            best_context: (
++                tuple[int, int, PreparedSynthesis, int, int, PreparedSynthesis, dict[str, Any]]
++                | None
++            ) = None
++            context_budget_exhausted = False
++            for stop in range(position + 1, len(safe_spans) + 1):
++                body_end = safe_spans[stop - 1][1]
++                body_prepared = phonemize_span(body_start, body_end)
++                if len(body_prepared.token_ids) > max_tokens:
++                    break
++                best_body = (stop, body_end, body_prepared)
++                if context_budget_exhausted:
++                    continue
++                context = self._narration_context_window(
++                    request.text, body_start, body_end, before_words, after_words
++                )
++                if context is None:
++                    continue
++                context_start = context["context_char_start"]
++                context_end = context["context_char_end"]
++                try:
++                    context_prepared = phonemize_span(context_start, context_end)
++                except InvalidRequestError:
++                    continue
++                if len(context_prepared.token_ids) > max_tokens:
++                    context_budget_exhausted = True
++                    continue
++                if self._has_exact_narration_alignment(request, context_prepared, context):
++                    best_context = (
++                        stop,
++                        body_end,
++                        body_prepared,
++                        context_start,
++                        context_end,
++                        context_prepared,
++                        context,
++                    )
++            if best_context is not None:
++                (
++                    stop,
++                    body_end,
++                    body_prepared,
++                    context_start,
++                    context_end,
++                    context_prepared,
++                    context,
++                ) = best_context
++                segment = self._phoneme_segment_from_prepared(
++                    request,
++                    context_prepared,
++                    start=context_start,
++                    end=context_end,
++                    phoneme_id=phoneme_id,
++                )
++                body_segment = self._phoneme_segment_from_prepared(
++                    request,
++                    body_prepared,
++                    start=body_start,
++                    end=body_end,
++                    phoneme_id=phoneme_id,
++                )
++                context["context_text"] = request.text[context_start:context_end]
++                context["body"] = {
++                    "text": body_segment.text,
++                    "phonemes": body_segment.phonemes,
++                    "tokens": list(body_segment.tokens),
++                    "char_start": body_segment.char_start,
++                    "char_end": body_segment.char_end,
++                    "alignment_tokens": [
++                        token.to_dict() for token in body_segment.alignment_tokens
++                    ],
++                }
++                segment.engine_metadata = {_AKINVOX_NARRATION_CONTEXT_KEY: context}
++            else:
++                if best_body is None:
++                    raise BackendError(
++                        f"PhraseSplit produced no usable chunks for request {request.id!r}"
++                    )
++                stop, body_end, body_prepared = best_body
++                segment = self._phoneme_segment_from_prepared(
++                    request,
++                    body_prepared,
++                    start=body_start,
++                    end=body_end,
++                    phoneme_id=phoneme_id,
++                )
++            segments.append(segment)
++            position = stop
++            phoneme_id += 1
++        return segments
++
+     def _phonemize_source_span(
+         self,
+         request: SynthesisSegment,
+diff --git a/pykokoro/runtime_protocol.py b/pykokoro/runtime_protocol.py
+index 4429d03..01e7db1 100644
+--- a/pykokoro/runtime_protocol.py
++++ b/pykokoro/runtime_protocol.py
+@@ -36,6 +36,7 @@ class KokoroInferenceRuntime(Protocol):
+         *,
+         style: np.ndarray | None = None,
+         reference: Any | None = None,
++        language: str | None = None,
+         speed: float = 1.0,
+         seed: int | None = None,
+     ) -> Any: ...
+diff --git a/pykokoro/synthesis_config.py b/pykokoro/synthesis_config.py
+index f7e46b0..870f972 100644
+--- a/pykokoro/synthesis_config.py
++++ b/pykokoro/synthesis_config.py
+@@ -133,6 +133,11 @@ def _manifest_model_name(
+     return None
+
+
++_LANGUAGE_ROUTER_LAYOUT = "language-router-onnx-v1"
++_LANGUAGE_ROUTER_COMPONENTS = ("model_en", "model_de")
++_LANGUAGE_ROUTER_MODELS = {"en": "model_en", "de": "model_de"}
++
++
+ _REFERENCE_ARTIFACTS = frozenset(
+     {
+         "reference_wavlm",
+@@ -147,6 +152,108 @@ _REFERENCE_ARTIFACTS = frozenset(
+ )
+
+
++def _resolve_language_router_manifest_paths(
++    config: SynthesisConfig, data: dict[str, Any], manifest_path: Path
++) -> SynthesisConfig:
++    runtime = data.get("runtime")
++    if not isinstance(runtime, dict) or runtime.get("layout") != _LANGUAGE_ROUTER_LAYOUT:
++        raise ValueError(
++            f"Release manifest {manifest_path} must declare runtime layout "
++            f"{_LANGUAGE_ROUTER_LAYOUT!r}"
++        )
++    if runtime.get("language_models") != _LANGUAGE_ROUTER_MODELS:
++        raise ValueError(
++            f"Release manifest {manifest_path} must map language_models to "
++            "en:model_en and de:model_de"
++        )
++    if config.model_path is not None:
++        raise ValueError(
++            "Language-router manifests require component model_artifacts, not model_path"
++        )
++
++    assets = [item for item in data.get("assets", []) if isinstance(item, dict)]
++    model_assets = [item for item in assets if item.get("role") == "model"]
++    unexpected = {
++        item.get("component")
++        for item in model_assets
++        if item.get("component") not in _LANGUAGE_ROUTER_COMPONENTS
++    }
++    if unexpected:
++        raise ValueError(
++            f"Release manifest {manifest_path} has unsupported model components: "
++            + ", ".join(sorted(repr(component) for component in unexpected))
++        )
++
++    base = manifest_path.parent
++
++    def asset_path(item: dict[str, Any]) -> Path:
++        name = item.get("name", item.get("filename", item.get("local_name", item.get("path"))))
++        if not isinstance(name, str) or not name:
++            raise ValueError(f"Release manifest {manifest_path} has an unnamed asset")
++        return base / name
++
++    artifacts: dict[str, Path] = {}
++    for component in _LANGUAGE_ROUTER_COMPONENTS:
++        matches = [
++            item
++            for item in model_assets
++            if item.get("component") == component and item.get("quality") == config.model_quality
++        ]
++        if len(matches) != 1:
++            raise ValueError(
++                f"Release manifest {manifest_path} requires exactly one model asset for "
++                f"component {component!r} and quality {config.model_quality!r}"
++            )
++        artifacts[component] = asset_path(matches[0])
++
++    voices = [
++        item
++        for item in assets
++        if item.get("role") == "voices" and item.get("format") == "numpy-npz"
++    ]
++    if len(voices) != 1:
++        raise ValueError(
++            f"Release manifest {manifest_path} requires exactly one voices numpy-npz asset"
++        )
++    voices_path = (
++        Path(config.voices_path) if config.voices_path is not None else asset_path(voices[0])
++    )
++
++    config_assets = [item for item in assets if item.get("role") == "config"]
++    if len(config_assets) > 1:
++        raise ValueError(f"Release manifest {manifest_path} has multiple config assets")
++    manifest_config = asset_path(config_assets[0]) if config_assets else None
++    config_path = (
++        Path(config.model_config_path) if config.model_config_path is not None else manifest_config
++    )
++    artifacts.update({name: Path(path) for name, path in (config.model_artifacts or {}).items()})
++    unexpected = set(artifacts) - set(_LANGUAGE_ROUTER_COMPONENTS)
++    if unexpected:
++        raise ValueError(
++            "Language-router model_artifacts contain unsupported components: "
++            + ", ".join(sorted(unexpected))
++        )
++    for component, path in artifacts.items():
++        if not path.is_file():
++            raise ValueError(
++                f"Release manifest {manifest_path} component {component!r} does not exist: {path}"
++            )
++    if not voices_path.is_file():
++        raise ValueError(
++            f"Release manifest {manifest_path} voices NPZ does not exist: {voices_path}"
++        )
++    if config_path is not None and not config_path.is_file():
++        raise ValueError(f"Release manifest {manifest_path} config does not exist: {config_path}")
++
++    return replace(
++        config,
++        model_path=None,
++        model_artifacts=artifacts,
++        voices_path=voices_path,
++        model_config_path=config_path,
++    )
++
++
+ def _resolve_reference_manifest_paths(
+     config: SynthesisConfig, data: dict[str, Any], manifest_path: Path
+ ) -> SynthesisConfig:
+@@ -216,6 +323,8 @@ def _resolve_manifest_paths(config: SynthesisConfig) -> SynthesisConfig:
+     profile = get_model_profile(config.model_variant or "v1.0", config.model_source or "github")
+     if profile.voice_mode == "reference":
+         return _resolve_reference_manifest_paths(config, data, manifest_path)
++    if profile.layout == _LANGUAGE_ROUTER_LAYOUT:
++        return _resolve_language_router_manifest_paths(config, data, manifest_path)
+     model = _manifest_model_name(assets, quality=config.model_quality, manifest_path=manifest_path)
+     voices = next(
+         (
+@@ -364,7 +473,7 @@ def resolve_synthesis_config(
+     if resolved.voice is None:
+         resolved = replace(resolved, voice=profile.default_voice)
+     elif (
+-        resolved.voices_path is None
++        config.voices_path is None
+         and isinstance(resolved.voice, str)
+         and profile.voice_names
+         and resolved.voice not in profile.voice_names
+@@ -374,4 +483,16 @@ def resolve_synthesis_config(
+             f"Voice {resolved.voice!r} is not available for model variant {variant!r}. "
+             f"Available voices: {available}"
+         )
++    if config.voices_path is None and isinstance(resolved.voice, str):
++        voice_languages = profile.voice_languages.get(resolved.voice)
++        requested_language = normalize_language_code(language).split("-", 1)[0]
++        supported_languages = {
++            normalize_language_code(code).split("-", 1)[0] for code in voice_languages or ()
++        }
++        if supported_languages and requested_language not in supported_languages:
++            available = ", ".join(sorted(supported_languages))
++            raise InvalidVoiceError(
++                f"Voice {resolved.voice!r} does not support language {language!r}. "
++                f"Supported language(s): {available}"
++            )
+     return replace(resolved, generation=replace(resolved.generation, lang=language))
+diff --git a/tests/test_akinvox_multispeaker.py b/tests/test_akinvox_multispeaker.py
+new file mode 100644
+index 0000000..7a1b72b
+--- /dev/null
++++ b/tests/test_akinvox_multispeaker.py
+@@ -0,0 +1,202 @@
++from __future__ import annotations
++
++import builtins
++import os
++from pathlib import Path
++from typing import Any
++
++import numpy as np
++import pytest
++from kokorog2p import phonemes_to_ids
++
++from pykokoro import KokoroSynthesizer
++from pykokoro.exceptions import InvalidVoiceError
++from pykokoro.frontend_contracts import FRONTEND_FIXTURES
++from pykokoro.model_profiles import (
++    IMPLEMENTED_FRONTENDS,
++    IMPLEMENTED_LAYOUTS,
++    get_model_profile,
++    profile_for_language,
++    profile_for_voice,
++)
++from pykokoro.prepared_g2p import PreparedG2PAdapter
++from pykokoro.synthesis_config import SynthesisConfig, resolve_synthesis_config
++from pykokoro.synthesis_types import SynthesisSegment
++from pykokoro.tokenizer import N_TOKENS, TokenizerConfig
++
++_ENGLISH_VOICES = (
++    "AV_ariala",
++    "AV_brody",
++    "AV_david",
++    "AV_elliott",
++    "AV_ralph",
++    "AV_cori",
++    "AV_phil",
++    "AV_helen",
++)
++_GERMAN_VOICES = (
++    "AV_thorsten",
++    "AV_bernd",
++    "AV_eva_k",
++    "AV_karlsson",
++    "AV_kerstin",
++    "AV_mucky",
++    "AV_hokuspokus",
++    "AV_julia",
++)
++
++
++def test_akinvox_profile_is_ready_and_selectable_by_all_named_voices() -> None:
++    profile = get_model_profile("akinvox-multispeaker-v1", "github")
++
++    assert profile.support_status == "ready"
++    assert profile.runtime_available is True
++    assert profile.layout == "language-router-onnx-v1"
++    assert profile.frontend == "akinvox-multispeaker-v1"
++    assert profile.frontend in IMPLEMENTED_FRONTENDS
++    assert profile.layout in IMPLEMENTED_LAYOUTS
++    assert profile.language_codes == ("en", "en-us", "en-gb", "de", "de-de", "de-at", "de-ch")
++    assert profile.default_voice == "AV_ariala"
++    assert profile.voice_names == _ENGLISH_VOICES + _GERMAN_VOICES
++    assert profile.voice_languages == {
++        **dict.fromkeys(_ENGLISH_VOICES, ("en",)),
++        **dict.fromkeys(_GERMAN_VOICES, ("de",)),
++    }
++    assert profile.auto_select_for_language is False
++    assert profile_for_language("en") is not profile
++    assert profile_for_language("de") is not profile
++
++    for voice in profile.voice_names:
++        assert profile_for_voice(voice) is profile
++        language = "en-us" if voice in _ENGLISH_VOICES else "de-de"
++        resolved = resolve_synthesis_config(SynthesisConfig(voice=voice), language=language)
++        assert resolved.model_variant == "akinvox-multispeaker-v1"
++        assert resolved.model_source == "github"
++        assert resolved.voice == voice
++
++
++@pytest.mark.parametrize(
++    "fixture_key",
++    ("akinvox-multispeaker-v1", "akinvox-multispeaker-v1-de"),
++)
++def test_akinvox_frontend_matches_release_ready_phoneme_and_token_fixtures(
++    fixture_key: str,
++) -> None:
++    fixture = FRONTEND_FIXTURES[fixture_key]
++    config = SynthesisConfig(
++        model_source="github",
++        model_variant="akinvox-multispeaker-v1",
++        tokenizer_config=TokenizerConfig(use_spacy=False),
++    )
++    request = SynthesisSegment(
++        id="akinvox-frontend-fixture",
++        text=fixture.text,
++        language=fixture.language,
++    )
++
++    prepared = PreparedG2PAdapter().phonemize(request, config)
++    expected_ids = tuple(phonemes_to_ids(fixture.diagnostic_phonemes, model="1.0"))
++
++    assert fixture.release_ready is True
++    assert fixture.diagnostic_backend == "kokorog2p"
++    assert prepared.phonemes == fixture.diagnostic_phonemes
++    assert prepared.token_ids == expected_ids
++    assert prepared.token_ids
++    assert all(0 < token_id < N_TOKENS for token_id in prepared.token_ids)
++
++
++def test_akinvox_frontend_does_not_import_upstream_package(monkeypatch: pytest.MonkeyPatch) -> None:
++    original_import = builtins.__import__
++
++    def guarded_import(name: str, *args: Any, **kwargs: Any) -> Any:
++        if name == "kokoro_multispeaker" or name.startswith("kokoro_multispeaker."):
++            raise AssertionError("PyKokoro must not import kokoro_multispeaker")
++        return original_import(name, *args, **kwargs)
++
++    monkeypatch.setattr(builtins, "__import__", guarded_import)
++    config = SynthesisConfig(
++        model_source="github",
++        model_variant="akinvox-multispeaker-v1",
++        tokenizer_config=TokenizerConfig(use_spacy=False),
++    )
++    request = SynthesisSegment(
++        id="akinvox-upstream-import-check",
++        text="Welcome to our next story.",
++        language="en-us",
++    )
++
++    assert PreparedG2PAdapter().phonemize(request, config).token_ids
++
++
++@pytest.mark.parametrize(("voice", "language"), [("AV_cori", "de-DE"), ("AV_julia", "en-US")])
++def test_akinvox_named_voice_rejects_mismatched_language(voice: str, language: str) -> None:
++    with pytest.raises(InvalidVoiceError, match=rf"{voice}.*does not support language"):
++        resolve_synthesis_config(
++            SynthesisConfig(
++                model_source="github",
++                model_variant="akinvox-multispeaker-v1",
++                voice=voice,
++            ),
++            language=language,
++        )
++
++
++def test_akinvox_router_default_voice_rejects_german_request() -> None:
++    with pytest.raises(InvalidVoiceError, match="AV_ariala.*does not support language"):
++        resolve_synthesis_config(
++            SynthesisConfig(model_source="github", model_variant="akinvox-multispeaker-v1"),
++            language="de-DE",
++        )
++
++
++def test_akinvox_voicepack_without_language_metadata_remains_user_owned() -> None:
++    from pykokoro.voice_pack import KokoroVoicePack
++
++    voice_pack = KokoroVoicePack.from_array(np.zeros((510, 1, 256), dtype=np.float32))
++    resolved = resolve_synthesis_config(
++        SynthesisConfig(
++            model_source="github",
++            model_variant="akinvox-multispeaker-v1",
++            voice=voice_pack,
++        ),
++        language="de-DE",
++    )
++
++    assert resolved.voice is voice_pack
++
++
++@pytest.mark.slow
++def test_akinvox_local_published_release_audio_smoke() -> None:
++    manifest_value = os.environ.get("PYKOKORO_AKINVOX_RELEASE_MANIFEST")
++    if not manifest_value:
++        pytest.skip("set PYKOKORO_AKINVOX_RELEASE_MANIFEST to a local release manifest")
++    manifest_path = Path(manifest_value).expanduser()
++    if not manifest_path.is_file():
++        pytest.fail(f"local AKinVox release manifest does not exist: {manifest_path}")
++
++    config = SynthesisConfig(
++        model_source="github",
++        model_variant="akinvox-multispeaker-v1",
++        model_quality="fp32",
++        release_manifest_path=manifest_path,
++        provider="cpu",
++        tokenizer_config=TokenizerConfig(
++            lexicons=(),
++            lexicon_data_policy="installed-only",
++            use_spacy=False,
++        ),
++    )
++    with KokoroSynthesizer(config) as synthesizer:
++        english = synthesizer.synthesize_text(
++            "Welcome to our next story.", language="en-us", voice="AV_ariala"
++        )
++        german = synthesizer.synthesize_text(
++            "Willkommen zu unserer nächsten Geschichte.",
++            language="de-de",
++            voice="AV_thorsten",
++        )
++
++    assert english.audio.size > 0
++    assert german.audio.size > 0
++    assert np.isfinite(english.audio).all()
++    assert np.isfinite(german.audio).all()
+diff --git a/tests/test_audio_generator_logging.py b/tests/test_audio_generator_logging.py
+index 7c709d1..f87b833 100644
+--- a/tests/test_audio_generator_logging.py
++++ b/tests/test_audio_generator_logging.py
+@@ -5,6 +5,7 @@ from types import SimpleNamespace
+ from typing import Any, cast
+
+ import numpy as np
++
+ from pykokoro.audio_generator import AudioGenerator
+ from pykokoro.short_sentence_handler import ShortSentenceConfig
+
+diff --git a/tests/test_audio_generator_performance.py b/tests/test_audio_generator_performance.py
+index 57e71b0..aff9c81 100644
+--- a/tests/test_audio_generator_performance.py
++++ b/tests/test_audio_generator_performance.py
+@@ -7,7 +7,7 @@ import numpy as np
+ import pytest
+
+ from pykokoro.audio_generator import AudioGenerator
+-from pykokoro.types import Trace
++from pykokoro.types import G2PAlignmentToken, PhonemeSegment, Trace
+
+
+ class _Input:
+@@ -49,6 +49,121 @@ def _generator(**kwargs: Any) -> tuple[AudioGenerator, _Session]:
+     return AudioGenerator(session, _Tokenizer(), **kwargs), session
+
+
++class _ContextSession:
++    supports_timings = True
++    sample_rate = 24_000
++    cache_identity = ("context-test", "fp32", "cpu")
++    resolved = SimpleNamespace(metadata={"runtime": {"layout": "language-router-onnx-v1"}})
++
++    def __init__(self, responses: list[tuple[int, list[float] | None]]) -> None:
++        self.responses = responses
++        self.calls: list[tuple[list[int], str | None]] = []
++
++    def infer(self, token_ids, *, style, speed, seed=None, language=None):
++        _ = style, speed, seed
++        self.calls.append((list(token_ids), language))
++        audio_length, timings = self.responses[len(self.calls) - 1]
++        return SimpleNamespace(
++            audio=np.arange(audio_length, dtype=np.float32),
++            timings=None if timings is None else np.asarray(timings, dtype=np.float32),
++        )
++
++
++def _narration_context_segment() -> PhonemeSegment:
++    text = "before body after"
++    context_tokens = [
++        G2PAlignmentToken(
++            token,
++            token,
++            char_start=start,
++            char_end=end,
++            model_token_count=1,
++            model_span_token_count=1,
++        )
++        for token, start, end in (("before", 0, 6), ("body", 7, 11), ("after", 12, 17))
++    ]
++    body_token = G2PAlignmentToken(
++        "body",
++        "body",
++        char_start=7,
++        char_end=11,
++        model_token_count=1,
++        model_span_token_count=1,
++    )
++    return PhonemeSegment(
++        id="request:phoneme:0",
++        segment_id="request",
++        phoneme_id=0,
++        text=text,
++        phonemes="before body after",
++        tokens=[1, 2, 3],
++        lang="de-de",
++        char_start=0,
++        char_end=len(text),
++        engine_metadata={
++            "__akinvox_narration_context": {
++                "context_char_start": 0,
++                "context_char_end": len(text),
++                "body_char_start": 7,
++                "body_char_end": 11,
++                "context_before_words": 1,
++                "context_after_words": 1,
++                "context_text": text,
++                "source_word_spans": [[0, 6], [7, 11], [12, 17]],
++                "body_word_spans": [[7, 11]],
++                "body": {
++                    "text": "body",
++                    "phonemes": "body",
++                    "tokens": [2],
++                    "char_start": 7,
++                    "char_end": 11,
++                    "alignment_tokens": [body_token.to_dict()],
++                },
++            }
++        },
++        alignment_tokens=context_tokens,
++    )
++
++
++def test_narration_context_audio_is_trimmed_using_exact_word_timings() -> None:
++    session = _ContextSession([(1800, [1.0, 1.0, 1.0])])
++    generator = AudioGenerator(session, _Tokenizer(), inference_cache_enabled=False)
++    segment = _narration_context_segment()
++
++    result = generator._generate_raw_audio_segments(
++        [segment], np.zeros((2, 256), dtype=np.float32), 1.0
++    )
++
++    assert len(session.calls) == 1
++    assert session.calls[0] == ([1, 2, 3], "de-de")
++    assert result[0].text == "body"
++    assert result[0].raw_audio is not None
++    np.testing.assert_array_equal(result[0].raw_audio, np.arange(600, 1200, dtype=np.float32))
++    assert [(timing.char_start, timing.char_end) for timing in result[0].word_timings] == [(7, 11)]
++    assert (result[0].word_timings[0].start_sample, result[0].word_timings[0].end_sample) == (
++        0,
++        600,
++    )
++
++
++def test_narration_context_without_exact_timings_retries_body_only() -> None:
++    session = _ContextSession([(1800, None), (600, [1.0])])
++    generator = AudioGenerator(session, _Tokenizer(), inference_cache_enabled=False)
++    segment = _narration_context_segment()
++    trace = Trace()
++
++    result = generator._generate_raw_audio_segments(
++        [segment], np.zeros((2, 256), dtype=np.float32), 1.0, trace
++    )
++
++    assert session.calls == [([1, 2, 3], "de-de"), ([2], "de-de")]
++    assert result[0].text == "body"
++    assert result[0].raw_audio is not None
++    assert result[0].raw_audio.size == 600
++    assert trace.counters["narration_context_body_only_fallback"] == 1
++    assert [(timing.char_start, timing.char_end) for timing in result[0].word_timings] == [(7, 11)]
++
++
+ def test_trace_records_ort_timing_and_aggregate_metrics() -> None:
+     generator, session = _generator(inference_cache_enabled=False)
+     trace = Trace()
+@@ -310,3 +425,33 @@ def test_retry_failure_uses_one_retry_and_wrap_fallback(monkeypatch) -> None:
+     assert session.calls == 3
+     assert trace.inference_summary()["short_sentence_phrase_retry"] == 1
+     assert trace.inference_summary()["short_sentence_wrap_fallback"] == 1
++
++
++class _LanguageRouterSession(_Session):
++    def __init__(self) -> None:
++        super().__init__()
++        self.resolved = SimpleNamespace(metadata={"runtime": {"layout": "language-router-onnx-v1"}})
++        self.languages: list[str | None] = []
++
++    def infer(self, token_ids, *, style, speed, seed=None, language=None):
++        self.languages.append(language)
++        return super().infer(token_ids, style=style, speed=speed, seed=seed)
++
++
++def test_router_inference_cache_is_language_specific_and_traces_route() -> None:
++    session = _LanguageRouterSession()
++    generator = AudioGenerator(session, _Tokenizer())
++    style = np.zeros((2, 256), dtype=np.float32)
++    english_trace = Trace()
++    german_trace = Trace()
++    repeated_english_trace = Trace()
++
++    generator._run_onnx("abc", style, 1.0, english_trace, language="en-US")
++    generator._run_onnx("abc", style, 1.0, german_trace, language="de-DE")
++    generator._run_onnx("abc", style, 1.0, repeated_english_trace, language="en-GB")
++
++    assert session.calls == 2
++    assert session.languages == ["en-US", "de-DE"]
++    assert english_trace.inference[0]["acoustic_route"] == "en"
++    assert german_trace.inference[0]["acoustic_route"] == "de"
++    assert repeated_english_trace.inference[0]["cache_hit"] is True
+diff --git a/tests/test_long_text_splitting.py b/tests/test_long_text_splitting.py
+index 4e5e539..1280575 100644
+--- a/tests/test_long_text_splitting.py
++++ b/tests/test_long_text_splitting.py
+@@ -1,6 +1,7 @@
+ from __future__ import annotations
+
+ import builtins
++import re
+ from collections.abc import Callable
+ from types import SimpleNamespace
+ from typing import Any
+@@ -60,6 +61,37 @@ class FakeG2PAdapter:
+         )
+
+
++class WordAlignedG2PAdapter(FakeG2PAdapter):
++    def phonemize(self, segment: SynthesisSegment, config: SynthesisConfig) -> PreparedSynthesis:
++        self.phonemized_segments.append(segment)
++        words = list(re.finditer(r"\S+", segment.text))
++        alignment_tokens = tuple(
++            G2PAlignmentToken(
++                text=match.group(),
++                phonemes=f"phonemes:{match.group()}",
++                whitespace=(
++                    segment.text[match.end() : words[index + 1].start()]
++                    if index + 1 < len(words)
++                    else ""
++                ),
++                char_start=match.start(),
++                char_end=match.end(),
++                model_token_count=1,
++                model_span_token_count=1,
++            )
++            for index, match in enumerate(words)
++        )
++        return PreparedSynthesis(
++            request_id=segment.id,
++            text=segment.text,
++            language=segment.language,
++            voice=segment.voice if isinstance(segment.voice, str) else None,
++            phonemes=f"phonemes:{segment.text}",
++            token_ids=tuple(range(len(words))),
++            alignment_tokens=alignment_tokens,
++        )
++
++
+ class FakeBackend:
+     def __init__(self) -> None:
+         self.generated: list[PhonemeSegment] = []
+@@ -127,6 +159,93 @@ def _request(text: str, **kwargs: Any) -> SynthesisSegment:
+     return SynthesisSegment("request", text, "en-us", **kwargs)
+
+
++@pytest.mark.parametrize(
++    ("language", "voice", "words", "max_tokens", "expected_context_counts"),
++    [
++        (
++            "en-us",
++            "AV_ariala",
++            "one two three four five six seven eight",
++            5,
++            [(0, 2), (1, 2), (1, 0)],
++        ),
++        (
++            "de-de",
++            "AV_thorsten",
++            "eins zwei drei vier fünf sechs sieben",
++            4,
++            [(0, 1), (1, 1), (1, 0)],
++        ),
++    ],
++)
++def test_akinvox_context_chunks_reserve_tokens_and_follow_language_policy(
++    monkeypatch: pytest.MonkeyPatch,
++    language: str,
++    voice: str,
++    words: str,
++    max_tokens: int,
++    expected_context_counts: list[tuple[int, int]],
++) -> None:
++    text = words
++    request = SynthesisSegment("request", text, language, voice=voice)
++    config = SynthesisConfig(
++        voice=voice,
++        model_source="github",
++        model_variant="akinvox-multispeaker-v1",
++        long_text_split="sentence",
++    )
++    adapter = WordAlignedG2PAdapter()
++    renderer = OnnxRequestRenderer(adapter, backend_factory=lambda _: FakeBackend())
++    monkeypatch.setattr(
++        renderer,
++        "_split_source_spans",
++        lambda _request, _config, *, start, end, mode: [(start, end)],
++    )
++
++    segments = renderer._build_phoneme_segments(
++        request,
++        _prepared(text, len(text.split())),
++        config,
++        max_tokens=max_tokens,
++    )
++
++    metadata = [segment.engine_metadata["__akinvox_narration_context"] for segment in segments]
++    assert [
++        (item["context_before_words"], item["context_after_words"]) for item in metadata
++    ] == expected_context_counts
++    assert "".join(item["body"]["text"] for item in metadata) == text
++    assert all(len(segment.tokens) <= max_tokens for segment in segments)
++    assert all(
++        segment.text == text[item["context_char_start"] : item["context_char_end"]]
++        for segment, item in zip(segments, metadata, strict=True)
++    )
++
++
++def test_akinvox_context_requires_exact_alignment_ownership(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    text = "one two three four five six"
++    request = SynthesisSegment("request", text, "en-us", voice="AV_ariala")
++    config = SynthesisConfig(
++        voice="AV_ariala",
++        model_source="github",
++        model_variant="akinvox-multispeaker-v1",
++        long_text_split="sentence",
++    )
++    renderer = FakeRenderer()
++    monkeypatch.setattr(
++        renderer,
++        "_split_source_spans",
++        lambda _request, _config, *, start, end, mode: [(start, end)],
++    )
++
++    segments = renderer._build_phoneme_segments(request, _prepared(text, 6), config, max_tokens=2)
++
++    assert all(segment.engine_metadata is None for segment in segments)
++    assert "".join(segment.text for segment in segments) == text
++    assert all(len(segment.tokens) <= 2 for segment in segments)
++
++
+ def test_atomic_request_keeps_exact_text_in_one_phoneme_segment() -> None:
+     request = _request("The caller prepared this exact text.")
+     prepared = _prepared(request.text, 2)
+diff --git a/tests/test_model_discovery.py b/tests/test_model_discovery.py
+index cfa77b7..f6dd22e 100644
+--- a/tests/test_model_discovery.py
++++ b/tests/test_model_discovery.py
+@@ -5,6 +5,7 @@ from dataclasses import FrozenInstanceError
+ import pytest
+
+ import pykokoro.discovery as discovery
++from pykokoro.model_profiles import get_registry_model_profile
+ from pykokoro.model_registry import ModelRegistry
+
+
+@@ -62,6 +63,7 @@ def _model(
+     voice_mode: str = "static",
+     layout: str = "single-onnx-v1",
+     voice_enrollers: list[dict] | None = None,
++    runtime_extra: dict | None = None,
+ ) -> dict:
+     return {
+         "runtime": {
+@@ -74,6 +76,7 @@ def _model(
+             "sample_rate": 24000,
+             "max_tokens": 510,
+             "voice_enrollers": voice_enrollers or [],
++            **(runtime_extra or {}),
+         },
+         "runtime_available": runtime_available,
+         "redistribution_allowed": redistribution_allowed,
+@@ -82,6 +85,28 @@ def _model(
+     }
+
+
++_AKINVOX_ENGLISH_VOICES = (
++    "AV_ariala",
++    "AV_brody",
++    "AV_david",
++    "AV_elliott",
++    "AV_ralph",
++    "AV_cori",
++    "AV_phil",
++    "AV_helen",
++)
++_AKINVOX_GERMAN_VOICES = (
++    "AV_thorsten",
++    "AV_bernd",
++    "AV_eva_k",
++    "AV_karlsson",
++    "AV_kerstin",
++    "AV_mucky",
++    "AV_hokuspokus",
++    "AV_julia",
++)
++
++
+ def _registry() -> ModelRegistry:
+     return ModelRegistry(
+         {
+@@ -104,6 +129,37 @@ def _registry() -> ModelRegistry:
+                     voice_mode="reference",
+                     layout="cloning-onnx-v1",
+                 ),
++                "akinvox-multispeaker-v1": _model(
++                    "akinvox-multispeaker-v1",
++                    frontend="akinvox-multispeaker-v1",
++                    languages=["en", "en-us", "en-gb", "de", "de-de", "de-at", "de-ch"],
++                    voices=list(_AKINVOX_ENGLISH_VOICES + _AKINVOX_GERMAN_VOICES),
++                    default_voice="AV_ariala",
++                    layout="language-router-onnx-v1",
++                    runtime_extra={
++                        "language_models": {"en": "model_en", "de": "model_de"},
++                        "voice_metadata": {
++                            **{
++                                voice: {
++                                    "gender": "unknown",
++                                    "language": "en",
++                                    "locale": "en",
++                                    "language_label": "English",
++                                }
++                                for voice in _AKINVOX_ENGLISH_VOICES
++                            },
++                            **{
++                                voice: {
++                                    "gender": "unknown",
++                                    "language": "de",
++                                    "locale": "de",
++                                    "language_label": "German",
++                                }
++                                for voice in _AKINVOX_GERMAN_VOICES
++                            },
++                        },
++                    },
++                ),
+                 "de-crane": _model(
+                     "de-crane",
+                     frontend="german-ipa-v1",
+@@ -185,6 +241,7 @@ def test_discovery_returns_complete_sorted_contract(monkeypatch: pytest.MonkeyPa
+
+     result = discovery.discover_models(offline=True)
+     assert [model.model_id for model in result.models] == [
++        "akinvox-multispeaker-v1",
+         "de-anna",
+         "de-crane",
+         "de-thorsten",
+@@ -204,6 +261,20 @@ def test_discovery_returns_complete_sorted_contract(monkeypatch: pytest.MonkeyPa
+     assert cloning.supports_reference_enrollment is True
+     assert cloning.speed_supported is False
+
++    akinvox = next(model for model in result.models if model.model_id == "akinvox-multispeaker-v1")
++    assert akinvox.languages == ("en", "en-us", "en-gb", "de", "de-de", "de-at", "de-ch")
++    assert akinvox.default_voice == "AV_ariala"
++    assert akinvox.voices == _AKINVOX_ENGLISH_VOICES + _AKINVOX_GERMAN_VOICES
++    assert len(akinvox.voice_details) == 16
++    assert akinvox.layout == "language-router-onnx-v1"
++    assert akinvox.frontend == "akinvox-multispeaker-v1"
++    assert akinvox.status == "ready"
++    profile = get_registry_model_profile("akinvox-multispeaker-v1", registry=_registry())
++    assert profile.voice_languages == {
++        **dict.fromkeys(_AKINVOX_ENGLISH_VOICES, ("en",)),
++        **dict.fromkeys(_AKINVOX_GERMAN_VOICES, ("de",)),
++    }
++
+     anna = next(model for model in result.models if model.model_id == "de-anna")
+     assert anna.source == "github"
+     assert anna.languages == ("de",)
+diff --git a/tests/test_onnxvoice_boundary.py b/tests/test_onnxvoice_boundary.py
+index 2d963e1..d4d28b6 100644
+--- a/tests/test_onnxvoice_boundary.py
++++ b/tests/test_onnxvoice_boundary.py
+@@ -5,8 +5,9 @@ from pathlib import Path
+ from types import SimpleNamespace
+
+ import numpy as np
+-import pykokoro._onnxvoice as boundary
+ import pytest
++
++import pykokoro._onnxvoice as boundary
+ from pykokoro.asset_progress import AssetProgressEvent
+ from pykokoro.error_diagnostics import error_diagnostic
+ from pykokoro.exceptions import BackendError, ConfigurationError
+@@ -509,8 +510,6 @@ def test_cache_identity_uses_paths_for_local_models(tmp_path: Path) -> None:
+     assert adapter.cache_identity[2] == str(voices.resolve())
+
+
+-
+-
+ def test_language_router_cache_identity_includes_layout_and_both_graph_paths(
+     tmp_path: Path,
+ ) -> None:
+@@ -545,6 +544,7 @@ def test_language_router_cache_identity_includes_layout_and_both_graph_paths(
+     assert routed_adapter.cache_identity[-1] == "language-router-onnx-v1"
+     assert routed_adapter.cache_identity != single_adapter.cache_identity
+
++
+ def test_different_distributions_produce_different_cache_identities(tmp_path: Path) -> None:
+     model = tmp_path / "model.onnx"
+     resolved_a = boundary.ResolvedKokoroModel(
+@@ -1000,3 +1000,104 @@ def test_reference_backend_opens_components_without_a_voice_archive(
+     assert backend.get_voices() == []
+     with pytest.raises(ConfigurationError, match="Static voice styles are unavailable"):
+         backend.get_voice_style("af_heart")
++
++
++def test_local_language_router_artifacts_preserve_components_and_runtime_metadata(
++    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
++) -> None:
++    import pykokoro.onnx_backend as onnx_backend
++    from pykokoro.model_profiles import get_model_profile
++
++    profile = get_model_profile("akinvox-multispeaker-v1", "github")
++    model_en = tmp_path / "model_en.onnx"
++    model_de = tmp_path / "model_de.onnx"
++    voices = tmp_path / "voices.npz"
++    model_artifacts = {"model_en": model_en, "model_de": model_de}
++    route_metadata = {
++        "layout": "language-router-onnx-v1",
++        "voice_mode": "static",
++        "language_models": {"en": "model_en", "de": "model_de"},
++        "language_codes": list(profile.language_codes),
++        "voice_metadata": {
++            voice: {"language": languages[0]}
++            for voice, languages in profile.voice_languages.items()
++        },
++    }
++    resolved = boundary.ResolvedKokoroModel(
++        ref=None,
++        model_id="akinvox-multispeaker-v1",
++        quality="fp32",
++        distribution=None,
++        storage_id=None,
++        installation=None,
++        metadata={"runtime": route_metadata},
++        sample_rate=24_000,
++        model_paths=(model_en, model_de),
++        voices_path=voices,
++        config_path=None,
++        model_artifacts=model_artifacts,
++    )
++    runtime = SimpleNamespace(resolved=resolved)
++    calls: list[dict[str, object]] = []
++
++    def open_local(**kwargs: object) -> SimpleNamespace:
++        calls.append(kwargs)
++        return runtime
++
++    class VoiceManagerStub:
++        def __init__(self, **kwargs: object) -> None:
++            self.kwargs = kwargs
++            self.voices_path: Path | None = None
++
++        def load_voices(self, *, voices_path: Path) -> None:
++            self.voices_path = voices_path
++
++    class AudioGeneratorStub:
++        def __init__(self, **kwargs: object) -> None:
++            self.kwargs = kwargs
++
++    monkeypatch.setattr(onnx_backend, "open_local_kokoro", open_local)
++    monkeypatch.setattr(
++        onnx_backend,
++        "runtime_diagnostics",
++        lambda _runtime: {"timing_contract": {"supports_timings": False}},
++    )
++    monkeypatch.setattr(onnx_backend, "VoiceManager", VoiceManagerStub)
++    monkeypatch.setattr(onnx_backend, "AudioGenerator", AudioGeneratorStub)
++
++    backend = onnx_backend.Kokoro(
++        model_artifacts=model_artifacts,
++        voices_path=voices,
++        model_variant="akinvox-multispeaker-v1",
++        model_quality="fp32",
++    )
++    backend._tokenizer = object()
++    backend._init_kokoro_locked()
++
++    assert calls[0]["artifacts"] == {
++        "model:model_en": model_en,
++        "model:model_de": model_de,
++        "voices": voices,
++    }
++    assert calls[0]["runtime"] == route_metadata
++    assert calls[0]["metadata"] == {
++        "model_id": "akinvox-multispeaker-v1",
++        "selected_quality": "fp32",
++    }
++    assert backend._model_path is None
++    assert backend._voice_manager is not None
++    assert backend._voice_manager.voices_path == voices
++
++
++def test_local_language_router_rejects_unsupported_components() -> None:
++    import pykokoro.onnx_backend as onnx_backend
++
++    backend = onnx_backend.Kokoro(
++        model_artifacts={"model_en": "en.onnx", "model_de": "de.onnx", "extra": "extra.onnx"},
++        voices_path="voices.npz",
++        model_variant="akinvox-multispeaker-v1",
++        model_quality="fp32",
++    )
++
++    with pytest.raises(ConfigurationError, match="exactly model_en and model_de"):
++        backend._init_kokoro_locked()
+diff --git a/tests/test_packaging_metadata.py b/tests/test_packaging_metadata.py
+index 3dca36c..e3938ed 100644
+--- a/tests/test_packaging_metadata.py
++++ b/tests/test_packaging_metadata.py
+@@ -73,11 +73,25 @@ def test_provider_extras_do_not_install_every_runtime_distribution() -> None:
+         "onnxvoice",
+     }
+     assert all(
+-        any(package.startswith("onnxvoice[") and ">=0.2.17,<0.3" in package for package in optional[extra])
++        any(
++            package.startswith("onnxvoice[") and ">=0.2.17,<0.3" in package
++            for package in optional[extra]
++        )
+         for extra in ("cpu", "gpu", "openvino", "directml", "coreml")
+     )
+
+
++def test_akinvox_german_frontend_job_pins_espeak_ng_151() -> None:
++    workflow = (ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
++
++    assert "akinvox-german-frontend:" in workflow
++    assert "image: python:3.13-bookworm" in workflow
++    assert "Install and verify eSpeak-NG 1.51" in workflow
++    assert "grep -Eq '1\\.51([[:space:]]|$)'" in workflow
++    assert "akinvox-multispeaker-v1-de" in workflow
++    assert "lexphon data install de-de:gold" in workflow
++
++
+ def test_goruut_extra_uses_companion_provider_contract() -> None:
+     optional = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
+         "optional-dependencies"
+diff --git a/tests/test_release_profiles.py b/tests/test_release_profiles.py
+index 7ad6244..5c3b712 100644
+--- a/tests/test_release_profiles.py
++++ b/tests/test_release_profiles.py
+@@ -1,4 +1,5 @@
+ import json
++from pathlib import Path
+
+ import pytest
+
+@@ -277,3 +278,164 @@ def test_nabra_loads_direct_release_vocabulary(tmp_path):
+     vocab = load_vocab_from_config("ar-nabra", vocab_path)
+
+     assert vocab == {"ʕ": 7, "ħ": 8, "a": 43}
++
++
++_ROUTER_LANGUAGE_MODELS = {"en": "model_en", "de": "model_de"}
++
++
++def _write_language_router_manifest(
++    tmp_path: Path,
++    *,
++    assets: list[dict[str, object]] | None = None,
++    runtime: dict[str, object] | None = None,
++) -> Path:
++    manifest_assets = assets or [
++        {
++            "name": "model_en.onnx",
++            "role": "model",
++            "component": "model_en",
++            "quality": "fp32",
++        },
++        {
++            "name": "model_de.onnx",
++            "role": "model",
++            "component": "model_de",
++            "quality": "fp32",
++        },
++        {"name": "voices.npz", "role": "voices", "format": "numpy-npz"},
++    ]
++    for asset in manifest_assets:
++        name = asset.get("name")
++        if isinstance(name, str):
++            (tmp_path / name).write_bytes(b"asset")
++    manifest = tmp_path / "language-router-manifest.json"
++    manifest.write_text(
++        json.dumps(
++            {
++                "schema": 2,
++                "runtime": runtime
++                or {
++                    "layout": "language-router-onnx-v1",
++                    "language_models": _ROUTER_LANGUAGE_MODELS,
++                },
++                "assets": manifest_assets,
++            }
++        ),
++        encoding="utf-8",
++    )
++    return manifest
++
++
++def _resolve_language_router_manifest(manifest: Path) -> SynthesisConfig:
++    return _resolve(
++        SynthesisConfig(
++            release_manifest_path=manifest,
++            model_source="github",
++            model_variant="akinvox-multispeaker-v1",
++            model_quality="fp32",
++            voice="AV_cori",
++            generation=GenerationConfig(lang="en"),
++        )
++    )
++
++
++def test_release_manifest_resolves_language_router_components_by_quality(tmp_path: Path) -> None:
++    assets = [
++        {
++            "name": f"{component}-{quality}.onnx",
++            "role": "model",
++            "component": component,
++            "quality": quality,
++        }
++        for component in ("model_en", "model_de")
++        for quality in ("q8", "fp32")
++    ]
++    assets.append({"name": "voices.npz", "role": "voices", "format": "numpy-npz"})
++    manifest = _write_language_router_manifest(tmp_path, assets=assets)
++
++    resolved = _resolve_language_router_manifest(manifest)
++
++    assert resolved.model_path is None
++    assert resolved.model_artifacts == {
++        "model_en": tmp_path / "model_en-fp32.onnx",
++        "model_de": tmp_path / "model_de-fp32.onnx",
++    }
++    assert resolved.voices_path == tmp_path / "voices.npz"
++
++
++def test_release_manifest_rejects_missing_language_router_component(tmp_path: Path) -> None:
++    assets = [item for item in _write_router_assets() if item.get("component") != "model_de"]
++    manifest = _write_language_router_manifest(tmp_path, assets=assets)
++
++    with pytest.raises(ValueError, match="exactly one model asset.*model_de.*fp32"):
++        _resolve_language_router_manifest(manifest)
++
++
++def test_release_manifest_rejects_duplicate_language_router_component(tmp_path: Path) -> None:
++    assets = _write_router_assets()
++    assets.append(
++        {
++            "name": "model_en-copy.onnx",
++            "role": "model",
++            "component": "model_en",
++            "quality": "fp32",
++        }
++    )
++    manifest = _write_language_router_manifest(tmp_path, assets=assets)
++
++    with pytest.raises(ValueError, match="exactly one model asset.*model_en.*fp32"):
++        _resolve_language_router_manifest(manifest)
++
++
++def test_release_manifest_rejects_wrong_language_router_quality(tmp_path: Path) -> None:
++    assets = _write_router_assets()
++    assets[1]["quality"] = "q8"
++    manifest = _write_language_router_manifest(tmp_path, assets=assets)
++
++    with pytest.raises(ValueError, match="exactly one model asset.*model_de.*fp32"):
++        _resolve_language_router_manifest(manifest)
++
++
++@pytest.mark.parametrize(
++    ("runtime", "message"),
++    [
++        ({"layout": "single-onnx-v1", "language_models": _ROUTER_LANGUAGE_MODELS}, "layout"),
++        (
++            {"layout": "language-router-onnx-v1", "language_models": {"en": "model_de"}},
++            "language_models",
++        ),
++    ],
++)
++def test_release_manifest_rejects_invalid_language_router_metadata(
++    tmp_path: Path, runtime: dict[str, object], message: str
++) -> None:
++    manifest = _write_language_router_manifest(tmp_path, runtime=runtime)
++
++    with pytest.raises(ValueError, match=message):
++        _resolve_language_router_manifest(manifest)
++
++
++def test_release_manifest_requires_existing_language_router_voices_npz(tmp_path: Path) -> None:
++    manifest = _write_language_router_manifest(tmp_path)
++    (tmp_path / "voices.npz").unlink()
++
++    with pytest.raises(ValueError, match="voices NPZ does not exist"):
++        _resolve_language_router_manifest(manifest)
++
++
++def _write_router_assets() -> list[dict[str, object]]:
++    return [
++        {
++            "name": "model_en.onnx",
++            "role": "model",
++            "component": "model_en",
++            "quality": "fp32",
++        },
++        {
++            "name": "model_de.onnx",
++            "role": "model",
++            "component": "model_de",
++            "quality": "fp32",
++        },
++        {"name": "voices.npz", "role": "voices", "format": "numpy-npz"},
++    ]
+diff --git a/tests/test_request_renderer.py b/tests/test_request_renderer.py
+index 8a7746a..055679a 100644
+--- a/tests/test_request_renderer.py
++++ b/tests/test_request_renderer.py
+@@ -4,6 +4,7 @@ from typing import Any
+
+ import numpy as np
+ import pytest
++
+ from pykokoro import SynthesisInputTooLongError
+ from pykokoro.error_diagnostics import error_diagnostic
+ from pykokoro.exceptions import BackendError, ConfigurationError, InvalidVoiceError
