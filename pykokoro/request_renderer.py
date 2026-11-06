@@ -170,6 +170,10 @@ class OnnxRequestRenderer:
             request, prepared, resolved, profile.max_tokens, trace
         )
         backend = self._get_backend(resolved)
+        if voice_name is not None:
+            validate = getattr(backend, "validate_voice_language", None)
+            if callable(validate):
+                validate(voice_name, request.language)
         if reference_voice is not None:
             voice_style = None
         elif voice_pack is not None:

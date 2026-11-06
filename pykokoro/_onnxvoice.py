@@ -793,6 +793,10 @@ class KokoroRuntimeAdapter:
             "declared" if self.supports_timings is not None else "unknown",
             _timing_output_name(resolved),
         )
+        runtime_metadata = resolved.metadata.get("runtime")
+        runtime_layout = (
+            runtime_metadata.get("layout") if isinstance(runtime_metadata, Mapping) else None
+        )
         # Managed installations use storage_id for cache identity.
         # Local unmanaged models use path-sensitive identity.
         if resolved.storage_id is not None:
@@ -800,6 +804,7 @@ class KokoroRuntimeAdapter:
                 "managed",
                 resolved.ref,
                 resolved.storage_id,
+                runtime_layout,
             )
         else:
             self.cache_identity = (
@@ -813,6 +818,7 @@ class KokoroRuntimeAdapter:
                         for name, path in resolved.model_artifacts.items()
                     )
                 ),
+                runtime_layout,
             )
         self._closed = False
 
@@ -866,6 +872,30 @@ class KokoroRuntimeAdapter:
             lambda: prepare(reference_token_ids, audio_24k=audio_24k, audio_16k=audio_16k),
         )
 
+    def validate_voice_language(self, voice_id: str, language: str) -> None:
+        runtime_metadata = self.resolved.metadata.get("runtime")
+        if not isinstance(runtime_metadata, Mapping) or runtime_metadata.get("layout") != (
+            "language-router-onnx-v1"
+        ):
+            return
+
+        from onnxvoice.inventory import language_base, voice_language_codes_from_catalog
+        from onnxvoice.types import CatalogItem
+
+        item = CatalogItem(
+            system="kokoro",
+            id=self.resolved.model_id or "local",
+            kind="model",
+            artifacts=(),
+            metadata=self.resolved.metadata,
+        )
+        supported = voice_language_codes_from_catalog(item, voice_id)
+        requested_language = language_base(language)
+        if requested_language not in {language_base(code) for code in supported}:
+            raise ConfigurationError(
+                f"Kokoro voice {voice_id!r} does not support language {language!r}"
+            )
+
     def infer(
         self,
         token_ids: Sequence[int],
@@ -874,6 +904,7 @@ class KokoroRuntimeAdapter:
         reference: Any | None = None,
         speed: float,
         seed: int | None = None,
+        language: str | None = None,
     ) -> Any:
         if self._closed:
             raise RuntimeError("Kokoro runtime is closed")
@@ -881,6 +912,13 @@ class KokoroRuntimeAdapter:
         runtime_kwargs: dict[str, Any] = {"speed": speed}
         if seed is not None:
             runtime_kwargs["seed"] = seed
+        if language is not None:
+            runtime_metadata = self.resolved.metadata.get("runtime")
+            if (
+                isinstance(runtime_metadata, Mapping)
+                and runtime_metadata.get("layout") == "language-router-onnx-v1"
+            ):
+                runtime_kwargs["language"] = language
         if reference is None:
             return _call(
                 "infer",

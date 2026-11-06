@@ -5,7 +5,6 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import numpy as np
-
 from pykokoro.audio_generator import AudioGenerator
 from pykokoro.short_sentence_handler import ShortSentenceConfig
 
@@ -33,6 +32,33 @@ class _TimestampSession(_Session):
             audio=np.zeros(4, dtype=np.float32),
             timings=np.ones(4, dtype=np.float32),
         )
+
+
+def test_run_onnx_forwards_explicit_language() -> None:
+    class _LanguageSession:
+        supports_timings = False
+        sample_rate = 24_000
+
+        def __init__(self) -> None:
+            self.inference: dict[str, Any] | None = None
+            self.resolved = SimpleNamespace(
+                metadata={"runtime": {"layout": "language-router-onnx-v1"}}
+            )
+
+        def infer(self, token_ids, **kwargs):
+            self.inference = {"token_ids": token_ids, **kwargs}
+            return SimpleNamespace(audio=np.zeros(4, dtype=np.float32), timings=None)
+
+    session = _LanguageSession()
+    generator = AudioGenerator(
+        runtime=cast(Any, session),
+        tokenizer=cast(Any, _Tokenizer()),
+    )
+
+    generator._run_onnx("hello", np.zeros((16, 256), dtype=np.float32), 1.0, language="de")
+
+    assert session.inference is not None
+    assert session.inference["language"] == "de"
 
 
 def test_inference_logging_reports_counts_cache_and_runtime_without_payload(caplog) -> None:

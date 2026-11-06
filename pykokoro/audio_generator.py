@@ -8,7 +8,7 @@ import logging
 import random
 import time
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import numpy as np
@@ -325,6 +325,7 @@ class AudioGenerator:
         attempt_kind: str = "initial",
         tokens: list[int] | None = None,
         seed: int | None = None,
+        language: str | None = None,
     ) -> tuple[np.ndarray, KokoroTimingPayload | None]:
         return self._run_conditioned_onnx(
             phonemes,
@@ -334,6 +335,7 @@ class AudioGenerator:
             attempt_kind=attempt_kind,
             tokens=tokens,
             seed=seed,
+            language=language,
         )
 
     def _run_reference_onnx(
@@ -346,6 +348,7 @@ class AudioGenerator:
         attempt_kind: str = "initial",
         tokens: list[int] | None = None,
         seed: int | None = None,
+        language: str | None = None,
     ) -> tuple[np.ndarray, KokoroTimingPayload | None]:
         if speed != 1.0:
             raise ConfigurationError("reference voice synthesis requires speed=1.0")
@@ -357,6 +360,7 @@ class AudioGenerator:
             attempt_kind=attempt_kind,
             tokens=tokens,
             seed=seed,
+            language=language,
             reference_voice=reference_voice,
         )
 
@@ -371,6 +375,7 @@ class AudioGenerator:
         attempt_kind: str = "initial",
         tokens: list[int] | None = None,
         seed: int | None = None,
+        language: str | None = None,
     ) -> tuple[np.ndarray, KokoroTimingPayload | None]:
         if reference_voice is not None:
             return self._run_reference_onnx(
@@ -381,6 +386,7 @@ class AudioGenerator:
                 attempt_kind=attempt_kind,
                 tokens=tokens,
                 seed=seed,
+                language=language,
             )
         if voice_style is None:
             raise ValueError("static-voice inference requires a voice style")
@@ -392,6 +398,7 @@ class AudioGenerator:
             attempt_kind=attempt_kind,
             tokens=tokens,
             seed=seed,
+            language=language,
         )
 
     def _run_conditioned_onnx(
@@ -404,6 +411,7 @@ class AudioGenerator:
         attempt_kind: str = "initial",
         tokens: list[int] | None = None,
         seed: int | None = None,
+        language: str | None = None,
         reference_voice: ReferenceVoice | None = None,
     ) -> tuple[np.ndarray, KokoroTimingPayload | None]:
         effective_phonemes = phonemes[:MAX_PHONEME_LENGTH]
@@ -449,20 +457,29 @@ class AudioGenerator:
             cache_hit = True
         else:
             started = time.perf_counter()
+            runtime_kwargs: dict[str, Any] = {"speed": speed, "seed": seed}
+            runtime_metadata = getattr(getattr(self._runtime, "resolved", None), "metadata", None)
+            routing_metadata = (
+                runtime_metadata.get("runtime") if isinstance(runtime_metadata, Mapping) else None
+            )
+            if (
+                language is not None
+                and isinstance(routing_metadata, Mapping)
+                and routing_metadata.get("layout") == "language-router-onnx-v1"
+            ):
+                runtime_kwargs["language"] = language
             if reference_voice is None:
                 assert voice_style_indexed is not None
                 result = self._runtime.infer(
                     effective_tokens,
                     style=voice_style_indexed,
-                    speed=speed,
-                    seed=seed,
+                    **runtime_kwargs,
                 )
             else:
                 result = self._runtime.infer(
                     effective_tokens,
                     reference=reference_voice,
-                    speed=speed,
-                    seed=seed,
+                    **runtime_kwargs,
                 )
             runtime_s = time.perf_counter() - started
             audio = np.asarray(getattr(result, "audio", result), dtype=np.float32).reshape(-1)
@@ -775,6 +792,7 @@ class AudioGenerator:
                     tokens=segment.tokens or None,
                     seed=seed,
                     reference_voice=reference_voice,
+                    language=segment.lang,
                 )
             else:
                 audio, pred_dur = self._run_voice_conditioned_onnx(
@@ -786,6 +804,7 @@ class AudioGenerator:
                     tokens=segment.tokens or None,
                     seed=seed,
                     reference_voice=reference_voice,
+                    language=segment.lang,
                 )
             if trace is not None:
                 trace.inference[-1].update(
@@ -1165,6 +1184,7 @@ class AudioGenerator:
                 tokens=prepared_fallback_tokens,
                 seed=seed,
                 reference_voice=reference_voice,
+                language=segment.lang,
             )
         else:
             fallback_audio, _ = self._run_voice_conditioned_onnx(
@@ -1176,6 +1196,7 @@ class AudioGenerator:
                 tokens=prepared_fallback_tokens,
                 seed=seed,
                 reference_voice=reference_voice,
+                language=segment.lang,
             )
         short_sentence_metadata["cut_applied"] = True
         short_sentence_metadata["fallback_used"] = "wrap"
@@ -1285,6 +1306,7 @@ class AudioGenerator:
                     tokens=retry.tokens,
                     seed=seed,
                     reference_voice=reference_voice,
+                    language=segment.lang,
                 )
             else:
                 retry_audio, pred_dur = self._run_voice_conditioned_onnx(
@@ -1296,6 +1318,7 @@ class AudioGenerator:
                     tokens=retry.tokens,
                     seed=seed,
                     reference_voice=reference_voice,
+                    language=segment.lang,
                 )
             timing_tokens = retry.metadata.get("timing_tokens")
             retry_timings: list[WordTiming] = []

@@ -491,6 +491,12 @@ class Kokoro:
             )
         return self._voice_manager.get_voice_style(self._voice_manager_voice_name(voice_name))
 
+    def validate_voice_language(self, voice_name: str, language: str) -> None:
+        self._init_kokoro()
+        validate = getattr(self._runtime, "validate_voice_language", None)
+        if callable(validate):
+            validate(voice_name, language)
+
     def create_blended_voice(self, blend: VoiceBlend) -> np.ndarray:
         """Create a blended voice style vector from a VoiceBlend."""
         self._require_static_voice_mode("Voice blending is unavailable for reference-only models")

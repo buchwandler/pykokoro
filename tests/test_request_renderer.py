@@ -4,7 +4,6 @@ from typing import Any
 
 import numpy as np
 import pytest
-
 from pykokoro import SynthesisInputTooLongError
 from pykokoro.error_diagnostics import error_diagnostic
 from pykokoro.exceptions import BackendError, ConfigurationError, InvalidVoiceError
@@ -381,6 +380,40 @@ def test_renderer_rejects_oversized_request_before_model_inference() -> None:
     assert raised.value.token_count == 511
     assert raised.value.max_tokens == 510
     assert backend.generated == []
+
+
+def test_named_router_voice_language_is_validated_before_style_resolution() -> None:
+    class VoiceLanguageBackend(FakeBackend):
+        def __init__(self) -> None:
+            super().__init__()
+            self.style_resolution_called = False
+            self.validated: tuple[str, str] | None = None
+
+        def validate_voice_language(self, voice: str, language: str) -> None:
+            self.validated = (voice, language)
+            raise ConfigurationError("voice does not support requested language")
+
+        def resolve_voice_style(self, voice: str) -> str:
+            self.style_resolution_called = True
+            return super().resolve_voice_style(voice)
+
+    request = SynthesisSegment("router-voice", "Hello", "en-us", voice="AV_julia")
+    prepared = PreparedSynthesis(
+        request_id=request.id,
+        text=request.text,
+        language=request.language,
+        voice=request.voice,
+        phonemes="hello",
+        token_ids=(1, 2),
+    )
+    backend = VoiceLanguageBackend()
+    renderer = OnnxRequestRenderer(FakeG2PAdapter(), backend_factory=lambda _: backend)
+
+    with pytest.raises(ConfigurationError, match="requested language"):
+        renderer.render(prepared, request, _config())
+
+    assert backend.validated == ("AV_julia", "en-us")
+    assert not backend.style_resolution_called
 
 
 def test_renderer_reports_invalid_voice_as_typed_error() -> None:

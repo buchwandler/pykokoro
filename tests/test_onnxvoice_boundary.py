@@ -5,9 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
-import pytest
-
 import pykokoro._onnxvoice as boundary
+import pytest
 from pykokoro.asset_progress import AssetProgressEvent
 from pykokoro.error_diagnostics import error_diagnostic
 from pykokoro.exceptions import BackendError, ConfigurationError
@@ -483,7 +482,7 @@ def test_cache_identity_uses_storage_id_for_managed_installations(tmp_path: Path
     runtime = SimpleNamespace(infer=lambda *a, **kw: None)
     adapter = boundary.KokoroRuntimeAdapter(runtime, resolved)
 
-    assert adapter.cache_identity == ("managed", "kokoro:v1.0", "kokoro--sel-abc123")
+    assert adapter.cache_identity == ("managed", "kokoro:v1.0", "kokoro--sel-abc123", None)
 
 
 def test_cache_identity_uses_paths_for_local_models(tmp_path: Path) -> None:
@@ -509,6 +508,42 @@ def test_cache_identity_uses_paths_for_local_models(tmp_path: Path) -> None:
     assert adapter.cache_identity[1] == (str(model.resolve()),)
     assert adapter.cache_identity[2] == str(voices.resolve())
 
+
+
+
+def test_language_router_cache_identity_includes_layout_and_both_graph_paths(
+    tmp_path: Path,
+) -> None:
+    model_en = tmp_path / "model_en.onnx"
+    model_de = tmp_path / "model_de.onnx"
+    paths = (model_en, model_de)
+    common = {
+        "ref": None,
+        "model_id": None,
+        "quality": None,
+        "distribution": None,
+        "storage_id": None,
+        "installation": None,
+        "sample_rate": 24_000,
+        "model_paths": paths,
+        "voices_path": None,
+        "config_path": None,
+        "model_artifacts": {"model:model_en": model_en, "model:model_de": model_de},
+    }
+    routed = boundary.ResolvedKokoroModel(
+        metadata={"runtime": {"layout": "language-router-onnx-v1"}}, **common
+    )
+    single = boundary.ResolvedKokoroModel(
+        metadata={"runtime": {"layout": "single-onnx-v1"}}, **common
+    )
+
+    runtime = SimpleNamespace(infer=lambda *args, **kwargs: None)
+    routed_adapter = boundary.KokoroRuntimeAdapter(runtime, routed)
+    single_adapter = boundary.KokoroRuntimeAdapter(runtime, single)
+
+    assert routed_adapter.cache_identity[1] == tuple(str(path.resolve()) for path in paths)
+    assert routed_adapter.cache_identity[-1] == "language-router-onnx-v1"
+    assert routed_adapter.cache_identity != single_adapter.cache_identity
 
 def test_different_distributions_produce_different_cache_identities(tmp_path: Path) -> None:
     model = tmp_path / "model.onnx"
@@ -659,6 +694,70 @@ def test_runtime_adapter_seed_keyword_contract(
         assert "seed" not in runtime.inference
     else:
         assert runtime.inference["seed"] == seed
+
+
+def test_runtime_adapter_passes_language_for_router_inference() -> None:
+    class Runtime:
+        def __init__(self) -> None:
+            self.inference: dict[str, object] | None = None
+
+        def infer(self, token_ids: object, **kwargs: object) -> str:
+            self.inference = {"token_ids": token_ids, **kwargs}
+            return "inferred"
+
+    runtime = Runtime()
+    resolved = boundary.ResolvedKokoroModel(
+        ref="kokoro:akinvox-en-de",
+        model_id="akinvox-en-de",
+        quality="fp32",
+        distribution="fixture",
+        storage_id="router-installation",
+        installation=None,
+        metadata={"runtime": {"layout": "language-router-onnx-v1"}},
+        sample_rate=24_000,
+        model_paths=(),
+        voices_path=None,
+        config_path=None,
+    )
+    adapter = boundary.KokoroRuntimeAdapter(runtime, resolved)
+
+    assert adapter.infer([1, 2], style=np.zeros((1, 256)), speed=1.0, language="de") == "inferred"
+    assert runtime.inference is not None
+    assert runtime.inference["token_ids"] == [1, 2]
+    assert runtime.inference["speed"] == 1.0
+    assert runtime.inference["language"] == "de"
+    assert np.array_equal(runtime.inference["style"], np.zeros((1, 256)))
+
+
+def test_runtime_adapter_validates_router_voice_language() -> None:
+    metadata = {
+        "language_codes": ("en", "de"),
+        "runtime": {
+            "layout": "language-router-onnx-v1",
+            "voice_metadata": {
+                "AV_cori": {"language": "en"},
+                "AV_julia": {"language": "de"},
+            },
+        },
+    }
+    resolved = boundary.ResolvedKokoroModel(
+        ref="kokoro:akinvox-en-de",
+        model_id="akinvox-en-de",
+        quality="fp32",
+        distribution="fixture",
+        storage_id="router-installation",
+        installation=None,
+        metadata=metadata,
+        sample_rate=24_000,
+        model_paths=(),
+        voices_path=None,
+        config_path=None,
+    )
+    adapter = boundary.KokoroRuntimeAdapter(SimpleNamespace(), resolved)
+
+    adapter.validate_voice_language("AV_cori", "en-US")
+    with pytest.raises(ConfigurationError, match="AV_cori.*de"):
+        adapter.validate_voice_language("AV_cori", "de")
 
 
 def test_runtime_adapter_prepares_and_converts_reference_state(

@@ -126,7 +126,7 @@ jobs:
           "phrasplit==0.3.9" \
           "audiosig==0.1.4" \
           "soxr==1.1.0" \
-          "onnxvoice[cpu]==0.2.2" \
+          "onnxvoice[cpu]==0.2.17" \
           platformdirs
         python -m pip install -e .
     - name: Install Lexphon data
