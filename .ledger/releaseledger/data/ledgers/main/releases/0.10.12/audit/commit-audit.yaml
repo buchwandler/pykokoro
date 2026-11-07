@@ -1,0 +1,59 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: 0.10.12
+git_base_ref: v0.10.11
+git_base_sha: a39f635ac34ec6e7724b95957c71eb0caa383aa4
+git_head_ref: HEAD
+git_head_sha: f8ceec2fa0e52258a80d79f197b3bab34dacb919
+git_range: a39f635ac34ec6e7724b95957c71eb0caa383aa4..f8ceec2fa0e52258a80d79f197b3bab34dacb919
+commit_count: 2
+rows:
+  - sha: f3367383ac92d0999af83192c4e29bfa473ff67d
+    source_ref: git:f3367383ac92d0999af83192c4e29bfa473ff67d
+    short_sha: f336738
+    changed_paths:
+      - pykokoro/_onnxvoice.py
+      - tests/test_onnxvoice_boundary.py
+    stats:
+      files_changed: 2
+      insertions: 8
+      deletions: 0
+    inspected: true
+    inspected_paths:
+      - pykokoro/_onnxvoice.py
+      - tests/test_onnxvoice_boundary.py
+    observed_behavior:
+      Maps the AkinVox multispeaker GitHub variant to its versioned model-files
+      distribution for managed resolution.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: add missing github map"
+    target_entry_id: entry-0001
+    notes: ""
+  - sha: f8ceec2fa0e52258a80d79f197b3bab34dacb919
+    source_ref: git:f8ceec2fa0e52258a80d79f197b3bab34dacb919
+    short_sha: f8ceec2
+    changed_paths:
+      - pykokoro/onnx_backend.py
+      - tests/test_onnxvoice_boundary.py
+    stats:
+      files_changed: 2
+      insertions: 45
+      deletions: 0
+    inspected: true
+    inspected_paths:
+      - pykokoro/onnx_backend.py
+      - tests/test_onnxvoice_boundary.py
+    observed_behavior:
+      Uses the managed installation's resolved voices artifact path when loading static
+      voices.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "fix: voices path"
+    target_entry_id: entry-0002
+    notes: ""

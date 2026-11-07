@@ -1,0 +1,34 @@
+ pykokoro/_onnxvoice.py           | 4 ++++
+ tests/test_onnxvoice_boundary.py | 4 ++++
+ 2 files changed, 8 insertions(+)
+
+diff --git a/pykokoro/_onnxvoice.py b/pykokoro/_onnxvoice.py
+index 81f01b8..e1bcf10 100644
+--- a/pykokoro/_onnxvoice.py
++++ b/pykokoro/_onnxvoice.py
+@@ -205,6 +205,10 @@ def normalize_kokoro_ref(ref: str) -> str:
+ _DISTRIBUTION_MAP: dict[tuple[str, str], str] = {
+     ("github", "v1.0"): "github-model-files-v1.0-timestamped-r4",
+     ("github", "v1.1-zh"): "github-model-files-v1.1",
++    (
++        "github",
++        "akinvox-multispeaker-v1",
++    ): "github-model-files-akinvox-multispeaker-v2026.10.07",
+ }
+
+
+diff --git a/tests/test_onnxvoice_boundary.py b/tests/test_onnxvoice_boundary.py
+index d4d28b6..aa72a0f 100644
+--- a/tests/test_onnxvoice_boundary.py
++++ b/tests/test_onnxvoice_boundary.py
+@@ -455,6 +455,10 @@ def test_onnxvoice_distribution_for_maps_github_variants() -> None:
+         boundary.onnxvoice_distribution_for(source="github", variant="v1.1-zh")
+         == "github-model-files-v1.1"
+     )
++    assert (
++        boundary.onnxvoice_distribution_for(source="github", variant="akinvox-multispeaker-v1")
++        == "github-model-files-akinvox-multispeaker-v2026.10.07"
++    )
+
+
+ def test_onnxvoice_distribution_for_raises_on_unmapped_pair() -> None:

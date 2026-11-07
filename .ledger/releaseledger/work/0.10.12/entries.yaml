@@ -1,0 +1,39 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: 0.10.12
+git_base_ref: a39f635ac34ec6e7724b95957c71eb0caa383aa4
+git_base_sha: a39f635ac34ec6e7724b95957c71eb0caa383aa4
+git_head_ref: f8ceec2fa0e52258a80d79f197b3bab34dacb919
+git_head_sha: f8ceec2fa0e52258a80d79f197b3bab34dacb919
+include_merges: nontrivial
+entries:
+  - kind: added
+    summary: "Added GitHub distribution resolution for the AkinVox multispeaker model"
+    status: accepted
+    source_refs:
+      - git:f3367383ac92d0999af83192c4e29bfa473ff67d
+    paths:
+      - pykokoro/_onnxvoice.py
+      - tests/test_onnxvoice_boundary.py
+    sources:
+      - git:f3367383ac92d0999af83192c4e29bfa473ff67d
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: fixed
+    summary: "Fixed managed installations to load their resolved voice artifact"
+    status: accepted
+    source_refs:
+      - git:f8ceec2fa0e52258a80d79f197b3bab34dacb919
+    paths:
+      - pykokoro/onnx_backend.py
+      - tests/test_onnxvoice_boundary.py
+    sources:
+      - git:f8ceec2fa0e52258a80d79f197b3bab34dacb919
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

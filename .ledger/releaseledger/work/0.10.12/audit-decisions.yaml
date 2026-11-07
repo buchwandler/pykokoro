@@ -1,0 +1,29 @@
+rows:
+  - sha: f3367383ac92d0999af83192c4e29bfa473ff67d
+    inspected: true
+    inspected_paths:
+      - pykokoro/_onnxvoice.py
+      - tests/test_onnxvoice_boundary.py
+    observed_behavior:
+      Maps the AkinVox multispeaker GitHub variant to its versioned model-files
+      distribution for managed resolution.
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false
+  - sha: f8ceec2fa0e52258a80d79f197b3bab34dacb919
+    inspected: true
+    inspected_paths:
+      - pykokoro/onnx_backend.py
+      - tests/test_onnxvoice_boundary.py
+    observed_behavior:
+      Uses the managed installation's resolved voices artifact path when loading static
+      voices.
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false

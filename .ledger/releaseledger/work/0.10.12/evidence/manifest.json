@@ -1,0 +1,33 @@
+{
+  "candidate_count": 2,
+  "candidates": [
+    {
+      "additions": 8,
+      "deletions": 0,
+      "patch_file": "f336738.patch",
+      "patch_sha256": "8038b0ca2ff2a37414922b5a99029fdac986ee8028924582c134230087646c74",
+      "paths": ["pykokoro/_onnxvoice.py", "tests/test_onnxvoice_boundary.py"],
+      "sha": "f3367383ac92d0999af83192c4e29bfa473ff67d",
+      "short_sha": "f336738",
+      "source_ref": "git:f3367383ac92d0999af83192c4e29bfa473ff67d"
+    },
+    {
+      "additions": 45,
+      "deletions": 0,
+      "patch_file": "f8ceec2.patch",
+      "patch_sha256": "47a35457d515d2c2cf6cf21c280a851a2bb67bec5478ebb276cd90503550691f",
+      "paths": ["pykokoro/onnx_backend.py", "tests/test_onnxvoice_boundary.py"],
+      "sha": "f8ceec2fa0e52258a80d79f197b3bab34dacb919",
+      "short_sha": "f8ceec2",
+      "source_ref": "git:f8ceec2fa0e52258a80d79f197b3bab34dacb919"
+    }
+  ],
+  "git_base_ref": "a39f635ac34ec6e7724b95957c71eb0caa383aa4",
+  "git_base_sha": "a39f635ac34ec6e7724b95957c71eb0caa383aa4",
+  "git_head_ref": "f8ceec2fa0e52258a80d79f197b3bab34dacb919",
+  "git_head_sha": "f8ceec2fa0e52258a80d79f197b3bab34dacb919",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "0.10.12",
+  "schema_version": 1
+}
