@@ -56,6 +56,49 @@ def test_backend_forwards_cache_dir_to_managed_install(
         boundary.normalize_kokoro_ref("piper:en_US")
 
 
+def test_backend_loads_voices_from_managed_installation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import pykokoro.onnx_backend as onnx_backend
+
+    voices = tmp_path / "voices.npz"
+    resolved = SimpleNamespace(
+        model_id="akinvox-multispeaker-v1",
+        quality="fp32",
+        distribution="github-model-files-akinvox-multispeaker-v2026.10.07",
+        model_paths=(tmp_path / "model_en.onnx", tmp_path / "model_de.onnx"),
+        voices_path=voices,
+        config_path=None,
+        metadata={},
+    )
+    runtime = SimpleNamespace()
+    monkeypatch.setattr(onnx_backend, "install_kokoro_model", lambda *args, **kwargs: resolved)
+    monkeypatch.setattr(onnx_backend, "open_installed_kokoro", lambda *args, **kwargs: runtime)
+    monkeypatch.setattr(onnx_backend, "runtime_diagnostics", lambda runtime: {})
+
+    class VoiceManagerStub:
+        def __init__(self, **kwargs: object) -> None:
+            self.voices_path: Path | None = None
+
+        def load_voices(self, *, voices_path: Path) -> None:
+            self.voices_path = voices_path
+
+    class AudioGeneratorStub:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+    monkeypatch.setattr(onnx_backend, "VoiceManager", VoiceManagerStub)
+    monkeypatch.setattr(onnx_backend, "AudioGenerator", AudioGeneratorStub)
+    backend = onnx_backend.Kokoro(model_variant="akinvox-multispeaker-v1", model_quality="fp32")
+    backend._tokenizer = object()
+
+    backend._init_kokoro_locked()
+
+    assert backend._voices_path == voices
+    assert backend._voice_manager is not None
+    assert backend._voice_manager.voices_path == voices
+
+
 def test_normalize_provider_request_supports_legacy_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

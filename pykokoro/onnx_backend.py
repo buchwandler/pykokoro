@@ -427,6 +427,8 @@ class Kokoro:
             else None
         )
         self._model_config_path = resolved.config_path
+        if resolved.voices_path is not None:
+            self._voices_path = resolved.voices_path
         if profile.voice_mode == "static":
             if self._voices_path is None:
                 raise ConfigurationError("OnnxVoice Kokoro installation has no voices artifact")
