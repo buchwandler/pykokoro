@@ -455,6 +455,10 @@ def test_onnxvoice_distribution_for_maps_github_variants() -> None:
         boundary.onnxvoice_distribution_for(source="github", variant="v1.1-zh")
         == "github-model-files-v1.1"
     )
+    assert (
+        boundary.onnxvoice_distribution_for(source="github", variant="akinvox-multispeaker-v1")
+        == "github-model-files-akinvox-multispeaker-v2026.10.07"
+    )
 
 
 def test_onnxvoice_distribution_for_raises_on_unmapped_pair() -> None:

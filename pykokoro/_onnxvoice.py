@@ -205,6 +205,10 @@ def normalize_kokoro_ref(ref: str) -> str:
 _DISTRIBUTION_MAP: dict[tuple[str, str], str] = {
     ("github", "v1.0"): "github-model-files-v1.0-timestamped-r4",
     ("github", "v1.1-zh"): "github-model-files-v1.1",
+    (
+        "github",
+        "akinvox-multispeaker-v1",
+    ): "github-model-files-akinvox-multispeaker-v2026.10.07",
 }
 
 
