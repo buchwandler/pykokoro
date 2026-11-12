@@ -1,0 +1,715 @@
+ docs/advanced_features.md                 |  39 +++++++----
+ docs/api_reference.md                     |  11 ++-
+ pykokoro/audio_generator.py               |  23 ++++---
+ pykokoro/request_renderer.py              |  28 +++++---
+ pykokoro/synthesis_config.py              |  15 ++++-
+ tests/test_audio_generator_performance.py | 107 +++++++++++++++++++++++++++++-
+ tests/test_public_engine_api.py           |   1 +
+ tests/test_reference_synthesis.py         |  15 ++++-
+ tests/test_request_renderer.py            |  62 +++++++++++++++--
+ tests/test_synthesis_config.py            |  31 ++++++++-
+ tests/typecheck/public_api.py             |   2 +
+ 11 files changed, 289 insertions(+), 45 deletions(-)
+
+diff --git a/docs/advanced_features.md b/docs/advanced_features.md
+index 2aabc86..483b9f6 100644
+--- a/docs/advanced_features.md
++++ b/docs/advanced_features.md
+@@ -3,25 +3,40 @@
+ All text passed to PyKokoro is prepared speech text. The engine applies the KokoroG2P
+ prepared-text behavior but does not interpret SSMD, YAML, or document-level directives.
+
+-## Raw acoustic output
++## Audio output policies
+
+-`SynthesisConfig.audio_output_policy` selects whether PyKokoro applies its normal audio
+-processing or returns the complete inference waveform:
++`SynthesisConfig.audio_output_policy` controls generic silence trimming separately from
++semantic short-sentence and narration-context processing:
+
+-| Policy      | Context synthesis                                 | Silence trim     | Short-sentence crop | Voice-level processing |
+-| ----------- | ------------------------------------------------- | ---------------- | ------------------- | ---------------------- |
+-| `processed` | allowed                                           | current behavior | allowed             | allowed                |
+-| `raw`       | disabled when a later body crop would be required | disabled         | disabled            | disabled               |
++| Policy             | Short-sentence detection and crop | AkinVox context and body crop | Generic silence trim   | Voice-level processing | Inference sample identity |
++| ------------------ | --------------------------------- | ----------------------------- | ---------------------- | ---------------------- | ------------------------- |
++| `PROCESSED`        | allowed                           | allowed                       | allowed when requested | allowed                | not required              |
++| `PRESERVE_SILENCE` | allowed                           | allowed                       | forbidden              | allowed                | not required              |
++| `RAW`              | disabled                          | disabled                      | forbidden              | disabled               | required                  |
+
+-`raw` preserves the inference sample count and values after canonical dtype and shape
+-normalization. It is intended for callers that own all downstream composition, such as
+-VoiceRender. Core sample-count provenance is included in the returned trace for raw
+-renders.
++`PRESERVE_SILENCE` is not a raw waveform mode. It runs normal PyKokoro semantic and
++voice-level processing but guarantees that generic leading/trailing silence trimming is
++not applied. Short-sentence target cropping and AkinVox narration-context body cropping
++remain enabled because they isolate requested speech from synthetic or contextual
++inference input. Those semantic crops are separate from generic silence removal.
++
++Use `PRESERVE_SILENCE` when a downstream caller owns pause removal, as VoiceRender does.
++Its trace records `audio_output_policy: "preserve_silence"`,
++`silence_trim_allowed: false`, and `silence_trim_applied: false`. It does not claim
++RAW's sample-count or sample-value identity guarantees.
++
++`RAW` preserves inference sample count and values after canonical dtype and shape
++normalization. It is intended for callers that own all downstream composition and want
++strict inference output. Core sample-count provenance is included in the returned trace
++for raw renders.
+
+ ```python
+ from pykokoro import AudioOutputPolicy, SynthesisConfig
+
+-config = SynthesisConfig(audio_output_policy=AudioOutputPolicy.RAW)
++preserve_silence_config = SynthesisConfig(
++    audio_output_policy=AudioOutputPolicy.PRESERVE_SILENCE
++)
++raw_config = SynthesisConfig(audio_output_policy=AudioOutputPolicy.RAW)
+ ```
+
+ ## Source-aligned pronunciation overrides
+diff --git a/docs/api_reference.md b/docs/api_reference.md
+index 63e3e24..d542697 100644
+--- a/docs/api_reference.md
++++ b/docs/api_reference.md
+@@ -41,9 +41,14 @@ from pykokoro import (
+ | Version                   | `__version__`, `__version_tuple__`                                                                                                                                                                                                                                                                                                                                                  |
+
+ `SynthesisConfig.audio_output_policy` accepts `AudioOutputPolicy.PROCESSED` (the
+-default) or `AudioOutputPolicy.RAW`. Raw mode returns sample-preserving inference audio
+-for callers that perform downstream composition. See
+-[advanced features](advanced_features.md#raw-acoustic-output) for the processing
++default), `AudioOutputPolicy.PRESERVE_SILENCE`, or `AudioOutputPolicy.RAW`.
++`PRESERVE_SILENCE` runs normal PyKokoro semantic and voice-level processing while
++guaranteeing that generic leading/trailing silence trimming is not applied.
++Short-sentence target cropping and AkinVox narration-context body cropping remain
++enabled because they isolate requested speech from synthetic or contextual inference
++input. These are not generic silence removal. `RAW` returns sample-preserving inference
++audio for callers that perform all downstream processing. See
++[audio output policies](advanced_features.md#audio-output-policies) for the processing
+ contract.
+
+ `SynthesisSegment` is an alias of `SynthesisRequest`, and `PyKokoroError` is a
+diff --git a/pykokoro/audio_generator.py b/pykokoro/audio_generator.py
+index 46ebc58..7ac7551 100644
+--- a/pykokoro/audio_generator.py
++++ b/pykokoro/audio_generator.py
+@@ -30,7 +30,12 @@ from .short_sentence_handler import (
+     build_short_sentence_phrase_retry,
+     cut_short_sentence_phrase_audio,
+ )
+-from .synthesis_config import AudioOutputPolicy
++from .synthesis_config import (
++    AudioOutputPolicy,
++    _allows_processed_features,
++    _forbids_silence_trim,
++    _requires_raw_sample_identity,
++)
+ from .tokenizer import Tokenizer
+ from .types import G2PAlignmentToken, PhonemeSegment, WordTiming, _exact_timing_geometry
+ from .voice_level import VoiceLevelConfig, apply_voice_level_calibration
+@@ -676,7 +681,7 @@ class AudioGenerator:
+
+         effective_config = (
+             None
+-            if audio_output_policy is AudioOutputPolicy.RAW
++            if not _allows_processed_features(audio_output_policy)
+             else self._resolve_short_sentence_config(enable_short_sentence_override)
+         )
+         self._context_phonemizer = context_phonemizer
+@@ -803,13 +808,13 @@ class AudioGenerator:
+             short_sentence_metadata = (segment.engine_metadata or {}).get(SHORT_SENTENCE_META_KEY)
+             narration_context = (segment.engine_metadata or {}).get(_AKINVOX_NARRATION_CONTEXT_KEY)
+             if isinstance(narration_context, dict) and (
+-                audio_output_policy is AudioOutputPolicy.RAW
++                _requires_raw_sample_identity(audio_output_policy)
+                 or isinstance(short_sentence_metadata, dict)
+             ):
+                 restored = self._restore_narration_body_segment(
+                     segment, narration_context, discard_short_sentence=True
+                 )
+-                if audio_output_policy is AudioOutputPolicy.RAW and not restored:
++                if _requires_raw_sample_identity(audio_output_policy) and not restored:
+                     raise ConfigurationError(
+                         "raw audio output could not restore an AkinVox narration body before inference"
+                     )
+@@ -858,7 +863,7 @@ class AudioGenerator:
+                     }
+                 )
+             segment.word_timings = self._map_pred_dur_to_word_timings(segment, pred_dur, len(audio))
+-            if audio_output_policy is AudioOutputPolicy.RAW and trace is not None:
++            if _requires_raw_sample_identity(audio_output_policy) and trace is not None:
+                 trace_record = trace.inference[-1]
+                 trace_record["audio_output_policy"] = AudioOutputPolicy.RAW.value
+                 timing = self._coerce_timing_payload(pred_dur, len(segment.tokens))
+@@ -909,7 +914,7 @@ class AudioGenerator:
+                         segment, narration_context, clear_word_timings=False
+                     )
+                     segment.word_timings = body_timings
+-            if audio_output_policy is AudioOutputPolicy.RAW:
++            if _requires_raw_sample_identity(audio_output_policy):
+                 segment.raw_audio = audio
+             else:
+                 self._log_short_sentence_timestamps(segment, pred_dur)
+@@ -1686,7 +1691,7 @@ class AudioGenerator:
+         trace: Trace | None = None,
+         audio_output_policy: AudioOutputPolicy = AudioOutputPolicy.PROCESSED,
+     ) -> list[PhonemeSegment]:
+-        if audio_output_policy is AudioOutputPolicy.RAW:
++        if _forbids_silence_trim(audio_output_policy):
+             trim_silence = False
+         config = voice_level_config or VoiceLevelConfig()
+         for segment in segments:
+@@ -1697,7 +1702,7 @@ class AudioGenerator:
+             audio = segment.raw_audio
+             short_sentence_metadata = (segment.engine_metadata or {}).get(SHORT_SENTENCE_META_KEY)
+             if (
+-                audio_output_policy is AudioOutputPolicy.PROCESSED
++                _allows_processed_features(audio_output_policy)
+                 and isinstance(short_sentence_metadata, dict)
+                 and not short_sentence_metadata.get("cut_applied")
+             ):
+@@ -1721,7 +1726,7 @@ class AudioGenerator:
+                 else:
+                     audio = trim_result
+
+-            if audio_output_policy is AudioOutputPolicy.RAW:
++            if _requires_raw_sample_identity(audio_output_policy):
+                 segment.processed_audio = audio
+             else:
+                 segment.processed_audio = apply_voice_level_calibration(
+diff --git a/pykokoro/request_renderer.py b/pykokoro/request_renderer.py
+index 5272f86..11cb585 100644
+--- a/pykokoro/request_renderer.py
++++ b/pykokoro/request_renderer.py
+@@ -26,7 +26,14 @@ if TYPE_CHECKING:
+     from .prepared_g2p import PreparedSynthesis
+     from .reference_audio import PreparedReferenceAudio
+ from .reference_voice import ReferenceVoice
+-from .synthesis_config import AudioOutputPolicy, SynthesisConfig, resolve_synthesis_config
++from .synthesis_config import (
++    AudioOutputPolicy,
++    SynthesisConfig,
++    _allows_processed_features,
++    _forbids_silence_trim,
++    _requires_raw_sample_identity,
++    resolve_synthesis_config,
++)
+ from .synthesis_identity import build_synthesis_identity
+ from .synthesis_types import RenderedSegment, SynthesisSegment
+ from .types import (
+@@ -121,7 +128,7 @@ class OnnxRequestRenderer:
+                 raise ConfigurationError("reference voice synthesis requires speed=1.0")
+         trace = (
+             Trace()
+-            if resolved.return_trace or resolved.audio_output_policy is AudioOutputPolicy.RAW
++            if resolved.return_trace or _requires_raw_sample_identity(resolved.audio_output_policy)
+             else None
+         )
+         if trace is not None:
+@@ -270,7 +277,7 @@ class OnnxRequestRenderer:
+             )
+
+         raw_audio_snapshots = None
+-        if resolved.audio_output_policy is AudioOutputPolicy.RAW:
++        if _requires_raw_sample_identity(resolved.audio_output_policy):
+             raw_audio_snapshots = [
+                 None
+                 if segment.raw_audio is None
+@@ -279,7 +286,7 @@ class OnnxRequestRenderer:
+             ]
+         effective_voice_level = (
+             VoiceLevelConfig()
+-            if resolved.audio_output_policy is AudioOutputPolicy.RAW
++            if _requires_raw_sample_identity(resolved.audio_output_policy)
+             else resolved.voice_level
+         )
+         processed_segments = _call_backend_operation(
+@@ -364,9 +371,9 @@ class OnnxRequestRenderer:
+         )
+         short_metadata = (processed_segments[0].engine_metadata or {}).get("__short_sentence")
+         short_sentence_mode = (
+-            "off" if resolved.audio_output_policy is AudioOutputPolicy.RAW else None
++            "off" if not _allows_processed_features(resolved.audio_output_policy) else None
+         )
+-        if resolved.audio_output_policy is AudioOutputPolicy.PROCESSED and isinstance(
++        if _allows_processed_features(resolved.audio_output_policy) and isinstance(
+             short_metadata, dict
+         ):
+             short_kind = short_metadata.get("kind")
+@@ -375,7 +382,12 @@ class OnnxRequestRenderer:
+         identity = replace(identity, resolved_short_sentence_mode=short_sentence_mode)
+         if trace is not None:
+             trace.model["synthesis_identity"] = identity.to_dict()
+-            if resolved.audio_output_policy is AudioOutputPolicy.RAW:
++            trace.model["audio_output_policy"] = resolved.audio_output_policy.value
++            trace.model["silence_trim_allowed"] = not _forbids_silence_trim(
++                resolved.audio_output_policy
++            )
++            trace.model["silence_trim_applied"] = False
++            if _requires_raw_sample_identity(resolved.audio_output_policy):
+                 inference_samples = sum(
+                     0 if audio is None else audio.size for audio in raw_audio_snapshots or ()
+                 )
+@@ -711,7 +723,7 @@ class OnnxRequestRenderer:
+         request: SynthesisSegment, config: SynthesisConfig
+     ) -> tuple[int, int] | None:
+         if (
+-            config.audio_output_policy is AudioOutputPolicy.RAW
++            _requires_raw_sample_identity(config.audio_output_policy)
+             or config.model_source != "github"
+             or config.model_variant != "akinvox-multispeaker-v1"
+             or not isinstance(request.voice, str)
+diff --git a/pykokoro/synthesis_config.py b/pykokoro/synthesis_config.py
+index ec04f16..4a55fcf 100644
+--- a/pykokoro/synthesis_config.py
++++ b/pykokoro/synthesis_config.py
+@@ -29,12 +29,25 @@ LongTextSplitMode = Literal["none", "sentence"]
+
+
+ class AudioOutputPolicy(str, Enum):
+-    """Controls whether synthesis output receives PyKokoro audio processing."""
++    """Controls PyKokoro post-inference audio processing."""
+
+     PROCESSED = "processed"
++    PRESERVE_SILENCE = "preserve_silence"
+     RAW = "raw"
+
+
++def _forbids_silence_trim(policy: AudioOutputPolicy) -> bool:
++    return policy in {AudioOutputPolicy.PRESERVE_SILENCE, AudioOutputPolicy.RAW}
++
++
++def _allows_processed_features(policy: AudioOutputPolicy) -> bool:
++    return policy is not AudioOutputPolicy.RAW
++
++
++def _requires_raw_sample_identity(policy: AudioOutputPolicy) -> bool:
++    return policy is AudioOutputPolicy.RAW
++
++
+ if TYPE_CHECKING:
+     from .tokenizer import TokenizerConfig
+
+diff --git a/tests/test_audio_generator_performance.py b/tests/test_audio_generator_performance.py
+index d63cb3c..59c989f 100644
+--- a/tests/test_audio_generator_performance.py
++++ b/tests/test_audio_generator_performance.py
+@@ -128,13 +128,21 @@ def _narration_context_segment() -> PhonemeSegment:
+     )
+
+
+-def test_narration_context_audio_is_trimmed_using_exact_word_timings() -> None:
++@pytest.mark.parametrize(
++    "policy", [AudioOutputPolicy.PROCESSED, AudioOutputPolicy.PRESERVE_SILENCE]
++)
++def test_narration_context_audio_is_trimmed_using_exact_word_timings(
++    policy: AudioOutputPolicy,
++) -> None:
+     session = _ContextSession([(1800, [1.0, 1.0, 1.0])])
+     generator = AudioGenerator(session, _Tokenizer(), inference_cache_enabled=False)
+     segment = _narration_context_segment()
+
+     result = generator._generate_raw_audio_segments(
+-        [segment], np.zeros((2, 256), dtype=np.float32), 1.0
++        [segment],
++        np.zeros((2, 256), dtype=np.float32),
++        1.0,
++        audio_output_policy=policy,
+     )
+
+     assert len(session.calls) == 1
+@@ -161,11 +169,18 @@ def test_raw_policy_disables_short_sentence_wrapping_before_inference() -> None:
+     raw = generator._preprocess_segments(
+         [_narration_context_segment()], None, audio_output_policy=AudioOutputPolicy.RAW
+     )
++    preserve_silence = generator._preprocess_segments(
++        [_narration_context_segment()],
++        None,
++        audio_output_policy=AudioOutputPolicy.PRESERVE_SILENCE,
++    )
+
+     assert processed[0].phonemes != segment.phonemes
+     assert "__short_sentence" in (processed[0].engine_metadata or {})
+     assert raw[0].phonemes == segment.phonemes
+     assert "__short_sentence" not in (raw[0].engine_metadata or {})
++    assert preserve_silence[0].phonemes != segment.phonemes
++    assert "__short_sentence" in (preserve_silence[0].engine_metadata or {})
+
+
+ def test_raw_postprocessing_skips_trim_cutter_and_voice_calibration(monkeypatch) -> None:
+@@ -199,6 +214,67 @@ def test_raw_postprocessing_skips_trim_cutter_and_voice_calibration(monkeypatch)
+     assert result[0].processed_audio is audio
+
+
++def test_preserve_silence_postprocessing_forbids_trim_and_keeps_crop_and_voice_level(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    generator, _ = _generator()
++    audio = np.asarray([0.1, 0.2, 0.3, 0.4, 0.5], dtype=np.float32)
++    segment = PhonemeSegment(
++        id="preserve-short",
++        segment_id="preserve-short",
++        phoneme_id=0,
++        text="Hi!",
++        phonemes="abc",
++        tokens=[1, 2, 3],
++        engine_metadata={"__short_sentence": {"kind": "phrase", "cut_applied": False}},
++        raw_audio=audio,
++    )
++    cut_calls = 0
++
++    def cut_phrase(waveform: np.ndarray, _metadata: dict[str, object]) -> np.ndarray:
++        nonlocal cut_calls
++        cut_calls += 1
++        return waveform[1:-1]
++
++    def unexpected_trim(_waveform: np.ndarray) -> np.ndarray:
++        pytest.fail("PRESERVE_SILENCE must never call generic silence trimming")
++
++    monkeypatch.setattr("pykokoro.audio_generator.cut_short_sentence_phrase_audio", cut_phrase)
++    monkeypatch.setattr("pykokoro.audio_generator.trim_audio", unexpected_trim)
++    trace = Trace()
++    result = generator._postprocess_audio_segments(
++        [segment],
++        trim_silence=True,
++        voice_level_config=VoiceLevelConfig(mode="calibrated", gain_db=-6.0),
++        trace=trace,
++        audio_output_policy=AudioOutputPolicy.PRESERVE_SILENCE,
++    )
++
++    expected = audio[1:-1] * np.float32(10 ** (-6.0 / 20.0))
++    assert cut_calls == 1
++    assert result[0].processed_audio is not None
++    np.testing.assert_allclose(result[0].processed_audio, expected)
++    assert trace.model["voice_leveling"][0]["applied"] is True
++
++
++def test_processed_policy_runs_generic_trim_when_requested(monkeypatch: pytest.MonkeyPatch) -> None:
++    generator, _ = _generator()
++    audio = np.asarray([0.1, 0.2, 0.3, 0.4], dtype=np.float32)
++    segment = PhonemeSegment("processed", "processed", 0, "Hi", "abc", [1, 2, 3], raw_audio=audio)
++    trim_calls: list[np.ndarray] = []
++
++    def trim(waveform: np.ndarray) -> np.ndarray:
++        trim_calls.append(waveform)
++        return waveform[1:-1]
++
++    monkeypatch.setattr("pykokoro.audio_generator.trim_audio", trim)
++    result = generator._postprocess_audio_segments([segment], trim_silence=True)
++
++    assert len(trim_calls) == 1
++    assert trim_calls[0] is audio
++    np.testing.assert_array_equal(result[0].processed_audio, audio[1:-1])
++
++
+ def test_raw_policy_restores_context_body_before_inference_and_skips_context_trim(
+     monkeypatch,
+ ) -> None:
+@@ -452,6 +528,33 @@ def test_phrase_cut_success_uses_one_model_call(waveform, cutter) -> None:
+     assert trace.counters.get("short_sentence_cut_failure", 0) == 0
+
+
++def test_preserve_silence_generates_and_crops_short_sentence_phrase() -> None:
++    session = _PhraseSession(np.zeros(4000, dtype=np.float32))
++    generator = AudioGenerator(session, _Tokenizer(), inference_cache_enabled=False)
++    metadata = _phrase_metadata()
++    segment = PhonemeSegment(
++        id="phrase",
++        segment_id="request",
++        phoneme_id=0,
++        text="Hi!",
++        phonemes="abc",
++        tokens=[1, 2, 3],
++        engine_metadata={"__short_sentence": metadata},
++    )
++
++    result = generator._generate_raw_audio_segments(
++        [segment],
++        np.zeros((2, 256), dtype=np.float32),
++        1.0,
++        audio_output_policy=AudioOutputPolicy.PRESERVE_SILENCE,
++    )
++
++    assert session.calls == 1
++    assert metadata["cut_applied"] is True
++    assert result[0].raw_audio is not None
++    assert 0 < result[0].raw_audio.size < session.audio.size
++
++
+ def test_invalid_timestamps_use_one_retry(monkeypatch) -> None:
+     from pykokoro.short_sentence_handler import ShortSentenceApplication
+
+diff --git a/tests/test_public_engine_api.py b/tests/test_public_engine_api.py
+index 0b17a1a..3859fcb 100644
+--- a/tests/test_public_engine_api.py
++++ b/tests/test_public_engine_api.py
+@@ -105,6 +105,7 @@ def test_public_api_exports_request_and_result_types() -> None:
+         "__version_tuple__",
+     }
+     assert expected == set(pykokoro.__all__)
++    assert AudioOutputPolicy.PRESERVE_SILENCE.value == "preserve_silence"
+     assert all(
+         value is not None
+         for value in (
+diff --git a/tests/test_reference_synthesis.py b/tests/test_reference_synthesis.py
+index b2e9989..568087d 100644
+--- a/tests/test_reference_synthesis.py
++++ b/tests/test_reference_synthesis.py
+@@ -13,7 +13,7 @@ from pykokoro.generation_config import GenerationConfig
+ from pykokoro.prepared_g2p import PreparedSynthesis
+ from pykokoro.reference_voice import ReferenceVoice
+ from pykokoro.request_renderer import OnnxRequestRenderer
+-from pykokoro.synthesis_config import SynthesisConfig
++from pykokoro.synthesis_config import AudioOutputPolicy, SynthesisConfig
+ from pykokoro.synthesis_identity import build_synthesis_identity
+ from pykokoro.synthesis_types import SynthesisSegment
+ from pykokoro.types import Trace
+@@ -108,6 +108,7 @@ def _reference_config(
+     speed: float = 1.0,
+     random_seed: int | None = None,
+     voice_level: VoiceLevelConfig | None = None,
++    audio_output_policy: AudioOutputPolicy = AudioOutputPolicy.PROCESSED,
+ ) -> SynthesisConfig:
+     return SynthesisConfig(
+         model_source="github",
+@@ -115,6 +116,7 @@ def _reference_config(
+         generation=GenerationConfig(random_seed=random_seed, speed=speed),
+         return_trace=True,
+         voice_level=voice_level or VoiceLevelConfig(),
++        audio_output_policy=audio_output_policy,
+     )
+
+
+@@ -261,7 +263,12 @@ def test_reference_renderer_succeeds_with_default_random_seed() -> None:
+     renderer.close()
+
+
+-def test_reference_rendering_rejects_auto_calibration_and_non_unit_speed() -> None:
++@pytest.mark.parametrize(
++    "policy", [AudioOutputPolicy.PROCESSED, AudioOutputPolicy.PRESERVE_SILENCE]
++)
++def test_reference_rendering_rejects_auto_calibration_and_non_unit_speed(
++    policy: AudioOutputPolicy,
++) -> None:
+     voice = _reference_voice()
+     request = SynthesisSegment("reference-request", "Hello there.", "en-us", voice=voice)
+     prepared = PreparedSynthesis(
+@@ -279,7 +286,9 @@ def test_reference_rendering_rejects_auto_calibration_and_non_unit_speed() -> No
+         renderer.render(
+             prepared,
+             request,
+-            _reference_config(voice_level=VoiceLevelConfig(mode="calibrated")),
++            _reference_config(
++                voice_level=VoiceLevelConfig(mode="calibrated"), audio_output_policy=policy
++            ),
+         )
+     with pytest.raises(ConfigurationError, match="speed=1.0"):
+         renderer.render(prepared, request, _reference_config(speed=1.2))
+diff --git a/tests/test_request_renderer.py b/tests/test_request_renderer.py
+index a1d3151..177d589 100644
+--- a/tests/test_request_renderer.py
++++ b/tests/test_request_renderer.py
+@@ -90,12 +90,19 @@ def test_raw_policy_disables_akinvox_narration_context_selection() -> None:
+     request = SynthesisSegment("raw-context", "One sentence.", "en-us", voice="AV_julia")
+     config = dataclasses.replace(_config(), model_variant="akinvox-multispeaker-v1")
+     raw_config = dataclasses.replace(config, audio_output_policy=AudioOutputPolicy.RAW)
++    preserve_config = dataclasses.replace(
++        config, audio_output_policy=AudioOutputPolicy.PRESERVE_SILENCE
++    )
+
+     assert OnnxRequestRenderer._akinvox_narration_context_counts(request, config) == (1, 2)
++    assert OnnxRequestRenderer._akinvox_narration_context_counts(request, preserve_config) == (
++        1,
++        2,
++    )
+     assert OnnxRequestRenderer._akinvox_narration_context_counts(request, raw_config) is None
+
+
+-def _render_raw_audio(backend: FakeBackend):
++def _render_audio_with_policy(backend: FakeBackend, policy: AudioOutputPolicy):
+     request = SynthesisSegment("raw-waveform", "Hello", "en-us", voice="af_sarah")
+     prepared = PreparedSynthesis(
+         request_id=request.id,
+@@ -110,7 +117,8 @@ def _render_raw_audio(backend: FakeBackend):
+         prepared,
+         request,
+         _config(
+-            audio_output_policy=AudioOutputPolicy.RAW,
++            audio_output_policy=policy,
++            return_trace=True,
+             voice_level=VoiceLevelConfig(mode="calibrated", gain_db=-2.5),
+         ),
+     )
+@@ -126,7 +134,7 @@ def test_raw_policy_preserves_complete_inference_waveform_and_trace(tail: str) -
+         audio[-9_600:] = 0.0
+     backend.audio = audio
+
+-    rendered = _render_raw_audio(backend)
++    rendered = _render_audio_with_policy(backend, AudioOutputPolicy.RAW)
+
+     np.testing.assert_array_equal(rendered.audio, audio)
+     assert rendered.trace is not None
+@@ -151,6 +159,29 @@ def test_raw_policy_preserves_complete_inference_waveform_and_trace(tail: str) -
+     assert voice_level_config.mode == "off"
+
+
++def test_preserve_silence_does_not_enforce_raw_sample_identity() -> None:
++    backend = FakeBackend()
++    audio = np.linspace(-0.9, 0.9, 32, dtype=np.float32)
++    backend.audio = audio
++    backend.postprocess_transform = lambda waveform: waveform[:-1] * 0.99
++
++    rendered = _render_audio_with_policy(backend, AudioOutputPolicy.PRESERVE_SILENCE)
++
++    np.testing.assert_array_equal(rendered.audio, audio[:-1] * 0.99)
++    assert rendered.trace is not None
++    assert rendered.trace.model["audio_output_policy"] == "preserve_silence"
++    assert rendered.trace.model["silence_trim_allowed"] is False
++    assert rendered.trace.model["silence_trim_applied"] is False
++    assert "sample_count_preserved" not in rendered.trace.model
++    assert "sample_values_preserved" not in rendered.trace.model
++    assert "voice_level_applied" not in rendered.trace.model
++    assert backend.postprocess_options["trim_silence"] is False
++    assert rendered.voice_level_applications[0].applied is True
++    voice_level_config = backend.postprocess_options["voice_level_config"]
++    assert isinstance(voice_level_config, VoiceLevelConfig)
++    assert voice_level_config.mode == "calibrated"
++
++
+ @pytest.mark.parametrize(
+     ("mutation", "message"),
+     [("drop", "changed sample count"), ("gain", "changed sample values")],
+@@ -164,7 +195,7 @@ def test_raw_policy_rejects_postprocess_mutation(mutation: str, message: str) ->
+         backend.postprocess_transform = lambda audio: audio * 0.99
+
+     with pytest.raises(BackendError, match=message):
+-        _render_raw_audio(backend)
++        _render_audio_with_policy(backend, AudioOutputPolicy.RAW)
+
+
+ def test_backend_factory_forwards_cache_dir(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+@@ -259,6 +290,9 @@ def test_renderer_keeps_one_request_independent_and_rebases_timings() -> None:
+         == "sha256:" + "a" * 64
+     )
+     assert rendered.trace.warnings == ["frontend note"]
++    assert rendered.trace.model["audio_output_policy"] == "processed"
++    assert rendered.trace.model["silence_trim_allowed"] is True
++    assert rendered.trace.model["silence_trim_applied"] is False
+     assert backend.preprocessed[0].tokens == [1, 2, 3]
+     assert factory_configs[0].voice == "af_sarah"
+     assert factory_configs[0].waveform_validation == "strict"
+@@ -579,7 +613,12 @@ def test_renderer_checks_capacity_after_frontend_postprocessing() -> None:
+     assert backend.generated == []
+
+
+-def test_rendered_result_exposes_short_sentence_mode_without_context_text() -> None:
++@pytest.mark.parametrize(
++    "policy", [AudioOutputPolicy.PROCESSED, AudioOutputPolicy.PRESERVE_SILENCE]
++)
++def test_rendered_result_exposes_short_sentence_mode_without_context_text(
++    policy: AudioOutputPolicy,
++) -> None:
+     class WrappedBackend(FakeBackend):
+         def preprocess_segments(self, segments, enable_short_sentence, **kwargs):
+             result = super().preprocess_segments(segments, enable_short_sentence, **kwargs)
+@@ -606,12 +645,23 @@ def test_rendered_result_exposes_short_sentence_mode_without_context_text() -> N
+     result = renderer.render(
+         prepared,
+         request,
+-        _config(short_sentence_config=ShortSentenceConfig(resolve_mode="wrap")),
++        _config(
++            short_sentence_config=ShortSentenceConfig(resolve_mode="wrap"),
++            audio_output_policy=policy,
++            return_trace=True,
++        ),
+     )
+
+     assert result.text == request.text
+     assert result.phonemes == prepared.phonemes
+     assert result.short_sentence_mode == "wrap"
++    assert result.trace is not None
++    assert result.trace.model["audio_output_policy"] == policy.value
++    assert result.trace.model["silence_trim_allowed"] is (policy is AudioOutputPolicy.PROCESSED)
++    assert result.trace.model["silence_trim_applied"] is False
++    if policy is AudioOutputPolicy.PRESERVE_SILENCE:
++        assert "sample_count_preserved" not in result.trace.model
++        assert "voice_level_applied" not in result.trace.model
+     assert result.synthesis_identity is not None
+     assert result.synthesis_identity.resolved_short_sentence_mode == "wrap"
+     assert "synthetic context" not in result.synthesis_identity.short_sentence
+diff --git a/tests/test_synthesis_config.py b/tests/test_synthesis_config.py
+index 7676d4c..1937b97 100644
+--- a/tests/test_synthesis_config.py
++++ b/tests/test_synthesis_config.py
+@@ -13,7 +13,12 @@ from pykokoro import (
+ )
+ from pykokoro.exceptions import ConfigurationError, InvalidModelError
+ from pykokoro.generation_config import GenerationConfig
+-from pykokoro.synthesis_config import resolve_synthesis_config
++from pykokoro.synthesis_config import (
++    _allows_processed_features,
++    _forbids_silence_trim,
++    _requires_raw_sample_identity,
++    resolve_synthesis_config,
++)
+
+
+ def test_synthesis_config_never_splits_long_text() -> None:
+@@ -27,12 +32,36 @@ def test_audio_output_policy_is_public_and_defaults_to_processed() -> None:
+
+     assert config.audio_output_policy is AudioOutputPolicy.PROCESSED
+     assert AudioOutputPolicy.PROCESSED.value == "processed"
++    assert AudioOutputPolicy.PRESERVE_SILENCE.value == "preserve_silence"
+     assert AudioOutputPolicy.RAW.value == "raw"
+     assert pykokoro.AudioOutputPolicy is AudioOutputPolicy
+     assert "AudioOutputPolicy" in pykokoro.__all__
+     assert SynthesisConfig(audio_output_policy=AudioOutputPolicy.RAW).audio_output_policy is (
+         AudioOutputPolicy.RAW
+     )
++    assert (
++        SynthesisConfig(audio_output_policy=AudioOutputPolicy.PRESERVE_SILENCE).audio_output_policy
++        is AudioOutputPolicy.PRESERVE_SILENCE
++    )
++
++
++@pytest.mark.parametrize(
++    ("policy", "trim_forbidden", "processed_features", "raw_identity"),
++    [
++        (AudioOutputPolicy.PROCESSED, False, True, False),
++        (AudioOutputPolicy.PRESERVE_SILENCE, True, True, False),
++        (AudioOutputPolicy.RAW, True, False, True),
++    ],
++)
++def test_audio_output_policy_semantics_matrix(
++    policy: AudioOutputPolicy,
++    trim_forbidden: bool,
++    processed_features: bool,
++    raw_identity: bool,
++) -> None:
++    assert _forbids_silence_trim(policy) is trim_forbidden
++    assert _allows_processed_features(policy) is processed_features
++    assert _requires_raw_sample_identity(policy) is raw_identity
+
+
+ def test_synthesis_config_rejects_invalid_audio_output_policy() -> None:
+diff --git a/tests/typecheck/public_api.py b/tests/typecheck/public_api.py
+index 094d338..94d7ba0 100644
+--- a/tests/typecheck/public_api.py
++++ b/tests/typecheck/public_api.py
+@@ -31,6 +31,7 @@ from pykokoro import (
+ config = SynthesisConfig(voice="af_sarah", generation=GenerationConfig(lang="en-us"))
+ request = SynthesisSegment("line-1", "Hello.", "en-us", voice="af_sarah")
+ raw_config = SynthesisConfig(audio_output_policy=AudioOutputPolicy.RAW)
++preserve_silence_config = SynthesisConfig(audio_output_policy=AudioOutputPolicy.PRESERVE_SILENCE)
+ reference_voice = ReferenceVoice(
+     np.zeros((1, 256), dtype=np.float32),
+     np.zeros((1, 1, 192), dtype=np.float32),
+@@ -71,6 +72,7 @@ assert_type(RenderedSegment, type[RenderedSegment])
+ assert_type(SynthesisConfig, type[SynthesisConfig])
+ assert_type(AudioOutputPolicy, type[AudioOutputPolicy])
+ assert_type(raw_config.audio_output_policy, AudioOutputPolicy)
++assert_type(preserve_silence_config.audio_output_policy, AudioOutputPolicy)
+ assert_type(ReferenceVoice, type[ReferenceVoice])
+ assert_type(reference_request, SynthesisSegment)
+ assert_type(reference_config, SynthesisConfig)

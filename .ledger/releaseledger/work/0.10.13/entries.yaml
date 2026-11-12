@@ -1,0 +1,63 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: 0.10.13
+git_base_ref: f73fda4b24018244a2e8b281d4bfb5bb212a9cd8
+git_base_sha: f73fda4b24018244a2e8b281d4bfb5bb212a9cd8
+git_head_ref: 79eff0b794a67847c28d652ab4987bdc2f9a2c42
+git_head_sha: 79eff0b794a67847c28d652ab4987bdc2f9a2c42
+include_merges: nontrivial
+entries:
+  - kind: added
+    summary:
+      "Added a raw audio output policy that preserves inference sample count and sample
+      values"
+    status: accepted
+    source_refs:
+      - git:c9bc94692e3323d6cc862b1786319a0ac3e6a3c0
+    paths:
+      - docs/advanced_features.md
+      - docs/api_reference.md
+      - pykokoro/__init__.py
+      - pykokoro/audio_generator.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/request_renderer.py
+      - pykokoro/synthesis_config.py
+      - tests/test_audio_generator_performance.py
+      - tests/test_public_engine_api.py
+      - tests/test_reference_synthesis.py
+      - tests/test_request_renderer.py
+      - tests/test_synthesis_config.py
+      - tests/typecheck/public_api.py
+    sources:
+      - git:c9bc94692e3323d6cc862b1786319a0ac3e6a3c0
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary:
+      "Added a silence-preserving output policy that disables generic trimming while
+      retaining semantic processing"
+    status: accepted
+    source_refs:
+      - git:79eff0b794a67847c28d652ab4987bdc2f9a2c42
+    paths:
+      - docs/advanced_features.md
+      - docs/api_reference.md
+      - pykokoro/audio_generator.py
+      - pykokoro/request_renderer.py
+      - pykokoro/synthesis_config.py
+      - tests/test_audio_generator_performance.py
+      - tests/test_public_engine_api.py
+      - tests/test_reference_synthesis.py
+      - tests/test_request_renderer.py
+      - tests/test_synthesis_config.py
+      - tests/typecheck/public_api.py
+    sources:
+      - git:79eff0b794a67847c28d652ab4987bdc2f9a2c42
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

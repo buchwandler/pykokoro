@@ -1,0 +1,99 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: 0.10.13
+git_base_ref: v0.10.12
+git_base_sha: f73fda4b24018244a2e8b281d4bfb5bb212a9cd8
+git_head_ref: HEAD
+git_head_sha: 79eff0b794a67847c28d652ab4987bdc2f9a2c42
+git_range: f73fda4b24018244a2e8b281d4bfb5bb212a9cd8..79eff0b794a67847c28d652ab4987bdc2f9a2c42
+commit_count: 2
+rows:
+  - sha: c9bc94692e3323d6cc862b1786319a0ac3e6a3c0
+    source_ref: git:c9bc94692e3323d6cc862b1786319a0ac3e6a3c0
+    short_sha: c9bc946
+    changed_paths:
+      - docs/advanced_features.md
+      - docs/api_reference.md
+      - pykokoro/__init__.py
+      - pykokoro/audio_generator.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/request_renderer.py
+      - pykokoro/synthesis_config.py
+      - tests/test_audio_generator_performance.py
+      - tests/test_public_engine_api.py
+      - tests/test_reference_synthesis.py
+      - tests/test_request_renderer.py
+      - tests/test_synthesis_config.py
+      - tests/typecheck/public_api.py
+    stats:
+      files_changed: 13
+      insertions: 453
+      deletions: 41
+    inspected: true
+    inspected_paths:
+      - docs/advanced_features.md
+      - docs/api_reference.md
+      - pykokoro/__init__.py
+      - pykokoro/audio_generator.py
+      - pykokoro/onnx_backend.py
+      - pykokoro/request_renderer.py
+      - pykokoro/synthesis_config.py
+      - tests/test_audio_generator_performance.py
+      - tests/test_public_engine_api.py
+      - tests/test_reference_synthesis.py
+      - tests/test_request_renderer.py
+      - tests/test_synthesis_config.py
+      - tests/typecheck/public_api.py
+    observed_behavior:
+      Raw output preserves inference samples and skips short-sentence and voice-level
+      processing
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: raw accoutic output without silence trim"
+    target_entry_id: entry-0001
+    notes: ""
+  - sha: 79eff0b794a67847c28d652ab4987bdc2f9a2c42
+    source_ref: git:79eff0b794a67847c28d652ab4987bdc2f9a2c42
+    short_sha: 79eff0b
+    changed_paths:
+      - docs/advanced_features.md
+      - docs/api_reference.md
+      - pykokoro/audio_generator.py
+      - pykokoro/request_renderer.py
+      - pykokoro/synthesis_config.py
+      - tests/test_audio_generator_performance.py
+      - tests/test_public_engine_api.py
+      - tests/test_reference_synthesis.py
+      - tests/test_request_renderer.py
+      - tests/test_synthesis_config.py
+      - tests/typecheck/public_api.py
+    stats:
+      files_changed: 11
+      insertions: 289
+      deletions: 45
+    inspected: true
+    inspected_paths:
+      - docs/advanced_features.md
+      - docs/api_reference.md
+      - pykokoro/audio_generator.py
+      - pykokoro/request_renderer.py
+      - pykokoro/synthesis_config.py
+      - tests/test_audio_generator_performance.py
+      - tests/test_public_engine_api.py
+      - tests/test_reference_synthesis.py
+      - tests/test_request_renderer.py
+      - tests/test_synthesis_config.py
+      - tests/typecheck/public_api.py
+    observed_behavior:
+      Silence-preserving output disables generic trimming while retaining semantic crops
+      and voice-level processing
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: preserve silence policy"
+    target_entry_id: entry-0002
+    notes: ""
