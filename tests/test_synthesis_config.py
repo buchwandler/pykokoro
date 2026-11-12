@@ -5,7 +5,12 @@ from typing import get_args
 import pytest
 
 import pykokoro
-from pykokoro import LongTextSplitMode, SynthesisConfig, SynthesisInputTooLongError
+from pykokoro import (
+    AudioOutputPolicy,
+    LongTextSplitMode,
+    SynthesisConfig,
+    SynthesisInputTooLongError,
+)
 from pykokoro.exceptions import ConfigurationError, InvalidModelError
 from pykokoro.generation_config import GenerationConfig
 from pykokoro.synthesis_config import resolve_synthesis_config
@@ -15,6 +20,26 @@ def test_synthesis_config_never_splits_long_text() -> None:
     config = SynthesisConfig()
 
     assert config.long_text_split == "none"
+
+
+def test_audio_output_policy_is_public_and_defaults_to_processed() -> None:
+    config = SynthesisConfig()
+
+    assert config.audio_output_policy is AudioOutputPolicy.PROCESSED
+    assert AudioOutputPolicy.PROCESSED.value == "processed"
+    assert AudioOutputPolicy.RAW.value == "raw"
+    assert pykokoro.AudioOutputPolicy is AudioOutputPolicy
+    assert "AudioOutputPolicy" in pykokoro.__all__
+    assert SynthesisConfig(audio_output_policy=AudioOutputPolicy.RAW).audio_output_policy is (
+        AudioOutputPolicy.RAW
+    )
+
+
+def test_synthesis_config_rejects_invalid_audio_output_policy() -> None:
+    with pytest.raises(
+        ConfigurationError, match="audio_output_policy must be an AudioOutputPolicy"
+    ):
+        SynthesisConfig(audio_output_policy="raw")  # type: ignore[arg-type]
 
 
 def test_synthesis_config_accepts_sentence_splitting() -> None:

@@ -30,6 +30,7 @@ from .short_sentence_handler import (
     build_short_sentence_phrase_retry,
     cut_short_sentence_phrase_audio,
 )
+from .synthesis_config import AudioOutputPolicy
 from .tokenizer import Tokenizer
 from .types import G2PAlignmentToken, PhonemeSegment, WordTiming, _exact_timing_geometry
 from .voice_level import VoiceLevelConfig, apply_voice_level_calibration
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
     from .types import Trace
 
 logger = logging.getLogger(__name__)
+_SAMPLES_PER_FRAME = 600
 
 
 _AKINVOX_NARRATION_CONTEXT_KEY = "__akinvox_narration_context"
@@ -668,10 +670,15 @@ class AudioGenerator:
         enable_short_sentence_override: bool | None,
         random_seed: int | None = None,
         context_phonemizer: Callable[[str, str], Any] | None = None,
+        audio_output_policy: AudioOutputPolicy = AudioOutputPolicy.PROCESSED,
     ) -> list[PhonemeSegment]:
         from .short_sentence_handler import is_segment_empty, is_segment_short
 
-        effective_config = self._resolve_short_sentence_config(enable_short_sentence_override)
+        effective_config = (
+            None
+            if audio_output_policy is AudioOutputPolicy.RAW
+            else self._resolve_short_sentence_config(enable_short_sentence_override)
+        )
         self._context_phonemizer = context_phonemizer
         phrase_rng = random.Random(random_seed) if random_seed is not None else None
         processed: list[PhonemeSegment] = []
@@ -785,6 +792,7 @@ class AudioGenerator:
         *,
         reference_voice: ReferenceVoice | None = None,
         seed: int | None = None,
+        audio_output_policy: AudioOutputPolicy = AudioOutputPolicy.PROCESSED,
     ) -> list[PhonemeSegment]:
         if (voice_style is None) == (reference_voice is None):
             raise ValueError("provide either a static voice style or a reference voice")
@@ -794,10 +802,17 @@ class AudioGenerator:
         for segment in segments:
             short_sentence_metadata = (segment.engine_metadata or {}).get(SHORT_SENTENCE_META_KEY)
             narration_context = (segment.engine_metadata or {}).get(_AKINVOX_NARRATION_CONTEXT_KEY)
-            if isinstance(narration_context, dict) and isinstance(short_sentence_metadata, dict):
-                self._restore_narration_body_segment(
+            if isinstance(narration_context, dict) and (
+                audio_output_policy is AudioOutputPolicy.RAW
+                or isinstance(short_sentence_metadata, dict)
+            ):
+                restored = self._restore_narration_body_segment(
                     segment, narration_context, discard_short_sentence=True
                 )
+                if audio_output_policy is AudioOutputPolicy.RAW and not restored:
+                    raise ConfigurationError(
+                        "raw audio output could not restore an AkinVox narration body before inference"
+                    )
                 narration_context = None
                 short_sentence_metadata = None
             if trace is not None and isinstance(short_sentence_metadata, dict):
@@ -843,6 +858,24 @@ class AudioGenerator:
                     }
                 )
             segment.word_timings = self._map_pred_dur_to_word_timings(segment, pred_dur, len(audio))
+            if audio_output_policy is AudioOutputPolicy.RAW and trace is not None:
+                trace_record = trace.inference[-1]
+                trace_record["audio_output_policy"] = AudioOutputPolicy.RAW.value
+                timing = self._coerce_timing_payload(pred_dur, len(segment.tokens))
+                if timing is not None and timing.is_valid:
+                    duration_values = timing.model_position_values
+                    rounded_durations = np.rint(duration_values)
+                    if np.array_equal(duration_values, rounded_durations):
+                        duration_frames = int(np.sum(rounded_durations))
+                        trace_record.update(
+                            {
+                                "duration_count": timing.raw_count,
+                                "duration_frames": duration_frames,
+                                "samples_per_frame": _SAMPLES_PER_FRAME,
+                                "expected_audio_samples": duration_frames * _SAMPLES_PER_FRAME,
+                                "actual_audio_samples": int(np.asarray(audio).size),
+                            }
+                        )
             if isinstance(narration_context, dict):
                 trimmed = self._trim_narration_context(segment, audio, narration_context)
                 if trimmed is None:
@@ -876,16 +909,19 @@ class AudioGenerator:
                         segment, narration_context, clear_word_timings=False
                     )
                     segment.word_timings = body_timings
-            self._log_short_sentence_timestamps(segment, pred_dur)
-            segment.raw_audio = self._prepare_short_sentence_phrase_audio(
-                segment,
-                audio,
-                segment_voice_style,
-                speed,
-                trace=trace,
-                reference_voice=reference_voice,
-                seed=seed,
-            )
+            if audio_output_policy is AudioOutputPolicy.RAW:
+                segment.raw_audio = audio
+            else:
+                self._log_short_sentence_timestamps(segment, pred_dur)
+                segment.raw_audio = self._prepare_short_sentence_phrase_audio(
+                    segment,
+                    audio,
+                    segment_voice_style,
+                    speed,
+                    trace=trace,
+                    reference_voice=reference_voice,
+                    seed=seed,
+                )
 
             if self._waveform_validation != "off":
                 noise_detected, _ = _is_stationary_broadband_noise(audio)
@@ -1080,6 +1116,7 @@ class AudioGenerator:
         *,
         seed: int | None = None,
         trace: Trace | None = None,
+        audio_output_policy: AudioOutputPolicy = AudioOutputPolicy.PROCESSED,
     ) -> list[PhonemeSegment]:
         return self._generate_raw_audio_segments(
             segments,
@@ -1088,6 +1125,7 @@ class AudioGenerator:
             trace,
             reference_voice=reference_voice,
             seed=seed,
+            audio_output_policy=audio_output_policy,
         )
 
     @staticmethod
@@ -1646,7 +1684,10 @@ class AudioGenerator:
         trim_silence: bool,
         voice_level_config: VoiceLevelConfig | None = None,
         trace: Trace | None = None,
+        audio_output_policy: AudioOutputPolicy = AudioOutputPolicy.PROCESSED,
     ) -> list[PhonemeSegment]:
+        if audio_output_policy is AudioOutputPolicy.RAW:
+            trim_silence = False
         config = voice_level_config or VoiceLevelConfig()
         for segment in segments:
             if segment.raw_audio is None:
@@ -1655,8 +1696,10 @@ class AudioGenerator:
 
             audio = segment.raw_audio
             short_sentence_metadata = (segment.engine_metadata or {}).get(SHORT_SENTENCE_META_KEY)
-            if isinstance(short_sentence_metadata, dict) and not short_sentence_metadata.get(
-                "cut_applied"
+            if (
+                audio_output_policy is AudioOutputPolicy.PROCESSED
+                and isinstance(short_sentence_metadata, dict)
+                and not short_sentence_metadata.get("cut_applied")
             ):
                 cut_audio = cut_short_sentence_phrase_audio(audio, short_sentence_metadata)
                 if cut_audio is not None:
@@ -1678,14 +1721,16 @@ class AudioGenerator:
                 else:
                     audio = trim_result
 
-            segment.processed_audio = apply_voice_level_calibration(
-                audio,
-                config,
-                segment.render_voice_key,
-                trace=trace,
-                segment_id=segment.id,
-            )
-
+            if audio_output_policy is AudioOutputPolicy.RAW:
+                segment.processed_audio = audio
+            else:
+                segment.processed_audio = apply_voice_level_calibration(
+                    audio,
+                    config,
+                    segment.render_voice_key,
+                    trace=trace,
+                    segment_id=segment.id,
+                )
         return segments
 
 

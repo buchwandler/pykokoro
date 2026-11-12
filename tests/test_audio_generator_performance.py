@@ -6,8 +6,11 @@ from typing import Any
 import numpy as np
 import pytest
 
+from pykokoro import AudioOutputPolicy
 from pykokoro.audio_generator import AudioGenerator
+from pykokoro.short_sentence_handler import ShortSentenceConfig
 from pykokoro.types import G2PAlignmentToken, PhonemeSegment, Trace
+from pykokoro.voice_level import VoiceLevelConfig
 
 
 class _Input:
@@ -144,6 +147,89 @@ def test_narration_context_audio_is_trimmed_using_exact_word_timings() -> None:
         0,
         600,
     )
+
+
+def test_raw_policy_disables_short_sentence_wrapping_before_inference() -> None:
+    generator = AudioGenerator(
+        _Session(),
+        _Tokenizer(),
+        short_sentence_config=ShortSentenceConfig(resolve_mode="wrap"),
+    )
+    segment = _narration_context_segment()
+
+    processed = generator._preprocess_segments([segment], None)
+    raw = generator._preprocess_segments(
+        [_narration_context_segment()], None, audio_output_policy=AudioOutputPolicy.RAW
+    )
+
+    assert processed[0].phonemes != segment.phonemes
+    assert "__short_sentence" in (processed[0].engine_metadata or {})
+    assert raw[0].phonemes == segment.phonemes
+    assert "__short_sentence" not in (raw[0].engine_metadata or {})
+
+
+def test_raw_postprocessing_skips_trim_cutter_and_voice_calibration(monkeypatch) -> None:
+    generator, _ = _generator()
+    segment = _narration_context_segment()
+    audio = np.asarray([0.2, -0.3, 0.4, 0.0, 0.0], dtype=np.float32)
+    segment.raw_audio = audio
+    segment.engine_metadata = {
+        **(segment.engine_metadata or {}),
+        "__short_sentence": {"kind": "phrase"},
+    }
+
+    def unexpected_processing(*_args, **_kwargs):
+        pytest.fail("raw postprocessing must not call signal-processing stages")
+
+    monkeypatch.setattr("pykokoro.audio_generator.trim_audio", unexpected_processing)
+    monkeypatch.setattr(
+        "pykokoro.audio_generator.cut_short_sentence_phrase_audio", unexpected_processing
+    )
+    monkeypatch.setattr(
+        "pykokoro.audio_generator.apply_voice_level_calibration", unexpected_processing
+    )
+
+    result = generator._postprocess_audio_segments(
+        [segment],
+        trim_silence=True,
+        voice_level_config=VoiceLevelConfig(mode="calibrated", gain_db=-2.5),
+        audio_output_policy=AudioOutputPolicy.RAW,
+    )
+
+    assert result[0].processed_audio is audio
+
+
+def test_raw_policy_restores_context_body_before_inference_and_skips_context_trim(
+    monkeypatch,
+) -> None:
+    session = _ContextSession([(600, [1.0])])
+    generator = AudioGenerator(session, _Tokenizer(), inference_cache_enabled=False)
+    segment = _narration_context_segment()
+    trace = Trace()
+
+    def unexpected_processing(*_args, **_kwargs):
+        pytest.fail("raw inference must not invoke context or phrase cutting")
+
+    monkeypatch.setattr(generator, "_trim_narration_context", unexpected_processing)
+    monkeypatch.setattr(generator, "_prepare_short_sentence_phrase_audio", unexpected_processing)
+
+    result = generator._generate_raw_audio_segments(
+        [segment],
+        np.zeros((2, 256), dtype=np.float32),
+        1.0,
+        trace,
+        audio_output_policy=AudioOutputPolicy.RAW,
+    )
+
+    assert session.calls == [([2], "de-de")]
+    assert result[0].text == "body"
+    assert result[0].engine_metadata is None
+    np.testing.assert_array_equal(result[0].raw_audio, np.arange(600, dtype=np.float32))
+    assert trace.inference[0]["duration_count"] == 1
+    assert trace.inference[0]["duration_frames"] == 1
+    assert trace.inference[0]["samples_per_frame"] == 600
+    assert trace.inference[0]["expected_audio_samples"] == 600
+    assert trace.inference[0]["actual_audio_samples"] == 600
 
 
 def test_narration_context_without_exact_timings_retries_body_only() -> None:

@@ -3,6 +3,27 @@
 All text passed to PyKokoro is prepared speech text. The engine applies the KokoroG2P
 prepared-text behavior but does not interpret SSMD, YAML, or document-level directives.
 
+## Raw acoustic output
+
+`SynthesisConfig.audio_output_policy` selects whether PyKokoro applies its normal audio
+processing or returns the complete inference waveform:
+
+| Policy      | Context synthesis                                 | Silence trim     | Short-sentence crop | Voice-level processing |
+| ----------- | ------------------------------------------------- | ---------------- | ------------------- | ---------------------- |
+| `processed` | allowed                                           | current behavior | allowed             | allowed                |
+| `raw`       | disabled when a later body crop would be required | disabled         | disabled            | disabled               |
+
+`raw` preserves the inference sample count and values after canonical dtype and shape
+normalization. It is intended for callers that own all downstream composition, such as
+VoiceRender. Core sample-count provenance is included in the returned trace for raw
+renders.
+
+```python
+from pykokoro import AudioOutputPolicy, SynthesisConfig
+
+config = SynthesisConfig(audio_output_policy=AudioOutputPolicy.RAW)
+```
+
 ## Source-aligned pronunciation overrides
 
 `PronunciationOverride` carries an already-resolved pronunciation instruction for a

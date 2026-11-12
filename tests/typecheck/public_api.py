@@ -6,6 +6,7 @@ import numpy as np
 from pykokoro import (
     AssetProgressCallback,
     AssetProgressEvent,
+    AudioOutputPolicy,
     ConsoleAssetProgress,
     GenerationConfig,
     InnoEnrollmentOptions,
@@ -29,6 +30,7 @@ from pykokoro import (
 
 config = SynthesisConfig(voice="af_sarah", generation=GenerationConfig(lang="en-us"))
 request = SynthesisSegment("line-1", "Hello.", "en-us", voice="af_sarah")
+raw_config = SynthesisConfig(audio_output_policy=AudioOutputPolicy.RAW)
 reference_voice = ReferenceVoice(
     np.zeros((1, 256), dtype=np.float32),
     np.zeros((1, 1, 192), dtype=np.float32),
@@ -67,6 +69,8 @@ assert_type(lexicon_discoverer, Callable[..., LexiconDiscoveryResult])
 assert_type(KokoroSynthesizer, type[KokoroSynthesizer])
 assert_type(RenderedSegment, type[RenderedSegment])
 assert_type(SynthesisConfig, type[SynthesisConfig])
+assert_type(AudioOutputPolicy, type[AudioOutputPolicy])
+assert_type(raw_config.audio_output_policy, AudioOutputPolicy)
 assert_type(ReferenceVoice, type[ReferenceVoice])
 assert_type(reference_request, SynthesisSegment)
 assert_type(reference_config, SynthesisConfig)

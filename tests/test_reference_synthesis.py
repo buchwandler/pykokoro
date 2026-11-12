@@ -88,7 +88,9 @@ class _ReferenceBackend:
     def resolve_voice_style(self, voice):
         raise AssertionError("reference rendering must not resolve a static voice style")
 
-    def generate_reference_audio_segments(self, segments, reference_voice, speed, *, seed, trace):
+    def generate_reference_audio_segments(
+        self, segments, reference_voice, speed, *, seed, trace, audio_output_policy=None
+    ):
         self.reference_call = (reference_voice, speed, seed)
         for segment in segments:
             segment.raw_audio = np.asarray([0.1, -0.1, 0.2], dtype=np.float32)

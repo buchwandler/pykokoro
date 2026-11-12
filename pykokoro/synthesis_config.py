@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -25,6 +26,13 @@ from .voice_manager import VoiceBlend
 from .voice_pack import KokoroVoicePack
 
 LongTextSplitMode = Literal["none", "sentence"]
+
+
+class AudioOutputPolicy(str, Enum):
+    """Controls whether synthesis output receives PyKokoro audio processing."""
+
+    PROCESSED = "processed"
+    RAW = "raw"
 
 
 if TYPE_CHECKING:
@@ -56,6 +64,7 @@ class SynthesisConfig:
     tokenizer_config: TokenizerConfig | None = None
     short_sentence_config: ShortSentenceConfig | None = None
     waveform_validation: Literal["off", "warn", "strict"] = "off"
+    audio_output_policy: AudioOutputPolicy = AudioOutputPolicy.PROCESSED
     inference_audio_diagnostics: bool = False
     long_text_split: LongTextSplitMode = "none"
     long_text_use_spacy: bool | None = False
@@ -91,6 +100,8 @@ class SynthesisConfig:
             raise TypeError("language_routing must be LanguageRoutingConfig or None")
         if self.waveform_validation not in ("off", "warn", "strict"):
             raise ValueError("waveform_validation must be 'off', 'warn', or 'strict'")
+        if not isinstance(self.audio_output_policy, AudioOutputPolicy):
+            raise ConfigurationError("audio_output_policy must be an AudioOutputPolicy")
         if self.long_text_split not in ("none", "sentence"):
             raise ConfigurationError("long_text_split must be 'none' or 'sentence'")
         if self.long_text_use_spacy is not None and not isinstance(self.long_text_use_spacy, bool):
@@ -381,6 +392,7 @@ def resolve_synthesis_config(
     effective_voice = voice if voice is not None else config.voice
     if (
         isinstance(effective_voice, (ReferenceVoice, KokoroVoicePack))
+        and config.audio_output_policy is not AudioOutputPolicy.RAW
         and config.voice_level.mode == "calibrated"
         and config.voice_level.gain_db is None
     ):

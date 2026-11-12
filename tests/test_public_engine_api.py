@@ -8,6 +8,7 @@ import numpy as np
 
 import pykokoro
 from pykokoro import (
+    AudioOutputPolicy,
     GenerationConfig,
     InnoEnrollmentOptions,
     KokoroSynthesizer,
@@ -53,6 +54,7 @@ def test_public_api_exports_request_and_result_types() -> None:
         "G2LexFileInspection",
         "inspect_g2lex_file",
         "GenerationConfig",
+        "AudioOutputPolicy",
         "LanguageRoutingConfig",
         "SynthesisConfig",
         "SynthesisInputTooLongError",
@@ -117,6 +119,7 @@ def test_public_api_exports_request_and_result_types() -> None:
             LongTextSplitMode,
             SynthesisInputTooLongError,
             GenerationConfig,
+            AudioOutputPolicy,
             VoiceLevelConfig,
             VoiceLevelApplication,
             LanguageRoutingConfig,

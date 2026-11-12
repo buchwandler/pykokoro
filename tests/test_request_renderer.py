@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import dataclasses
 from typing import Any
 
 import numpy as np
 import pytest
 
-from pykokoro import SynthesisInputTooLongError
+from pykokoro import AudioOutputPolicy, SynthesisInputTooLongError
 from pykokoro.error_diagnostics import error_diagnostic
 from pykokoro.exceptions import BackendError, ConfigurationError, InvalidVoiceError
 from pykokoro.generation_config import GenerationConfig
@@ -39,28 +40,36 @@ class FakeBackend:
         self.generated: list[PhonemeSegment] = []
         self.postprocess_options: dict[str, object] = {}
 
+        self.audio = np.asarray([0.25, -0.25, 0.5], dtype=np.float32)
+        self.postprocess_transform = lambda audio: audio
+        self.preprocess_policy: AudioOutputPolicy | None = None
+        self.generation_policy: AudioOutputPolicy | None = None
+
     def resolve_voice_style(self, voice: str) -> str:
         return f"style:{voice}"
 
     def preprocess_segments(self, segments, enable_short_sentence, **kwargs):
         self.preprocessed = segments
         self.context_phonemizer = kwargs["context_phonemizer"]
+        self.preprocess_policy = kwargs["audio_output_policy"]
         return segments
 
     def generate_raw_audio_segments(self, segments, voice_style, speed, **kwargs):
         self.generated = segments
+        self.generation_policy = kwargs["audio_output_policy"]
         voice_name = kwargs["default_voice_name"]
         assert voice_style == f"style:{voice_name}"
         assert speed == 1.0
         for segment in segments:
-            segment.raw_audio = np.asarray([0.25, -0.25, 0.5], dtype=np.float32)
+            segment.raw_audio = self.audio.copy()
             segment.word_timings = [WordTiming("Hello", 0, 5, 0, 2, segment.id)]
         return segments
 
     def postprocess_audio_segments(self, segments, *, trim_silence, **kwargs):
         self.postprocess_options = {"trim_silence": trim_silence, **kwargs}
+        self.postprocess_policy = kwargs["audio_output_policy"]
         for segment in segments:
-            segment.processed_audio = segment.raw_audio
+            segment.processed_audio = self.postprocess_transform(segment.raw_audio)
         return segments
 
     def close(self) -> None:
@@ -75,6 +84,87 @@ def _config(**kwargs: Any) -> SynthesisConfig:
         generation=GenerationConfig(lang="en-us"),
         **kwargs,
     )
+
+
+def test_raw_policy_disables_akinvox_narration_context_selection() -> None:
+    request = SynthesisSegment("raw-context", "One sentence.", "en-us", voice="AV_julia")
+    config = dataclasses.replace(_config(), model_variant="akinvox-multispeaker-v1")
+    raw_config = dataclasses.replace(config, audio_output_policy=AudioOutputPolicy.RAW)
+
+    assert OnnxRequestRenderer._akinvox_narration_context_counts(request, config) == (1, 2)
+    assert OnnxRequestRenderer._akinvox_narration_context_counts(request, raw_config) is None
+
+
+def _render_raw_audio(backend: FakeBackend):
+    request = SynthesisSegment("raw-waveform", "Hello", "en-us", voice="af_sarah")
+    prepared = PreparedSynthesis(
+        request_id=request.id,
+        text=request.text,
+        language=request.language,
+        voice="af_sarah",
+        phonemes="həlˈoʊ",
+        token_ids=(1, 2, 3),
+    )
+    renderer = OnnxRequestRenderer(FakeG2PAdapter(), backend_factory=lambda _config: backend)
+    return renderer.render(
+        prepared,
+        request,
+        _config(
+            audio_output_policy=AudioOutputPolicy.RAW,
+            voice_level=VoiceLevelConfig(mode="calibrated", gain_db=-2.5),
+        ),
+    )
+
+
+@pytest.mark.parametrize("tail", ["distinctive", "silent"])
+def test_raw_policy_preserves_complete_inference_waveform_and_trace(tail: str) -> None:
+    backend = FakeBackend()
+    audio = np.linspace(-0.9, 0.9, 61_800, dtype=np.float32)
+    if tail == "distinctive":
+        audio[-8:] = [0.11, -0.22, 0.33, -0.44, 0.55, -0.66, 0.77, -0.88]
+    else:
+        audio[-9_600:] = 0.0
+    backend.audio = audio
+
+    rendered = _render_raw_audio(backend)
+
+    np.testing.assert_array_equal(rendered.audio, audio)
+    assert rendered.trace is not None
+    assert rendered.trace.model["audio_output_policy"] == "raw"
+    assert rendered.trace.model["narration_context_applied"] is False
+    assert rendered.trace.model["short_sentence_mode"] == "off"
+    assert rendered.trace.model["short_sentence_cut_applied"] is False
+    assert rendered.trace.model["silence_trim_applied"] is False
+    assert rendered.trace.model["voice_level_applied"] is False
+    assert rendered.trace.model["inference_samples"] == len(audio)
+    assert rendered.trace.model["returned_samples"] == len(audio)
+    assert rendered.trace.model["sample_count_preserved"] is True
+    assert rendered.trace.model["sample_values_preserved"] is True
+    assert rendered.short_sentence_mode == "off"
+    assert rendered.voice_level_applications[0].applied is False
+    assert backend.preprocess_policy is AudioOutputPolicy.RAW
+    assert backend.generation_policy is AudioOutputPolicy.RAW
+    assert backend.postprocess_policy is AudioOutputPolicy.RAW
+    assert backend.postprocess_options["trim_silence"] is False
+    voice_level_config = backend.postprocess_options["voice_level_config"]
+    assert isinstance(voice_level_config, VoiceLevelConfig)
+    assert voice_level_config.mode == "off"
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [("drop", "changed sample count"), ("gain", "changed sample values")],
+)
+def test_raw_policy_rejects_postprocess_mutation(mutation: str, message: str) -> None:
+    backend = FakeBackend()
+    backend.audio = np.linspace(-0.9, 0.9, 32, dtype=np.float32)
+    if mutation == "drop":
+        backend.postprocess_transform = lambda audio: audio[:-1]
+    else:
+        backend.postprocess_transform = lambda audio: audio * 0.99
+
+    with pytest.raises(BackendError, match=message):
+        _render_raw_audio(backend)
 
 
 def test_backend_factory_forwards_cache_dir(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:

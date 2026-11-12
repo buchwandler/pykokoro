@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from .prepared_g2p import PreparedSynthesis
     from .reference_audio import PreparedReferenceAudio
 from .reference_voice import ReferenceVoice
-from .synthesis_config import SynthesisConfig, resolve_synthesis_config
+from .synthesis_config import AudioOutputPolicy, SynthesisConfig, resolve_synthesis_config
 from .synthesis_identity import build_synthesis_identity
 from .synthesis_types import RenderedSegment, SynthesisSegment
 from .types import (
@@ -36,7 +36,7 @@ from .types import (
     _exact_timing_geometry,
 )
 from .voice_enrollment import InnoEnrollmentOptions
-from .voice_level import resolve_voice_level_application
+from .voice_level import VoiceLevelConfig, resolve_voice_level_application
 from .voice_pack import KokoroVoicePack
 
 _AKINVOX_NARRATION_CONTEXT_KEY = "__akinvox_narration_context"
@@ -119,7 +119,11 @@ class OnnxRequestRenderer:
             rendered_voice = f"reference:{reference_voice.fingerprint}"
             if resolved.generation.speed != 1.0:
                 raise ConfigurationError("reference voice synthesis requires speed=1.0")
-        trace = Trace() if resolved.return_trace else None
+        trace = (
+            Trace()
+            if resolved.return_trace or resolved.audio_output_policy is AudioOutputPolicy.RAW
+            else None
+        )
         if trace is not None:
             if request.say_as:
                 projection = project_frontend_text(request.text, request.say_as)
@@ -211,6 +215,7 @@ class OnnxRequestRenderer:
                 resolved.generation.enable_short_sentence,
                 random_seed=resolved.generation.random_seed,
                 context_phonemizer=context_phonemizer,
+                audio_output_policy=resolved.audio_output_policy,
             ),
             operation="preprocess_segments",
             stage="inference",
@@ -243,6 +248,7 @@ class OnnxRequestRenderer:
                     resolved.generation.speed,
                     seed=resolved.generation.random_seed,
                     trace=trace,
+                    audio_output_policy=resolved.audio_output_policy,
                 ),
                 operation="generate_reference_audio_segments",
                 stage="inference",
@@ -256,18 +262,33 @@ class OnnxRequestRenderer:
                     resolved.generation.speed,
                     default_voice_name=voice_name,
                     trace=trace,
+                    audio_output_policy=resolved.audio_output_policy,
                 ),
                 operation="generate_raw_audio_segments",
                 stage="inference",
                 request_id=request.id,
             )
 
+        raw_audio_snapshots = None
+        if resolved.audio_output_policy is AudioOutputPolicy.RAW:
+            raw_audio_snapshots = [
+                None
+                if segment.raw_audio is None
+                else np.asarray(segment.raw_audio, dtype=np.float32).reshape(-1).copy()
+                for segment in raw_segments
+            ]
+        effective_voice_level = (
+            VoiceLevelConfig()
+            if resolved.audio_output_policy is AudioOutputPolicy.RAW
+            else resolved.voice_level
+        )
         processed_segments = _call_backend_operation(
             lambda: backend.postprocess_audio_segments(
                 raw_segments,
                 trim_silence=False,
                 trace=trace,
-                voice_level_config=resolved.voice_level,
+                voice_level_config=effective_voice_level,
+                audio_output_policy=resolved.audio_output_policy,
             ),
             operation="postprocess_audio_segments",
             stage="postprocess",
@@ -280,6 +301,32 @@ class OnnxRequestRenderer:
                 stage="postprocess",
                 details={"request_id": request.id},
             )
+        if raw_audio_snapshots is not None:
+            for chunk_index, (inference_audio, segment) in enumerate(
+                zip(raw_audio_snapshots, processed_segments, strict=True)
+            ):
+                returned = segment.processed_audio
+                returned_audio = (
+                    np.zeros(0, dtype=np.float32)
+                    if returned is None
+                    else np.asarray(returned, dtype=np.float32).reshape(-1)
+                )
+                inference_samples = 0 if inference_audio is None else inference_audio.size
+                if inference_samples != returned_audio.size:
+                    raise BackendError(
+                        "raw audio policy changed sample count: "
+                        f"inference={inference_samples} returned={returned_audio.size}",
+                        stage="postprocess",
+                        details={"request_id": request.id, "chunk_index": chunk_index},
+                    )
+                if inference_audio is not None and not np.array_equal(
+                    inference_audio, returned_audio
+                ):
+                    raise BackendError(
+                        f"raw audio policy changed sample values for chunk {chunk_index}",
+                        stage="postprocess",
+                        details={"request_id": request.id, "chunk_index": chunk_index},
+                    )
         audio_parts: list[np.ndarray] = []
         word_timings: list[WordTiming] = []
         sample_offset = 0
@@ -311,19 +358,76 @@ class OnnxRequestRenderer:
                 details={"request_id": request.id},
             )
         voice_level_applications = tuple(
-            resolve_voice_level_application(resolved.voice_level, segment.render_voice_key)
+            resolve_voice_level_application(effective_voice_level, segment.render_voice_key)
             for segment in processed_segments
             if segment.processed_audio is not None
         )
         short_metadata = (processed_segments[0].engine_metadata or {}).get("__short_sentence")
-        short_sentence_mode = None
-        if isinstance(short_metadata, dict):
+        short_sentence_mode = (
+            "off" if resolved.audio_output_policy is AudioOutputPolicy.RAW else None
+        )
+        if resolved.audio_output_policy is AudioOutputPolicy.PROCESSED and isinstance(
+            short_metadata, dict
+        ):
             short_kind = short_metadata.get("kind")
             if isinstance(short_kind, str):
                 short_sentence_mode = short_kind
         identity = replace(identity, resolved_short_sentence_mode=short_sentence_mode)
         if trace is not None:
             trace.model["synthesis_identity"] = identity.to_dict()
+            if resolved.audio_output_policy is AudioOutputPolicy.RAW:
+                inference_samples = sum(
+                    0 if audio is None else audio.size for audio in raw_audio_snapshots or ()
+                )
+                returned_samples = sum(
+                    0
+                    if segment.processed_audio is None
+                    else np.asarray(segment.processed_audio, dtype=np.float32).size
+                    for segment in processed_segments
+                )
+                trace.model.update(
+                    {
+                        "audio_output_policy": AudioOutputPolicy.RAW.value,
+                        "narration_context_applied": False,
+                        "short_sentence_mode": "off",
+                        "short_sentence_cut_applied": False,
+                        "silence_trim_applied": False,
+                        "voice_level_applied": False,
+                        "inference_samples": inference_samples,
+                        "returned_samples": returned_samples,
+                        "sample_count_preserved": inference_samples == returned_samples,
+                        "sample_values_preserved": True,
+                    }
+                )
+                duration_records = [
+                    record
+                    for record in trace.inference
+                    if all(
+                        isinstance(record.get(key), int) and not isinstance(record.get(key), bool)
+                        for key in (
+                            "duration_count",
+                            "duration_frames",
+                            "samples_per_frame",
+                            "expected_audio_samples",
+                        )
+                    )
+                ]
+                if duration_records:
+                    trace.model.update(
+                        {
+                            "duration_count": sum(
+                                record["duration_count"] for record in duration_records
+                            ),
+                            "duration_frames": sum(
+                                record["duration_frames"] for record in duration_records
+                            ),
+                            "samples_per_frame": duration_records[0]["samples_per_frame"],
+                            "expected_audio_samples": sum(
+                                record["expected_audio_samples"] for record in duration_records
+                            ),
+                            "actual_audio_samples": returned_samples,
+                        }
+                    )
         return RenderedSegment(
             id=request.id,
             audio=rendered_audio,
@@ -607,7 +711,8 @@ class OnnxRequestRenderer:
         request: SynthesisSegment, config: SynthesisConfig
     ) -> tuple[int, int] | None:
         if (
-            config.model_source != "github"
+            config.audio_output_policy is AudioOutputPolicy.RAW
+            or config.model_source != "github"
             or config.model_variant != "akinvox-multispeaker-v1"
             or not isinstance(request.voice, str)
             or not request.voice.startswith("AV_")

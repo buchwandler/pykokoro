@@ -6,6 +6,7 @@ parsing, speech planning, and composition between requests remain caller-owned.
 
 ```python
 from pykokoro import (
+    AudioOutputPolicy,
     GenerationConfig,
     InnoEnrollmentOptions,
     KokoroVoicePack,
@@ -26,7 +27,7 @@ from pykokoro import (
 | Synthesis                 | `KokoroSynthesizer`, `SynthesisRequest`, `SynthesisSegment`, `RenderedSegment`                                                                                                                                                                                                                                                                                                      |
 | Request measurement       | `RequestMeasure`, `KokoroSynthesizer.measure_request()`                                                                                                                                                                                                                                                                                                                             |
 | Source context and timing | `PronunciationOverride`, `LinguisticToken`, `SayAsSpan`, `WordTiming`                                                                                                                                                                                                                                                                                                               |
-| Configuration             | `SynthesisConfig`, `GenerationConfig`, `LanguageRoutingConfig`, `TokenizerConfig`, `ShortSentenceConfig`, `LongTextSplitMode`                                                                                                                                                                                                                                                       |
+| Configuration             | `SynthesisConfig`, `AudioOutputPolicy`, `GenerationConfig`, `LanguageRoutingConfig`, `TokenizerConfig`, `ShortSentenceConfig`, `LongTextSplitMode`                                                                                                                                                                                                                                  |
 | Voice level               | `VoiceLevelConfig`, `VoiceLevelApplication`, `VoiceBlend`                                                                                                                                                                                                                                                                                                                           |
 | Voice enrollment          | `KokoroVoicePack`, `ReferenceVoice`, `InnoEnrollmentOptions`, `KokoroSynthesizer.enroll_voice()`                                                                                                                                                                                                                                                                                    |
 | Model discovery           | `ModelCapabilities`, `ModelDiscoveryResult`, `VoiceCapabilities`, `VoiceEnrollerSpec`, `discover_models`                                                                                                                                                                                                                                                                            |
@@ -38,6 +39,12 @@ from pykokoro import (
 | Errors                    | `KokoroError`, `PyKokoroError`, `SynthesisError`, `ConfigurationError`, `InvalidRequestError`, `EmptyTextError`, `InvalidLanguageError`, `InvalidVoiceError`, `InvalidModelError`, `InvalidPronunciationError`, `InvalidLinguisticTokensError`, `UnsupportedFeatureError`, `CapabilityError`, `SynthesisStateError`, `AlignmentError`, `BackendError`, `SynthesisInputTooLongError` |
 | Error diagnostics         | `ERROR_DIAGNOSTICS_VERSION`, `error_diagnostic()`                                                                                                                                                                                                                                                                                                                                   |
 | Version                   | `__version__`, `__version_tuple__`                                                                                                                                                                                                                                                                                                                                                  |
+
+`SynthesisConfig.audio_output_policy` accepts `AudioOutputPolicy.PROCESSED` (the
+default) or `AudioOutputPolicy.RAW`. Raw mode returns sample-preserving inference audio
+for callers that perform downstream composition. See
+[advanced features](advanced_features.md#raw-acoustic-output) for the processing
+contract.
 
 `SynthesisSegment` is an alias of `SynthesisRequest`, and `PyKokoroError` is a
 compatibility alias of `KokoroError`. `AssetProgressCallback`, `LongTextSplitMode`,

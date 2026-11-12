@@ -34,6 +34,7 @@ from .config_types import (
 from .exceptions import ConfigurationError
 from .model_profiles import VOICE_ALIASES, get_model_profile
 from .reference_voice import ReferenceVoice
+from .synthesis_config import AudioOutputPolicy
 from .tokenizer import Tokenizer, TokenizerConfig
 from .voice_level import VoiceCalibrationKey, VoiceLevelConfig
 from .voice_manager import VoiceBlend, VoiceManager
@@ -593,6 +594,7 @@ class Kokoro:
         enable_short_sentence_override: bool | None,
         random_seed: int | None = None,
         context_phonemizer: Callable[[str, str], Any] | None = None,
+        audio_output_policy: AudioOutputPolicy = AudioOutputPolicy.PROCESSED,
     ) -> list[PhonemeSegment]:
         """Preprocess phoneme segments for short sentence handling."""
         self._init_kokoro()
@@ -602,6 +604,7 @@ class Kokoro:
             enable_short_sentence_override,
             random_seed,
             context_phonemizer=context_phonemizer,
+            audio_output_policy=audio_output_policy,
         )
 
     def generate_raw_audio_segments(
@@ -612,6 +615,7 @@ class Kokoro:
         *,
         default_voice_name: str | None = None,
         trace: Trace | None = None,
+        audio_output_policy: AudioOutputPolicy = AudioOutputPolicy.PROCESSED,
     ) -> list[PhonemeSegment]:
         """Generate raw audio for each request-local phoneme segment."""
         self._init_kokoro()
@@ -649,7 +653,7 @@ class Kokoro:
                 )
         assert self._audio_generator is not None
         return self._audio_generator._generate_raw_audio_segments(
-            segments, voice_style, speed, trace
+            segments, voice_style, speed, trace, audio_output_policy=audio_output_policy
         )
 
     def generate_reference_audio_segments(
@@ -660,6 +664,7 @@ class Kokoro:
         *,
         seed: int | None = None,
         trace: Trace | None = None,
+        audio_output_policy: AudioOutputPolicy = AudioOutputPolicy.PROCESSED,
     ) -> list[PhonemeSegment]:
         """Generate request-local audio conditioned by one enrolled reference voice."""
         if reference_voice.model_id != self._model_variant:
@@ -672,7 +677,12 @@ class Kokoro:
         self._init_kokoro()
         assert self._audio_generator is not None
         return self._audio_generator._generate_reference_audio_segments(
-            segments, reference_voice, speed, seed=seed, trace=trace
+            segments,
+            reference_voice,
+            speed,
+            seed=seed,
+            trace=trace,
+            audio_output_policy=audio_output_policy,
         )
 
     def postprocess_audio_segments(
@@ -681,12 +691,13 @@ class Kokoro:
         trim_silence: bool,
         voice_level_config: VoiceLevelConfig | None = None,
         trace: Trace | None = None,
+        audio_output_policy: AudioOutputPolicy = AudioOutputPolicy.PROCESSED,
     ) -> list[PhonemeSegment]:
         """Apply optional silence trimming and request-local voice calibration."""
         self._init_kokoro()
         assert self._audio_generator is not None
         return self._audio_generator._postprocess_audio_segments(
-            segments, trim_silence, voice_level_config, trace
+            segments, trim_silence, voice_level_config, trace, audio_output_policy
         )
 
     # Voice Database Integration (from kokovoicelab)
