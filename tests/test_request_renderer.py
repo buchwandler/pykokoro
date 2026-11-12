@@ -90,12 +90,19 @@ def test_raw_policy_disables_akinvox_narration_context_selection() -> None:
     request = SynthesisSegment("raw-context", "One sentence.", "en-us", voice="AV_julia")
     config = dataclasses.replace(_config(), model_variant="akinvox-multispeaker-v1")
     raw_config = dataclasses.replace(config, audio_output_policy=AudioOutputPolicy.RAW)
+    preserve_config = dataclasses.replace(
+        config, audio_output_policy=AudioOutputPolicy.PRESERVE_SILENCE
+    )
 
     assert OnnxRequestRenderer._akinvox_narration_context_counts(request, config) == (1, 2)
+    assert OnnxRequestRenderer._akinvox_narration_context_counts(request, preserve_config) == (
+        1,
+        2,
+    )
     assert OnnxRequestRenderer._akinvox_narration_context_counts(request, raw_config) is None
 
 
-def _render_raw_audio(backend: FakeBackend):
+def _render_audio_with_policy(backend: FakeBackend, policy: AudioOutputPolicy):
     request = SynthesisSegment("raw-waveform", "Hello", "en-us", voice="af_sarah")
     prepared = PreparedSynthesis(
         request_id=request.id,
@@ -110,7 +117,8 @@ def _render_raw_audio(backend: FakeBackend):
         prepared,
         request,
         _config(
-            audio_output_policy=AudioOutputPolicy.RAW,
+            audio_output_policy=policy,
+            return_trace=True,
             voice_level=VoiceLevelConfig(mode="calibrated", gain_db=-2.5),
         ),
     )
@@ -126,7 +134,7 @@ def test_raw_policy_preserves_complete_inference_waveform_and_trace(tail: str) -
         audio[-9_600:] = 0.0
     backend.audio = audio
 
-    rendered = _render_raw_audio(backend)
+    rendered = _render_audio_with_policy(backend, AudioOutputPolicy.RAW)
 
     np.testing.assert_array_equal(rendered.audio, audio)
     assert rendered.trace is not None
@@ -151,6 +159,29 @@ def test_raw_policy_preserves_complete_inference_waveform_and_trace(tail: str) -
     assert voice_level_config.mode == "off"
 
 
+def test_preserve_silence_does_not_enforce_raw_sample_identity() -> None:
+    backend = FakeBackend()
+    audio = np.linspace(-0.9, 0.9, 32, dtype=np.float32)
+    backend.audio = audio
+    backend.postprocess_transform = lambda waveform: waveform[:-1] * 0.99
+
+    rendered = _render_audio_with_policy(backend, AudioOutputPolicy.PRESERVE_SILENCE)
+
+    np.testing.assert_array_equal(rendered.audio, audio[:-1] * 0.99)
+    assert rendered.trace is not None
+    assert rendered.trace.model["audio_output_policy"] == "preserve_silence"
+    assert rendered.trace.model["silence_trim_allowed"] is False
+    assert rendered.trace.model["silence_trim_applied"] is False
+    assert "sample_count_preserved" not in rendered.trace.model
+    assert "sample_values_preserved" not in rendered.trace.model
+    assert "voice_level_applied" not in rendered.trace.model
+    assert backend.postprocess_options["trim_silence"] is False
+    assert rendered.voice_level_applications[0].applied is True
+    voice_level_config = backend.postprocess_options["voice_level_config"]
+    assert isinstance(voice_level_config, VoiceLevelConfig)
+    assert voice_level_config.mode == "calibrated"
+
+
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [("drop", "changed sample count"), ("gain", "changed sample values")],
@@ -164,7 +195,7 @@ def test_raw_policy_rejects_postprocess_mutation(mutation: str, message: str) ->
         backend.postprocess_transform = lambda audio: audio * 0.99
 
     with pytest.raises(BackendError, match=message):
-        _render_raw_audio(backend)
+        _render_audio_with_policy(backend, AudioOutputPolicy.RAW)
 
 
 def test_backend_factory_forwards_cache_dir(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
@@ -259,6 +290,9 @@ def test_renderer_keeps_one_request_independent_and_rebases_timings() -> None:
         == "sha256:" + "a" * 64
     )
     assert rendered.trace.warnings == ["frontend note"]
+    assert rendered.trace.model["audio_output_policy"] == "processed"
+    assert rendered.trace.model["silence_trim_allowed"] is True
+    assert rendered.trace.model["silence_trim_applied"] is False
     assert backend.preprocessed[0].tokens == [1, 2, 3]
     assert factory_configs[0].voice == "af_sarah"
     assert factory_configs[0].waveform_validation == "strict"
@@ -579,7 +613,12 @@ def test_renderer_checks_capacity_after_frontend_postprocessing() -> None:
     assert backend.generated == []
 
 
-def test_rendered_result_exposes_short_sentence_mode_without_context_text() -> None:
+@pytest.mark.parametrize(
+    "policy", [AudioOutputPolicy.PROCESSED, AudioOutputPolicy.PRESERVE_SILENCE]
+)
+def test_rendered_result_exposes_short_sentence_mode_without_context_text(
+    policy: AudioOutputPolicy,
+) -> None:
     class WrappedBackend(FakeBackend):
         def preprocess_segments(self, segments, enable_short_sentence, **kwargs):
             result = super().preprocess_segments(segments, enable_short_sentence, **kwargs)
@@ -606,12 +645,23 @@ def test_rendered_result_exposes_short_sentence_mode_without_context_text() -> N
     result = renderer.render(
         prepared,
         request,
-        _config(short_sentence_config=ShortSentenceConfig(resolve_mode="wrap")),
+        _config(
+            short_sentence_config=ShortSentenceConfig(resolve_mode="wrap"),
+            audio_output_policy=policy,
+            return_trace=True,
+        ),
     )
 
     assert result.text == request.text
     assert result.phonemes == prepared.phonemes
     assert result.short_sentence_mode == "wrap"
+    assert result.trace is not None
+    assert result.trace.model["audio_output_policy"] == policy.value
+    assert result.trace.model["silence_trim_allowed"] is (policy is AudioOutputPolicy.PROCESSED)
+    assert result.trace.model["silence_trim_applied"] is False
+    if policy is AudioOutputPolicy.PRESERVE_SILENCE:
+        assert "sample_count_preserved" not in result.trace.model
+        assert "voice_level_applied" not in result.trace.model
     assert result.synthesis_identity is not None
     assert result.synthesis_identity.resolved_short_sentence_mode == "wrap"
     assert "synthetic context" not in result.synthesis_identity.short_sentence

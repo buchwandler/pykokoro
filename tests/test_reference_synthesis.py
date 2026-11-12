@@ -13,7 +13,7 @@ from pykokoro.generation_config import GenerationConfig
 from pykokoro.prepared_g2p import PreparedSynthesis
 from pykokoro.reference_voice import ReferenceVoice
 from pykokoro.request_renderer import OnnxRequestRenderer
-from pykokoro.synthesis_config import SynthesisConfig
+from pykokoro.synthesis_config import AudioOutputPolicy, SynthesisConfig
 from pykokoro.synthesis_identity import build_synthesis_identity
 from pykokoro.synthesis_types import SynthesisSegment
 from pykokoro.types import Trace
@@ -108,6 +108,7 @@ def _reference_config(
     speed: float = 1.0,
     random_seed: int | None = None,
     voice_level: VoiceLevelConfig | None = None,
+    audio_output_policy: AudioOutputPolicy = AudioOutputPolicy.PROCESSED,
 ) -> SynthesisConfig:
     return SynthesisConfig(
         model_source="github",
@@ -115,6 +116,7 @@ def _reference_config(
         generation=GenerationConfig(random_seed=random_seed, speed=speed),
         return_trace=True,
         voice_level=voice_level or VoiceLevelConfig(),
+        audio_output_policy=audio_output_policy,
     )
 
 
@@ -261,7 +263,12 @@ def test_reference_renderer_succeeds_with_default_random_seed() -> None:
     renderer.close()
 
 
-def test_reference_rendering_rejects_auto_calibration_and_non_unit_speed() -> None:
+@pytest.mark.parametrize(
+    "policy", [AudioOutputPolicy.PROCESSED, AudioOutputPolicy.PRESERVE_SILENCE]
+)
+def test_reference_rendering_rejects_auto_calibration_and_non_unit_speed(
+    policy: AudioOutputPolicy,
+) -> None:
     voice = _reference_voice()
     request = SynthesisSegment("reference-request", "Hello there.", "en-us", voice=voice)
     prepared = PreparedSynthesis(
@@ -279,7 +286,9 @@ def test_reference_rendering_rejects_auto_calibration_and_non_unit_speed() -> No
         renderer.render(
             prepared,
             request,
-            _reference_config(voice_level=VoiceLevelConfig(mode="calibrated")),
+            _reference_config(
+                voice_level=VoiceLevelConfig(mode="calibrated"), audio_output_policy=policy
+            ),
         )
     with pytest.raises(ConfigurationError, match="speed=1.0"):
         renderer.render(prepared, request, _reference_config(speed=1.2))

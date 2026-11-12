@@ -29,10 +29,23 @@ LongTextSplitMode = Literal["none", "sentence"]
 
 
 class AudioOutputPolicy(str, Enum):
-    """Controls whether synthesis output receives PyKokoro audio processing."""
+    """Controls PyKokoro post-inference audio processing."""
 
     PROCESSED = "processed"
+    PRESERVE_SILENCE = "preserve_silence"
     RAW = "raw"
+
+
+def _forbids_silence_trim(policy: AudioOutputPolicy) -> bool:
+    return policy in {AudioOutputPolicy.PRESERVE_SILENCE, AudioOutputPolicy.RAW}
+
+
+def _allows_processed_features(policy: AudioOutputPolicy) -> bool:
+    return policy is not AudioOutputPolicy.RAW
+
+
+def _requires_raw_sample_identity(policy: AudioOutputPolicy) -> bool:
+    return policy is AudioOutputPolicy.RAW
 
 
 if TYPE_CHECKING:

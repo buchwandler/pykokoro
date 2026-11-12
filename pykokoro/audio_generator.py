@@ -30,7 +30,12 @@ from .short_sentence_handler import (
     build_short_sentence_phrase_retry,
     cut_short_sentence_phrase_audio,
 )
-from .synthesis_config import AudioOutputPolicy
+from .synthesis_config import (
+    AudioOutputPolicy,
+    _allows_processed_features,
+    _forbids_silence_trim,
+    _requires_raw_sample_identity,
+)
 from .tokenizer import Tokenizer
 from .types import G2PAlignmentToken, PhonemeSegment, WordTiming, _exact_timing_geometry
 from .voice_level import VoiceLevelConfig, apply_voice_level_calibration
@@ -676,7 +681,7 @@ class AudioGenerator:
 
         effective_config = (
             None
-            if audio_output_policy is AudioOutputPolicy.RAW
+            if not _allows_processed_features(audio_output_policy)
             else self._resolve_short_sentence_config(enable_short_sentence_override)
         )
         self._context_phonemizer = context_phonemizer
@@ -803,13 +808,13 @@ class AudioGenerator:
             short_sentence_metadata = (segment.engine_metadata or {}).get(SHORT_SENTENCE_META_KEY)
             narration_context = (segment.engine_metadata or {}).get(_AKINVOX_NARRATION_CONTEXT_KEY)
             if isinstance(narration_context, dict) and (
-                audio_output_policy is AudioOutputPolicy.RAW
+                _requires_raw_sample_identity(audio_output_policy)
                 or isinstance(short_sentence_metadata, dict)
             ):
                 restored = self._restore_narration_body_segment(
                     segment, narration_context, discard_short_sentence=True
                 )
-                if audio_output_policy is AudioOutputPolicy.RAW and not restored:
+                if _requires_raw_sample_identity(audio_output_policy) and not restored:
                     raise ConfigurationError(
                         "raw audio output could not restore an AkinVox narration body before inference"
                     )
@@ -858,7 +863,7 @@ class AudioGenerator:
                     }
                 )
             segment.word_timings = self._map_pred_dur_to_word_timings(segment, pred_dur, len(audio))
-            if audio_output_policy is AudioOutputPolicy.RAW and trace is not None:
+            if _requires_raw_sample_identity(audio_output_policy) and trace is not None:
                 trace_record = trace.inference[-1]
                 trace_record["audio_output_policy"] = AudioOutputPolicy.RAW.value
                 timing = self._coerce_timing_payload(pred_dur, len(segment.tokens))
@@ -909,7 +914,7 @@ class AudioGenerator:
                         segment, narration_context, clear_word_timings=False
                     )
                     segment.word_timings = body_timings
-            if audio_output_policy is AudioOutputPolicy.RAW:
+            if _requires_raw_sample_identity(audio_output_policy):
                 segment.raw_audio = audio
             else:
                 self._log_short_sentence_timestamps(segment, pred_dur)
@@ -1686,7 +1691,7 @@ class AudioGenerator:
         trace: Trace | None = None,
         audio_output_policy: AudioOutputPolicy = AudioOutputPolicy.PROCESSED,
     ) -> list[PhonemeSegment]:
-        if audio_output_policy is AudioOutputPolicy.RAW:
+        if _forbids_silence_trim(audio_output_policy):
             trim_silence = False
         config = voice_level_config or VoiceLevelConfig()
         for segment in segments:
@@ -1697,7 +1702,7 @@ class AudioGenerator:
             audio = segment.raw_audio
             short_sentence_metadata = (segment.engine_metadata or {}).get(SHORT_SENTENCE_META_KEY)
             if (
-                audio_output_policy is AudioOutputPolicy.PROCESSED
+                _allows_processed_features(audio_output_policy)
                 and isinstance(short_sentence_metadata, dict)
                 and not short_sentence_metadata.get("cut_applied")
             ):
@@ -1721,7 +1726,7 @@ class AudioGenerator:
                 else:
                     audio = trim_result
 
-            if audio_output_policy is AudioOutputPolicy.RAW:
+            if _requires_raw_sample_identity(audio_output_policy):
                 segment.processed_audio = audio
             else:
                 segment.processed_audio = apply_voice_level_calibration(

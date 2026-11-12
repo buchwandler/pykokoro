@@ -105,6 +105,7 @@ def test_public_api_exports_request_and_result_types() -> None:
         "__version_tuple__",
     }
     assert expected == set(pykokoro.__all__)
+    assert AudioOutputPolicy.PRESERVE_SILENCE.value == "preserve_silence"
     assert all(
         value is not None
         for value in (

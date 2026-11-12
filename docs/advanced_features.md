@@ -3,25 +3,40 @@
 All text passed to PyKokoro is prepared speech text. The engine applies the KokoroG2P
 prepared-text behavior but does not interpret SSMD, YAML, or document-level directives.
 
-## Raw acoustic output
+## Audio output policies
 
-`SynthesisConfig.audio_output_policy` selects whether PyKokoro applies its normal audio
-processing or returns the complete inference waveform:
+`SynthesisConfig.audio_output_policy` controls generic silence trimming separately from
+semantic short-sentence and narration-context processing:
 
-| Policy      | Context synthesis                                 | Silence trim     | Short-sentence crop | Voice-level processing |
-| ----------- | ------------------------------------------------- | ---------------- | ------------------- | ---------------------- |
-| `processed` | allowed                                           | current behavior | allowed             | allowed                |
-| `raw`       | disabled when a later body crop would be required | disabled         | disabled            | disabled               |
+| Policy             | Short-sentence detection and crop | AkinVox context and body crop | Generic silence trim   | Voice-level processing | Inference sample identity |
+| ------------------ | --------------------------------- | ----------------------------- | ---------------------- | ---------------------- | ------------------------- |
+| `PROCESSED`        | allowed                           | allowed                       | allowed when requested | allowed                | not required              |
+| `PRESERVE_SILENCE` | allowed                           | allowed                       | forbidden              | allowed                | not required              |
+| `RAW`              | disabled                          | disabled                      | forbidden              | disabled               | required                  |
 
-`raw` preserves the inference sample count and values after canonical dtype and shape
-normalization. It is intended for callers that own all downstream composition, such as
-VoiceRender. Core sample-count provenance is included in the returned trace for raw
-renders.
+`PRESERVE_SILENCE` is not a raw waveform mode. It runs normal PyKokoro semantic and
+voice-level processing but guarantees that generic leading/trailing silence trimming is
+not applied. Short-sentence target cropping and AkinVox narration-context body cropping
+remain enabled because they isolate requested speech from synthetic or contextual
+inference input. Those semantic crops are separate from generic silence removal.
+
+Use `PRESERVE_SILENCE` when a downstream caller owns pause removal, as VoiceRender does.
+Its trace records `audio_output_policy: "preserve_silence"`,
+`silence_trim_allowed: false`, and `silence_trim_applied: false`. It does not claim
+RAW's sample-count or sample-value identity guarantees.
+
+`RAW` preserves inference sample count and values after canonical dtype and shape
+normalization. It is intended for callers that own all downstream composition and want
+strict inference output. Core sample-count provenance is included in the returned trace
+for raw renders.
 
 ```python
 from pykokoro import AudioOutputPolicy, SynthesisConfig
 
-config = SynthesisConfig(audio_output_policy=AudioOutputPolicy.RAW)
+preserve_silence_config = SynthesisConfig(
+    audio_output_policy=AudioOutputPolicy.PRESERVE_SILENCE
+)
+raw_config = SynthesisConfig(audio_output_policy=AudioOutputPolicy.RAW)
 ```
 
 ## Source-aligned pronunciation overrides

@@ -13,7 +13,12 @@ from pykokoro import (
 )
 from pykokoro.exceptions import ConfigurationError, InvalidModelError
 from pykokoro.generation_config import GenerationConfig
-from pykokoro.synthesis_config import resolve_synthesis_config
+from pykokoro.synthesis_config import (
+    _allows_processed_features,
+    _forbids_silence_trim,
+    _requires_raw_sample_identity,
+    resolve_synthesis_config,
+)
 
 
 def test_synthesis_config_never_splits_long_text() -> None:
@@ -27,12 +32,36 @@ def test_audio_output_policy_is_public_and_defaults_to_processed() -> None:
 
     assert config.audio_output_policy is AudioOutputPolicy.PROCESSED
     assert AudioOutputPolicy.PROCESSED.value == "processed"
+    assert AudioOutputPolicy.PRESERVE_SILENCE.value == "preserve_silence"
     assert AudioOutputPolicy.RAW.value == "raw"
     assert pykokoro.AudioOutputPolicy is AudioOutputPolicy
     assert "AudioOutputPolicy" in pykokoro.__all__
     assert SynthesisConfig(audio_output_policy=AudioOutputPolicy.RAW).audio_output_policy is (
         AudioOutputPolicy.RAW
     )
+    assert (
+        SynthesisConfig(audio_output_policy=AudioOutputPolicy.PRESERVE_SILENCE).audio_output_policy
+        is AudioOutputPolicy.PRESERVE_SILENCE
+    )
+
+
+@pytest.mark.parametrize(
+    ("policy", "trim_forbidden", "processed_features", "raw_identity"),
+    [
+        (AudioOutputPolicy.PROCESSED, False, True, False),
+        (AudioOutputPolicy.PRESERVE_SILENCE, True, True, False),
+        (AudioOutputPolicy.RAW, True, False, True),
+    ],
+)
+def test_audio_output_policy_semantics_matrix(
+    policy: AudioOutputPolicy,
+    trim_forbidden: bool,
+    processed_features: bool,
+    raw_identity: bool,
+) -> None:
+    assert _forbids_silence_trim(policy) is trim_forbidden
+    assert _allows_processed_features(policy) is processed_features
+    assert _requires_raw_sample_identity(policy) is raw_identity
 
 
 def test_synthesis_config_rejects_invalid_audio_output_policy() -> None:

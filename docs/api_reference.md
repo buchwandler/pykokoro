@@ -41,9 +41,14 @@ from pykokoro import (
 | Version                   | `__version__`, `__version_tuple__`                                                                                                                                                                                                                                                                                                                                                  |
 
 `SynthesisConfig.audio_output_policy` accepts `AudioOutputPolicy.PROCESSED` (the
-default) or `AudioOutputPolicy.RAW`. Raw mode returns sample-preserving inference audio
-for callers that perform downstream composition. See
-[advanced features](advanced_features.md#raw-acoustic-output) for the processing
+default), `AudioOutputPolicy.PRESERVE_SILENCE`, or `AudioOutputPolicy.RAW`.
+`PRESERVE_SILENCE` runs normal PyKokoro semantic and voice-level processing while
+guaranteeing that generic leading/trailing silence trimming is not applied.
+Short-sentence target cropping and AkinVox narration-context body cropping remain
+enabled because they isolate requested speech from synthetic or contextual inference
+input. These are not generic silence removal. `RAW` returns sample-preserving inference
+audio for callers that perform all downstream processing. See
+[audio output policies](advanced_features.md#audio-output-policies) for the processing
 contract.
 
 `SynthesisSegment` is an alias of `SynthesisRequest`, and `PyKokoroError` is a

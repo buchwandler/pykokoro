@@ -128,13 +128,21 @@ def _narration_context_segment() -> PhonemeSegment:
     )
 
 
-def test_narration_context_audio_is_trimmed_using_exact_word_timings() -> None:
+@pytest.mark.parametrize(
+    "policy", [AudioOutputPolicy.PROCESSED, AudioOutputPolicy.PRESERVE_SILENCE]
+)
+def test_narration_context_audio_is_trimmed_using_exact_word_timings(
+    policy: AudioOutputPolicy,
+) -> None:
     session = _ContextSession([(1800, [1.0, 1.0, 1.0])])
     generator = AudioGenerator(session, _Tokenizer(), inference_cache_enabled=False)
     segment = _narration_context_segment()
 
     result = generator._generate_raw_audio_segments(
-        [segment], np.zeros((2, 256), dtype=np.float32), 1.0
+        [segment],
+        np.zeros((2, 256), dtype=np.float32),
+        1.0,
+        audio_output_policy=policy,
     )
 
     assert len(session.calls) == 1
@@ -161,11 +169,18 @@ def test_raw_policy_disables_short_sentence_wrapping_before_inference() -> None:
     raw = generator._preprocess_segments(
         [_narration_context_segment()], None, audio_output_policy=AudioOutputPolicy.RAW
     )
+    preserve_silence = generator._preprocess_segments(
+        [_narration_context_segment()],
+        None,
+        audio_output_policy=AudioOutputPolicy.PRESERVE_SILENCE,
+    )
 
     assert processed[0].phonemes != segment.phonemes
     assert "__short_sentence" in (processed[0].engine_metadata or {})
     assert raw[0].phonemes == segment.phonemes
     assert "__short_sentence" not in (raw[0].engine_metadata or {})
+    assert preserve_silence[0].phonemes != segment.phonemes
+    assert "__short_sentence" in (preserve_silence[0].engine_metadata or {})
 
 
 def test_raw_postprocessing_skips_trim_cutter_and_voice_calibration(monkeypatch) -> None:
@@ -197,6 +212,67 @@ def test_raw_postprocessing_skips_trim_cutter_and_voice_calibration(monkeypatch)
     )
 
     assert result[0].processed_audio is audio
+
+
+def test_preserve_silence_postprocessing_forbids_trim_and_keeps_crop_and_voice_level(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    generator, _ = _generator()
+    audio = np.asarray([0.1, 0.2, 0.3, 0.4, 0.5], dtype=np.float32)
+    segment = PhonemeSegment(
+        id="preserve-short",
+        segment_id="preserve-short",
+        phoneme_id=0,
+        text="Hi!",
+        phonemes="abc",
+        tokens=[1, 2, 3],
+        engine_metadata={"__short_sentence": {"kind": "phrase", "cut_applied": False}},
+        raw_audio=audio,
+    )
+    cut_calls = 0
+
+    def cut_phrase(waveform: np.ndarray, _metadata: dict[str, object]) -> np.ndarray:
+        nonlocal cut_calls
+        cut_calls += 1
+        return waveform[1:-1]
+
+    def unexpected_trim(_waveform: np.ndarray) -> np.ndarray:
+        pytest.fail("PRESERVE_SILENCE must never call generic silence trimming")
+
+    monkeypatch.setattr("pykokoro.audio_generator.cut_short_sentence_phrase_audio", cut_phrase)
+    monkeypatch.setattr("pykokoro.audio_generator.trim_audio", unexpected_trim)
+    trace = Trace()
+    result = generator._postprocess_audio_segments(
+        [segment],
+        trim_silence=True,
+        voice_level_config=VoiceLevelConfig(mode="calibrated", gain_db=-6.0),
+        trace=trace,
+        audio_output_policy=AudioOutputPolicy.PRESERVE_SILENCE,
+    )
+
+    expected = audio[1:-1] * np.float32(10 ** (-6.0 / 20.0))
+    assert cut_calls == 1
+    assert result[0].processed_audio is not None
+    np.testing.assert_allclose(result[0].processed_audio, expected)
+    assert trace.model["voice_leveling"][0]["applied"] is True
+
+
+def test_processed_policy_runs_generic_trim_when_requested(monkeypatch: pytest.MonkeyPatch) -> None:
+    generator, _ = _generator()
+    audio = np.asarray([0.1, 0.2, 0.3, 0.4], dtype=np.float32)
+    segment = PhonemeSegment("processed", "processed", 0, "Hi", "abc", [1, 2, 3], raw_audio=audio)
+    trim_calls: list[np.ndarray] = []
+
+    def trim(waveform: np.ndarray) -> np.ndarray:
+        trim_calls.append(waveform)
+        return waveform[1:-1]
+
+    monkeypatch.setattr("pykokoro.audio_generator.trim_audio", trim)
+    result = generator._postprocess_audio_segments([segment], trim_silence=True)
+
+    assert len(trim_calls) == 1
+    assert trim_calls[0] is audio
+    np.testing.assert_array_equal(result[0].processed_audio, audio[1:-1])
 
 
 def test_raw_policy_restores_context_body_before_inference_and_skips_context_trim(
@@ -450,6 +526,33 @@ def test_phrase_cut_success_uses_one_model_call(waveform, cutter) -> None:
     assert result.size > 0
     assert session.calls == 1
     assert trace.counters.get("short_sentence_cut_failure", 0) == 0
+
+
+def test_preserve_silence_generates_and_crops_short_sentence_phrase() -> None:
+    session = _PhraseSession(np.zeros(4000, dtype=np.float32))
+    generator = AudioGenerator(session, _Tokenizer(), inference_cache_enabled=False)
+    metadata = _phrase_metadata()
+    segment = PhonemeSegment(
+        id="phrase",
+        segment_id="request",
+        phoneme_id=0,
+        text="Hi!",
+        phonemes="abc",
+        tokens=[1, 2, 3],
+        engine_metadata={"__short_sentence": metadata},
+    )
+
+    result = generator._generate_raw_audio_segments(
+        [segment],
+        np.zeros((2, 256), dtype=np.float32),
+        1.0,
+        audio_output_policy=AudioOutputPolicy.PRESERVE_SILENCE,
+    )
+
+    assert session.calls == 1
+    assert metadata["cut_applied"] is True
+    assert result[0].raw_audio is not None
+    assert 0 < result[0].raw_audio.size < session.audio.size
 
 
 def test_invalid_timestamps_use_one_retry(monkeypatch) -> None:

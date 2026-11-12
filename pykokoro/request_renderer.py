@@ -26,7 +26,14 @@ if TYPE_CHECKING:
     from .prepared_g2p import PreparedSynthesis
     from .reference_audio import PreparedReferenceAudio
 from .reference_voice import ReferenceVoice
-from .synthesis_config import AudioOutputPolicy, SynthesisConfig, resolve_synthesis_config
+from .synthesis_config import (
+    AudioOutputPolicy,
+    SynthesisConfig,
+    _allows_processed_features,
+    _forbids_silence_trim,
+    _requires_raw_sample_identity,
+    resolve_synthesis_config,
+)
 from .synthesis_identity import build_synthesis_identity
 from .synthesis_types import RenderedSegment, SynthesisSegment
 from .types import (
@@ -121,7 +128,7 @@ class OnnxRequestRenderer:
                 raise ConfigurationError("reference voice synthesis requires speed=1.0")
         trace = (
             Trace()
-            if resolved.return_trace or resolved.audio_output_policy is AudioOutputPolicy.RAW
+            if resolved.return_trace or _requires_raw_sample_identity(resolved.audio_output_policy)
             else None
         )
         if trace is not None:
@@ -270,7 +277,7 @@ class OnnxRequestRenderer:
             )
 
         raw_audio_snapshots = None
-        if resolved.audio_output_policy is AudioOutputPolicy.RAW:
+        if _requires_raw_sample_identity(resolved.audio_output_policy):
             raw_audio_snapshots = [
                 None
                 if segment.raw_audio is None
@@ -279,7 +286,7 @@ class OnnxRequestRenderer:
             ]
         effective_voice_level = (
             VoiceLevelConfig()
-            if resolved.audio_output_policy is AudioOutputPolicy.RAW
+            if _requires_raw_sample_identity(resolved.audio_output_policy)
             else resolved.voice_level
         )
         processed_segments = _call_backend_operation(
@@ -364,9 +371,9 @@ class OnnxRequestRenderer:
         )
         short_metadata = (processed_segments[0].engine_metadata or {}).get("__short_sentence")
         short_sentence_mode = (
-            "off" if resolved.audio_output_policy is AudioOutputPolicy.RAW else None
+            "off" if not _allows_processed_features(resolved.audio_output_policy) else None
         )
-        if resolved.audio_output_policy is AudioOutputPolicy.PROCESSED and isinstance(
+        if _allows_processed_features(resolved.audio_output_policy) and isinstance(
             short_metadata, dict
         ):
             short_kind = short_metadata.get("kind")
@@ -375,7 +382,12 @@ class OnnxRequestRenderer:
         identity = replace(identity, resolved_short_sentence_mode=short_sentence_mode)
         if trace is not None:
             trace.model["synthesis_identity"] = identity.to_dict()
-            if resolved.audio_output_policy is AudioOutputPolicy.RAW:
+            trace.model["audio_output_policy"] = resolved.audio_output_policy.value
+            trace.model["silence_trim_allowed"] = not _forbids_silence_trim(
+                resolved.audio_output_policy
+            )
+            trace.model["silence_trim_applied"] = False
+            if _requires_raw_sample_identity(resolved.audio_output_policy):
                 inference_samples = sum(
                     0 if audio is None else audio.size for audio in raw_audio_snapshots or ()
                 )
@@ -711,7 +723,7 @@ class OnnxRequestRenderer:
         request: SynthesisSegment, config: SynthesisConfig
     ) -> tuple[int, int] | None:
         if (
-            config.audio_output_policy is AudioOutputPolicy.RAW
+            _requires_raw_sample_identity(config.audio_output_policy)
             or config.model_source != "github"
             or config.model_variant != "akinvox-multispeaker-v1"
             or not isinstance(request.voice, str)
